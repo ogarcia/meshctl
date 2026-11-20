@@ -9,10 +9,10 @@
 use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
-    BADGE_COLORS, Badge, BadgeContent, Conversation, ErrorCode, Hop, LinkState, Message, MessageId,
-    MessageStatus, NewMessage, NewRequest, NodeSettings, NodeSettingsChange, Packet, Peer,
-    Preferences, Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind, SettingsApplied,
-    SettingsSection, SightingId, Status, Traceroute,
+    BADGE_COLORS, Badge, BadgeContent, Conversation, ErrorCode, Hop, LinkState, MapView, Message,
+    MessageId, MessageStatus, NewMessage, NewRequest, NodeSettings, NodeSettingsChange, Packet,
+    Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind,
+    SettingsApplied, SettingsSection, SightingId, Status, Traceroute,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -833,6 +833,17 @@ impl Radios {
         self.store.set_radio_order(radios).await?;
         self.changed();
         Ok(true)
+    }
+
+    /// Where the map was left for a radio: `None` if there is no such radio.
+    /// Nobody is told when it moves: each browser goes on where it is.
+    pub async fn map_view(&self, id: RadioId) -> Result<Option<Option<MapView>>> {
+        self.store.map_view(id).await
+    }
+
+    /// Keeps where the map was left for a radio; `false` if there is none.
+    pub async fn set_map_view(&self, id: RadioId, view: &MapView) -> Result<bool> {
+        self.store.set_map_view(id, view).await
     }
 
     /// Removes a radio and disconnects from it; `false` if there was none.

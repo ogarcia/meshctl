@@ -73,6 +73,9 @@ pub enum ErrorCode {
     InvalidBadge,
     /// Not an order of the radios: every radio's id, each once, and no other.
     InvalidOrder,
+    /// Not a place on the map: a latitude past ±90, a longitude past ±180, or
+    /// a zoom past what maps have.
+    InvalidMapView,
 }
 
 /// The body of every error the API answers with.
@@ -260,6 +263,31 @@ impl BadgeIcon {
         Self::Bolt,
         Self::Heart,
     ];
+}
+
+/// Where the interface's map was left for a radio: its centre and its zoom,
+/// to go back to.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MapView {
+    #[cfg_attr(feature = "openapi", schema(example = 43.36))]
+    pub latitude: f64,
+    #[cfg_attr(feature = "openapi", schema(example = -8.41))]
+    pub longitude: f64,
+    #[cfg_attr(feature = "openapi", schema(example = 11.0))]
+    pub zoom: f64,
+}
+
+impl MapView {
+    /// The most a map zooms in.
+    pub const ZOOM_MAX: f64 = 22.0;
+
+    /// Whether it is a place on the map.
+    pub fn is_valid(&self) -> bool {
+        (-90.0..=90.0).contains(&self.latitude)
+            && (-180.0..=180.0).contains(&self.longitude)
+            && (0.0..=Self::ZOOM_MAX).contains(&self.zoom)
+    }
 }
 
 /// The order of the radios, as the interface lists them: every radio's id,

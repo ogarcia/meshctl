@@ -884,6 +884,16 @@
         font-size: 18px;
       }
       .leaflet-bar a:hover { background: var(--mc-raised); }
+      /* Every node in sight, under the zoom's buttons. */
+      .mc-zoom-all a { display: flex; align-items: center; justify-content: center; }
+      .mc-zoom-all a::after {
+        content: "";
+        width: 18px;
+        height: 18px;
+        background: currentColor;
+        -webkit-mask: url(/tabler-icons-3.51.0/icons/outline/zoom-scan.svg) center / contain no-repeat;
+        mask: url(/tabler-icons-3.51.0/icons/outline/zoom-scan.svg) center / contain no-repeat;
+      }
       /* Links everywhere else underline on hover; not the map's controls. */
       .leaflet-bar a:hover,
       .leaflet-control-attribution a:hover { text-decoration: none; }
@@ -902,6 +912,17 @@
       }
       .leaflet-popup-content-wrapper { border: 1px solid var(--mc-border); border-radius: 12px; }
       .leaflet-container a.leaflet-popup-close-button { color: var(--mc-muted); }
+      /* Leaflet's own ×, drawn as every other cross is: Tabler's. */
+      .leaflet-container a.leaflet-popup-close-button span { visibility: hidden; }
+      .leaflet-container a.leaflet-popup-close-button::after {
+        content: "";
+        position: absolute;
+        inset: 5px;
+        background: currentColor;
+        -webkit-mask: url(/tabler-icons-3.51.0/icons/outline/x.svg) center / contain no-repeat;
+        mask: url(/tabler-icons-3.51.0/icons/outline/x.svg) center / contain no-repeat;
+      }
+      .leaflet-container a.leaflet-popup-close-button:hover { color: var(--mc-text); }
       .leaflet-popup-content { margin: 12px 14px; font-size: 13px; line-height: 1.4; }
       .mc-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--mc-pin-far); }
       .mc-dot.local, .mc-pin.local { background: var(--mc-pin-local); }
@@ -1007,16 +1028,37 @@
       }
       .map-route-notice button {
         flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         width: 28px;
         height: 28px;
         padding: 0;
         border-radius: 50%;
-        line-height: 1;
       }
+      .map-route-notice button svg { width: 16px; height: 16px; }
       .mc-picker-popup .leaflet-popup-content { margin: 6px; width: 260px !important; max-width: calc(100vw - 64px); }
-      .mc-picker-head { display: flex; align-items: center; gap: 8px; padding: 2px 22px 4px 8px; }
+      .mc-picker-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 4px 8px; }
       .mc-picker-head p { flex: 1; margin: 0; font-size: 12px; color: var(--mc-muted); }
-      .mc-picker-zoom { width: 30px; height: 30px; padding: 0; border: 0; background: transparent; color: var(--mc-muted); font-size: 18px; }
+      .mc-picker-zoom {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--mc-muted);
+      }
+      /* A magnifier: zooming in on the group, which parts its dots. */
+      .mc-picker-zoom i {
+        width: 18px;
+        height: 18px;
+        background: currentColor;
+        -webkit-mask: url(/tabler-icons-3.51.0/icons/outline/zoom-in.svg) center / contain no-repeat;
+        mask: url(/tabler-icons-3.51.0/icons/outline/zoom-in.svg) center / contain no-repeat;
+      }
       .mc-picker-zoom:hover { background: var(--mc-raised); color: var(--mc-text); }
       .mc-picker-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
       .mc-picker-item {

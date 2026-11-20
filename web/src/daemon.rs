@@ -10,8 +10,8 @@ use gloo_net::websocket::Message as Frame;
 use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
-    API_V1, Channel, Conversation, Error, ErrorCode, Message, NewMessage, NewTraceroute, Node,
-    NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioOrder,
+    API_V1, Channel, Conversation, Error, ErrorCode, MapView, Message, NewMessage, NewTraceroute,
+    Node, NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioOrder,
     RadioSettings, SectionChange, SettingsApplied, SettingsSection, SightingId, Status,
     TOKEN_HEADER, Traceroute,
 };
@@ -224,6 +224,19 @@ pub async fn save_radio(
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// Where the map was left for a radio, if it ever was moved.
+pub async fn map_view(radio: RadioId) -> Result<Option<MapView>, Failure> {
+    get(&format!("/radios/{radio}/map-view")).await
+}
+
+/// Keeps where the map was left for a radio.
+pub async fn save_map_view(radio: RadioId, view: &MapView) -> Result<(), Failure> {
+    let request = with_token(Request::put(&url(&format!("/radios/{radio}/map-view"))))
+        .json(view)
+        .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
 }
 
 /// Puts the radios in this order, which names each of them once.

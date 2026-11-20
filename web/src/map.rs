@@ -7,21 +7,26 @@
 
 use crate::app::Live;
 use crate::chat::title;
+use crate::daemon;
 use crate::i18n::{t, t_string, use_i18n};
 use crate::mesh::{ago, model, power, radius};
 use crate::traces::quality;
 use leptos::html;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use meshctl_api::{
-    Hop, Node, Peer, PositionSource, RadioId, RadioKind, Traceroute, TracerouteId, TracerouteStatus,
+    Hop, MapView, Node, Peer, PositionSource, RadioId, RadioKind, Traceroute, TracerouteId,
+    TracerouteStatus,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = open)]
-    fn map_open(element: &web_sys::HtmlElement, pick: &JsValue, act: &JsValue);
+    fn map_open(element: &web_sys::HtmlElement, pick: &JsValue, act: &JsValue, moved: &JsValue);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = close)]
     fn map_close();
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = nodes)]
@@ -30,6 +35,8 @@ extern "C" {
     fn map_route(json: Option<String>);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = reset)]
     fn map_reset();
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = view)]
+    fn map_view(json: Option<String>);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = resize)]
     fn map_resize();
 }
@@ -49,6 +56,8 @@ struct Labels {
     /// With `{n}` where the number of nodes goes.
     here: String,
     zoom: String,
+    /// The button that takes in every node.
+    all: String,
     /// The route button, by what it does: named as [`Marker::route`] says.
     show: String,
     hide: String,
@@ -65,6 +74,8 @@ struct RouteDrawing {
     back: Vec<Segment>,
     /// Where the relays on the way are.
     relays: Vec<(f64, f64)>,
+    /// Every node on it, both ways: the only ones the map shows while it is.
+    nodes: Vec<u32>,
 }
 
 /// A stretch of a route between two nodes the map can place.
@@ -213,16 +224,47 @@ pub fn MapView() -> impl IntoView {
                 _ => live.open_node(num),
             }
         });
-        map_open(&element, &pick.into_js_value(), &act.into_js_value());
+        // Where the person leaves the map, kept for the radio it shows.
+        let moved = Closure::<dyn Fn(f64, f64, f64)>::new(move |latitude, longitude, zoom| {
+            let Some(radio) = live.selected.get_untracked() else {
+                return;
+            };
+            let view = MapView {
+                latitude,
+                longitude,
+                zoom,
+            };
+            spawn_local(async move {
+                let _ = daemon::save_map_view(radio, &view).await;
+            });
+        });
+        map_open(
+            &element,
+            &pick.into_js_value(),
+            &act.into_js_value(),
+            &moved.into_js_value(),
+        );
         true
     });
     on_cleanup(map_close);
 
-    // Another radio's nodes are somewhere else: the view goes to them.
+    // Another radio's nodes are somewhere else: the view goes to where it was
+    // left for that one, or to its nodes. Once the map is there, and again
+    // as the radio changes.
     Effect::new(move |previous: Option<Option<RadioId>>| {
         let selected = live.selected.get();
+        // Not before the map is there; then, as if for the first time.
+        element.get()?;
         if previous.is_some_and(|previous| previous != selected) {
             map_reset();
+        }
+        if let Some(radio) = selected {
+            spawn_local(async move {
+                let view = daemon::map_view(radio).await.ok().flatten();
+                if live.selected.get_untracked() == Some(radio) {
+                    map_view(view.and_then(|v| serde_json::to_string(&v).ok()));
+                }
+            });
         }
         selected
     });
@@ -311,6 +353,7 @@ pub fn MapView() -> impl IntoView {
                 chat: t_string!(i18n, node_message).to_owned(),
                 here: t_string!(i18n, map_here).to_owned(),
                 zoom: t_string!(i18n, map_zoom).to_owned(),
+                all: t_string!(i18n, map_all).to_owned(),
                 show: t_string!(i18n, map_route_show).to_owned(),
                 hide: t_string!(i18n, map_route_hide).to_owned(),
                 trace: t_string!(i18n, map_route_trace).to_owned(),
@@ -361,11 +404,21 @@ pub fn MapView() -> impl IntoView {
                 })
                 .filter_map(at)
                 .collect();
+            let mut on_it: Vec<u32> = traceroute
+                .towards
+                .iter()
+                .chain(&traceroute.back)
+                .filter_map(|hop| hop.node)
+                .chain([num])
+                .collect();
+            on_it.sort_unstable();
+            on_it.dedup();
             Some(RouteDrawing {
                 id: traceroute.id,
                 towards: segments(&traceroute.towards, &at),
                 back: segments(&traceroute.back, &at),
                 relays,
+                nodes: on_it,
             })
         });
         map_route(drawing.and_then(|d| serde_json::to_string(&d).ok()));
@@ -471,9 +524,8 @@ fn RouteNotice() -> impl IntoView {
                     aria-label=move || t_string!(i18n, map_route_hide)
                     title=move || t_string!(i18n, map_route_hide)
                     on:click=move |_| live.map_route.set(None)
-                >
-                    "✕"
-                </button>
+                    inner_html=CLOSE
+                ></button>
             </div>
         })
     }

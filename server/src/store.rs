@@ -6,8 +6,9 @@
 
 use anyhow::{Context, Result};
 use meshctl_api::{
-    BROADCAST, Badge, Conversation, Hop, Message, MessageId, MessageStatus, Peer, Preferences,
-    RadioId, RadioKind, RadioSettings, SightingId, Traceroute, TracerouteId, TracerouteStatus,
+    BROADCAST, Badge, Conversation, Hop, MapView, Message, MessageId, MessageStatus, Peer,
+    Preferences, RadioId, RadioKind, RadioSettings, SightingId, Traceroute, TracerouteId,
+    TracerouteStatus,
 };
 use meshctl_core::mesh::{Heard, LocalNode, Node, Position, PositionSource, User};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
@@ -362,6 +363,29 @@ impl Store {
         .execute(&self.pool)
         .await?
         .rows_affected();
+        Ok(changed > 0)
+    }
+
+    /// Where the map was left for a radio: `None` if there is no such radio,
+    /// `Some(None)` if it was never moved.
+    pub async fn map_view(&self, radio: RadioId) -> Result<Option<Option<MapView>>> {
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT map_view FROM radio WHERE id = ?")
+                .bind(radio)
+                .fetch_optional(&self.pool)
+                .await?;
+        // One this build cannot read is as none.
+        Ok(row.map(|(view,)| view.and_then(|view| serde_json::from_str(&view).ok())))
+    }
+
+    /// Keeps where the map was left for a radio; `false` if there is none.
+    pub async fn set_map_view(&self, radio: RadioId, view: &MapView) -> Result<bool> {
+        let changed = sqlx::query("UPDATE radio SET map_view = ? WHERE id = ?")
+            .bind(serde_json::to_string(view)?)
+            .bind(radio)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
         Ok(changed > 0)
     }
 
@@ -1114,6 +1138,18 @@ mod tests {
             .await
             .unwrap();
         assert!(badge.is_none());
+
+        // Where its map was left, from never to somewhere.
+        assert_eq!(store.map_view(added.id).await.unwrap(), Some(None));
+        let view = MapView {
+            latitude: 43.36,
+            longitude: -8.41,
+            zoom: 11.0,
+        };
+        assert!(store.set_map_view(added.id, &view).await.unwrap());
+        assert_eq!(store.map_view(added.id).await.unwrap(), Some(Some(view)));
+        assert!(!store.set_map_view(999, &view).await.unwrap());
+        assert_eq!(store.map_view(999).await.unwrap(), None);
 
         assert!(store.remove_radio(added.id).await.unwrap());
         assert!(!store.remove_radio(added.id).await.unwrap());

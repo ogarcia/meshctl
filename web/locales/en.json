@@ -255,5 +255,6 @@
   "color_cyan": "Cyan",
   "color_teal": "Teal",
   "color_lime": "Lime",
-  "color_gray": "Grey"
+  "color_gray": "Grey",
+  "map_all": "Show every node"
 }

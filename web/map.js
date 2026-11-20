@@ -12,11 +12,14 @@ window.meshctlMap = (() => {
   const ATTRIBUTION =
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 
-  // Nodes this close (in pixels) to a click count as clicked: the dots are
-  // 12px wide, so those that touch or overlap the one under the pointer join
-  // it. A finger covers more, so touch reaches further.
-  const PICK_RADIUS = 12;
-  const PICK_RADIUS_TOUCH = 22;
+  // Nodes this close (in pixels) to a click count as clicked: the smallest
+  // pins are 20px wide, so those that touch or overlap the one under the
+  // pointer join it. A finger covers more, so touch reaches further.
+  const PICK_RADIUS = 16;
+  const PICK_RADIUS_TOUCH = 26;
+
+  // How long the map stays still before where it is left is kept, in ms.
+  const SAVE_AFTER = 1000;
 
   let map = null;
   let markers = null;
@@ -54,6 +57,15 @@ window.meshctlMap = (() => {
   // Whether the view was already placed: after that it stays where the
   // person leaves it, however the nodes move.
   let placed = false;
+  // Where the map was left for the radio: undefined until it is read, null
+  // when it never was moved.
+  let savedView;
+  // Whether the person moved the map: only then is where it is kept.
+  let touched = false;
+  // Told where the map is left, a while after it stops moving.
+  let moved = null;
+  let saveTimer = null;
+  let allButton = null;
 
   // A colour of the interface's, as the style sheet has it now.
   const color = (name) =>
@@ -67,9 +79,27 @@ window.meshctlMap = (() => {
     return made;
   }
 
-  function open(target, onPick, onAct) {
+  function open(target, onPick, onAct, onMoved) {
     close();
     map = L.map(target, { zoomControl: true, worldCopyJump: true });
+    allControl().addTo(map);
+    moved = onMoved;
+    savedView = undefined;
+    touched = false;
+    // The person moving the map, not the map moving itself: from then on,
+    // where it is left is kept, and a view read late does not move it.
+    for (const kind of ["pointerdown", "wheel", "keydown"]) {
+      target.addEventListener(kind, () => (touched = true), { passive: true });
+    }
+    map.on("moveend", () => {
+      if (!touched) return;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        if (!map || !moved) return;
+        const centre = map.getCenter().wrap();
+        moved(centre.lat, centre.lng, map.getZoom());
+      }, SAVE_AFTER);
+    });
     map.attributionControl.setPrefix(false);
     L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(map);
     markers = L.layerGroup().addTo(map);
@@ -87,6 +117,9 @@ window.meshctlMap = (() => {
     // route away as it does elsewhere.
     // A route keeps its sides a few pixels apart, whatever the zoom.
     map.on("zoomend", drawRoute);
+    // The ring of a node in the overlap list goes as the map zooms: the list
+    // is gone by then, and the ring would grow with the zoom's animation.
+    map.on("zoomstart", () => showPreview(null));
     map.on("keydown", (event) => {
       if (event.originalEvent.key === "Escape") {
         act && act(0, "unroute");
@@ -119,7 +152,7 @@ window.meshctlMap = (() => {
 
   // The nodes near a point of the map's, the nearest first.
   function nodesNear(point, radius) {
-    return shown.nodes
+    return visible()
       .map((node) => ({
         node,
         distance: map.latLngToContainerPoint([node.lat, node.lon]).distanceTo(point),
@@ -167,9 +200,9 @@ window.meshctlMap = (() => {
   // How big a node's pin is: bigger with an icon, for what its role is, and
   // for the radio's own.
   function pinSize(node) {
-    if (node.role === "router") return 30;
-    if (node.role) return 26;
-    return node.kind === "local" ? 18 : 14;
+    if (node.role === "router") return 32;
+    if (node.role) return 28;
+    return node.kind === "local" ? 24 : 20;
   }
 
   // What hovering a node says: who it is, and how it is heard.
@@ -205,15 +238,18 @@ window.meshctlMap = (() => {
     const head = element("div", "mc-picker-head");
     head.append(element("p", "", labels.here.replace("{n}", found.length)));
     // Zooming in on the group separates its dots, handier than a long list.
-    const zoom = element("button", "mc-picker-zoom", "+");
+    const zoom = element("button", "mc-picker-zoom");
+    zoom.append(element("i"));
     zoom.type = "button";
     zoom.title = labels.zoom;
     zoom.setAttribute("aria-label", labels.zoom);
     zoom.addEventListener("click", (event) => {
       L.DomEvent.stop(event);
+      showPreview(null);
       map.closePopup();
       const bounds = L.latLngBounds(found.map((n) => [n.lat, n.lon]));
-      map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 18 });
+      // Quick: the group is near, there is no need to fly far.
+      map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 18, duration: 0.5 });
     });
     head.append(zoom);
     const list = element("ul", "mc-picker-list");
@@ -237,7 +273,13 @@ window.meshctlMap = (() => {
       list.append(item);
     }
     box.append(head, list);
-    L.popup({ className: "mc-picker-popup", maxWidth: 300, autoPanPadding: [24, 24] })
+    // No cross: a click anywhere else closes it, as picking a node does.
+    L.popup({
+      className: "mc-picker-popup",
+      maxWidth: 300,
+      autoPanPadding: [24, 24],
+      closeButton: false,
+    })
       .setLatLng(latlng)
       .setContent(box)
       .openOn(map);
@@ -335,12 +377,36 @@ window.meshctlMap = (() => {
   // id, name, short, seen, facts: [[label, value]], lat, lon, kind,
   // selected}]}, kind one of local, direct, near and far. The first time
   // there are nodes, the view goes to the radio's own, or to them all.
+  // The nodes on the map: while a route is shown, only those on it, and the
+  // one picked, so that the route reads clear of the rest.
+  function visible() {
+    if (!shownRoute || !shownRoute.nodes) return shown.nodes;
+    const on = new Set(shownRoute.nodes);
+    return shown.nodes.filter((node) => on.has(node.num) || node.selected);
+  }
+
   function nodes(json) {
     if (!map) return;
     shown = JSON.parse(json);
     const list = shown.nodes;
+    drawMarkers();
+    labelAll();
+    // The first time: where it was left, if that is known already; else to
+    // the nodes, until it is.
+    if (!placed && list.length > 0) {
+      if (savedView) {
+        placed = true;
+        map.setView([savedView.latitude, savedView.longitude], savedView.zoom);
+      } else {
+        placeAll();
+      }
+    }
+    showCard();
+  }
+
+  function drawMarkers() {
     markers.clearLayers();
-    for (const node of list) {
+    for (const node of visible()) {
       const marker = L.marker([node.lat, node.lon], {
         icon: pin(node),
         keyboard: false,
@@ -352,16 +418,6 @@ window.meshctlMap = (() => {
       marker.bindTooltip(tip(node), { direction: "top", className: "mc-tip" });
       marker.addTo(markers);
     }
-    if (!placed && list.length > 0) {
-      placed = true;
-      const local = list.find((n) => n.kind === "local");
-      if (local) {
-        map.setView([local.lat, local.lon], 11);
-      } else {
-        map.fitBounds(list.map((n) => [n.lat, n.lon]), { maxZoom: 13, padding: [32, 32] });
-      }
-    }
-    showCard();
   }
 
   const QUALITY_COLOR = {
@@ -473,10 +529,14 @@ window.meshctlMap = (() => {
     const drawn = json ? JSON.parse(json) : null;
     if (!drawn) {
       routeShown = null;
-      shownRoute = null;
+      if (shownRoute) {
+        shownRoute = null;
+        drawMarkers();
+      }
       return;
     }
     shownRoute = drawn;
+    drawMarkers();
     drawRoute();
     // A route shown for the first time: the popup goes out of its way, and
     // the view takes it all in, at once, clear of the notice above and the
@@ -499,6 +559,71 @@ window.meshctlMap = (() => {
   // Other nodes, of another radio: the view goes to them, as the first time.
   function reset() {
     placed = false;
+    savedView = undefined;
+    touched = false;
+  }
+
+  // Where the map was left for the radio, as JSON {latitude, longitude,
+  // zoom}, or null if it never was: the map goes there, or to the nodes,
+  // unless the person has moved it already.
+  function view(json) {
+    savedView = json ? JSON.parse(json) : null;
+    if (!map || touched) return;
+    if (savedView) {
+      map.setView([savedView.latitude, savedView.longitude], savedView.zoom);
+      placed = true;
+    } else if (!placed) {
+      placeAll();
+    }
+  }
+
+  // Every node in sight: those on the route, while one is shown.
+  function fitAll() {
+    const list = visible();
+    if (list.length === 0) return;
+    map.fitBounds(list.map((n) => [n.lat, n.lon]), { maxZoom: 15, padding: [32, 32] });
+  }
+
+  // The first view of a radio's nodes: its own node, or all of them.
+  function placeAll() {
+    const list = shown.nodes;
+    if (list.length === 0) return;
+    placed = true;
+    const local = list.find((n) => n.kind === "local");
+    if (local) {
+      map.setView([local.lat, local.lon], 11);
+    } else {
+      map.fitBounds(list.map((n) => [n.lat, n.lon]), { maxZoom: 13, padding: [32, 32] });
+    }
+  }
+
+  // The button under the zoom's that takes in every node.
+  function allControl() {
+    const Control = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd() {
+        const bar = L.DomUtil.create("div", "leaflet-bar mc-zoom-all");
+        const button = L.DomUtil.create("a", "", bar);
+        button.href = "#";
+        button.setAttribute("role", "button");
+        allButton = button;
+        labelAll();
+        L.DomEvent.disableClickPropagation(bar);
+        L.DomEvent.on(button, "click", (event) => {
+          L.DomEvent.preventDefault(event);
+          touched = true;
+          fitAll();
+        });
+        return bar;
+      },
+    });
+    return new Control();
+  }
+
+  function labelAll() {
+    if (!allButton || !shown.labels.all) return;
+    allButton.title = shown.labels.all;
+    allButton.setAttribute("aria-label", shown.labels.all);
   }
 
   // The element changed size: the map has to know.
@@ -506,5 +631,5 @@ window.meshctlMap = (() => {
     if (map) map.invalidateSize();
   }
 
-  return { open, close, nodes, route, reset, resize };
+  return { open, close, nodes, route, reset, resize, view };
 })();

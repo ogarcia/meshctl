@@ -255,5 +255,6 @@
   "color_cyan": "Cian",
   "color_teal": "Turquesa",
   "color_lime": "Lima",
-  "color_gray": "Gris"
+  "color_gray": "Gris",
+  "map_all": "Ver todos los nodos"
 }

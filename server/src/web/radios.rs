@@ -11,7 +11,8 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Channel, Error, ErrorCode, LinkState, Node, Radio, RadioId, RadioOrder, RadioSettings, Status,
+    Channel, Error, ErrorCode, LinkState, MapView, Node, Radio, RadioId, RadioOrder, RadioSettings,
+    Status,
 };
 use meshctl_core::radio::Mesh;
 use utoipa_axum::router::OpenApiRouter;
@@ -21,6 +22,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list, add))
         .routes(routes!(reorder))
+        .routes(routes!(map_view, set_map_view))
         .routes(routes!(get, update, remove))
         .routes(routes!(status))
         .routes(routes!(channels))
@@ -103,6 +105,60 @@ async fn reorder(State(state): State<AppState>, Json(order): Json<RadioOrder>) -
     match state.radios.reorder(&order.radios).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidOrder),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Map view
+///
+/// Where the interface's map was left for a radio; null if it never was moved.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/map-view",
+    tag = "radios",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    responses(
+        (status = 200, description = "Where it was left", body = Option<MapView>),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+    )
+)]
+async fn map_view(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
+    match state.radios.map_view(radio).await {
+        Ok(Some(view)) => Json(view).into_response(),
+        Ok(None) => not_found(),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Keep the map view
+///
+/// Keeps where the interface's map was left for a radio, to go back to.
+/// Nobody else is told: each browser goes on where it is.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/map-view",
+    tag = "radios",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = MapView,
+    responses(
+        (status = 204, description = "Kept"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 422, description = "Not a place on the map: `invalid_map_view`", body = Error),
+    )
+)]
+async fn set_map_view(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(view): Json<MapView>,
+) -> Response {
+    if !view.is_valid() {
+        return error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidMapView);
+    }
+    match state.radios.set_map_view(radio, &view).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => not_found(),
         Err(err) => failed(&err),
     }
 }
