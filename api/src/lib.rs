@@ -144,13 +144,21 @@ fn enabled() -> bool {
     true
 }
 
+/// The colours of the interface's palette for radios' buttons, by name: each
+/// one is shown in a tone of its own on each theme, light on the light one and
+/// deep on the dark one, as the rail's own buttons are.
+pub const BADGE_COLORS: [&str; 10] = [
+    "amber", "coral", "pink", "grape", "violet", "blue", "cyan", "teal", "lime", "gray",
+];
+
 /// How a radio's button looks.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default)]
 pub struct Badge {
-    /// Its colour, as `#rrggbb`; none for the rail's own.
-    #[cfg_attr(feature = "openapi", schema(example = "#f0a63a"))]
+    /// Its colour: one of [`BADGE_COLORS`] by its name, or any other as
+    /// `#rrggbb`; none for the rail's own.
+    #[cfg_attr(feature = "openapi", schema(example = "amber"))]
     pub color: Option<String>,
     pub content: BadgeContent,
 }
@@ -904,9 +912,6 @@ pub struct Preferences {
     pub accent: Accent,
     /// The maps' own theme, which may differ from the rest.
     pub map_theme: MapTheme,
-    /// Whether picking a node on the map shows its last traced route at once,
-    /// rather than when asked for.
-    pub map_routes: bool,
     /// Whether the map's legend is folded away, for more map.
     pub map_legend_folded: bool,
     /// The interface's language; none for the browser's.
@@ -982,7 +987,9 @@ mod tests {
 
     #[test]
     fn preferences_fill_in_what_is_missing() {
-        let preferences: Preferences = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        // What an older meshctl kept, and this one no longer has, is left out.
+        let preferences: Preferences =
+            serde_json::from_str(r#"{"theme":"dark","map_routes":true}"#).unwrap();
         assert_eq!(
             preferences,
             Preferences {
@@ -992,7 +999,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_routes":false,"map_legend_folded":false,"language":null}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null}"#
         );
     }
 

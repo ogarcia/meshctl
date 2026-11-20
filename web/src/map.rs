@@ -325,20 +325,13 @@ pub fn MapView() -> impl IntoView {
 
     // A route shown stays until its notice is closed or another node is
     // picked: letting the node go, with a click anywhere on the map, as when
-    // dragging it, leaves it. Picking another shows that one's instead, if
-    // routes are to be shown on picking.
+    // dragging it, leaves it.
     Effect::new(move |previous: Option<Option<u32>>| {
         let picked = live.map_pick.get();
         if previous.is_some_and(|previous| previous != picked) {
             let shown = live.map_route.get_untracked();
             if shown.is_some() && picked.is_some() && shown != picked {
                 live.map_route.set(None);
-            }
-            if let Some(num) = picked
-                && live.preferences.get_untracked().map_routes
-                && traces_of(live, num).1.is_some()
-            {
-                live.map_route.set(Some(num));
             }
         }
         picked

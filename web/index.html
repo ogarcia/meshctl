@@ -53,6 +53,34 @@
         --mc-node-near: #1971c2;
         --mc-node-mid: #7048e8;
         --mc-node-far: #6c757d;
+        /*
+         * Radios' buttons of the palette, as the rail's own and the accent: at
+         * rest, a light tone with dark text here (a deep one with light text
+         * on the dark theme); selected, -on, a deep one with light text here
+         * (a vivid one with dark text there).
+         */
+        --mc-badge-ink: #161b22;
+        --mc-badge-ink-on: #ffffff;
+        --mc-badge-amber: #ffc078;
+        --mc-badge-amber-on: #b35c00;
+        --mc-badge-coral: #ffa8a8;
+        --mc-badge-coral-on: #c92a2a;
+        --mc-badge-pink: #faa2c1;
+        --mc-badge-pink-on: #a61e4d;
+        --mc-badge-grape: #e599f7;
+        --mc-badge-grape-on: #862e9c;
+        --mc-badge-violet: #b197fc;
+        --mc-badge-violet-on: #5f3dc4;
+        --mc-badge-blue: #74c0fc;
+        --mc-badge-blue-on: #1864ab;
+        --mc-badge-cyan: #66d9e8;
+        --mc-badge-cyan-on: #0b7285;
+        --mc-badge-teal: #63e6be;
+        --mc-badge-teal-on: #087f5b;
+        --mc-badge-lime: #c0eb75;
+        --mc-badge-lime-on: #4a7a0b;
+        --mc-badge-gray: #ced4da;
+        --mc-badge-gray-on: #495057;
         --mc-font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
         --mc-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
       }
@@ -76,6 +104,28 @@
         --mc-node-near: #4dabf7;
         --mc-node-mid: #b197fc;
         --mc-node-far: #a5aeb8;
+        --mc-badge-ink: #ffffff;
+        --mc-badge-ink-on: #161b22;
+        --mc-badge-amber: #b35c00;
+        --mc-badge-amber-on: #ffa94d;
+        --mc-badge-coral: #c92a2a;
+        --mc-badge-coral-on: #ff8787;
+        --mc-badge-pink: #a61e4d;
+        --mc-badge-pink-on: #f783ac;
+        --mc-badge-grape: #862e9c;
+        --mc-badge-grape-on: #da77f2;
+        --mc-badge-violet: #5f3dc4;
+        --mc-badge-violet-on: #9775fa;
+        --mc-badge-blue: #1864ab;
+        --mc-badge-blue-on: #4dabf7;
+        --mc-badge-cyan: #0b7285;
+        --mc-badge-cyan-on: #3bc9db;
+        --mc-badge-teal: #087f5b;
+        --mc-badge-teal-on: #38d9a9;
+        --mc-badge-lime: #4a7a0b;
+        --mc-badge-lime-on: #a9e34b;
+        --mc-badge-gray: #495057;
+        --mc-badge-gray-on: #adb5bd;
       }
       @media (prefers-color-scheme: dark) {
         :root:not([data-theme="light"]) {
@@ -98,6 +148,28 @@
           --mc-node-near: #4dabf7;
           --mc-node-mid: #b197fc;
           --mc-node-far: #a5aeb8;
+          --mc-badge-ink: #ffffff;
+          --mc-badge-ink-on: #161b22;
+          --mc-badge-amber: #b35c00;
+          --mc-badge-amber-on: #ffa94d;
+          --mc-badge-coral: #c92a2a;
+          --mc-badge-coral-on: #ff8787;
+          --mc-badge-pink: #a61e4d;
+          --mc-badge-pink-on: #f783ac;
+          --mc-badge-grape: #862e9c;
+          --mc-badge-grape-on: #da77f2;
+          --mc-badge-violet: #5f3dc4;
+          --mc-badge-violet-on: #9775fa;
+          --mc-badge-blue: #1864ab;
+          --mc-badge-blue-on: #4dabf7;
+          --mc-badge-cyan: #0b7285;
+          --mc-badge-cyan-on: #3bc9db;
+          --mc-badge-teal: #087f5b;
+          --mc-badge-teal-on: #38d9a9;
+          --mc-badge-lime: #4a7a0b;
+          --mc-badge-lime-on: #a9e34b;
+          --mc-badge-gray: #495057;
+          --mc-badge-gray-on: #adb5bd;
         }
       }
       /* Amber, the default. */
@@ -210,7 +282,19 @@
         font-size: 13px;
         transition: border-radius 0.15s;
       }
-      .rail-button:hover { border-radius: 14px; }
+      /*
+       * One way for every button: at rest, its colour dimmed into the rail's
+       * (the rail's own grey, with none); on hover, a ring in the accent, a
+       * gap away so that it reads on any colour; selected, its colour in full
+       * (the accent, with none), squared, and the pill on the rail's edge.
+       */
+      .rail-button:hover {
+        border-radius: 14px;
+        /* The ring alone: not the accent edge every other button takes. */
+        border-color: var(--mc-rail-button-edge);
+        outline: 2px solid var(--mc-primary);
+        outline-offset: 2px;
+      }
       .rail-button.active {
         border-radius: 14px;
         background: var(--mc-primary);
@@ -231,11 +315,15 @@
       }
       .rail-button svg { width: 22px; height: 22px; }
       /* A radio with a colour of its own keeps it, selected too. */
-      .rail-button.colored,
-      .rail-button.colored.active {
+      .rail-button.colored {
         background: var(--badge);
-        border-color: var(--badge);
+        border-color: transparent;
         color: var(--badge-ink);
+      }
+      .rail-button.colored.active {
+        background: var(--badge-on);
+        border-color: var(--badge-on);
+        color: var(--badge-on-ink);
       }
       .rail-button .emoji { font-size: 22px; line-height: 1; font-weight: 400; }
       .rail-button .pict svg { width: 22px; height: 22px; }
@@ -506,9 +594,32 @@
       .note { border-left: 3px solid var(--mc-warn); color: var(--mc-muted); margin: 0; }
       .note.bad { border-left-color: var(--mc-danger); }
 
-      .preferences { display: grid; gap: 8px; max-width: 760px; }
-      .preferences p { margin: 0 0 8px; }
-      .preferences h2 { margin: 12px 0 2px; font-size: 14px; }
+      /*
+       * The preferences, centred as the radios are: each one a row, what it
+       * is on the left and its control on the right, every control as wide.
+       */
+      .preferences { width: 100%; max-width: 760px; margin: 0 auto; }
+      .pref-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px 24px;
+        padding: 18px 4px;
+        border-bottom: 1px solid var(--mc-border);
+      }
+      .pref-row:first-child { padding-top: 6px; }
+      .pref-row:last-child { border-bottom: 0; }
+      /* What it is takes what its control leaves: they keep to one line. */
+      .pref-what { flex: 1 1 0; min-width: 200px; display: flex; flex-direction: column; gap: 2px; }
+      .pref-title { font-weight: 600; }
+      .pref-what .dim { font-size: 12px; }
+      .pref-control { flex: none; width: 450px; max-width: 100%; }
+      .pref-control.segmented button { padding: 0 8px; white-space: nowrap; }
+      select.pref-control { min-height: 40px; }
+      .accents { display: flex; gap: 10px; }
+      .accents .swatch:disabled { opacity: 0.35; cursor: not-allowed; }
+      .accents .swatch:disabled:hover { border-color: transparent; }
       .choices { display: flex; flex-wrap: wrap; gap: 8px; }
       .choice { min-height: 40px; padding: 0 16px; border-radius: 10px; }
       .choice.on { border-color: var(--mc-primary); background: var(--mc-soft); font-weight: 600; }
@@ -1018,7 +1129,8 @@
 
       /*
        * A radio's button, as the list and the editor show it: the rail's own
-       * look, or its colour (--badge, and --badge-ink for what is on it).
+       * look, or its colour in full, as when it is selected (--badge-on, and
+       * --badge-on-ink for what is on it).
        */
       .face {
         flex: none;
@@ -1034,7 +1146,7 @@
         font-weight: 700;
         font-size: 13px;
       }
-      .face.colored { background: var(--badge); border-color: var(--badge); color: var(--badge-ink); }
+      .face.colored { background: var(--badge-on); border-color: var(--badge-on); color: var(--badge-on-ink); }
       .face .emoji { font-size: 20px; line-height: 1; font-weight: 400; }
       .face .pict, .rail-button .pict { display: flex; }
       .face .pict svg { width: 20px; height: 20px; }
@@ -1231,7 +1343,19 @@
       }
       .swatch:hover { border-color: var(--mc-muted); }
       .swatch.on { border-color: var(--mc-text); box-shadow: inset 0 0 0 2px var(--mc-surface); }
-      .swatch.none { background: var(--mc-rail-button); border: 1px dashed var(--mc-muted); }
+      /* None: the rail's own button at rest, and the accent selected. */
+      .swatch.none {
+        --swatch-rest: var(--mc-rail-button);
+        --swatch: var(--mc-primary);
+        border: 1px dashed var(--mc-muted);
+      }
+      /* Both of a colour's tones: at rest, top left; selected, bottom right. */
+      .swatch.none,
+      .swatch.split,
+      .swatch.other.split {
+        background: linear-gradient(135deg, var(--swatch-rest) 50%, var(--swatch) 50%);
+        background-origin: border-box;
+      }
       .swatch.none.on { border: 2px solid var(--mc-text); }
       /* Any other colour: the wheel until one is picked, then that one. */
       .swatch.other {

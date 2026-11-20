@@ -343,7 +343,10 @@ impl Draft {
             address: settings.address.clone(),
             enabled: settings.enabled,
             shown: settings.shown,
-            color: settings.badge.color.clone(),
+            // A colour of the palette, as it was once kept, by its name.
+            color: settings.badge.color.as_deref().map(|color| {
+                badge::palette_name(color).map_or_else(|| color.to_owned(), str::to_owned)
+            }),
             look,
         }
     }
@@ -537,7 +540,6 @@ pub fn RadioEditor(
             <button
                 type="button"
                 role="radio"
-                class="choice"
                 class:on=on
                 aria-checked=move || on().to_string()
                 on:click=move |_| draft.update(|d| d.kind = kind)
@@ -632,7 +634,14 @@ pub fn RadioEditor(
                     </label>
                     <div class="field">
                         <span class="dim">{t!(i18n, radio_kind)}</span>
-                        <div class="choices" role="radiogroup">
+                        <div
+                            class="segmented"
+                            role="radiogroup"
+                            style=move || {
+                                let at = draft.with(|d| usize::from(d.kind == RadioKind::Meshcore));
+                                format!("--n: 2; --at: {at}")
+                            }
+                        >
                             {kinds.into_iter().collect_view()}
                         </div>
                     </div>
@@ -722,25 +731,28 @@ pub fn RadioEditor(
 fn ColorPicker(draft: RwSignal<Draft>) -> impl IntoView {
     let i18n = use_i18n();
     let color = move || draft.with(|d| d.color.clone());
-    let swatches = PALETTE.map(|hex| {
-        let on = move || color().as_deref() == Some(hex);
+    let swatches = PALETTE.map(|name| {
+        let on = move || color().as_deref() == Some(name);
+        let label = move || badge::color_name(name);
         view! {
             <button
                 type="button"
                 role="radio"
-                class="swatch"
+                class="swatch split"
                 class:on=on
                 aria-checked=move || on().to_string()
-                title=hex
-                aria-label=hex
-                style=format!("--swatch: {hex}")
-                on:click=move |_| draft.update(|d| d.color = Some(hex.to_owned()))
+                title=label
+                aria-label=label
+                style=format!(
+                    "--swatch: var(--mc-badge-{name}-on); --swatch-rest: var(--mc-badge-{name})"
+                )
+                on:click=move |_| draft.update(|d| d.color = Some(name.to_owned()))
             ></button>
         }
     });
     let none = move || color().is_none();
     // Any other: the one it has when it is none of the palette's.
-    let other = move || color().filter(|c| !PALETTE.contains(&c.as_str()));
+    let other = move || color().filter(|c| badge::palette_name(c).is_none());
     view! {
         <div class="field colors">
             <span class="dim">{t!(i18n, radio_color)}</span>
@@ -760,13 +772,23 @@ fn ColorPicker(draft: RwSignal<Draft>) -> impl IntoView {
                 <label
                     class="swatch other"
                     class:on=move || other().is_some()
-                    style=move || other().map(|c| format!("--swatch: {c}")).unwrap_or_default()
+                    class:split=move || other().is_some()
+                    style=move || {
+                        other()
+                            .map(|c| {
+                                format!(
+                                    "--swatch: {c}; \
+                                     --swatch-rest: color-mix(in srgb, {c} 50%, var(--mc-rail))"
+                                )
+                            })
+                            .unwrap_or_default()
+                    }
                     title=move || t_string!(i18n, radio_color_other)
                 >
                     <input
                         type="color"
                         aria-label=move || t_string!(i18n, radio_color_other)
-                        prop:value=move || color().unwrap_or_else(|| PALETTE[0].to_owned())
+                        prop:value=move || other().unwrap_or_else(|| "#f0a63a".to_owned())
                         on:input=move |ev| {
                             let picked = event_target_value(&ev);
                             draft.update(|d| d.color = Some(picked));
@@ -900,11 +922,16 @@ mod tests {
             },
         ] {
             settings.badge = Badge {
-                color: Some("#38d9a9".into()),
+                color: Some("teal".into()),
                 content,
             };
             assert_eq!(Draft::new(&settings).settings(), settings);
         }
+        // A colour of the palette as it was once kept goes by its name.
+        settings.badge.color = Some("#38D9A9".into());
+        assert_eq!(Draft::new(&settings).color.as_deref(), Some("teal"));
+        settings.badge.color = Some("#123456".into());
+        assert_eq!(Draft::new(&settings).color.as_deref(), Some("#123456"));
         // Characters left blank are the initials.
         let mut draft = Draft::new(&home());
         draft.look.text = " ".into();

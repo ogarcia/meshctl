@@ -964,7 +964,13 @@ fn Topbar() -> impl IntoView {
             <h1>{t!(i18n, nav_radio_settings)}</h1>
         }
         .into_any(),
-        Page::Preferences => view! { <h1>{t!(i18n, prefs_title)}</h1> }.into_any(),
+        Page::Preferences => view! {
+            <div class="heading">
+                <h1>{t!(i18n, prefs_title)}</h1>
+                <span class="dim">{t!(i18n, prefs_text)}</span>
+            </div>
+        }
+        .into_any(),
         Page::Radios => {
             let count = move || live.radios.with(|r| r.as_ref().map_or(0, Vec::len));
             view! {

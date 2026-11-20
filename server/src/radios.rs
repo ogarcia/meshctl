@@ -9,7 +9,7 @@
 use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
-    Badge, BadgeContent, Conversation, ErrorCode, Hop, LinkState, Message, MessageId,
+    BADGE_COLORS, Badge, BadgeContent, Conversation, ErrorCode, Hop, LinkState, Message, MessageId,
     MessageStatus, NewMessage, NewRequest, NodeSettings, NodeSettingsChange, Packet, Peer,
     Preferences, Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind, SettingsApplied,
     SettingsSection, SightingId, Status, Traceroute,
@@ -284,13 +284,15 @@ pub fn validate(settings: &RadioSettings) -> Result<Transport, ErrorCode> {
 /// several, such as families or flags of regions.
 const EMOJI_MAX: usize = 16;
 
-/// Whether a radio's button can be shown: a colour as `#rrggbb`, one or two
+/// Whether a radio's button can be shown: a colour of the palette, or one as
+/// `#rrggbb`; one or two
 /// characters, or an emoji, which has no letters, digits or spaces.
 fn valid_badge(badge: &Badge) -> bool {
     let color = badge.color.as_deref().is_none_or(|color| {
-        color.len() == 7
-            && color.starts_with('#')
-            && color[1..].chars().all(|c| c.is_ascii_hexdigit())
+        BADGE_COLORS.contains(&color)
+            || (color.len() == 7
+                && color.starts_with('#')
+                && color[1..].chars().all(|c| c.is_ascii_hexdigit()))
     });
     let shown = |text: &str| text.chars().all(|c| !c.is_whitespace() && !c.is_control());
     let content = match &badge.content {
@@ -1268,6 +1270,7 @@ mod tests {
         };
         let good = [
             with(Some("#F0a63a"), BadgeContent::Initials),
+            with(Some("teal"), BadgeContent::Initials),
             with(None, text("Ñ")),
             with(None, text(" TM ")),
             with(None, emoji("📡")),
@@ -1285,6 +1288,7 @@ mod tests {
         }
         let bad = [
             with(Some("f0a63a"), BadgeContent::Initials),
+            with(Some("red"), BadgeContent::Initials),
             with(Some("#f0a63"), BadgeContent::Initials),
             with(Some("#g0a63a"), BadgeContent::Initials),
             with(Some("#f0a63a00"), BadgeContent::Initials),

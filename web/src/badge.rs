@@ -9,12 +9,27 @@ use crate::i18n::{t_string, use_i18n};
 use leptos::prelude::*;
 use meshctl_api::{Badge, BadgeContent, BadgeIcon};
 
-/// The colours offered, light enough for dark text and strong enough on
-/// both themes' rails. Any other can be picked too.
-pub const PALETTE: [&str; 10] = [
+/// The palette's colours, by name, as the API names them: the style sheet has
+/// a tone of each for each theme (`--mc-badge-<name>`), which reads with its
+/// text (`--mc-badge-ink`). Any other colour can be picked too.
+pub use meshctl_api::BADGE_COLORS as PALETTE;
+
+/// The colours of the palette as they were once kept, as `#rrggbb`, in its
+/// order: they are read as the palette's.
+const PALETTE_BEFORE: [&str; 10] = [
     "#f0a63a", "#ff8a6b", "#f06595", "#cc5de8", "#9775fa", "#4dabf7", "#3bc9db", "#38d9a9",
     "#a9e34b", "#adb5bd",
 ];
+
+/// The palette's colour a colour is, if it is one: by its name, or as it
+/// was once kept.
+pub fn palette_name(color: &str) -> Option<&'static str> {
+    PALETTE
+        .iter()
+        .zip(PALETTE_BEFORE)
+        .find(|(name, before)| **name == color || before.eq_ignore_ascii_case(color))
+        .map(|(name, _)| *name)
+}
 
 /// Two letters for a radio: its words' first, or its first two.
 pub fn initials(name: &str) -> String {
@@ -46,11 +61,25 @@ fn ink(color: &str) -> Option<&'static str> {
 
 /// The style a button takes for its colour: none for the rail's own.
 pub fn style(badge: &Badge) -> String {
-    badge
-        .color
-        .as_deref()
-        .and_then(|color| Some(format!("--badge: {color}; --badge-ink: {}", ink(color)?)))
-        .unwrap_or_default()
+    let Some(color) = badge.color.as_deref() else {
+        return String::new();
+    };
+    match palette_name(color) {
+        // The theme's tones of it, at rest and selected, and their text.
+        Some(name) => format!(
+            "--badge: var(--mc-badge-{name}); --badge-ink: var(--mc-badge-ink); \
+             --badge-on: var(--mc-badge-{name}-on); --badge-on-ink: var(--mc-badge-ink-on)"
+        ),
+        // Any other: dimmed into the rail at rest, in full selected.
+        None => ink(color)
+            .map(|ink| {
+                format!(
+                    "--badge: color-mix(in srgb, {color} 50%, var(--mc-rail)); \
+                     --badge-ink: {ink}; --badge-on: {color}; --badge-on-ink: {ink}"
+                )
+            })
+            .unwrap_or_default(),
+    }
 }
 
 /// The class a button takes: `colored` when it has a colour of its own.
@@ -149,6 +178,23 @@ pub fn icon_name(icon: BadgeIcon) -> String {
     }
 }
 
+/// A colour of the palette's name, for whoever cannot see it.
+pub fn color_name(name: &str) -> String {
+    let i18n = use_i18n();
+    match name {
+        "amber" => t_string!(i18n, color_amber).to_string(),
+        "coral" => t_string!(i18n, color_coral).to_string(),
+        "pink" => t_string!(i18n, color_pink).to_string(),
+        "grape" => t_string!(i18n, color_grape).to_string(),
+        "violet" => t_string!(i18n, color_violet).to_string(),
+        "blue" => t_string!(i18n, color_blue).to_string(),
+        "cyan" => t_string!(i18n, color_cyan).to_string(),
+        "teal" => t_string!(i18n, color_teal).to_string(),
+        "lime" => t_string!(i18n, color_lime).to_string(),
+        _ => t_string!(i18n, color_gray).to_string(),
+    }
+}
+
 /// What a button shows inside: the box around it is its holder's.
 #[component]
 pub fn Face(
@@ -177,6 +223,27 @@ mod tests {
         assert_eq!(initials("Casa de campo"), "Cd");
         assert_eq!(initials("Ñu"), "Ñu");
         assert_eq!(initials(""), "?");
+    }
+
+    #[test]
+    fn the_palette_is_known_by_name_and_as_it_was() {
+        assert_eq!(super::palette_name("teal"), Some("teal"));
+        assert_eq!(super::palette_name("#F0A63A"), Some("amber"));
+        assert_eq!(super::palette_name("#123456"), None);
+        let badge = |color: &str| meshctl_api::Badge {
+            color: Some(color.into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::style(&badge("#4dabf7")),
+            "--badge: var(--mc-badge-blue); --badge-ink: var(--mc-badge-ink); \
+             --badge-on: var(--mc-badge-blue-on); --badge-on-ink: var(--mc-badge-ink-on)"
+        );
+        assert_eq!(
+            super::style(&badge("#1c3d8f")),
+            "--badge: color-mix(in srgb, #1c3d8f 50%, var(--mc-rail)); \
+             --badge-ink: #ffffff; --badge-on: #1c3d8f; --badge-on-ink: #ffffff"
+        );
     }
 
     #[test]
