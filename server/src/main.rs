@@ -1,25 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
+mod radios;
+mod store;
 mod web;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use meshctl_core::link::Transport;
-use meshctl_core::radio::Mesh;
+use radios::Radios;
 use std::net::SocketAddr;
+use std::path::PathBuf;
+use store::Store;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-/// A lean control panel for your Meshtastic node.
+/// A lean control panel for your mesh radios.
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Cli {
-    /// Where the radio is: `host` or `host:port` (a radio on the network, or a
-    /// tasticsplitter in front of one), or the path of its serial device, with
-    /// `@speed` after it when it is not 115200.
-    #[arg(long, env = "MESHCTL_RADIO")]
-    radio: Transport,
+    /// Where to keep what meshctl knows: the radios it was given and what they
+    /// heard. Created if it is not there.
+    #[arg(long, env = "MESHCTL_DATA", default_value = "data")]
+    data: PathBuf,
 
     /// Where to serve the panel and the API. Only this machine by default:
     /// serving anywhere else is a decision to make, not a default to inherit.
@@ -53,10 +55,17 @@ async fn main() -> Result<()> {
 
     if !cli.listen.ip().is_loopback() && token.is_none() {
         warn!(
-            "listening on {} with no access token: anyone who reaches it can use the radio. \
+            "listening on {} with no access token: anyone who reaches it can use the radios. \
              Put a proxy with authentication in front, or set MESHCTL_TOKEN",
             cli.listen
         );
+    }
+
+    let store = Store::open(&cli.data).await?;
+    let radios = Radios::start(store.clone()).await?;
+    match radios.list().await?.len() {
+        0 => info!("no radios yet: add one from the panel"),
+        n => info!(radios = n, "radios loaded"),
     }
 
     let listener = tokio::net::TcpListener::bind(cli.listen)
@@ -64,20 +73,21 @@ async fn main() -> Result<()> {
         .with_context(|| format!("cannot listen on {}", cli.listen))?;
     info!("serving on http://{}", cli.listen);
 
-    let mesh = Mesh::default();
-    let radio = mesh.spawn(cli.radio);
     let state = web::AppState {
         auth: web::Auth::new(token),
-        mesh,
+        radios: radios.clone(),
     };
-
+    let stopping = radios.clone();
     axum::serve(listener, web::router(state))
-        .with_graceful_shutdown(shutdown())
+        .with_graceful_shutdown(async move {
+            shutdown().await;
+            // Ends the event streams too, which would otherwise keep the
+            // server waiting for them forever.
+            stopping.stop();
+        })
         .await?;
 
-    // Dropping the link closes the connection to the radio.
-    radio.abort();
-    let _ = radio.await;
+    store.close().await;
     info!("stopped");
     Ok(())
 }

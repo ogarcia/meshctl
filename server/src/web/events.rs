@@ -21,6 +21,9 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// The close code for a first message that is not a hello: policy violation.
 const CLOSE_BAD_HELLO: u16 = 1008;
 
+/// The close code for a daemon that is stopping.
+const CLOSE_GOING_AWAY: u16 = 1001;
+
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().routes(routes!(events))
 }
@@ -62,16 +65,23 @@ async fn stream(mut socket: WebSocket, state: AppState) {
 
     // Subscribed before saying ready, so that whatever the client reads after
     // `ready` is either already in what it reads or still to come as an event.
-    let mut events = state.mesh.subscribe();
+    let mut events = state.radios.subscribe();
     if send(&mut socket, &ServerMessage::Ready).await.is_err() {
         return;
     }
 
     loop {
         tokio::select! {
+            () = state.radios.stopped() => {
+                let _ = socket.send(Message::Close(Some(CloseFrame {
+                    code: CLOSE_GOING_AWAY,
+                    reason: "".into(),
+                }))).await;
+                return;
+            }
             event = events.recv() => {
                 let message = match event {
-                    Ok(event) => convert::event(event),
+                    Ok(change) => convert::change(change),
                     Err(RecvError::Lagged(_)) => ServerMessage::Lagged,
                     Err(RecvError::Closed) => return,
                 };
@@ -129,14 +139,35 @@ mod tests {
 
     /// A daemon on a port of its own, and a WebSocket to its event stream.
     async fn connect(token: Option<&str>) -> Client {
+        connect_to(app(token).await).await
+    }
+
+    async fn connect_to(router: axum::Router) -> Client {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let router = app(token);
         tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let (client, _) = tokio_tungstenite::connect_async(format!("ws://{address}/api/v1/events"))
             .await
             .unwrap();
         client
+    }
+
+    #[tokio::test]
+    async fn the_stream_ends_when_the_daemon_stops() {
+        let radios = crate::web::tests::radios().await;
+        let router = crate::web::router(crate::web::AppState {
+            auth: crate::web::Auth::new(None),
+            radios: radios.clone(),
+        });
+        let mut client = connect_to(router).await;
+        client.send(Message::text("{}")).await.unwrap();
+        assert_eq!(message(receive(&mut client).await), ServerMessage::Ready);
+
+        radios.stop();
+        let Some(Message::Close(Some(frame))) = receive(&mut client).await else {
+            panic!("a close frame");
+        };
+        assert_eq!(u16::from(frame.code), 1001);
     }
 
     async fn receive(client: &mut Client) -> Option<Message> {
@@ -200,12 +231,14 @@ mod tests {
 
     #[test]
     fn link_changes_reach_the_stream_as_codes() {
-        let message = super::convert::event(meshctl_core::mesh::Event::Link(
-            meshctl_core::mesh::LinkState::Syncing,
+        let message = super::convert::change(crate::radios::Change::Mesh(
+            7,
+            meshctl_core::mesh::Event::Link(meshctl_core::mesh::LinkState::Syncing),
         ));
         assert_eq!(
             message,
             ServerMessage::Link {
+                radio: 7,
                 link: LinkState::Syncing
             }
         );

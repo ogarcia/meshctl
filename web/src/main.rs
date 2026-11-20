@@ -5,6 +5,8 @@ include!(concat!(env!("OUT_DIR"), "/i18n/mod.rs"));
 
 mod app;
 mod daemon;
+mod mesh;
+mod radios;
 
 fn main() {
     console_error_panic_hook::set_once();

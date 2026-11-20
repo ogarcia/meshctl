@@ -70,8 +70,8 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use meshctl_api::TOKEN_HEADER;
 
-    fn guarded() -> axum::Router {
-        app(Some("s3cret"))
+    async fn guarded() -> axum::Router {
+        app(Some("s3cret")).await
     }
 
     fn with_token(token: &str) -> Request<Body> {
@@ -83,32 +83,32 @@ mod tests {
 
     #[tokio::test]
     async fn without_a_token_configured_the_api_is_open() {
-        let (status, _) = ask(app(None), get("/api/v1/version")).await;
+        let (status, _) = ask(app(None).await, get("/api/v1/version")).await;
         assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]
     async fn with_one_configured_it_is_asked_for() {
-        let (status, body) = ask(guarded(), get("/api/v1/version")).await;
+        let (status, body) = ask(guarded().await, get("/api/v1/version")).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body, br#"{"error":"unauthorized"}"#);
     }
 
     #[tokio::test]
     async fn the_wrong_one_is_refused() {
-        let (status, _) = ask(guarded(), with_token("s3creT")).await;
+        let (status, _) = ask(guarded().await, with_token("s3creT")).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn the_right_one_is_let_through() {
-        let (status, _) = ask(guarded(), with_token("s3cret")).await;
+        let (status, _) = ask(guarded().await, with_token("s3cret")).await;
         assert_eq!(status, StatusCode::OK);
     }
 
     #[tokio::test]
     async fn the_reference_and_the_interface_need_none() {
-        let (status, _) = ask(guarded(), get("/api/openapi.json")).await;
+        let (status, _) = ask(guarded().await, get("/api/openapi.json")).await;
         assert_eq!(status, StatusCode::OK);
     }
 }

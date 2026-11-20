@@ -14,16 +14,17 @@
 mod api;
 mod assets;
 mod auth;
-mod convert;
+pub mod convert;
 mod events;
+mod radios;
 
 pub use auth::Auth;
 
+use crate::radios::Radios;
 use axum::Router;
 use axum::response::Html;
 use axum::routing::get;
 use meshctl_api::API_V1;
-use meshctl_core::radio::Mesh;
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_scalar::Scalar;
@@ -59,8 +60,8 @@ const SCALAR_HTML: &str = r#"<!doctype html>
     ),
     tags(
         (name = "meta", description = "What is answering"),
-        (name = "radio", description = "The radio meshctl is connected to"),
-        (name = "nodes", description = "The nodes of the mesh"),
+        (name = "radios", description = "The radios meshctl keeps connected to"),
+        (name = "nodes", description = "The nodes each radio hears"),
         (name = "events", description = "What changes, as it changes"),
     ),
     components(schemas(
@@ -76,17 +77,20 @@ struct Reference;
 #[derive(Clone)]
 pub struct AppState {
     pub auth: Auth,
-    pub mesh: Mesh,
+    pub radios: Radios,
 }
 
 /// Every route meshctl answers.
 pub fn router(state: AppState) -> Router {
     // The event stream checks the token itself, in its first message: a
     // browser cannot put a header on a WebSocket.
-    let guarded = api::router().layer(axum::middleware::from_fn_with_state(
-        state.auth.clone(),
-        auth::check,
-    ));
+    let guarded =
+        api::router()
+            .merge(radios::router())
+            .layer(axum::middleware::from_fn_with_state(
+                state.auth.clone(),
+                auth::check,
+            ));
     let (v1, reference) = OpenApiRouter::with_openapi(Reference::openapi())
         .nest(API_V1, guarded.merge(events::router()))
         .split_for_parts();
@@ -113,11 +117,18 @@ pub fn router(state: AppState) -> Router {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::store::Store;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
+    use meshctl_api::{RadioKind, RadioSettings};
     use meshctl_core::mesh::{LinkState, LocalNode, MeshState, Node, User};
+    use meshctl_core::radio::Mesh;
+    use serde::de::DeserializeOwned;
     use tower::ServiceExt;
+
+    /// The radio [`app`] has, with [`mesh`] for what it knows.
+    pub const RADIO: i64 = 1;
 
     /// A mesh as a radio would have left it: synced, two nodes.
     pub fn mesh() -> Mesh {
@@ -154,11 +165,34 @@ pub(crate) mod tests {
         Mesh::new(state)
     }
 
-    pub fn app(token: Option<&str>) -> Router {
+    /// The radios of [`app`]: [`RADIO`], stored disabled so that nothing tries
+    /// to reach it, and [`mesh`] put in place of its link.
+    pub async fn radios() -> Radios {
+        let store = Store::in_memory().await;
+        let record = store
+            .add_radio(&RadioSettings {
+                name: "Home".into(),
+                kind: RadioKind::Meshtastic,
+                address: "127.0.0.1:1".into(),
+                enabled: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(record.id, RADIO);
+        let radios = Radios::start(store).await.unwrap();
+        radios.insert_mesh(RADIO, mesh());
+        radios
+    }
+
+    pub async fn app(token: Option<&str>) -> Router {
         router(AppState {
             auth: Auth::new(token.map(str::to_owned)),
-            mesh: mesh(),
+            radios: radios().await,
         })
+    }
+
+    pub fn json<T: DeserializeOwned>(body: &[u8]) -> T {
+        serde_json::from_slice(body).unwrap()
     }
 
     /// Asks the router, the way axum would, and returns the status and body.
@@ -175,24 +209,29 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn the_reference_documents_the_api() {
-        let (status, body) = ask(app(None), get(OPENAPI_PATH)).await;
+        let (status, body) = ask(app(None).await, get(OPENAPI_PATH)).await;
         assert_eq!(status, StatusCode::OK);
         let spec: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        for path in ["/api/v1/version", "/api/v1/nodes", "/api/v1/events"] {
+        for path in [
+            "/api/v1/version",
+            "/api/v1/radios",
+            "/api/v1/radios/{radio}/nodes",
+            "/api/v1/events",
+        ] {
             assert!(spec["paths"][path]["get"].is_object(), "{path}");
         }
     }
 
     #[tokio::test]
     async fn the_reference_has_a_page() {
-        let (status, body) = ask(app(None), get(DOCS_PATH)).await;
+        let (status, body) = ask(app(None).await, get(DOCS_PATH)).await;
         assert_eq!(status, StatusCode::OK);
         assert!(String::from_utf8(body).unwrap().contains("/api/v1/version"));
     }
 
     #[tokio::test]
     async fn an_unknown_api_address_answers_in_json() {
-        let (status, body) = ask(app(None), get("/api/v1/nowhere")).await;
+        let (status, body) = ask(app(None).await, get("/api/v1/nowhere")).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body, br#"{"error":"not_found"}"#);
     }

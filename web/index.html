@@ -139,6 +139,47 @@
       }
       .token { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       .token p { margin: 0 auto 0 0; }
+      select {
+        font: inherit;
+        color: inherit;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 10px;
+      }
+      .picker { max-width: 40vw; }
+      .badge.disabled::before { background: var(--dim); }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.danger:hover { border-color: var(--bad); color: var(--bad); }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .actions { text-align: right; }
+      .actions button { margin-left: 6px; }
+      .welcome { max-width: 640px; }
+      .welcome p { color: var(--dim); }
+      .radio-form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px 16px;
+        align-items: end;
+      }
+      .radio-form label { display: grid; gap: 4px; }
+      .radio-form label span { color: var(--dim); font-size: 12px; }
+      .radio-form label.check {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding-bottom: 8px;
+      }
+      .radio-form label.check span { font-size: inherit; color: inherit; }
+      .radio-form .hint,
+      .radio-form .error,
+      .radio-form .buttons { grid-column: 1 / -1; margin: 0; }
+      .radio-form .hint { color: var(--dim); font-size: 12px; }
+      .radio-form .error { color: var(--bad); }
+      .radio-form .error:empty { display: none; }
+      .radio-form .buttons { display: flex; gap: 8px; }
     </style>
   </head>
   <body></body>

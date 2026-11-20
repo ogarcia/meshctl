@@ -4,6 +4,7 @@
 //! From what meshctl knows to what the API says. Kept apart from the core's
 //! own types so that either can change without the other having to.
 
+use crate::radios::Change;
 use meshctl_api as api;
 use meshctl_core::mesh;
 
@@ -61,12 +62,20 @@ pub fn node(node: &mesh::Node) -> api::Node {
     }
 }
 
-/// An event, as the stream carries it.
-pub fn event(event: mesh::Event) -> api::events::ServerMessage {
+/// A change, as the event stream carries it.
+pub fn change(change: Change) -> api::events::ServerMessage {
     use api::events::ServerMessage;
-    match event {
-        mesh::Event::Link(state) => ServerMessage::Link { link: link(state) },
-        mesh::Event::Synced => ServerMessage::Synced,
-        mesh::Event::Node(n) => ServerMessage::Node { node: node(&n) },
+    match change {
+        Change::Radios => ServerMessage::Radios,
+        Change::Lagged => ServerMessage::Lagged,
+        Change::Mesh(radio, mesh::Event::Link(state)) => ServerMessage::Link {
+            radio,
+            link: link(state),
+        },
+        Change::Mesh(radio, mesh::Event::Synced) => ServerMessage::Synced { radio },
+        Change::Mesh(radio, mesh::Event::Node(n)) => ServerMessage::Node {
+            radio,
+            node: node(&n),
+        },
     }
 }

@@ -1,14 +1,16 @@
 # meshctl
 
-A lean control panel for your Meshtastic node: control it, see the mesh around
-it, chat, and trace routes. That is the whole list.
+A lean control panel for your mesh radios: control them, see the mesh around
+them, chat, and trace routes. That is the whole list.
 
-meshctl stays connected to your node around the clock, keeps what it hears in
-SQLite, and serves a web interface and an API from a single binary.
+meshctl stays connected to your radios around the clock, keeps what they hear
+in SQLite, and serves a web interface and an API from a single binary. One
+radio or a dozen, Meshtastic today and MeshCore next, all from the same panel.
 
 ## Goals
 
-- **Your node:** its identity, role, channels and LoRa settings.
+- **Your radios:** as many as you have, added and changed from the panel.
+- **Each node:** its identity, role, channels and LoRa settings.
 - **The mesh:** every node heard, when, how well and how far, on a list and a
   map.
 - **Chat:** channels and direct messages, with history kept while you were away.
@@ -39,18 +41,24 @@ MeshCore support is planned, after Meshtastic works well.
 
 ## Running
 
-Tell meshctl where the radio is, with `--radio` or `MESHCTL_RADIO`:
-
 ```sh
-meshctl --radio 192.168.1.10              # on the network, port 4403
-meshctl --radio radio.lan:4404            # on another port
-meshctl --radio /dev/ttyACM0              # plugged in, at 115200
-meshctl --radio /dev/ttyUSB0@921600       # plugged in, at another speed
+meshctl
 ```
 
-The radio serves one client at a time. If something else (the phone app, say)
+That is all it needs. It keeps its database in `./data` (`--data` or
+`MESHCTL_DATA` to put it elsewhere) and, the first time, the panel asks for a
+radio. A radio's address is one of:
+
+```text
+192.168.1.10              on the network, port 4403
+radio.lan:4404            on the network, another port
+/dev/ttyACM0              plugged in, at 115200
+/dev/ttyUSB0@921600       plugged in, at another speed
+```
+
+A radio serves one client at a time. If something else (the phone app, say)
 also needs it, put [tasticsplitter](https://github.com/ogarcia/tasticsplitter)
-in front and point meshctl at it.
+in front and give meshctl its address instead.
 
 ## Access
 
@@ -85,7 +93,7 @@ The web interface needs [trunk](https://trunkrs.dev) and the
 
 ```sh
 git config core.hooksPath .githooks   # format and clippy before each commit
-cargo run -- --radio <radio>           # the daemon, on 127.0.0.1:7434
+cargo run                              # the daemon, on 127.0.0.1:7434
 (cd web && trunk serve)                # the interface on 127.0.0.1:7435,
                                        # rebuilt on change, API proxied
 cargo run -p meshctl-core --example probe -- <host> [port] [seconds]

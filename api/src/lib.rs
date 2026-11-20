@@ -45,6 +45,13 @@ pub enum ErrorCode {
     NotFound,
     /// The request does not say what it should.
     BadRequest,
+    /// A radio needs a name.
+    InvalidName,
+    /// That is not where a radio can be: neither `host`, `host:port`, nor the
+    /// path of a serial device.
+    InvalidAddress,
+    /// This meshctl cannot talk to that kind of radio yet.
+    UnsupportedKind,
 }
 
 /// The body of every error the API answers with.
@@ -54,11 +61,59 @@ pub struct Error {
     pub error: ErrorCode,
 }
 
-/// How the link to the radio is doing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// How a radio is identified in the API.
+pub type RadioId = i64;
+
+/// Which mesh a radio speaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RadioKind {
+    Meshtastic,
+    Meshcore,
+}
+
+/// A radio meshctl knows of, and how its link is doing.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Radio {
+    pub id: RadioId,
+    #[cfg_attr(feature = "openapi", schema(example = "Home"))]
+    pub name: String,
+    pub kind: RadioKind,
+    /// `host`, `host:port`, or the path of a serial device with an optional
+    /// `@speed`.
+    #[cfg_attr(feature = "openapi", schema(example = "192.168.1.10:4403"))]
+    pub address: String,
+    /// Whether meshctl keeps connected to it.
+    pub enabled: bool,
+    pub link: LinkState,
+}
+
+/// What it takes to add a radio, or to change one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioSettings {
+    #[cfg_attr(feature = "openapi", schema(example = "Home"))]
+    pub name: String,
+    pub kind: RadioKind,
+    #[cfg_attr(feature = "openapi", schema(example = "192.168.1.10:4403"))]
+    pub address: String,
+    #[serde(default = "enabled")]
+    pub enabled: bool,
+}
+
+fn enabled() -> bool {
+    true
+}
+
+/// How the link to a radio is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum LinkState {
+    /// Turned off: meshctl does not try to connect.
+    Disabled,
     /// Not connected, and waiting to try again.
     Disconnected,
     /// Trying to connect.

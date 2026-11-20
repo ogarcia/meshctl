@@ -1,66 +1,127 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
-//! Talking to the daemon: the API for reading, the event stream for following
-//! along, and the token when it asks for one.
+//! Talking to the daemon: the API for reading and changing, the event stream
+//! for following along, and the token when it asks for one.
 
 use futures_util::{SinkExt, StreamExt};
-use gloo_net::http::Request;
+use gloo_net::http::{Request, RequestBuilder, Response};
 use gloo_net::websocket::Message;
 use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
-use meshctl_api::{API_V1, ErrorCode, Node, Status, TOKEN_HEADER};
+use meshctl_api::{
+    API_V1, Error, ErrorCode, Node, Radio, RadioId, RadioSettings, Status, TOKEN_HEADER,
+};
 use serde::de::DeserializeOwned;
 
 /// Where the token is kept in the browser, once given.
 const TOKEN_KEY: &str = "meshctl.token";
 
-/// Why talking to the daemon stopped.
+/// Where the radio last looked at is kept, to come back to it.
+const RADIO_KEY: &str = "meshctl.radio";
+
+/// Why the daemon did not do what it was asked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Failure {
     /// It asks for a token, and the one we have (if any) is not it.
     Unauthorized,
-    /// It cannot be reached, or stopped answering.
+    /// It cannot be reached, or stopped answering, or failed.
     Unreachable,
+    /// It refused, and said why.
+    Rejected(ErrorCode),
 }
 
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?
 }
 
+fn stored(key: &str) -> Option<String> {
+    storage()?.get_item(key).ok()?.filter(|v| !v.is_empty())
+}
+
+fn store(key: &str, value: &str) {
+    if let Some(storage) = storage() {
+        let _ = storage.set_item(key, value);
+    }
+}
+
 pub fn token() -> Option<String> {
-    storage()?
-        .get_item(TOKEN_KEY)
-        .ok()?
-        .filter(|t| !t.is_empty())
+    stored(TOKEN_KEY)
 }
 
 pub fn set_token(token: &str) {
-    if let Some(storage) = storage() {
-        let _ = storage.set_item(TOKEN_KEY, token);
+    store(TOKEN_KEY, token);
+}
+
+pub fn last_radio() -> Option<RadioId> {
+    stored(RADIO_KEY)?.parse().ok()
+}
+
+pub fn set_last_radio(radio: RadioId) {
+    store(RADIO_KEY, &radio.to_string());
+}
+
+fn with_token(request: RequestBuilder) -> RequestBuilder {
+    match token() {
+        Some(token) => request.header(TOKEN_HEADER, &token),
+        None => request,
     }
 }
 
-/// Reads something from the API.
-pub async fn get<T: DeserializeOwned>(path: &str) -> Result<T, Failure> {
-    let mut request = Request::get(&format!("{API_V1}{path}"));
-    if let Some(token) = token() {
-        request = request.header(TOKEN_HEADER, &token);
-    }
-    let response = request.send().await.map_err(|_| Failure::Unreachable)?;
+fn url(path: &str) -> String {
+    format!("{API_V1}{path}")
+}
+
+/// What an answer means: its body when it is a success, why not otherwise.
+async fn answer(response: Result<Response, gloo_net::Error>) -> Result<Response, Failure> {
+    let response = response.map_err(|_| Failure::Unreachable)?;
     match response.status() {
-        200 => response.json().await.map_err(|_| Failure::Unreachable),
+        200..=299 => Ok(response),
         401 => Err(Failure::Unauthorized),
+        400..=499 => Err(response
+            .json::<Error>()
+            .await
+            .map_or(Failure::Unreachable, |e| Failure::Rejected(e.error))),
         _ => Err(Failure::Unreachable),
     }
 }
 
-pub async fn status() -> Result<Status, Failure> {
-    get("/status").await
+async fn get<T: DeserializeOwned>(path: &str) -> Result<T, Failure> {
+    let response = answer(with_token(Request::get(&url(path))).send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
 }
 
-pub async fn nodes() -> Result<Vec<Node>, Failure> {
-    get("/nodes").await
+pub async fn radios() -> Result<Vec<Radio>, Failure> {
+    get("/radios").await
+}
+
+pub async fn status(radio: RadioId) -> Result<Status, Failure> {
+    get(&format!("/radios/{radio}/status")).await
+}
+
+pub async fn nodes(radio: RadioId) -> Result<Vec<Node>, Failure> {
+    get(&format!("/radios/{radio}/nodes")).await
+}
+
+/// Adds a radio, or changes one when given its id.
+pub async fn save_radio(
+    radio: Option<RadioId>,
+    settings: &RadioSettings,
+) -> Result<Radio, Failure> {
+    let request = match radio {
+        Some(id) => Request::put(&url(&format!("/radios/{id}"))),
+        None => Request::post(&url("/radios")),
+    };
+    let request = with_token(request)
+        .json(settings)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+pub async fn remove_radio(radio: RadioId) -> Result<(), Failure> {
+    let request = with_token(Request::delete(&url(&format!("/radios/{radio}"))));
+    answer(request.send().await).await.map(|_| ())
 }
 
 /// The event stream, already past hello and ready.
