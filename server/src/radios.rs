@@ -6,12 +6,15 @@
 //! that keeps that mesh current. They are started, restarted and stopped as
 //! radios are added, changed and removed.
 
-use crate::store::{RadioRecord, Store, now};
+use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
-use meshctl_api::{ErrorCode, LinkState, Radio, RadioId, RadioKind, RadioSettings, Status};
+use meshctl_api::{
+    Conversation, ErrorCode, LinkState, Message, MessageId, MessageStatus, NewMessage, Peer, Radio,
+    RadioId, RadioKind, RadioSettings, Status,
+};
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
-use meshctl_core::radio::Mesh;
+use meshctl_core::radio::{Mesh, OutgoingText, SendError};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast::error::RecvError;
@@ -29,10 +32,36 @@ const EVENT_BACKLOG: usize = 4096;
 pub enum Change {
     /// A radio was added, changed or removed.
     Radios,
-    /// Something changed on one radio.
+    /// Something changed on one radio: its link, or a node. Messages and
+    /// their answers come as [`Change::Message`] and [`Change::MessageStatus`]
+    /// instead, once kept.
     Mesh(RadioId, mesh::Event),
+    /// A message heard or sent, as kept.
+    Message(RadioId, Message),
+    /// What became of a message sent.
+    MessageStatus {
+        radio: RadioId,
+        id: MessageId,
+        status: MessageStatus,
+        error: Option<String>,
+    },
     /// Events of a radio were lost on their way here.
     Lagged,
+}
+
+/// Why a message was not sent.
+#[derive(Debug)]
+pub enum SendFailure {
+    NoSuchRadio,
+    NotConnected,
+    Invalid,
+    Failed(anyhow::Error),
+}
+
+impl From<anyhow::Error> for SendFailure {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Failed(err)
+    }
 }
 
 /// Checks what a client asks a radio to be, and says where it is.
@@ -131,6 +160,117 @@ impl Radios {
             link: self.link(id),
             local,
         })
+    }
+
+    /// Sends a message through a radio, and keeps it as sent.
+    pub async fn send(&self, id: RadioId, message: NewMessage) -> Result<Message, SendFailure> {
+        let mesh = self.mesh(id).ok_or(SendFailure::NoSuchRadio)?;
+        let (to, channel) = match (message.channel, message.node) {
+            (Some(channel), None) => {
+                let usable = mesh.read(|state| {
+                    state
+                        .channels
+                        .get(&channel)
+                        .is_some_and(|c| c.role != "DISABLED")
+                });
+                if !usable {
+                    return Err(SendFailure::Invalid);
+                }
+                (mesh::BROADCAST, channel)
+            }
+            // A direct message goes on the primary channel; with the
+            // recipient's key, when the firmware has it, it is private anyway.
+            (None, Some(node)) if node != mesh::BROADCAST => (node, 0),
+            _ => return Err(SendFailure::Invalid),
+        };
+        let outgoing = OutgoingText {
+            to,
+            channel,
+            text: message.text.clone(),
+            reply_id: message.reply_id,
+        };
+        if self.link(id) != LinkState::Ready {
+            return Err(SendFailure::NotConnected);
+        }
+        let packet_id = mesh.send_text(&outgoing).map_err(|error| match error {
+            SendError::NotConnected => SendFailure::NotConnected,
+            SendError::BadText => SendFailure::Invalid,
+        })?;
+        let from = mesh.read(|state| state.local.as_ref().map_or(0, |l| l.num));
+        let row = NewMessageRow {
+            packet_id,
+            from,
+            to,
+            channel,
+            text: message.text,
+            at: now(),
+            outgoing: true,
+            status: MessageStatus::Sending,
+            reply_id: message.reply_id,
+            emoji: false,
+            snr: None,
+            rssi: None,
+            hops_away: None,
+            via_mqtt: false,
+        };
+        let kept = self
+            .store
+            .add_message(id, &row)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("a packet id was used twice"))?;
+        let _ = self.changes.send(Change::Message(id, kept.clone()));
+        Ok(kept)
+    }
+
+    /// Every conversation a radio has: its channels, whether or not anything
+    /// was said in them, and every node it exchanged messages with, the most
+    /// recent first.
+    pub async fn conversations(&self, id: RadioId) -> Result<Option<Vec<Conversation>>> {
+        let Some(mesh) = self.mesh(id) else {
+            return Ok(None);
+        };
+        let kept = self.store.conversations(id).await?;
+        let channels: Vec<u32> = mesh.read(|state| {
+            state
+                .channels
+                .values()
+                .filter(|c| c.role != "DISABLED")
+                .map(|c| c.index)
+                .collect()
+        });
+        let mut conversations: Vec<Conversation> = channels
+            .into_iter()
+            .map(|channel| {
+                let peer = Peer::Channel { channel };
+                let last = kept
+                    .iter()
+                    .find(|c| c.peer == peer)
+                    .and_then(|c| c.last.clone());
+                Conversation { peer, last }
+            })
+            .collect();
+        // Channels no longer on the radio keep what was said in them.
+        let others: Vec<Conversation> = kept
+            .into_iter()
+            .filter(|c| !conversations.iter().any(|known| known.peer == c.peer))
+            .collect();
+        conversations.extend(others);
+        Ok(Some(conversations))
+    }
+
+    /// The messages exchanged with a peer through a radio, if there is such a
+    /// radio.
+    pub async fn messages(
+        &self,
+        id: RadioId,
+        peer: Peer,
+        before: Option<MessageId>,
+        limit: u32,
+    ) -> Result<Option<Vec<Message>>> {
+        if self.mesh(id).is_none() {
+            return Ok(None);
+        }
+        Ok(Some(self.store.messages(id, peer, before, limit).await?))
     }
 
     pub async fn list(&self) -> Result<Vec<Radio>> {
@@ -289,6 +429,8 @@ impl Radios {
         tokio::spawn(async move {
             loop {
                 let change = match events.recv().await {
+                    // These go out once kept, from `persist`.
+                    Ok(mesh::Event::Message(_) | mesh::Event::Ack(_)) => continue,
                     Ok(event) => Change::Mesh(id, event),
                     Err(RecvError::Lagged(_)) => Change::Lagged,
                     Err(RecvError::Closed) => return,
@@ -305,11 +447,35 @@ impl Radios {
         let mut events = mesh.subscribe();
         let mesh = mesh.clone();
         let store = self.store.clone();
+        let changes = self.changes.clone();
         tokio::spawn(async move {
             let mut connected = false;
             loop {
                 let stored = match events.recv().await {
                     Ok(mesh::Event::Node(node)) => store.save_node(id, &node).await,
+                    Ok(mesh::Event::Message(heard)) => {
+                        let kept = store.add_message(id, &heard_row(heard)).await;
+                        kept.map(|kept| {
+                            if let Some(message) = kept {
+                                let _ = changes.send(Change::Message(id, message));
+                            }
+                        })
+                    }
+                    Ok(mesh::Event::Ack(ack)) => {
+                        let answered = store
+                            .ack(id, ack.packet_id, ack.from, ack.error.as_deref())
+                            .await;
+                        answered.map(|answered| {
+                            if let Some((message, status, error)) = answered {
+                                let _ = changes.send(Change::MessageStatus {
+                                    radio: id,
+                                    id: message,
+                                    status,
+                                    error,
+                                });
+                            }
+                        })
+                    }
                     Ok(mesh::Event::Synced) => {
                         connected = true;
                         save_all(&store, id, &mesh).await
@@ -342,6 +508,26 @@ impl Radios {
                 tasks: vec![forward],
             },
         );
+    }
+}
+
+/// A message heard, as kept.
+fn heard_row(heard: mesh::TextMessage) -> NewMessageRow {
+    NewMessageRow {
+        packet_id: heard.packet_id,
+        from: heard.from,
+        to: heard.to,
+        channel: heard.channel,
+        text: heard.text,
+        at: i64::from(heard.at),
+        outgoing: false,
+        status: MessageStatus::Received,
+        reply_id: heard.reply_id,
+        emoji: heard.emoji,
+        snr: heard.snr,
+        rssi: heard.rssi,
+        hops_away: heard.hops_away,
+        via_mqtt: heard.via_mqtt,
     }
 }
 

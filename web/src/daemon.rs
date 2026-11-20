@@ -6,11 +6,12 @@
 
 use futures_util::{SinkExt, StreamExt};
 use gloo_net::http::{Request, RequestBuilder, Response};
-use gloo_net::websocket::Message;
+use gloo_net::websocket::Message as Frame;
 use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
-    API_V1, Error, ErrorCode, Node, Radio, RadioId, RadioSettings, Status, TOKEN_HEADER,
+    API_V1, Channel, Conversation, Error, ErrorCode, Message, NewMessage, Node, Peer, Radio,
+    RadioId, RadioSettings, Status, TOKEN_HEADER,
 };
 use serde::de::DeserializeOwned;
 
@@ -103,6 +104,31 @@ pub async fn nodes(radio: RadioId) -> Result<Vec<Node>, Failure> {
     get(&format!("/radios/{radio}/nodes")).await
 }
 
+pub async fn channels(radio: RadioId) -> Result<Vec<Channel>, Failure> {
+    get(&format!("/radios/{radio}/channels")).await
+}
+
+pub async fn conversations(radio: RadioId) -> Result<Vec<Conversation>, Failure> {
+    get(&format!("/radios/{radio}/conversations")).await
+}
+
+/// The newest messages of a conversation, oldest first.
+pub async fn messages(radio: RadioId, peer: Peer) -> Result<Vec<Message>, Failure> {
+    let which = match peer {
+        Peer::Channel { channel } => format!("channel={channel}"),
+        Peer::Node { node } => format!("node={node}"),
+    };
+    get(&format!("/radios/{radio}/messages?{which}&limit=200")).await
+}
+
+pub async fn send_message(radio: RadioId, message: &NewMessage) -> Result<Message, Failure> {
+    let request = with_token(Request::post(&url(&format!("/radios/{radio}/messages"))))
+        .json(message)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
 /// Adds a radio, or changes one when given its id.
 pub async fn save_radio(
     radio: Option<RadioId>,
@@ -142,7 +168,7 @@ impl Events {
         let mut socket = WebSocket::open(&url).map_err(|_| Failure::Unreachable)?;
         let hello = serde_json::to_string(&Hello { token: token() }).expect("hello serializes");
         socket
-            .send(Message::Text(hello))
+            .send(Frame::Text(hello))
             .await
             .map_err(|_| Failure::Unreachable)?;
 
@@ -160,12 +186,12 @@ impl Events {
     pub async fn next(&mut self) -> Option<ServerMessage> {
         loop {
             match self.socket.next().await? {
-                Ok(Message::Text(text)) => {
+                Ok(Frame::Text(text)) => {
                     if let Ok(message) = serde_json::from_str(&text) {
                         return Some(message);
                     }
                 }
-                Ok(Message::Bytes(_)) => {}
+                Ok(Frame::Bytes(_)) => {}
                 Err(_) => return None,
             }
         }

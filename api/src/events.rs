@@ -15,7 +15,7 @@
 //! [`ServerMessage::Synced`] means what was read of that radio is out of date;
 //! [`ServerMessage::Lagged`], that everything is. Either way, read it again.
 
-use crate::{ErrorCode, LinkState, Node, RadioId};
+use crate::{ErrorCode, LinkState, Message, MessageId, MessageStatus, Node, RadioId};
 use serde::{Deserialize, Serialize};
 
 /// Where the event stream is served, under [`crate::API_V1`].
@@ -52,6 +52,15 @@ pub enum ServerMessage {
     Synced { radio: RadioId },
     /// A radio heard a node, or something about one changed.
     Node { radio: RadioId, node: Node },
+    /// A message heard or sent through a radio.
+    Message { radio: RadioId, message: Message },
+    /// What became of a message sent.
+    MessageStatus {
+        radio: RadioId,
+        id: MessageId,
+        status: MessageStatus,
+        error: Option<String>,
+    },
 }
 
 #[cfg(test)]

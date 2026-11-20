@@ -5,7 +5,10 @@
 //! last knew of itself and of the mesh.
 
 use anyhow::{Context, Result};
-use meshctl_api::{RadioId, RadioKind, RadioSettings};
+use meshctl_api::{
+    BROADCAST, Conversation, Message, MessageId, MessageStatus, Peer, RadioId, RadioKind,
+    RadioSettings,
+};
 use meshctl_core::mesh::{LocalNode, Node, Position, User};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
@@ -368,6 +371,257 @@ impl Store {
             .await?;
         Ok(())
     }
+
+    /// Keeps a message; `None` if it was already kept, as a message replayed
+    /// on reconnecting is.
+    pub async fn add_message(
+        &self,
+        radio: RadioId,
+        message: &NewMessageRow,
+    ) -> Result<Option<Message>> {
+        let id = sqlx::query(
+            "INSERT INTO message (radio_id, packet_id, from_num, to_num, channel, text, at,
+                outgoing, status, reply_id, emoji, snr, rssi, hops_away, via_mqtt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (radio_id, from_num, packet_id) DO NOTHING",
+        )
+        .bind(radio)
+        .bind(i64::from(message.packet_id))
+        .bind(i64::from(message.from))
+        .bind(i64::from(message.to))
+        .bind(i64::from(message.channel))
+        .bind(&message.text)
+        .bind(message.at)
+        .bind(message.outgoing)
+        .bind(status_name(message.status))
+        .bind(message.reply_id.map(i64::from))
+        .bind(message.emoji)
+        .bind(message.snr)
+        .bind(message.rssi)
+        .bind(message.hops_away.map(i64::from))
+        .bind(message.via_mqtt)
+        .execute(&self.pool)
+        .await?;
+        if id.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.message(id.last_insert_rowid()).await
+    }
+
+    async fn message(&self, id: MessageId) -> Result<Option<Message>> {
+        let row: Option<MessageRow> = sqlx::query_as("SELECT * FROM message WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(MessageRow::message))
+    }
+
+    /// Takes in the answer to a message sent: `from` is who answered. Returns
+    /// the message's new status, if there is such a message.
+    pub async fn ack(
+        &self,
+        radio: RadioId,
+        packet_id: u32,
+        from: u32,
+        error: Option<&str>,
+    ) -> Result<Option<(MessageId, MessageStatus, Option<String>)>> {
+        let row: Option<(i64, i64, String)> = sqlx::query_as(
+            "SELECT id, to_num, status FROM message
+            WHERE radio_id = ? AND outgoing = 1 AND packet_id = ?
+            ORDER BY id DESC LIMIT 1",
+        )
+        .bind(radio)
+        .bind(i64::from(packet_id))
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some((id, to, status)) = row else {
+            return Ok(None);
+        };
+        let status = match (error, status_from(&status)) {
+            // Once delivered, a late answer from a relay changes nothing.
+            (_, MessageStatus::Delivered) => MessageStatus::Delivered,
+            (Some(_), _) => MessageStatus::Failed,
+            (None, _) if i64::from(from) == to => MessageStatus::Delivered,
+            (None, _) => MessageStatus::Sent,
+        };
+        let error = error
+            .filter(|_| status == MessageStatus::Failed)
+            .map(str::to_owned);
+        sqlx::query("UPDATE message SET status = ?, error = ? WHERE id = ?")
+            .bind(status_name(status))
+            .bind(&error)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(Some((id, status, error)))
+    }
+
+    /// The messages exchanged with a peer, the newest `limit` before
+    /// `before`, oldest first.
+    pub async fn messages(
+        &self,
+        radio: RadioId,
+        peer: Peer,
+        before: Option<MessageId>,
+        limit: u32,
+    ) -> Result<Vec<Message>> {
+        let before = before.unwrap_or(i64::MAX);
+        let rows: Vec<MessageRow> = match peer {
+            Peer::Channel { channel } => {
+                sqlx::query_as(
+                    "SELECT * FROM message
+                    WHERE radio_id = ? AND to_num = ? AND channel = ? AND id < ?
+                    ORDER BY id DESC LIMIT ?",
+                )
+                .bind(radio)
+                .bind(i64::from(BROADCAST))
+                .bind(i64::from(channel))
+                .bind(before)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            Peer::Node { node } => {
+                sqlx::query_as(
+                    "SELECT * FROM message
+                    WHERE radio_id = ? AND to_num != ? AND id < ?
+                        AND ((outgoing = 1 AND to_num = ?) OR (outgoing = 0 AND from_num = ?))
+                    ORDER BY id DESC LIMIT ?",
+                )
+                .bind(radio)
+                .bind(i64::from(BROADCAST))
+                .bind(before)
+                .bind(i64::from(node))
+                .bind(i64::from(node))
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+        Ok(rows.into_iter().rev().map(MessageRow::message).collect())
+    }
+
+    /// Every conversation that has messages, with the newest one in it.
+    pub async fn conversations(&self, radio: RadioId) -> Result<Vec<Conversation>> {
+        let rows: Vec<MessageRow> = sqlx::query_as(
+            "SELECT * FROM message WHERE id IN (
+                SELECT max(id) FROM message WHERE radio_id = ? AND to_num = ?
+                GROUP BY channel
+                UNION ALL
+                SELECT max(id) FROM message WHERE radio_id = ? AND to_num != ?
+                GROUP BY CASE WHEN outgoing = 1 THEN to_num ELSE from_num END
+            ) ORDER BY id DESC",
+        )
+        .bind(radio)
+        .bind(i64::from(BROADCAST))
+        .bind(radio)
+        .bind(i64::from(BROADCAST))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(MessageRow::message)
+            .map(|last| Conversation {
+                peer: peer_of(&last),
+                last: Some(last),
+            })
+            .collect())
+    }
+}
+
+/// Who a message was exchanged with.
+pub fn peer_of(message: &Message) -> Peer {
+    if message.to == BROADCAST {
+        Peer::Channel {
+            channel: message.channel,
+        }
+    } else if message.outgoing {
+        Peer::Node { node: message.to }
+    } else {
+        Peer::Node { node: message.from }
+    }
+}
+
+/// A message to keep, as heard or as sent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewMessageRow {
+    pub packet_id: u32,
+    pub from: u32,
+    pub to: u32,
+    pub channel: u32,
+    pub text: String,
+    pub at: i64,
+    pub outgoing: bool,
+    pub status: MessageStatus,
+    pub reply_id: Option<u32>,
+    pub emoji: bool,
+    pub snr: Option<f32>,
+    pub rssi: Option<i32>,
+    pub hops_away: Option<u32>,
+    pub via_mqtt: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct MessageRow {
+    id: i64,
+    packet_id: i64,
+    from_num: i64,
+    to_num: i64,
+    channel: i64,
+    text: String,
+    at: i64,
+    outgoing: bool,
+    status: String,
+    error: Option<String>,
+    reply_id: Option<i64>,
+    emoji: bool,
+    snr: Option<f32>,
+    rssi: Option<i32>,
+    hops_away: Option<i64>,
+    via_mqtt: bool,
+}
+
+impl MessageRow {
+    fn message(self) -> Message {
+        Message {
+            id: self.id,
+            packet_id: u32_from(self.packet_id),
+            from: u32_from(self.from_num),
+            to: u32_from(self.to_num),
+            channel: u32_from(self.channel),
+            text: self.text,
+            at: self.at,
+            outgoing: self.outgoing,
+            status: status_from(&self.status),
+            error: self.error,
+            reply_id: self.reply_id.map(u32_from),
+            emoji: self.emoji,
+            snr: self.snr,
+            rssi: self.rssi,
+            hops_away: self.hops_away.map(u32_from),
+            via_mqtt: self.via_mqtt,
+        }
+    }
+}
+
+fn status_name(status: MessageStatus) -> &'static str {
+    match status {
+        MessageStatus::Received => "received",
+        MessageStatus::Sending => "sending",
+        MessageStatus::Sent => "sent",
+        MessageStatus::Delivered => "delivered",
+        MessageStatus::Failed => "failed",
+    }
+}
+
+fn status_from(name: &str) -> MessageStatus {
+    match name {
+        "sending" => MessageStatus::Sending,
+        "sent" => MessageStatus::Sent,
+        "delivered" => MessageStatus::Delivered,
+        "failed" => MessageStatus::Failed,
+        _ => MessageStatus::Received,
+    }
 }
 
 pub fn now() -> i64 {
@@ -511,6 +765,122 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0);
+    }
+
+    fn text(packet_id: u32, from: u32, to: u32, outgoing: bool) -> NewMessageRow {
+        NewMessageRow {
+            packet_id,
+            from,
+            to,
+            channel: 0,
+            text: format!("#{packet_id}"),
+            at: i64::from(packet_id),
+            outgoing,
+            status: if outgoing {
+                MessageStatus::Sending
+            } else {
+                MessageStatus::Received
+            },
+            reply_id: None,
+            emoji: false,
+            snr: None,
+            rssi: None,
+            hops_away: None,
+            via_mqtt: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_message_replayed_is_kept_once() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        let heard = text(1, 9, BROADCAST, false);
+        assert!(store.add_message(radio, &heard).await.unwrap().is_some());
+        assert!(store.add_message(radio, &heard).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn answers_move_a_message_along() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        store
+            .add_message(radio, &text(1, 7, 9, true))
+            .await
+            .unwrap();
+        store
+            .add_message(radio, &text(2, 7, 9, true))
+            .await
+            .unwrap();
+
+        // Heard relayed by the radio itself, then acknowledged by node 9.
+        let (_, status, _) = store.ack(radio, 1, 7, None).await.unwrap().unwrap();
+        assert_eq!(status, MessageStatus::Sent);
+        let (_, status, _) = store.ack(radio, 1, 9, None).await.unwrap().unwrap();
+        assert_eq!(status, MessageStatus::Delivered);
+        // A late answer does not take it back.
+        let (_, status, _) = store
+            .ack(radio, 1, 7, Some("MAX_RETRANSMIT"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, MessageStatus::Delivered);
+
+        let (_, status, error) = store
+            .ack(radio, 2, 7, Some("MAX_RETRANSMIT"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, MessageStatus::Failed);
+        assert_eq!(error.as_deref(), Some("MAX_RETRANSMIT"));
+
+        assert!(store.ack(radio, 3, 7, None).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn messages_gather_by_who_they_were_exchanged_with() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        for row in [
+            text(1, 9, BROADCAST, false),
+            text(2, 9, 7, false),
+            text(3, 7, 9, true),
+            text(4, 8, 7, false),
+            text(5, 8, BROADCAST, false),
+        ] {
+            store.add_message(radio, &row).await.unwrap();
+        }
+
+        let with_nine = store
+            .messages(radio, Peer::Node { node: 9 }, None, 50)
+            .await
+            .unwrap();
+        let ids: Vec<_> = with_nine.iter().map(|m| m.packet_id).collect();
+        assert_eq!(ids, [2, 3]);
+
+        let channel = store
+            .messages(radio, Peer::Channel { channel: 0 }, None, 1)
+            .await
+            .unwrap();
+        assert_eq!(channel[0].packet_id, 5, "the newest page");
+        let before = store
+            .messages(radio, Peer::Channel { channel: 0 }, Some(channel[0].id), 50)
+            .await
+            .unwrap();
+        assert_eq!(before[0].packet_id, 1);
+
+        let conversations = store.conversations(radio).await.unwrap();
+        let peers: Vec<_> = conversations
+            .iter()
+            .map(|c| (c.peer, c.last.as_ref().unwrap().packet_id))
+            .collect();
+        assert_eq!(
+            peers,
+            [
+                (Peer::Channel { channel: 0 }, 5),
+                (Peer::Node { node: 8 }, 4),
+                (Peer::Node { node: 9 }, 3),
+            ]
+        );
     }
 
     #[tokio::test]

@@ -4,6 +4,7 @@
 //! The interface's frame, and what keeps it current: the connection to the
 //! daemon, the radios, and what the selected one knows.
 
+use crate::chat::{ChatView, peer_of};
 use crate::daemon::{self, Events, Failure};
 use crate::i18n::{I18nContextProvider, Locale, t, use_i18n};
 use crate::mesh::MeshView;
@@ -12,7 +13,7 @@ use gloo_timers::future::sleep;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
-use meshctl_api::{LinkState, Node, Radio, RadioId, Status};
+use meshctl_api::{Channel, Conversation, LinkState, Message, Node, Peer, Radio, RadioId, Status};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -35,6 +36,7 @@ pub enum Daemon {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Mesh,
+    Chat,
     Radios,
 }
 
@@ -50,6 +52,14 @@ pub struct Live {
     pub status: RwSignal<Option<Status>>,
     /// Of the selected radio.
     pub nodes: RwSignal<BTreeMap<u32, Node>>,
+    /// Of the selected radio.
+    pub channels: RwSignal<Vec<Channel>>,
+    /// Of the selected radio.
+    pub conversations: RwSignal<Vec<Conversation>>,
+    /// The conversation open in the chat, if any.
+    pub open: RwSignal<Option<Peer>>,
+    /// The messages of the open conversation, oldest first.
+    pub thread: RwSignal<Vec<Message>>,
     /// Seconds since the epoch, ticking.
     pub now: RwSignal<u32>,
 }
@@ -63,6 +73,10 @@ impl Live {
             selected: RwSignal::new(daemon::last_radio()),
             status: RwSignal::new(None),
             nodes: RwSignal::new(BTreeMap::new()),
+            channels: RwSignal::new(Vec::new()),
+            conversations: RwSignal::new(Vec::new()),
+            open: RwSignal::new(None),
+            thread: RwSignal::new(Vec::new()),
             now: RwSignal::new(now()),
         }
     }
@@ -70,10 +84,48 @@ impl Live {
     pub fn select(self, radio: RadioId) {
         daemon::set_last_radio(radio);
         self.selected.set(Some(radio));
-        self.page.set(Page::Mesh);
+        self.open.set(None);
+        self.thread.set(Vec::new());
+        if self.page.get_untracked() == Page::Radios {
+            self.page.set(Page::Mesh);
+        }
         spawn_local(async move {
             let _ = self.refresh_selected().await;
         });
+    }
+
+    /// Opens a conversation in the chat.
+    pub fn open_chat(self, peer: Peer) {
+        self.open.set(Some(peer));
+        self.thread.set(Vec::new());
+        self.page.set(Page::Chat);
+        spawn_local(async move {
+            let _ = self.refresh_thread().await;
+        });
+    }
+
+    /// Reads the open conversation's messages again.
+    pub async fn refresh_thread(self) -> Result<(), Failure> {
+        let (Some(radio), Some(peer)) = (self.selected.get_untracked(), self.open.get_untracked())
+        else {
+            return Ok(());
+        };
+        let messages = daemon::messages(radio, peer).await?;
+        if self.selected.get_untracked() == Some(radio) && self.open.get_untracked() == Some(peer) {
+            self.thread.set(messages);
+        }
+        Ok(())
+    }
+
+    async fn refresh_conversations(self) -> Result<(), Failure> {
+        let Some(radio) = self.selected.get_untracked() else {
+            return Ok(());
+        };
+        let conversations = daemon::conversations(radio).await?;
+        if self.selected.get_untracked() == Some(radio) {
+            self.conversations.set(conversations);
+        }
+        Ok(())
     }
 
     /// Reads the radios again, and keeps a selection that still exists.
@@ -97,13 +149,17 @@ impl Live {
         };
         let status = daemon::status(radio).await?;
         let nodes = daemon::nodes(radio).await?;
+        let channels = daemon::channels(radio).await?;
+        let conversations = daemon::conversations(radio).await?;
         // The selection may have moved on while we were asking.
         if self.selected.get_untracked() == Some(radio) {
             self.status.set(Some(status));
             self.nodes
                 .set(nodes.into_iter().map(|node| (node.num, node)).collect());
+            self.channels.set(channels);
+            self.conversations.set(conversations);
         }
-        Ok(())
+        self.refresh_thread().await
     }
 
     pub async fn refresh(self) -> Result<(), Failure> {
@@ -154,6 +210,30 @@ impl Live {
                 }
                 ServerMessage::Synced { radio } if self.is_selected(radio) => {
                     self.refresh_selected().await
+                }
+                ServerMessage::Message { radio, message } if self.is_selected(radio) => {
+                    if self.open.get_untracked() == Some(peer_of(&message)) {
+                        self.thread.update(|thread| {
+                            if !thread.iter().any(|m| m.id == message.id) {
+                                thread.push(message);
+                            }
+                        });
+                    }
+                    self.refresh_conversations().await
+                }
+                ServerMessage::MessageStatus {
+                    radio,
+                    id,
+                    status,
+                    error,
+                } if self.is_selected(radio) => {
+                    self.thread.update(|thread| {
+                        if let Some(message) = thread.iter_mut().find(|m| m.id == id) {
+                            message.status = status;
+                            message.error = error;
+                        }
+                    });
+                    Ok(())
                 }
                 ServerMessage::Radios | ServerMessage::Lagged => self.refresh().await,
                 _ => Ok(()),
@@ -219,13 +299,24 @@ fn Shell() -> impl IntoView {
         live.radios
             .with(|r| r.as_ref().is_some_and(|r| !r.is_empty()))
     };
-    let toggle_page = move |_| {
-        live.page.update(|page| {
-            *page = match page {
-                Page::Mesh => Page::Radios,
-                Page::Radios => Page::Mesh,
-            };
-        });
+    let tab = move |page: Page| {
+        let class = move || {
+            if live.page.get() == page {
+                "tab active"
+            } else {
+                "tab"
+            }
+        };
+        let label = move || match page {
+            Page::Mesh => t!(i18n, page_nodes).into_any(),
+            Page::Chat => t!(i18n, page_chat).into_any(),
+            Page::Radios => t!(i18n, radios_manage).into_any(),
+        };
+        view! {
+            <button class=class on:click=move |_| live.page.set(page)>
+                {label}
+            </button>
+        }
     };
 
     view! {
@@ -234,12 +325,7 @@ fn Shell() -> impl IntoView {
             <Show when=has_radios>
                 <RadioPicker />
                 <Connection />
-                <button on:click=toggle_page>
-                    {move || match live.page.get() {
-                        Page::Mesh => t!(i18n, radios_manage).into_any(),
-                        Page::Radios => t!(i18n, radios_back).into_any(),
-                    }}
-                </button>
+                <nav>{tab(Page::Mesh)} {tab(Page::Chat)} {tab(Page::Radios)}</nav>
             </Show>
             <LanguageSwitch />
         </header>
@@ -253,6 +339,7 @@ fn Shell() -> impl IntoView {
                 (_, Some(0)) => view! { <Welcome /> }.into_any(),
                 (_, Some(_)) => match live.page.get() {
                     Page::Mesh => view! { <MeshView /> }.into_any(),
+                    Page::Chat => view! { <ChatView /> }.into_any(),
                     Page::Radios => view! { <RadiosView /> }.into_any(),
                 },
             }}

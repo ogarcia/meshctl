@@ -6,7 +6,7 @@
 use crate::app::Live;
 use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
-use meshctl_api::{LinkState, Node};
+use meshctl_api::{LinkState, Node, Peer};
 use std::collections::BTreeMap;
 
 #[component]
@@ -180,12 +180,21 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
         None => String::new(),
     };
 
+    let live = expect_context::<Live>();
+    let num = node.num;
+    let open = move |ev: leptos::ev::MouseEvent| {
+        ev.prevent_default();
+        live.open_chat(Peer::Node { node: num });
+    };
+
     view! {
         <tr>
             <td>
                 <span class="short">{node.short_name.clone()}</span>
                 " "
-                {node.long_name.clone()}
+                <a href="#" on:click=open>
+                    {node.long_name.clone().unwrap_or_else(|| node.id.clone())}
+                </a>
             </td>
             <td class="mono">{node.id.clone()}</td>
             <td class="num">{move || heard.map(|t| ago(now.get(), t)).unwrap_or_default()}</td>

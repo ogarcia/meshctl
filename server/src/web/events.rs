@@ -81,7 +81,10 @@ async fn stream(mut socket: WebSocket, state: AppState) {
             }
             event = events.recv() => {
                 let message = match event {
-                    Ok(change) => convert::change(change),
+                    Ok(change) => match convert::change(change) {
+                        Some(message) => message,
+                        None => continue,
+                    },
                     Err(RecvError::Lagged(_)) => ServerMessage::Lagged,
                     Err(RecvError::Closed) => return,
                 };
@@ -236,7 +239,7 @@ mod tests {
             meshctl_core::mesh::Event::Link(meshctl_core::mesh::LinkState::Syncing),
         ));
         assert_eq!(
-            message,
+            message.unwrap(),
             ServerMessage::Link {
                 radio: 7,
                 link: LinkState::Syncing

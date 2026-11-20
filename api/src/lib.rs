@@ -52,6 +52,11 @@ pub enum ErrorCode {
     InvalidAddress,
     /// This meshctl cannot talk to that kind of radio yet.
     UnsupportedKind,
+    /// The radio is not connected, so nothing can be sent through it now.
+    RadioNotConnected,
+    /// A message needs some text, of up to 200 bytes, and either a channel the
+    /// radio has or a node, not both.
+    InvalidMessage,
 }
 
 /// The body of every error the API answers with.
@@ -228,6 +233,100 @@ pub struct Node {
     pub battery_level: Option<u32>,
     /// Battery voltage, in volts.
     pub voltage: Option<f32>,
+}
+
+/// How a message is identified in the API.
+pub type MessageId = i64;
+
+/// The node number that stands for everyone: what a channel message is
+/// addressed to.
+pub const BROADCAST: u32 = 0xffff_ffff;
+
+/// Where a message sent is at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MessageStatus {
+    /// Heard from someone else.
+    Received,
+    /// Handed to the radio, with no answer yet.
+    Sending,
+    /// Heard relayed by another node, which for a channel message is as far
+    /// as anyone can tell.
+    Sent,
+    /// Acknowledged by the node it was sent to.
+    Delivered,
+    /// The radio gave up on it; `error` says why.
+    Failed,
+}
+
+/// A text message, heard or sent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Message {
+    pub id: MessageId,
+    /// The packet's id on the mesh, which replies and reactions refer to.
+    pub packet_id: u32,
+    /// The node it came from.
+    pub from: u32,
+    /// [`BROADCAST`] (4294967295) for a channel message, a node for a direct
+    /// one.
+    pub to: u32,
+    /// The channel's slot on the radio.
+    pub channel: u32,
+    pub text: String,
+    /// When it was heard or sent, in seconds since the epoch.
+    pub at: i64,
+    /// Whether it was sent from meshctl.
+    pub outgoing: bool,
+    pub status: MessageStatus,
+    /// Why it failed, as the protobufs name it.
+    #[cfg_attr(feature = "openapi", schema(example = "MAX_RETRANSMIT"))]
+    pub error: Option<String>,
+    /// The packet it answers, if any.
+    pub reply_id: Option<u32>,
+    /// Whether it is a reaction (an emoji) to `reply_id`.
+    pub emoji: bool,
+    pub snr: Option<f32>,
+    pub rssi: Option<i32>,
+    pub hops_away: Option<u32>,
+    pub via_mqtt: bool,
+}
+
+/// A message to send: to a channel, or to a node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NewMessage {
+    /// Up to 200 bytes of it.
+    #[cfg_attr(feature = "openapi", schema(example = "hola"))]
+    pub text: String,
+    /// The channel's slot, for a channel message.
+    #[serde(default)]
+    pub channel: Option<u32>,
+    /// The node's number, for a direct message.
+    #[serde(default)]
+    pub node: Option<u32>,
+    /// The packet it answers, if any.
+    #[serde(default)]
+    pub reply_id: Option<u32>,
+}
+
+/// Where messages are exchanged: a channel, or a node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Peer {
+    Channel { channel: u32 },
+    Node { node: u32 },
+}
+
+/// A conversation, and where it was left.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Conversation {
+    pub peer: Peer,
+    /// The newest message in it, if any.
+    pub last: Option<Message>,
 }
 
 #[cfg(test)]

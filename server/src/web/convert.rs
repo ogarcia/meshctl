@@ -63,9 +63,9 @@ pub fn node(node: &mesh::Node) -> api::Node {
 }
 
 /// A change, as the event stream carries it.
-pub fn change(change: Change) -> api::events::ServerMessage {
+pub fn change(change: Change) -> Option<api::events::ServerMessage> {
     use api::events::ServerMessage;
-    match change {
+    Some(match change {
         Change::Radios => ServerMessage::Radios,
         Change::Lagged => ServerMessage::Lagged,
         Change::Mesh(radio, mesh::Event::Link(state)) => ServerMessage::Link {
@@ -77,5 +77,19 @@ pub fn change(change: Change) -> api::events::ServerMessage {
             radio,
             node: node(&n),
         },
-    }
+        // Clients hear of these once kept, as the two below.
+        Change::Mesh(_, mesh::Event::Message(_) | mesh::Event::Ack(_)) => return None,
+        Change::Message(radio, message) => ServerMessage::Message { radio, message },
+        Change::MessageStatus {
+            radio,
+            id,
+            status,
+            error,
+        } => ServerMessage::MessageStatus {
+            radio,
+            id,
+            status,
+            error,
+        },
+    })
 }

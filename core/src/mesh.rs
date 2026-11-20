@@ -113,6 +113,50 @@ pub enum Event {
     /// read before is out of date.
     Synced,
     Node(Node),
+    /// A text message heard. Messages are not kept here: whoever wants them,
+    /// keeps them.
+    Message(TextMessage),
+    /// The answer to a packet sent with want_ack: delivered, heard relayed,
+    /// or given up on.
+    Ack(Ack),
+}
+
+/// The node number that stands for everyone: what a channel message is sent to.
+pub const BROADCAST: u32 = 0xffff_ffff;
+
+/// A text message, as heard.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextMessage {
+    /// The packet's id, which with `from` names it across the mesh.
+    pub packet_id: u32,
+    pub from: u32,
+    /// [`BROADCAST`] for a channel message, a node for a direct one.
+    pub to: u32,
+    /// The channel's slot on the radio.
+    pub channel: u32,
+    pub text: String,
+    /// When it was received, in seconds since the epoch.
+    pub at: u32,
+    /// The packet it answers, if any.
+    pub reply_id: Option<u32>,
+    /// Whether it is a reaction (an emoji) to `reply_id` rather than a message.
+    pub emoji: bool,
+    pub snr: Option<f32>,
+    pub rssi: Option<i32>,
+    pub hops_away: Option<u32>,
+    pub via_mqtt: bool,
+}
+
+/// What became of a packet sent with want_ack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ack {
+    /// The id of the packet sent.
+    pub packet_id: u32,
+    /// Who answered: the destination when it was delivered, the radio itself
+    /// when it heard it relayed or gave up.
+    pub from: u32,
+    /// Why it failed, as the protobufs name it; none if it did not.
+    pub error: Option<String>,
 }
 
 /// Everything known about the radio and the mesh.
@@ -196,7 +240,17 @@ impl MeshState {
                 None
             }
             Some(V::NodeInfo(info)) => Some(self.node_info(info)),
-            Some(V::Packet(packet)) => Some(self.packet(packet, now)),
+            Some(V::Packet(packet)) => {
+                // What the packet says counts even while syncing: a radio, or a
+                // tasticsplitter, replays the messages a client missed then.
+                let said = said(&packet, now);
+                let node = self.packet(packet, now);
+                let mut events: Vec<Event> = said.into_iter().collect();
+                if !quiet {
+                    events.insert(0, Event::Node(node));
+                }
+                return events;
+            }
             _ => None,
         };
 
@@ -278,6 +332,53 @@ impl MeshState {
         }
 
         node.clone()
+    }
+}
+
+/// A message, or the answer to one, if that is what the packet carries.
+fn said(packet: &pb::MeshPacket, now: u32) -> Option<Event> {
+    let Some(mesh_packet::PayloadVariant::Decoded(data)) = &packet.payload_variant else {
+        return None;
+    };
+    match PortNum::try_from(data.portnum) {
+        Ok(PortNum::TextMessageApp) => {
+            let reception = !packet.via_mqtt;
+            Some(Event::Message(TextMessage {
+                packet_id: packet.id,
+                from: packet.from,
+                to: packet.to,
+                channel: packet.channel,
+                text: String::from_utf8_lossy(&data.payload).into_owned(),
+                at: packet.rx_time.filter(|t| *t > 0).unwrap_or(now),
+                reply_id: (data.reply_id != 0).then_some(data.reply_id),
+                emoji: data.emoji != 0,
+                snr: reception.then_some(packet.rx_snr).filter(|s| *s != 0.0),
+                rssi: packet.rx_rssi.filter(|_| reception),
+                hops_away: (reception && packet.hop_start > 0)
+                    .then(|| packet.hop_start.saturating_sub(packet.hop_limit)),
+                via_mqtt: packet.via_mqtt,
+            }))
+        }
+        Ok(PortNum::RoutingApp) if data.request_id != 0 => {
+            let routing = pb::Routing::decode(data.payload.as_slice()).ok()?;
+            let error = match routing.variant {
+                Some(pb::routing::Variant::ErrorReason(reason)) => reason,
+                // A route request or reply is not an answer to anything sent.
+                _ => return None,
+            };
+            Some(Event::Ack(Ack {
+                packet_id: data.request_id,
+                from: packet.from,
+                error: (error != pb::routing::Error::None as i32).then(|| {
+                    enum_name(error, |v| {
+                        pb::routing::Error::try_from(v)
+                            .ok()
+                            .map(|e| e.as_str_name())
+                    })
+                }),
+            }))
+        }
+        _ => None,
     }
 }
 
@@ -377,7 +478,7 @@ mod tests {
         assert_eq!(node.snr, Some(6.5));
         assert_eq!(node.rssi, Some(-90));
         assert_eq!(node.hops_away, Some(2));
-        assert_eq!(events, vec![Event::Node(node.clone())]);
+        assert_eq!(events.first(), Some(&Event::Node(node.clone())));
     }
 
     #[test]
@@ -523,6 +624,78 @@ mod tests {
         assert_eq!(local.num, 2);
         // What the old node said of itself is not the new one's.
         assert_eq!(local.firmware_version, None);
+    }
+
+    #[test]
+    fn a_text_message_is_heard() {
+        let mut state = ready();
+        let mut sent = packet(7, PortNum::TextMessageApp, "hola".into());
+        sent.id = 42;
+        sent.channel = 4;
+        if let Some(mesh_packet::PayloadVariant::Decoded(data)) = &mut sent.payload_variant {
+            data.reply_id = 41;
+        }
+        let events = state.apply(from_radio(V::Packet(sent)), 100);
+        let Some(Event::Message(message)) = events.last() else {
+            panic!("a message, after the node");
+        };
+        assert_eq!(message.packet_id, 42);
+        assert_eq!(message.text, "hola");
+        assert_eq!(message.to, BROADCAST);
+        assert_eq!(message.channel, 4);
+        assert_eq!(message.reply_id, Some(41));
+        assert_eq!(message.hops_away, Some(2));
+        assert!(matches!(events.first(), Some(Event::Node(_))));
+    }
+
+    #[test]
+    fn a_message_counts_while_syncing() {
+        let mut state = MeshState {
+            link: LinkState::Syncing,
+            ..Default::default()
+        };
+        let events = state.apply(
+            from_radio(V::Packet(packet(7, PortNum::TextMessageApp, "hola".into()))),
+            1,
+        );
+        assert!(matches!(events.as_slice(), [Event::Message(_)]));
+    }
+
+    fn routing(from: u32, request_id: u32, error: pb::routing::Error) -> pb::MeshPacket {
+        let body = pb::Routing {
+            variant: Some(pb::routing::Variant::ErrorReason(error as i32)),
+            ..Default::default()
+        };
+        let mut answer = packet(from, PortNum::RoutingApp, body.encode_to_vec());
+        if let Some(mesh_packet::PayloadVariant::Decoded(data)) = &mut answer.payload_variant {
+            data.request_id = request_id;
+        }
+        answer
+    }
+
+    #[test]
+    fn answers_to_what_was_sent_are_heard() {
+        let mut state = ready();
+        let events = state.apply(
+            from_radio(V::Packet(routing(9, 42, pb::routing::Error::None))),
+            1,
+        );
+        assert_eq!(
+            events.last(),
+            Some(&Event::Ack(Ack {
+                packet_id: 42,
+                from: 9,
+                error: None
+            }))
+        );
+        let events = state.apply(
+            from_radio(V::Packet(routing(1, 43, pb::routing::Error::MaxRetransmit))),
+            1,
+        );
+        let Some(Event::Ack(ack)) = events.last() else {
+            panic!("an ack");
+        };
+        assert_eq!(ack.error.as_deref(), Some("MAX_RETRANSMIT"));
     }
 
     #[test]

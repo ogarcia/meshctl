@@ -16,6 +16,7 @@ mod assets;
 mod auth;
 pub mod convert;
 mod events;
+mod messages;
 mod radios;
 
 pub use auth::Auth;
@@ -62,6 +63,7 @@ const SCALAR_HTML: &str = r#"<!doctype html>
         (name = "meta", description = "What is answering"),
         (name = "radios", description = "The radios meshctl keeps connected to"),
         (name = "nodes", description = "The nodes each radio hears"),
+        (name = "chat", description = "What each radio hears and says"),
         (name = "events", description = "What changes, as it changes"),
     ),
     components(schemas(
@@ -84,13 +86,13 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     // The event stream checks the token itself, in its first message: a
     // browser cannot put a header on a WebSocket.
-    let guarded =
-        api::router()
-            .merge(radios::router())
-            .layer(axum::middleware::from_fn_with_state(
-                state.auth.clone(),
-                auth::check,
-            ));
+    let guarded = api::router()
+        .merge(radios::router())
+        .merge(messages::router())
+        .layer(axum::middleware::from_fn_with_state(
+            state.auth.clone(),
+            auth::check,
+        ));
     let (v1, reference) = OpenApiRouter::with_openapi(Reference::openapi())
         .nest(API_V1, guarded.merge(events::router()))
         .split_for_parts();
@@ -122,7 +124,7 @@ pub(crate) mod tests {
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
     use meshctl_api::{RadioKind, RadioSettings};
-    use meshctl_core::mesh::{LinkState, LocalNode, MeshState, Node, User};
+    use meshctl_core::mesh::{Channel, LinkState, LocalNode, MeshState, Node, User};
     use meshctl_core::radio::Mesh;
     use serde::de::DeserializeOwned;
     use tower::ServiceExt;
@@ -159,6 +161,20 @@ pub(crate) mod tests {
                     favorite: false,
                     battery_level: None,
                     voltage: None,
+                },
+            );
+        }
+        for (index, name, role) in [
+            (0, "", "PRIMARY"),
+            (4, "Moire", "SECONDARY"),
+            (6, "", "DISABLED"),
+        ] {
+            state.channels.insert(
+                index,
+                Channel {
+                    index,
+                    name: name.into(),
+                    role: role.into(),
                 },
             );
         }
