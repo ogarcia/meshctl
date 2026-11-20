@@ -1,7 +1,23 @@
 {
-  "tagline": "Your node, the mesh around it, and nothing else.",
-  "connecting": "Asking the daemon…",
-  "served_by": "Served by {{ name }} {{ version }}",
-  "unreachable": "The daemon does not answer.",
-  "other_language": "Español"
+  "other_language": "Español",
+  "link_ready": "Connected",
+  "link_syncing": "Syncing",
+  "link_connecting": "Connecting",
+  "link_radio_down": "Radio unreachable",
+  "link_daemon_down": "meshctl unreachable",
+  "token_needed": "This meshctl asks for an access token.",
+  "token_use": "Use it",
+  "local_id": "ID",
+  "local_hardware": "Hardware",
+  "local_firmware": "Firmware",
+  "local_role": "Role",
+  "local_radio": "Radio",
+  "nodes_title": "Nodes",
+  "nodes_name": "Name",
+  "nodes_id": "ID",
+  "nodes_heard": "Heard",
+  "nodes_hops": "Hops",
+  "nodes_battery": "Battery",
+  "nodes_hardware": "Hardware",
+  "search": "Search"
 }

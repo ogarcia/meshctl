@@ -5,6 +5,8 @@ mod web;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use meshctl_core::link::Transport;
+use meshctl_core::radio::Mesh;
 use std::net::SocketAddr;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -13,6 +15,12 @@ use tracing_subscriber::EnvFilter;
 #[derive(Debug, Parser)]
 #[command(version, about)]
 struct Cli {
+    /// Where the radio is: `host` or `host:port` (a radio on the network, or a
+    /// tasticsplitter in front of one), or the path of its serial device, with
+    /// `@speed` after it when it is not 115200.
+    #[arg(long, env = "MESHCTL_RADIO")]
+    radio: Transport,
+
     /// Where to serve the panel and the API. Only this machine by default:
     /// serving anywhere else is a decision to make, not a default to inherit.
     //
@@ -56,10 +64,20 @@ async fn main() -> Result<()> {
         .with_context(|| format!("cannot listen on {}", cli.listen))?;
     info!("serving on http://{}", cli.listen);
 
-    axum::serve(listener, web::router(web::Auth::new(token)))
+    let mesh = Mesh::default();
+    let radio = mesh.spawn(cli.radio);
+    let state = web::AppState {
+        auth: web::Auth::new(token),
+        mesh,
+    };
+
+    axum::serve(listener, web::router(state))
         .with_graceful_shutdown(shutdown())
         .await?;
 
+    // Dropping the link closes the connection to the radio.
+    radio.abort();
+    let _ = radio.await;
     info!("stopped");
     Ok(())
 }

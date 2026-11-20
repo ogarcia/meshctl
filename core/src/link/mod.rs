@@ -37,6 +37,62 @@ impl std::fmt::Display for Transport {
     }
 }
 
+/// Reads where the radio is, the way it is written in the configuration:
+///
+/// - `tcp://host`, `tcp://host:port`, or just `host` or `host:port`;
+/// - `serial:///dev/ttyACM0`, `serial:///dev/ttyACM0@115200`, or just the
+///   device's path.
+impl std::str::FromStr for Transport {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(rest) = s.strip_prefix("serial://") {
+            return serial_from(rest);
+        }
+        if s.starts_with('/') {
+            return serial_from(s);
+        }
+        let rest = s.strip_prefix("tcp://").unwrap_or(s);
+        let rest = rest.trim_end_matches('/');
+        let (host, port) = match rest.rsplit_once(':') {
+            // An IPv6 address without a port has colons of its own.
+            Some((host, port)) if !host.contains(':') || host.ends_with(']') => {
+                let port = port
+                    .parse()
+                    .map_err(|_| format!("{port:?} is not a port"))?;
+                (host, port)
+            }
+            _ => (rest, DEFAULT_TCP_PORT),
+        };
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        if host.is_empty() {
+            return Err(format!("{s:?} names no host"));
+        }
+        Ok(Self::Tcp {
+            host: host.to_owned(),
+            port,
+        })
+    }
+}
+
+fn serial_from(s: &str) -> Result<Transport, String> {
+    let (path, baud) = match s.rsplit_once('@') {
+        Some((path, baud)) => (
+            path,
+            baud.parse()
+                .map_err(|_| format!("{baud:?} is not a speed"))?,
+        ),
+        None => (s, DEFAULT_BAUD),
+    };
+    if path.is_empty() {
+        return Err("no serial device given".into());
+    }
+    Ok(Transport::Serial {
+        path: path.to_owned(),
+        baud,
+    })
+}
+
 /// A connected radio. Payloads arrive on `rx`, which closes when the link
 /// drops, and leave through `tx`. Dropping the link closes the connection.
 pub struct Link {
@@ -143,6 +199,53 @@ mod tests {
         let mut buf = vec![0u8; frame::HEADER_SIZE + 8];
         radio.read_exact(&mut buf).await.unwrap();
         assert_eq!(buf, frame::encode(b"to radio").unwrap());
+    }
+
+    fn tcp(host: &str, port: u16) -> Transport {
+        Transport::Tcp {
+            host: host.into(),
+            port,
+        }
+    }
+
+    fn serial(path: &str, baud: u32) -> Transport {
+        Transport::Serial {
+            path: path.into(),
+            baud,
+        }
+    }
+
+    #[test]
+    fn where_the_radio_is_reads_as_written() {
+        let cases = [
+            ("192.168.1.10", tcp("192.168.1.10", 4403)),
+            ("192.168.1.10:4404", tcp("192.168.1.10", 4404)),
+            ("tcp://radio.lan", tcp("radio.lan", 4403)),
+            ("tcp://radio.lan:5000/", tcp("radio.lan", 5000)),
+            ("[::1]:4403", tcp("::1", 4403)),
+            ("fe80::1", tcp("fe80::1", 4403)),
+            ("/dev/ttyACM0", serial("/dev/ttyACM0", 115_200)),
+            (
+                "serial:///dev/ttyUSB1@921600",
+                serial("/dev/ttyUSB1", 921_600),
+            ),
+        ];
+        for (written, expected) in cases {
+            assert_eq!(written.parse::<Transport>().unwrap(), expected, "{written}");
+        }
+        for wrong in ["", "tcp://", "host:port", "serial://", "/dev/tty@fast"] {
+            assert!(wrong.parse::<Transport>().is_err(), "{wrong}");
+        }
+    }
+
+    #[test]
+    fn it_reads_back_what_it_writes() {
+        for transport in [tcp("radio.lan", 4403), serial("/dev/ttyACM0", 115_200)] {
+            assert_eq!(
+                transport.to_string().parse::<Transport>().unwrap(),
+                transport
+            );
+        }
     }
 
     #[tokio::test]

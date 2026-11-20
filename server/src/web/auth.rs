@@ -27,26 +27,33 @@ impl Auth {
             token: token.map(Into::into),
         }
     }
+
+    /// Whether whoever gave this token, or none, may use the API.
+    pub fn allows(&self, given: Option<&[u8]>) -> bool {
+        match (&self.token, given) {
+            (None, _) => true,
+            (Some(expected), Some(given)) => same(given, expected.as_bytes()),
+            (Some(_), None) => false,
+        }
+    }
 }
 
 /// Lets the request through, or answers 401.
 pub async fn check(State(auth): State<Auth>, request: Request, next: Next) -> Response {
-    let Some(expected) = &auth.token else {
-        return next.run(request).await;
-    };
     let given = request
         .headers()
         .get(TOKEN_HEADER)
         .map(|value| value.as_bytes());
-    match given {
-        Some(given) if same(given, expected.as_bytes()) => next.run(request).await,
-        _ => (
+    if auth.allows(given) {
+        next.run(request).await
+    } else {
+        (
             StatusCode::UNAUTHORIZED,
             Json(Error {
                 error: ErrorCode::Unauthorized,
             }),
         )
-            .into_response(),
+            .into_response()
     }
 }
 
@@ -58,14 +65,13 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::web::tests::{ask, get};
-    use crate::web::{Auth, router};
+    use crate::web::tests::{app, ask, get};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use meshctl_api::TOKEN_HEADER;
 
     fn guarded() -> axum::Router {
-        router(Auth::new(Some("s3cret".into())))
+        app(Some("s3cret"))
     }
 
     fn with_token(token: &str) -> Request<Body> {
@@ -77,7 +83,7 @@ mod tests {
 
     #[tokio::test]
     async fn without_a_token_configured_the_api_is_open() {
-        let (status, _) = ask(router(Auth::new(None)), get("/api/v1/version")).await;
+        let (status, _) = ask(app(None), get("/api/v1/version")).await;
         assert_eq!(status, StatusCode::OK);
     }
 

@@ -25,6 +25,7 @@ repository = "https://github.com/ogarcia/meshctl"
 # crate actually uses it.
 [workspace.dependencies]
 meshctl-api = { path = "api" }
+meshctl-core = { path = "core" }
 meshctl-proto = { path = "proto" }
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }

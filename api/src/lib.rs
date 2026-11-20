@@ -5,8 +5,10 @@
 //! a CLI or a TUI tomorrow. Every client reads the same types the daemon
 //! writes, so a change here is a compile error wherever it matters.
 //!
-//! Nothing here is text for people. Errors and states travel as codes, and each
-//! client puts them in its own words and language.
+//! Nothing here is text for people. Errors, states, roles and models travel as
+//! codes, and each client puts them in its own words and language.
+
+pub mod events;
 
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +43,8 @@ pub enum ErrorCode {
     Unauthorized,
     /// There is nothing at that address.
     NotFound,
+    /// The request does not say what it should.
+    BadRequest,
 }
 
 /// The body of every error the API answers with.
@@ -48,6 +52,122 @@ pub enum ErrorCode {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Error {
     pub error: ErrorCode,
+}
+
+/// How the link to the radio is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum LinkState {
+    /// Not connected, and waiting to try again.
+    Disconnected,
+    /// Trying to connect.
+    Connecting,
+    /// Connected, and receiving the radio's configuration and node list.
+    Syncing,
+    /// Connected and up to date.
+    Ready,
+}
+
+/// The daemon's link to the radio, and the radio itself once it has said who
+/// it is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Status {
+    pub link: LinkState,
+    pub local: Option<LocalNode>,
+}
+
+/// The radio meshctl is connected to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LocalNode {
+    /// Its node number.
+    #[cfg_attr(feature = "openapi", schema(example = 825_542_997))]
+    pub num: u32,
+    /// Its node id, `!` and eight hex digits.
+    #[cfg_attr(feature = "openapi", schema(example = "!3134c955"))]
+    pub id: String,
+    #[cfg_attr(feature = "openapi", schema(example = "2.8.2.d5f1619"))]
+    pub firmware_version: Option<String>,
+    /// Its hardware model, as the protobufs name it.
+    #[cfg_attr(feature = "openapi", schema(example = "HELTEC_V3"))]
+    pub hw_model: Option<String>,
+    /// Its device role, as the protobufs name it.
+    #[cfg_attr(feature = "openapi", schema(example = "CLIENT_BASE"))]
+    pub role: Option<String>,
+    /// Its LoRa region, as the protobufs name it.
+    #[cfg_attr(feature = "openapi", schema(example = "EU_868"))]
+    pub region: Option<String>,
+    /// Its modem preset, as the protobufs name it, or none if it uses custom
+    /// LoRa settings.
+    #[cfg_attr(feature = "openapi", schema(example = "LONG_FAST"))]
+    pub modem_preset: Option<String>,
+}
+
+/// A channel configured on the radio. Its key is never sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Channel {
+    /// Its slot on the radio, 0 to 7.
+    pub index: u32,
+    /// Its name. Empty for a primary channel that takes the modem preset's.
+    #[cfg_attr(feature = "openapi", schema(example = "Galicia"))]
+    pub name: String,
+    /// `PRIMARY`, `SECONDARY` or `DISABLED`.
+    #[cfg_attr(feature = "openapi", schema(example = "SECONDARY"))]
+    pub role: String,
+}
+
+/// Where a node says it is.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Position {
+    /// Degrees north.
+    #[cfg_attr(feature = "openapi", schema(example = 43.3623))]
+    pub latitude: f64,
+    /// Degrees east.
+    #[cfg_attr(feature = "openapi", schema(example = -8.4115))]
+    pub longitude: f64,
+    /// Metres above sea level.
+    pub altitude: Option<i32>,
+}
+
+/// A node of the mesh, as heard from the radio.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Node {
+    #[cfg_attr(feature = "openapi", schema(example = 2_429_395_573_u32))]
+    pub num: u32,
+    #[cfg_attr(feature = "openapi", schema(example = "!90cda275"))]
+    pub id: String,
+    #[cfg_attr(feature = "openapi", schema(example = "StaLocaia"))]
+    pub long_name: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(example = "stlo"))]
+    pub short_name: Option<String>,
+    /// Its hardware model, as the protobufs name it.
+    #[cfg_attr(feature = "openapi", schema(example = "RAK4631"))]
+    pub hw_model: Option<String>,
+    /// Its device role, as the protobufs name it.
+    #[cfg_attr(feature = "openapi", schema(example = "ROUTER"))]
+    pub role: Option<String>,
+    pub position: Option<Position>,
+    /// When it was last heard, in seconds since the epoch.
+    pub last_heard: Option<u32>,
+    /// Signal to noise ratio of the last packet heard straight from it, in dB.
+    pub snr: Option<f32>,
+    /// Received signal strength of the last packet heard from it, in dBm.
+    pub rssi: Option<i32>,
+    /// How many hops away it was last heard.
+    pub hops_away: Option<u32>,
+    /// Whether it was last heard through MQTT rather than over the air.
+    pub via_mqtt: bool,
+    /// Whether it is a favorite on the radio.
+    pub favorite: bool,
+    /// Battery level, in percent; over 100 means it is powered.
+    pub battery_level: Option<u32>,
+    /// Battery voltage, in volts.
+    pub voltage: Option<f32>,
 }
 
 #[cfg(test)]

@@ -1,7 +1,23 @@
 {
-  "tagline": "Tu nodo, la malla que lo rodea y nada más.",
-  "connecting": "Preguntando al demonio…",
-  "served_by": "Servido por {{ name }} {{ version }}",
-  "unreachable": "El demonio no responde.",
-  "other_language": "English"
+  "other_language": "English",
+  "link_ready": "Conectado",
+  "link_syncing": "Sincronizando",
+  "link_connecting": "Conectando",
+  "link_radio_down": "Radio inaccesible",
+  "link_daemon_down": "meshctl inaccesible",
+  "token_needed": "Este meshctl pide un token de acceso.",
+  "token_use": "Usar",
+  "local_id": "ID",
+  "local_hardware": "Hardware",
+  "local_firmware": "Firmware",
+  "local_role": "Rol",
+  "local_radio": "Radio",
+  "nodes_title": "Nodos",
+  "nodes_name": "Nombre",
+  "nodes_id": "ID",
+  "nodes_heard": "Oído",
+  "nodes_hops": "Saltos",
+  "nodes_battery": "Batería",
+  "nodes_hardware": "Hardware",
+  "search": "Buscar"
 }

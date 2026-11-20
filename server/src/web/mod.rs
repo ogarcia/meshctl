@@ -14,6 +14,8 @@
 mod api;
 mod assets;
 mod auth;
+mod convert;
+mod events;
 
 pub use auth::Auth;
 
@@ -21,6 +23,7 @@ use axum::Router;
 use axum::response::Html;
 use axum::routing::get;
 use meshctl_api::API_V1;
+use meshctl_core::radio::Mesh;
 use utoipa::OpenApi;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_scalar::Scalar;
@@ -51,25 +54,48 @@ const SCALAR_HTML: &str = r#"<!doctype html>
 #[openapi(
     info(
         title = "meshctl",
-        description = "The API behind meshctl's panel, for any other client too.",
+        description = include_str!("intro.md"),
         license(name = "GPL-3.0-or-later", identifier = "GPL-3.0-or-later"),
     ),
-    tags((name = "meta", description = "What is answering")),
-    components(schemas(meshctl_api::Error, meshctl_api::ErrorCode)),
+    tags(
+        (name = "meta", description = "What is answering"),
+        (name = "radio", description = "The radio meshctl is connected to"),
+        (name = "nodes", description = "The nodes of the mesh"),
+        (name = "events", description = "What changes, as it changes"),
+    ),
+    components(schemas(
+        meshctl_api::Error,
+        meshctl_api::ErrorCode,
+        meshctl_api::events::Hello,
+        meshctl_api::events::ServerMessage,
+    )),
 )]
 struct Reference;
 
+/// What every handler can reach.
+#[derive(Clone)]
+pub struct AppState {
+    pub auth: Auth,
+    pub mesh: Mesh,
+}
+
 /// Every route meshctl answers.
-pub fn router(auth: Auth) -> Router {
+pub fn router(state: AppState) -> Router {
+    // The event stream checks the token itself, in its first message: a
+    // browser cannot put a header on a WebSocket.
+    let guarded = api::router().layer(axum::middleware::from_fn_with_state(
+        state.auth.clone(),
+        auth::check,
+    ));
     let (v1, reference) = OpenApiRouter::with_openapi(Reference::openapi())
-        .nest(API_V1, api::router())
+        .nest(API_V1, guarded.merge(events::router()))
         .split_for_parts();
 
     let spec = serde_json::to_string(&reference).expect("the reference serializes");
     let docs = Scalar::new(reference).custom_html(SCALAR_HTML).to_html();
 
     Router::new()
-        .merge(v1.layer(axum::middleware::from_fn_with_state(auth, auth::check)))
+        .merge(v1)
         .route(DOCS_PATH, get(move || async move { Html(docs) }))
         .route(
             OPENAPI_PATH,
@@ -81,6 +107,7 @@ pub fn router(auth: Auth) -> Router {
             }),
         )
         .fallback(assets::serve)
+        .with_state(state)
 }
 
 #[cfg(test)]
@@ -89,7 +116,50 @@ pub(crate) mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
+    use meshctl_core::mesh::{LinkState, LocalNode, MeshState, Node, User};
     use tower::ServiceExt;
+
+    /// A mesh as a radio would have left it: synced, two nodes.
+    pub fn mesh() -> Mesh {
+        let mut state = MeshState {
+            link: LinkState::Ready,
+            local: Some(LocalNode {
+                num: 0x3134_c955,
+                firmware_version: Some("2.8.2.d5f1619".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for (num, name, heard) in [(0x3134_c955, "Home", 200), (0x90cd_a275, "Faro", 100)] {
+            state.nodes.insert(
+                num,
+                Node {
+                    num,
+                    user: Some(User {
+                        long_name: name.into(),
+                        ..Default::default()
+                    }),
+                    position: None,
+                    last_heard: Some(heard),
+                    snr: None,
+                    rssi: None,
+                    hops_away: Some(0),
+                    via_mqtt: false,
+                    favorite: false,
+                    battery_level: None,
+                    voltage: None,
+                },
+            );
+        }
+        Mesh::new(state)
+    }
+
+    pub fn app(token: Option<&str>) -> Router {
+        router(AppState {
+            auth: Auth::new(token.map(str::to_owned)),
+            mesh: mesh(),
+        })
+    }
 
     /// Asks the router, the way axum would, and returns the status and body.
     pub async fn ask(router: Router, request: Request<Body>) -> (StatusCode, Vec<u8>) {
@@ -105,22 +175,24 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn the_reference_documents_the_api() {
-        let (status, body) = ask(router(Auth::new(None)), get(OPENAPI_PATH)).await;
+        let (status, body) = ask(app(None), get(OPENAPI_PATH)).await;
         assert_eq!(status, StatusCode::OK);
         let spec: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert!(spec["paths"]["/api/v1/version"]["get"].is_object());
+        for path in ["/api/v1/version", "/api/v1/nodes", "/api/v1/events"] {
+            assert!(spec["paths"][path]["get"].is_object(), "{path}");
+        }
     }
 
     #[tokio::test]
     async fn the_reference_has_a_page() {
-        let (status, body) = ask(router(Auth::new(None)), get(DOCS_PATH)).await;
+        let (status, body) = ask(app(None), get(DOCS_PATH)).await;
         assert_eq!(status, StatusCode::OK);
         assert!(String::from_utf8(body).unwrap().contains("/api/v1/version"));
     }
 
     #[tokio::test]
     async fn an_unknown_api_address_answers_in_json() {
-        let (status, body) = ask(router(Auth::new(None)), get("/api/v1/nowhere")).await;
+        let (status, body) = ask(app(None), get("/api/v1/nowhere")).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body, br#"{"error":"not_found"}"#);
     }

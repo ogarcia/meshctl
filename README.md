@@ -37,6 +37,21 @@ a reason to point at another tool, not to grow this one.
 
 MeshCore support is planned, after Meshtastic works well.
 
+## Running
+
+Tell meshctl where the radio is, with `--radio` or `MESHCTL_RADIO`:
+
+```sh
+meshctl --radio 192.168.1.10              # on the network, port 4403
+meshctl --radio radio.lan:4404            # on another port
+meshctl --radio /dev/ttyACM0              # plugged in, at 115200
+meshctl --radio /dev/ttyUSB0@921600       # plugged in, at another speed
+```
+
+The radio serves one client at a time. If something else (the phone app, say)
+also needs it, put [tasticsplitter](https://github.com/ogarcia/tasticsplitter)
+in front and point meshctl at it.
+
 ## Access
 
 meshctl listens on `127.0.0.1:7434` by default, so only the machine it runs on
@@ -70,9 +85,12 @@ The web interface needs [trunk](https://trunkrs.dev) and the
 
 ```sh
 git config core.hooksPath .githooks   # format and clippy before each commit
-cargo run                              # the daemon, on 127.0.0.1:7434
+cargo run -- --radio <radio>           # the daemon, on 127.0.0.1:7434
 (cd web && trunk serve)                # the interface on 127.0.0.1:7435,
                                        # rebuilt on change, API proxied
+cargo run -p meshctl-core --example probe -- <host> [port] [seconds]
+                                       # what a radio says, line by line;
+                                       # read only, never transmits
 ```
 
 | Crate    | What it is                                                     |
