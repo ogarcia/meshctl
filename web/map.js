@@ -31,6 +31,24 @@ window.meshctlMap = (() => {
   let cardPopup = null;
   let popupFor = null;
   let preview = null;
+  // The route drawn, if any.
+  let routeLayer = null;
+  // The traceroute last drawn, so that the view goes to a route once, not at
+  // every redrawing; and whether the picked node's popup is put away for it.
+  let routeShown = null;
+  let cardAway = false;
+
+  // Picks a node: its popup shows again, even when it was put away for a
+  // route and the node is the one picked already.
+  function choose(num) {
+    cardAway = false;
+    const picked = shown.nodes.find((n) => n.selected);
+    if (picked && picked.num === num) {
+      showCard();
+    } else if (pick) {
+      pick(num);
+    }
+  }
   // Whether the view was already placed: after that it stays where the
   // person leaves it, however the nodes move.
   let placed = false;
@@ -70,6 +88,13 @@ window.meshctlMap = (() => {
         pick && pick(null);
       }
     });
+    // Escape on the map, which Leaflet keeps from reaching the page, takes the
+    // route away as it does elsewhere.
+    map.on("keydown", (event) => {
+      if (event.originalEvent.key === "Escape") {
+        act && act(0, "unroute");
+      }
+    });
     // The node's popup closed by the person, not by another opening in its
     // place: the node is let go.
     map.on("popupclose", (event) => {
@@ -91,6 +116,7 @@ window.meshctlMap = (() => {
     cardPopup = null;
     popupFor = null;
     preview = null;
+    routeLayer = null;
   }
 
   // The nodes near a point of the map's, the nearest first.
@@ -114,7 +140,7 @@ window.meshctlMap = (() => {
     const found = nodesNear(point, touch ? PICK_RADIUS_TOUCH : PICK_RADIUS);
     if (found.length === 0) return false;
     if (found.length === 1) {
-      pick && pick(found[0].num);
+      choose(found[0].num);
     } else {
       showPicker(found, map.containerPointToLatLng(point));
     }
@@ -152,7 +178,8 @@ window.meshctlMap = (() => {
     zoom.type = "button";
     zoom.title = labels.zoom;
     zoom.setAttribute("aria-label", labels.zoom);
-    zoom.addEventListener("click", () => {
+    zoom.addEventListener("click", (event) => {
+      L.DomEvent.stop(event);
       map.closePopup();
       const bounds = L.latLngBounds(found.map((n) => [n.lat, n.lon]));
       map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 18 });
@@ -170,9 +197,10 @@ window.meshctlMap = (() => {
       button.addEventListener("mouseenter", () => showPreview(node));
       button.addEventListener("focus", () => showPreview(node));
       button.addEventListener("mouseleave", () => showPreview(null));
-      button.addEventListener("click", () => {
+      button.addEventListener("click", (event) => {
+        L.DomEvent.stop(event);
         map.closePopup();
-        pick && pick(node.num);
+        choose(node.num);
       });
       item.append(button);
       list.append(item);
@@ -207,17 +235,33 @@ window.meshctlMap = (() => {
     ]) {
       const button = element("button", primary ? "primary" : "", label);
       button.type = "button";
-      button.addEventListener("click", () => act && act(node.num, what));
+      button.addEventListener("click", (event) => {
+        L.DomEvent.stop(event);
+        act && act(node.num, what);
+      });
       buttons.append(button);
     }
     box.append(head, facts, buttons);
+    // Its route: to show, to hide, to trace, or being traced.
+    if (node.route) {
+      const button = element("button", "mc-card-route", labels[node.route]);
+      button.type = "button";
+      button.disabled = node.route === "tracing";
+      button.setAttribute("aria-pressed", String(node.route === "hide"));
+      button.addEventListener("click", (event) => {
+        L.DomEvent.stop(event);
+        act && act(node.num, "route");
+      });
+      box.append(button);
+    }
     return box;
   }
 
   // The popup on the picked node, open, current, or closed if there is none.
   function showCard() {
     const picked = shown.nodes.find((n) => n.selected);
-    if (!picked) {
+    // None picked, or its popup put away for its route: no popup.
+    if (!picked || cardAway) {
       if (cardPopup) {
         const open = cardPopup;
         cardPopup = null;
@@ -283,6 +327,69 @@ window.meshctlMap = (() => {
     showCard();
   }
 
+  const QUALITY_COLOR = {
+    good: "--mc-ok",
+    fair: "--mc-warn",
+    poor: "--mc-danger",
+    unknown: "--mc-muted",
+  };
+
+  // A traced route, as JSON: {towards: [segment], back: [segment], relays:
+  // [[lat, lon]]}, each segment {from: [lat, lon], to: [lat, lon], quality,
+  // gap}, gap when nodes between its ends could not be placed. Or null, to
+  // take the route off the map.
+  function route(json) {
+    if (!map) return;
+    if (routeLayer) routeLayer.remove();
+    routeLayer = null;
+    const drawn = json ? JSON.parse(json) : null;
+    if (!drawn) {
+      routeShown = null;
+      return;
+    }
+    routeLayer = L.layerGroup();
+    const draw = (segment, back) =>
+      L.polyline([segment.from, segment.to], {
+        color: color(QUALITY_COLOR[segment.quality] || "--mc-muted"),
+        weight: back ? 2 : 4,
+        opacity: 0.9,
+        // There, solid; back, dashed; across nodes that could not be placed,
+        // dotted.
+        dashArray: segment.gap ? "2 8" : back ? "8 6" : null,
+        interactive: false,
+      }).addTo(routeLayer);
+    drawn.towards.forEach((segment) => draw(segment, false));
+    drawn.back.forEach((segment) => draw(segment, true));
+    for (const relay of drawn.relays) {
+      L.circleMarker(relay, {
+        radius: 11,
+        color: color("--mc-text"),
+        weight: 2,
+        fill: false,
+        interactive: false,
+      }).addTo(routeLayer);
+    }
+    // Under the nodes, so that they can still be picked.
+    routeLayer.addTo(map);
+    markers.eachLayer((marker) => marker.bringToFront());
+    // A route shown for the first time: the popup goes out of its way, and
+    // the view takes it all in, clear of the notice above and the legend
+    // below. Clicking the node brings the popup back.
+    if (drawn.id !== routeShown) {
+      routeShown = drawn.id;
+      cardAway = true;
+      showCard();
+      const points = [...drawn.towards, ...drawn.back].flatMap((s) => [s.from, s.to]);
+      if (points.length > 0) {
+        map.flyToBounds(points, {
+          paddingTopLeft: [40, 80],
+          paddingBottomRight: [40, 80],
+          maxZoom: 15,
+        });
+      }
+    }
+  }
+
   // Other nodes, of another radio: the view goes to them, as the first time.
   function reset() {
     placed = false;
@@ -293,5 +400,5 @@ window.meshctlMap = (() => {
     if (map) map.invalidateSize();
   }
 
-  return { open, close, nodes, reset, resize };
+  return { open, close, nodes, route, reset, resize };
 })();

@@ -29,6 +29,16 @@ fn node_title(live: Live, num: u32) -> String {
     })
 }
 
+/// How well a hop was heard: `good`, `fair`, `poor`, or `unknown`.
+pub fn quality(snr: Option<f32>) -> &'static str {
+    match snr {
+        Some(s) if s >= 5.0 => "good",
+        Some(s) if s >= -5.0 => "fair",
+        Some(_) => "poor",
+        None => "unknown",
+    }
+}
+
 #[component]
 pub fn TraceCard(traceroute: Traceroute) -> impl IntoView {
     let i18n = use_i18n();
@@ -97,12 +107,7 @@ fn Route(hops: Vec<Hop>) -> impl IntoView {
                 let snr = hop
                     .snr
                     .map_or_else(|| "?".to_owned(), |s| format!("{s:.1} dB"));
-                let quality = match hop.snr {
-                    Some(s) if s >= 5.0 => "good",
-                    Some(s) if s >= -5.0 => "fair",
-                    Some(_) => "poor",
-                    None => "unknown",
-                };
+                let quality = quality(hop.snr);
                 view! { <span class=format!("hop {quality}")>"→ " {snr} " →"</span> }
             });
             let name = hop

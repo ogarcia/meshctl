@@ -54,6 +54,23 @@ pub fn PreferencesView() -> impl IntoView {
             </Choice>
         }
     });
+    let routes = [false, true].map(|on_pick| {
+        let label = move || {
+            if on_pick {
+                t!(i18n, routes_picked).into_any()
+            } else {
+                t!(i18n, routes_asked).into_any()
+            }
+        };
+        view! {
+            <Choice
+                on=Signal::derive(move || current().map_routes == on_pick)
+                pick=choose(Box::new(move |p| p.map_routes = on_pick))
+            >
+                {label}
+            </Choice>
+        }
+    });
     let languages = [None, Some(Language::En), Some(Language::Es)].map(|language| {
         let label = move || match language {
             None => t!(i18n, language_browser).into_any(),
@@ -78,6 +95,8 @@ pub fn PreferencesView() -> impl IntoView {
             <div class="choices" role="radiogroup">{themes.into_iter().collect_view()}</div>
             <h2>{t!(i18n, prefs_map)}</h2>
             <div class="choices" role="radiogroup">{maps.into_iter().collect_view()}</div>
+            <h2>{t!(i18n, prefs_routes)}</h2>
+            <div class="choices" role="radiogroup">{routes.into_iter().collect_view()}</div>
             <h2>{t!(i18n, prefs_language)}</h2>
             <div class="choices" role="radiogroup">{languages.into_iter().collect_view()}</div>
         </section>

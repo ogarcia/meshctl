@@ -153,5 +153,15 @@
   "map_far": "Más lejos",
   "map_empty": "Ningún nodo de esta radio ha dicho aún dónde está.",
   "map_here": "{n} nodos aquí",
-  "map_zoom": "Acercar a ellos"
+  "map_zoom": "Acercar a ellos",
+  "map_route_show": "Ver ruta",
+  "map_route_hide": "Ocultar ruta",
+  "map_route_trace": "Trazar ruta",
+  "map_route_tracing": "Trazando…",
+  "map_route_to": "Ruta a {{ name }}, hace {{ ago }}",
+  "map_route_tracing_to": "Trazando la ruta a {{ name }}…",
+  "map_route_none": "{{ name }} no respondió a la traza",
+  "prefs_routes": "Rutas en el mapa",
+  "routes_asked": "Al pedirlas",
+  "routes_picked": "Al elegir un nodo"
 }

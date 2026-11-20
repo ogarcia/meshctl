@@ -754,6 +754,9 @@ pub struct Preferences {
     pub accent: Accent,
     /// The maps' own theme, which may differ from the rest.
     pub map_theme: MapTheme,
+    /// Whether picking a node on the map shows its last traced route at once,
+    /// rather than when asked for.
+    pub map_routes: bool,
     /// The interface's language; none for the browser's.
     pub language: Option<Language>,
 }
@@ -816,7 +819,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","language":null}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_routes":false,"language":null}"#
         );
     }
 

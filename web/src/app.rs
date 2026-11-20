@@ -106,6 +106,8 @@ pub struct Live {
     pub node: RwSignal<Option<u32>>,
     /// The node picked on the map, if any.
     pub map_pick: RwSignal<Option<u32>>,
+    /// The node whose last traced route the map shows, if any.
+    pub map_route: RwSignal<Option<u32>>,
     /// What the open node was asked for, the newest first.
     pub requests: RwSignal<Vec<Request>>,
     /// Why the last request or traceroute was not sent.
@@ -135,6 +137,7 @@ impl Live {
             packets: RwSignal::new(Vec::new()),
             node: RwSignal::new(None),
             map_pick: RwSignal::new(None),
+            map_route: RwSignal::new(None),
             requests: RwSignal::new(Vec::new()),
             ask_error: RwSignal::new(None),
             synced: RwSignal::new(0),
@@ -156,6 +159,7 @@ impl Live {
         self.node.set(None);
         self.requests.set(Vec::new());
         self.map_pick.set(None);
+        self.map_route.set(None);
         if matches!(self.page.get_untracked(), Page::Chat | Page::Node)
             || self.page.get_untracked().is_meshctl()
         {

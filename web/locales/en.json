@@ -153,5 +153,15 @@
   "map_far": "Further",
   "map_empty": "None of this radio's nodes has said where it is yet.",
   "map_here": "{n} nodes here",
-  "map_zoom": "Zoom in on them"
+  "map_zoom": "Zoom in on them",
+  "map_route_show": "Show route",
+  "map_route_hide": "Hide route",
+  "map_route_trace": "Trace route",
+  "map_route_tracing": "Tracing…",
+  "map_route_to": "Route to {{ name }}, {{ ago }} ago",
+  "map_route_tracing_to": "Tracing the route to {{ name }}…",
+  "map_route_none": "{{ name }} did not answer the traceroute",
+  "prefs_routes": "Routes on the map",
+  "routes_asked": "When asked for",
+  "routes_picked": "On picking a node"
 }

@@ -6,11 +6,15 @@
 //! worked out here.
 
 use crate::app::Live;
+use crate::chat::title;
 use crate::i18n::{t, t_string, use_i18n};
 use crate::mesh::ago;
+use crate::traces::quality;
 use leptos::html;
 use leptos::prelude::*;
-use meshctl_api::{Node, Peer, RadioId};
+use meshctl_api::{
+    Hop, Node, Peer, RadioId, RadioKind, Traceroute, TracerouteId, TracerouteStatus,
+};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -22,6 +26,8 @@ extern "C" {
     fn map_close();
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = nodes)]
     fn map_nodes(json: &str);
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = route)]
+    fn map_route(json: Option<String>);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = reset)]
     fn map_reset();
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = resize)]
@@ -43,6 +49,59 @@ struct Labels {
     /// With `{n}` where the number of nodes goes.
     here: String,
     zoom: String,
+    /// The route button, by what it does: named as [`Marker::route`] says.
+    show: String,
+    hide: String,
+    trace: String,
+    tracing: String,
+}
+
+/// A route as the map draws it.
+#[derive(Debug, Serialize)]
+struct RouteDrawing {
+    /// The traceroute it is, which the map goes to the first time it is shown.
+    id: TracerouteId,
+    towards: Vec<Segment>,
+    back: Vec<Segment>,
+    /// Where the relays on the way are.
+    relays: Vec<(f64, f64)>,
+}
+
+/// A stretch of a route between two nodes the map can place.
+#[derive(Debug, Serialize)]
+struct Segment {
+    from: (f64, f64),
+    to: (f64, f64),
+    /// How well the last hop of it was heard, as [`quality`] says.
+    quality: &'static str,
+    /// Whether there are nodes between its ends that could not be placed.
+    gap: bool,
+}
+
+/// The stretches of a route that can be drawn: between each pair of hops
+/// whose nodes say where they are, across those that do not.
+fn segments(hops: &[Hop], at: &impl Fn(u32) -> Option<(f64, f64)>) -> Vec<Segment> {
+    let mut segments = Vec::new();
+    let mut last: Option<(f64, f64)> = None;
+    let mut gap = false;
+    for hop in hops {
+        match hop.node.and_then(at) {
+            Some(here) => {
+                if let Some(from) = last {
+                    segments.push(Segment {
+                        from,
+                        to: here,
+                        quality: if gap { "unknown" } else { quality(hop.snr) },
+                        gap,
+                    });
+                }
+                last = Some(here);
+                gap = false;
+            }
+            None => gap = true,
+        }
+    }
+    segments
 }
 
 /// A node as the map draws it.
@@ -61,6 +120,23 @@ struct Marker {
     /// `local`, `direct`, `near` or `far`, which the map colours.
     kind: &'static str,
     selected: bool,
+    /// For the node picked, what its route button does: `show`, `hide`,
+    /// `trace` or `tracing`; none when routes cannot be traced.
+    route: Option<&'static str>,
+}
+
+/// The node's traceroutes the map cares for: the newest, and the newest that
+/// was answered, which may be the same.
+fn traces_of(live: Live, node: u32) -> (Option<Traceroute>, Option<Traceroute>) {
+    live.traceroutes.with(|traces| {
+        let mut theirs = traces.iter().filter(|t| t.target == node);
+        let newest = theirs.next().cloned();
+        let done = std::iter::once(newest.clone())
+            .flatten()
+            .chain(theirs.cloned())
+            .find(|t| t.status == TracerouteStatus::Done);
+        (newest, done)
+    })
 }
 
 /// What kind of node it is to the radio: itself, heard directly, a hop or
@@ -101,10 +177,22 @@ pub fn MapView() -> impl IntoView {
         };
         let pick = Closure::<dyn Fn(Option<u32>)>::new(move |num| live.map_pick.set(num));
         let act = Closure::<dyn Fn(u32, String)>::new(move |num, what: String| {
-            if what == "chat" {
-                live.open_chat(Peer::Node { node: num });
-            } else {
-                live.open_node(num);
+            match what.as_str() {
+                "chat" => live.open_chat(Peer::Node { node: num }),
+                "unroute" => live.map_route.set(None),
+                "route" => {
+                    if live.map_route.get_untracked() == Some(num) {
+                        live.map_route.set(None);
+                    } else {
+                        // With nothing traced yet, it is traced now, and shown
+                        // as the answer comes.
+                        if traces_of(live, num).1.is_none() {
+                            live.trace(num, 0);
+                        }
+                        live.map_route.set(Some(num));
+                    }
+                }
+                _ => live.open_node(num),
             }
         });
         map_open(&element, &pick.into_js_value(), &act.into_js_value());
@@ -133,6 +221,25 @@ pub fn MapView() -> impl IntoView {
             .status
             .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
         let picked = live.map_pick.get();
+        let shown_route = live.map_route.get();
+        let traceable = live.selected_kind() != Some(RadioKind::Meshcore);
+        let route_button = |num: u32| -> Option<&'static str> {
+            if picked != Some(num) || !traceable || local == Some(num) {
+                return None;
+            }
+            let (newest, done) = traces_of(live, num);
+            Some(
+                if newest.is_some_and(|t| t.status == TracerouteStatus::Pending) {
+                    "tracing"
+                } else if shown_route == Some(num) && done.is_some() {
+                    "hide"
+                } else if done.is_some() {
+                    "show"
+                } else {
+                    "trace"
+                },
+            )
+        };
         let fact_labels = FactLabels {
             heard: t_string!(i18n, nodes_heard).to_owned(),
             hops: t_string!(i18n, nodes_hops).to_owned(),
@@ -156,6 +263,7 @@ pub fn MapView() -> impl IntoView {
                         lon: position.longitude,
                         kind: kind(local, n.num, n.hops_away, n.via_mqtt),
                         selected: picked == Some(n.num),
+                        route: route_button(n.num),
                     })
                 })
                 .collect()
@@ -168,6 +276,10 @@ pub fn MapView() -> impl IntoView {
                 chat: t_string!(i18n, node_message).to_owned(),
                 here: t_string!(i18n, map_here).to_owned(),
                 zoom: t_string!(i18n, map_zoom).to_owned(),
+                show: t_string!(i18n, map_route_show).to_owned(),
+                hide: t_string!(i18n, map_route_hide).to_owned(),
+                trace: t_string!(i18n, map_route_trace).to_owned(),
+                tracing: t_string!(i18n, map_route_tracing).to_owned(),
             },
             nodes: markers,
         };
@@ -175,6 +287,69 @@ pub fn MapView() -> impl IntoView {
             map_nodes(&json);
         }
     });
+
+    // A route shown stays until its notice is closed or another node is
+    // picked: letting the node go, with a click anywhere on the map, as when
+    // dragging it, leaves it. Picking another shows that one's instead, if
+    // routes are to be shown on picking.
+    Effect::new(move |previous: Option<Option<u32>>| {
+        let picked = live.map_pick.get();
+        if previous.is_some_and(|previous| previous != picked) {
+            let shown = live.map_route.get_untracked();
+            if shown.is_some() && picked.is_some() && shown != picked {
+                live.map_route.set(None);
+            }
+            if let Some(num) = picked
+                && live.preferences.get_untracked().map_routes
+                && traces_of(live, num).1.is_some()
+            {
+                live.map_route.set(Some(num));
+            }
+        }
+        picked
+    });
+
+    // The route shown, drawn again as its nodes or its traces change.
+    Effect::new(move |_| {
+        if element.get().is_none() {
+            return;
+        }
+        live.preferences.track();
+        let drawing = live.map_route.get().and_then(|num| {
+            let traceroute = traces_of(live, num).1?;
+            let at = |node: u32| {
+                live.nodes.with(|nodes| {
+                    let position = nodes.get(&node)?.position.as_ref()?;
+                    Some((position.latitude, position.longitude))
+                })
+            };
+            let relays = traceroute
+                .towards
+                .iter()
+                .chain(&traceroute.back)
+                .filter_map(|hop| hop.node)
+                .filter(|&node| {
+                    node != num && Some(node) != traceroute.towards.first().and_then(|h| h.node)
+                })
+                .filter_map(at)
+                .collect();
+            Some(RouteDrawing {
+                id: traceroute.id,
+                towards: segments(&traceroute.towards, &at),
+                back: segments(&traceroute.back, &at),
+                relays,
+            })
+        });
+        map_route(drawing.and_then(|d| serde_json::to_string(&d).ok()));
+    });
+
+    // Escape takes the route away.
+    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            live.map_route.set(None);
+        }
+    });
+    on_cleanup(move || escape.remove());
 
     // The page's size changes with the window and with the bars.
     let resize = window_event_listener(leptos::ev::resize, move |_| map_resize());
@@ -192,7 +367,48 @@ pub fn MapView() -> impl IntoView {
             <Show when=move || placed(live) == 0>
                 <p class="map-empty card dim">{t!(i18n, map_empty)}</p>
             </Show>
+            <RouteNotice />
         </div>
+    }
+}
+
+/// While a route is shown, what it is, and the way to take it away.
+#[component]
+fn RouteNotice() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    move || {
+        let num = live.map_route.get()?;
+        let name = title(live, Peer::Node { node: num });
+        let (newest, done) = traces_of(live, num);
+        let what = match (&newest, &done) {
+            (Some(t), _) if t.status == TracerouteStatus::Pending => {
+                t!(i18n, map_route_tracing_to, name = name.clone()).into_any()
+            }
+            (_, Some(done)) => {
+                let at = u32::try_from(done.at).unwrap_or_default();
+                t!(
+                    i18n,
+                    map_route_to,
+                    name = name.clone(),
+                    ago = move || ago(live.now.get(), at)
+                )
+                .into_any()
+            }
+            _ => t!(i18n, map_route_none, name = name.clone()).into_any(),
+        };
+        Some(view! {
+            <div class="map-route-notice" role="status">
+                <span>{what}</span>
+                <button
+                    aria-label=move || t_string!(i18n, map_route_hide)
+                    title=move || t_string!(i18n, map_route_hide)
+                    on:click=move |_| live.map_route.set(None)
+                >
+                    "✕"
+                </button>
+            </div>
+        })
     }
 }
 
@@ -258,6 +474,29 @@ mod tests {
         assert_eq!(kind(Some(1), 2, Some(3), false), "far");
         assert_eq!(kind(Some(1), 2, Some(0), true), "far");
         assert_eq!(kind(None, 2, None, false), "far");
+    }
+
+    #[test]
+    fn a_route_is_drawn_across_the_nodes_it_cannot_place() {
+        let hop = |node: Option<u32>, snr: Option<f32>| Hop { node, snr };
+        let hops = [
+            hop(Some(1), None),
+            hop(Some(2), Some(8.0)),
+            hop(Some(3), Some(1.0)),
+            hop(None, None),
+            hop(Some(5), Some(-9.0)),
+        ];
+        // Every node is somewhere but the third.
+        let at = |node: u32| (node != 3).then(|| (f64::from(node), 0.0));
+        let drawn = segments(&hops, &at);
+        let told: Vec<_> = drawn
+            .iter()
+            .map(|s| (s.from.0, s.to.0, s.quality, s.gap))
+            .collect();
+        assert_eq!(
+            told,
+            [(1.0, 2.0, "good", false), (2.0, 5.0, "unknown", true)]
+        );
     }
 
     #[test]
