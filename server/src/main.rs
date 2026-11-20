@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
 mod radios;
+mod settings;
 mod store;
 mod web;
 

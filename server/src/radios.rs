@@ -9,12 +9,13 @@
 use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
-    Conversation, ErrorCode, Hop, LinkState, Message, MessageId, MessageStatus, NewMessage, Peer,
-    Radio, RadioId, RadioKind, RadioSettings, Status, Traceroute,
+    Conversation, ErrorCode, Hop, LinkState, Message, MessageId, MessageStatus, NewMessage,
+    NodeSettings, NodeSettingsChange, Peer, Radio, RadioId, RadioKind, RadioSettings,
+    SettingsApplied, Status, Traceroute,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
-use meshctl_core::radio::{Mesh, OutgoingText, SendError};
+use meshctl_core::radio::{AdminError, Mesh, OutgoingText, SendError};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast::error::RecvError;
@@ -75,6 +76,16 @@ const TRACEROUTE_TIMEOUT: i64 = 120;
 
 /// How often traceroutes waited for too long are looked for.
 const TRACEROUTE_EXPIRY_TICK: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Why a radio's settings were not shown or changed.
+#[derive(Debug)]
+pub enum SettingsFailure {
+    NoSuchRadio,
+    /// Not connected, or not yet in sync: its settings are known only then.
+    NotConnected,
+    Invalid(crate::settings::Invalid),
+    NoAnswer,
+}
 
 /// Why a traceroute was not sent.
 #[derive(Debug)]
@@ -395,6 +406,46 @@ impl Radios {
         Ok(traceroute)
     }
 
+    /// A radio's own settings, as it sent them on syncing. Only while it is
+    /// connected: they are not kept, and a radio that is not there cannot be
+    /// changed anyway.
+    pub fn settings(&self, id: RadioId) -> Result<NodeSettings, SettingsFailure> {
+        let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
+        if self.link(id) != LinkState::Ready {
+            return Err(SettingsFailure::NotConnected);
+        }
+        mesh.read(|state| crate::settings::view(&state.settings))
+            .ok_or(SettingsFailure::NotConnected)
+    }
+
+    /// Changes a radio's own settings. Returns whether it reboots to apply
+    /// them.
+    pub async fn change_settings(
+        &self,
+        id: RadioId,
+        wanted: &NodeSettingsChange,
+    ) -> Result<SettingsApplied, SettingsFailure> {
+        let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
+        if self.link(id) != LinkState::Ready {
+            return Err(SettingsFailure::NotConnected);
+        }
+        let (change, reboots) = mesh
+            .read(|state| {
+                crate::settings::change(&state.settings, wanted, |key| {
+                    getrandom::fill(key).expect("the system has randomness to give");
+                })
+            })
+            .map_err(SettingsFailure::Invalid)?;
+        mesh.change_settings(change)
+            .await
+            .map_err(|error| match error {
+                AdminError::NotConnected => SettingsFailure::NotConnected,
+                AdminError::NoAnswer => SettingsFailure::NoAnswer,
+            })?;
+        tracing::info!(radio = id, reboots, "settings changed");
+        Ok(SettingsApplied { reboots })
+    }
+
     /// A radio's traceroutes, to one node or to any, the newest first, if there
     /// is such a radio.
     pub async fn traceroutes(
@@ -567,7 +618,10 @@ impl Radios {
                 let change = match events.recv().await {
                     // These go out once kept, from `persist`.
                     Ok(
-                        mesh::Event::Message(_) | mesh::Event::Ack(_) | mesh::Event::Traceroute(_),
+                        mesh::Event::Message(_)
+                        | mesh::Event::Ack(_)
+                        | mesh::Event::Traceroute(_)
+                        | mesh::Event::AdminAnswer { .. },
                     ) => continue,
                     Ok(event) => Change::Mesh(id, event),
                     Err(RecvError::Lagged(_)) => Change::Lagged,

@@ -10,14 +10,15 @@
 use crate::link::{self, Link, Transport};
 use crate::mesh::{Event, LinkState, MeshState};
 use meshctl_proto::meshtastic::{
-    Data, FromRadio, Heartbeat, MeshPacket, PortNum, RouteDiscovery, ToRadio, from_radio,
-    mesh_packet, to_radio,
+    AdminMessage, Channel, Config, Data, FromRadio, Heartbeat, MeshPacket, PortNum, RouteDiscovery,
+    ToRadio, User, admin_message, from_radio, mesh_packet, to_radio,
 };
 use prost::Message;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
@@ -74,7 +75,36 @@ pub struct Mesh {
     outbox: Arc<Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>>,
     /// The id the next packet sent gets.
     next_id: Arc<AtomicU32>,
+    /// The want_config nonce the radio's answer is expected with.
+    nonce: Arc<AtomicU32>,
+    /// Admin requests waiting for their answer, by packet id.
+    waiting: Arc<Mutex<HashMap<u32, oneshot::Sender<Vec<u8>>>>>,
 }
+
+/// A change to the radio's own settings, as the protobufs carry them, each
+/// part whole: whatever is not to change in it goes as it already is.
+#[derive(Debug, Clone, Default)]
+pub struct SettingsChange {
+    pub owner: Option<User>,
+    pub configs: Vec<Config>,
+    pub channels: Vec<Channel>,
+}
+
+/// Why the radio's settings were not changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminError {
+    /// The radio is not connected and in sync.
+    NotConnected,
+    /// The radio did not answer the request a change starts with.
+    NoAnswer,
+}
+
+/// How long the radio has to answer an admin request.
+const ADMIN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long after changing settings to read them back: the radio applies them
+/// after queueing them, and may reboot to.
+const ADMIN_RESYNC_DELAY: Duration = Duration::from_secs(3);
 
 impl Default for Mesh {
     fn default() -> Self {
@@ -91,6 +121,8 @@ impl Mesh {
             // Ids that start somewhere else every run, so that a restart does
             // not reuse the ones still being answered.
             next_id: Arc::new(AtomicU32::new(nonce())),
+            nonce: Arc::new(AtomicU32::new(0)),
+            waiting: Arc::default(),
         }
     }
 
@@ -149,9 +181,7 @@ impl Mesh {
             .clone();
         let outbox = outbox.ok_or(SendError::NotConnected)?;
 
-        // Ids are 32 bits but the firmware keeps the top one clear, and never
-        // uses zero.
-        let id = (self.next_id.fetch_add(1, Ordering::Relaxed) & 0x7fff_ffff).max(1);
+        let id = self.next_packet_id();
         let packet = MeshPacket {
             to,
             channel,
@@ -184,9 +214,138 @@ impl Mesh {
     fn update(&self, f: impl FnOnce(&mut MeshState) -> Vec<Event>) {
         let events = f(&mut self.state.write().unwrap_or_else(|e| e.into_inner()));
         for event in events {
+            if let Event::AdminAnswer {
+                request_id,
+                passkey,
+            } = event
+            {
+                let waiting = self
+                    .waiting
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&request_id);
+                if let Some(waiting) = waiting {
+                    let _ = waiting.send(passkey);
+                }
+                continue;
+            }
             // Nobody listening is fine.
             let _ = self.events.send(event);
         }
+    }
+
+    /// Changes the radio's own settings, all at once: the radio saves them,
+    /// and reboots if any of them needs it, once. They are read back a moment
+    /// later, and arrive as a sync.
+    pub async fn change_settings(&self, change: SettingsChange) -> Result<(), AdminError> {
+        let me = self
+            .read(|state| state.local.as_ref().map(|l| l.num))
+            .ok_or(AdminError::NotConnected)?;
+
+        // Changing settings takes the passkey the radio gives out with what it
+        // answers; asking who it is is the cheapest way to have one.
+        let (answer, answered) = oneshot::channel();
+        let request = self.admin(
+            me,
+            admin_message::PayloadVariant::GetOwnerRequest(true),
+            vec![],
+        )?;
+        self.waiting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(request.0, answer);
+        self.send_raw(request.1)?;
+        let passkey = match tokio::time::timeout(ADMIN_TIMEOUT, answered).await {
+            Ok(Ok(passkey)) => passkey,
+            _ => {
+                self.waiting
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&request.0);
+                return Err(AdminError::NoAnswer);
+            }
+        };
+
+        use admin_message::PayloadVariant as A;
+        let mut steps = vec![A::BeginEditSettings(true)];
+        steps.extend(change.owner.map(A::SetOwner));
+        steps.extend(change.configs.into_iter().map(A::SetConfig));
+        steps.extend(change.channels.into_iter().map(A::SetChannel));
+        steps.push(A::CommitEditSettings(true));
+        for step in steps {
+            let (_, packet) = self.admin(me, step, passkey.clone())?;
+            self.send_raw(packet)?;
+        }
+
+        let mesh = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(ADMIN_RESYNC_DELAY).await;
+            // If the radio rebooted, the link dropped and the next one syncs.
+            let _ = mesh.resync();
+        });
+        Ok(())
+    }
+
+    /// An admin message to the radio itself, as the packet that carries it,
+    /// and that packet's id.
+    fn admin(
+        &self,
+        me: u32,
+        variant: admin_message::PayloadVariant,
+        passkey: Vec<u8>,
+    ) -> Result<(u32, Vec<u8>), AdminError> {
+        if self.read(|state| state.link) != LinkState::Ready {
+            return Err(AdminError::NotConnected);
+        }
+        let admin = AdminMessage {
+            payload_variant: Some(variant),
+            session_passkey: passkey,
+        };
+        let id = self.next_packet_id();
+        let packet = MeshPacket {
+            to: me,
+            id,
+            payload_variant: Some(mesh_packet::PayloadVariant::Decoded(Data {
+                portnum: PortNum::AdminApp as i32,
+                payload: admin.encode_to_vec(),
+                want_response: true,
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let message = ToRadio {
+            payload_variant: Some(to_radio::PayloadVariant::Packet(packet)),
+        };
+        Ok((id, message.encode_to_vec()))
+    }
+
+    /// Writes a ToRadio, already encoded, to the radio.
+    fn send_raw(&self, payload: Vec<u8>) -> Result<(), AdminError> {
+        let outbox = self
+            .outbox
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or(AdminError::NotConnected)?;
+        outbox.send(payload).map_err(|_| AdminError::NotConnected)
+    }
+
+    /// Asks the radio for its configuration and node list again, as on
+    /// connecting.
+    fn resync(&self) -> Result<(), AdminError> {
+        let nonce = nonce();
+        self.nonce.store(nonce, Ordering::Relaxed);
+        self.set_link(LinkState::Syncing);
+        let message = ToRadio {
+            payload_variant: Some(to_radio::PayloadVariant::WantConfigId(nonce)),
+        };
+        self.send_raw(message.encode_to_vec())
+    }
+
+    fn next_packet_id(&self) -> u32 {
+        // Ids are 32 bits but the firmware keeps the top one clear, and never
+        // uses zero.
+        (self.next_id.fetch_add(1, Ordering::Relaxed) & 0x7fff_ffff).max(1)
     }
 
     fn set_link(&self, link: LinkState) {
@@ -253,6 +412,7 @@ impl Mesh {
 
     async fn exchange(&self, mut link: Link) -> &'static str {
         let nonce = nonce();
+        self.nonce.store(nonce, Ordering::Relaxed);
         self.set_link(LinkState::Syncing);
         if send(&link, to_radio::PayloadVariant::WantConfigId(nonce)).is_err() {
             return "link closed";
@@ -277,7 +437,10 @@ impl Mesh {
                         }
                     };
                     match message.payload_variant {
-                        Some(from_radio::PayloadVariant::ConfigCompleteId(id)) if id == nonce => {
+                        // The nonce of the last request, which a resync renews.
+                        Some(from_radio::PayloadVariant::ConfigCompleteId(id))
+                            if id == self.nonce.load(Ordering::Relaxed) =>
+                        {
                             let nodes = self.read(|state| state.nodes.len());
                             tracing::info!(nodes, "in sync with the radio");
                             self.set_link(LinkState::Ready);
@@ -337,20 +500,20 @@ mod tests {
     struct FakeRadio {
         stream: TcpStream,
         parser: FrameParser,
+        /// Frames read but not yet asked for: several can arrive in one read.
+        pending: std::collections::VecDeque<Vec<u8>>,
     }
 
     impl FakeRadio {
         async fn receive(&mut self) -> ToRadio {
             let mut buf = [0u8; 512];
             loop {
-                if let Some(payload) = self.parser.feed(&[]).into_iter().next() {
+                if let Some(payload) = self.pending.pop_front() {
                     return ToRadio::decode(payload.as_slice()).unwrap();
                 }
                 let n = self.stream.read(&mut buf).await.unwrap();
                 assert!(n > 0, "meshctl hung up");
-                if let Some(payload) = self.parser.feed(&buf[..n]).into_iter().next() {
-                    return ToRadio::decode(payload.as_slice()).unwrap();
-                }
+                self.pending.extend(self.parser.feed(&buf[..n]));
             }
         }
 
@@ -376,6 +539,7 @@ mod tests {
         let radio = FakeRadio {
             stream,
             parser: FrameParser::new(),
+            pending: std::collections::VecDeque::new(),
         };
         (mesh, radio, task)
     }
@@ -495,6 +659,101 @@ mod tests {
             ..text
         };
         assert_eq!(mesh.send_text(&too_long), Err(SendError::BadText));
+        task.abort();
+    }
+
+    /// The admin message a packet to the radio carries.
+    fn admin_of(message: ToRadio) -> (u32, pb::AdminMessage) {
+        let Some(to_radio::PayloadVariant::Packet(packet)) = message.payload_variant else {
+            panic!("a packet, not {message:?}");
+        };
+        let Some(mesh_packet::PayloadVariant::Decoded(data)) = packet.payload_variant else {
+            panic!("in the clear");
+        };
+        assert_eq!(data.portnum, PortNum::AdminApp as i32);
+        assert_eq!(packet.to, 1, "to the radio itself");
+        (
+            packet.id,
+            pb::AdminMessage::decode(data.payload.as_slice()).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn settings_change_at_once_with_the_passkey_given() {
+        let (mesh, mut radio, task) = connected().await;
+        let mut events = mesh.subscribe();
+        let Some(to_radio::PayloadVariant::WantConfigId(nonce)) =
+            radio.receive().await.payload_variant
+        else {
+            panic!("the configuration first");
+        };
+        radio
+            .send(from_radio::PayloadVariant::MyInfo(MyNodeInfo {
+                my_node_num: 1,
+                ..Default::default()
+            }))
+            .await;
+        radio
+            .send(from_radio::PayloadVariant::ConfigCompleteId(nonce))
+            .await;
+        assert_eq!(next_event(&mut events).await, Event::Link(LinkState::Ready));
+
+        let change = SettingsChange {
+            owner: Some(User {
+                long_name: "Faro".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let changing = tokio::spawn({
+            let mesh = mesh.clone();
+            async move { mesh.change_settings(change).await }
+        });
+
+        // First the question that gets the passkey...
+        let (asked, question) = admin_of(radio.receive().await);
+        assert!(matches!(
+            question.payload_variant,
+            Some(admin_message::PayloadVariant::GetOwnerRequest(true))
+        ));
+        let answer = pb::AdminMessage {
+            session_passkey: vec![7; 8],
+            payload_variant: Some(admin_message::PayloadVariant::GetOwnerResponse(
+                User::default(),
+            )),
+        };
+        radio
+            .send(from_radio::PayloadVariant::Packet(pb::MeshPacket {
+                from: 1,
+                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                    portnum: PortNum::AdminApp as i32,
+                    payload: answer.encode_to_vec(),
+                    request_id: asked,
+                    ..Default::default()
+                })),
+                ..Default::default()
+            }))
+            .await;
+
+        // ...then the change, wrapped so that the radio applies it once.
+        let mut steps = Vec::new();
+        for _ in 0..3 {
+            let (_, step) = admin_of(radio.receive().await);
+            assert_eq!(step.session_passkey, vec![7; 8]);
+            steps.push(step.payload_variant.unwrap());
+        }
+        assert!(matches!(
+            steps[0],
+            admin_message::PayloadVariant::BeginEditSettings(true)
+        ));
+        assert!(
+            matches!(&steps[1], admin_message::PayloadVariant::SetOwner(u) if u.long_name == "Faro")
+        );
+        assert!(matches!(
+            steps[2],
+            admin_message::PayloadVariant::CommitEditSettings(true)
+        ));
+        assert_eq!(changing.await.unwrap(), Ok(()));
         task.abort();
     }
 

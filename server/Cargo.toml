@@ -21,6 +21,9 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 clap = { version = "4", features = ["derive", "env"] }
 meshctl-api = { workspace = true, features = ["openapi"] }
 meshctl-core.workspace = true
+meshctl-proto.workspace = true
+# Fresh channel keys, when one is asked for.
+getrandom = "0.4"
 # The interface trunk builds into web/dist. When it has not been built the
 # binary still compiles, and says so at the address the interface would be.
 rust-embed = { version = "8", features = ["mime-guess"] }

@@ -1,0 +1,478 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
+
+//! The radio's own settings, between what the radio sent and what the API
+//! shows and takes. What is shown leaves the secrets out; what is changed is
+//! built on what the radio has, so that whatever the API does not cover goes
+//! back exactly as it was.
+
+use meshctl_api::{
+    ChannelChange, ChannelKey, ChannelSettings, DeviceSettings, KeyChange, LoraSettings,
+    NodeSettings, NodeSettingsChange, OwnerSettings, SettingsChoices,
+};
+use meshctl_core::mesh::Settings;
+use meshctl_core::radio::SettingsChange;
+use meshctl_proto::meshtastic::{self as pb, config};
+
+/// The most bytes each name takes, as the firmware keeps them.
+const LONG_NAME_MAX: usize = 39;
+const SHORT_NAME_MAX: usize = 4;
+const CHANNEL_NAME_MAX: usize = 11;
+
+/// The slots a radio has for channels.
+const CHANNEL_SLOTS: u32 = 8;
+
+const HOP_LIMIT_MAX: u32 = 7;
+
+/// Every name an enum of the protobufs has, in the order of its values.
+fn names(name: impl Fn(i32) -> Option<&'static str>) -> Vec<String> {
+    (0..=255).filter_map(name).map(str::to_owned).collect()
+}
+
+fn role_name(value: i32) -> Option<&'static str> {
+    config::device_config::Role::try_from(value)
+        .ok()
+        .map(|r| r.as_str_name())
+}
+
+fn region_name(value: i32) -> Option<&'static str> {
+    config::lo_ra_config::RegionCode::try_from(value)
+        .ok()
+        .map(|r| r.as_str_name())
+}
+
+fn preset_name(value: i32) -> Option<&'static str> {
+    config::lo_ra_config::ModemPreset::try_from(value)
+        .ok()
+        .map(|p| p.as_str_name())
+}
+
+fn channel_role_name(value: i32) -> Option<&'static str> {
+    pb::channel::Role::try_from(value)
+        .ok()
+        .map(|r| r.as_str_name())
+}
+
+pub fn choices() -> SettingsChoices {
+    SettingsChoices {
+        roles: names(role_name),
+        regions: names(region_name),
+        presets: names(preset_name),
+    }
+}
+
+/// What kind of key a channel has, from the key itself.
+fn key_kind(psk: &[u8]) -> ChannelKey {
+    match psk {
+        [] | [0] => ChannelKey::None,
+        [1] => ChannelKey::Default,
+        [_] => ChannelKey::Simple,
+        key if key.len() <= 16 => ChannelKey::Aes128,
+        _ => ChannelKey::Aes256,
+    }
+}
+
+/// The settings as the API shows them; `None` until the radio has sent them.
+pub fn view(settings: &Settings) -> Option<NodeSettings> {
+    let owner = settings.owner.as_ref()?;
+    let device = settings.config.device.as_ref()?;
+    let lora = settings.config.lora.as_ref()?;
+    let channels = (0..CHANNEL_SLOTS)
+        .map(|index| {
+            let channel = settings.channels.get(&index);
+            let channel_settings = channel.and_then(|c| c.settings.as_ref());
+            ChannelSettings {
+                index,
+                role: channel
+                    .and_then(|c| channel_role_name(c.role))
+                    .unwrap_or("DISABLED")
+                    .to_owned(),
+                name: channel_settings.map(|s| s.name.clone()).unwrap_or_default(),
+                key: key_kind(channel_settings.map_or(&[][..], |s| s.psk.as_slice())),
+                uplink: channel_settings.is_some_and(|s| s.uplink_enabled),
+                downlink: channel_settings.is_some_and(|s| s.downlink_enabled),
+            }
+        })
+        .collect();
+    Some(NodeSettings {
+        owner: OwnerSettings {
+            long_name: owner.long_name.clone(),
+            short_name: owner.short_name.clone(),
+        },
+        device: DeviceSettings {
+            role: role_name(device.role).unwrap_or_default().to_owned(),
+        },
+        lora: LoraSettings {
+            region: region_name(lora.region).unwrap_or_default().to_owned(),
+            use_preset: lora.use_preset,
+            modem_preset: preset_name(lora.modem_preset)
+                .unwrap_or_default()
+                .to_owned(),
+            hop_limit: lora.hop_limit,
+            tx_enabled: lora.tx_enabled,
+        },
+        channels,
+        choices: choices(),
+    })
+}
+
+/// Why a change cannot be made: the API says `invalid_settings` for all of
+/// them, and the reference what each setting takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Invalid(pub &'static str);
+
+fn check(ok: bool, what: &'static str) -> Result<(), Invalid> {
+    if ok { Ok(()) } else { Err(Invalid(what)) }
+}
+
+/// What the radio is to be sent for a change, built on what it has; and
+/// whether it reboots to apply it.
+pub fn change(
+    settings: &Settings,
+    wanted: &NodeSettingsChange,
+    random: impl Fn(&mut [u8]),
+) -> Result<(SettingsChange, bool), Invalid> {
+    let mut change = SettingsChange::default();
+    let mut reboots = false;
+
+    if let Some(owner) = &wanted.owner {
+        let long_name = owner.long_name.trim();
+        let short_name = owner.short_name.trim();
+        check(
+            !long_name.is_empty() && long_name.len() <= LONG_NAME_MAX,
+            "long_name",
+        )?;
+        check(
+            !short_name.is_empty() && short_name.len() <= SHORT_NAME_MAX,
+            "short_name",
+        )?;
+        let mut user = settings.owner.clone().ok_or(Invalid("owner"))?;
+        user.long_name = long_name.to_owned();
+        user.short_name = short_name.to_owned();
+        change.owner = Some(user);
+    }
+
+    if let Some(device) = &wanted.device {
+        let role =
+            config::device_config::Role::from_str_name(&device.role).ok_or(Invalid("role"))?;
+        let mut current = settings.config.device.clone().ok_or(Invalid("device"))?;
+        if current.role != role as i32 {
+            current.role = role as i32;
+            change.configs.push(pb::Config {
+                payload_variant: Some(config::PayloadVariant::Device(current)),
+            });
+            reboots = true;
+        }
+    }
+
+    if let Some(lora) = &wanted.lora {
+        let region = config::lo_ra_config::RegionCode::from_str_name(&lora.region)
+            .ok_or(Invalid("region"))?;
+        let preset = config::lo_ra_config::ModemPreset::from_str_name(&lora.modem_preset)
+            .ok_or(Invalid("modem_preset"))?;
+        check((1..=HOP_LIMIT_MAX).contains(&lora.hop_limit), "hop_limit")?;
+        let before = settings.config.lora.clone().ok_or(Invalid("lora"))?;
+        let mut current = before.clone();
+        current.region = region as i32;
+        current.use_preset = lora.use_preset;
+        current.modem_preset = preset as i32;
+        current.hop_limit = lora.hop_limit;
+        current.tx_enabled = lora.tx_enabled;
+        if current != before {
+            change.configs.push(pb::Config {
+                payload_variant: Some(config::PayloadVariant::Lora(current)),
+            });
+            reboots = true;
+        }
+    }
+
+    for wanted in &wanted.channels {
+        change.channels.push(channel(settings, wanted, &random)?);
+    }
+
+    Ok((change, reboots))
+}
+
+fn channel(
+    settings: &Settings,
+    wanted: &ChannelChange,
+    random: impl Fn(&mut [u8]),
+) -> Result<pb::Channel, Invalid> {
+    check(wanted.index < CHANNEL_SLOTS, "index")?;
+    let role = pb::channel::Role::from_str_name(&wanted.role).ok_or(Invalid("channel role"))?;
+    // The primary is slot 0, and only slot 0.
+    check(
+        (wanted.index == 0) == (role == pb::channel::Role::Primary),
+        "channel role",
+    )?;
+    let name = wanted.name.trim();
+    check(name.len() <= CHANNEL_NAME_MAX, "channel name")?;
+    check(
+        !name.is_empty() || role != pb::channel::Role::Secondary,
+        "channel name",
+    )?;
+
+    let mut channel = settings
+        .channels
+        .get(&wanted.index)
+        .cloned()
+        .unwrap_or_default();
+    channel.index = i32::try_from(wanted.index).unwrap_or_default();
+    channel.role = role as i32;
+    let channel_settings = channel.settings.get_or_insert_with(Default::default);
+    channel_settings.name = name.to_owned();
+    channel_settings.uplink_enabled = wanted.uplink;
+    channel_settings.downlink_enabled = wanted.downlink;
+    channel_settings.psk = match wanted.key {
+        KeyChange::Keep => std::mem::take(&mut channel_settings.psk),
+        KeyChange::None => vec![0],
+        KeyChange::Default => vec![1],
+        KeyChange::NewAes128 => fresh(16, &random),
+        KeyChange::NewAes256 => fresh(32, &random),
+    };
+    Ok(channel)
+}
+
+fn fresh(len: usize, random: impl Fn(&mut [u8])) -> Vec<u8> {
+    let mut key = vec![0; len];
+    random(&mut key);
+    key
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> Settings {
+        let mut settings = Settings {
+            owner: Some(pb::User {
+                id: "!3134c955".into(),
+                long_name: "Casa".into(),
+                short_name: "CASA".into(),
+                public_key: vec![9; 32],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        settings.config.device = Some(config::DeviceConfig {
+            role: config::device_config::Role::ClientBase as i32,
+            node_info_broadcast_secs: 43_200,
+            ..Default::default()
+        });
+        settings.config.lora = Some(config::LoRaConfig {
+            region: config::lo_ra_config::RegionCode::EuN868 as i32,
+            use_preset: true,
+            modem_preset: config::lo_ra_config::ModemPreset::NarrowFast as i32,
+            hop_limit: 5,
+            tx_enabled: true,
+            sx126x_rx_boosted_gain: true,
+            ..Default::default()
+        });
+        settings.channels.insert(
+            4,
+            pb::Channel {
+                index: 4,
+                role: pb::channel::Role::Secondary as i32,
+                settings: Some(pb::ChannelSettings {
+                    name: "Moire".into(),
+                    psk: vec![7; 32],
+                    ..Default::default()
+                }),
+            },
+        );
+        settings
+    }
+
+    fn no_random(_: &mut [u8]) {}
+
+    #[test]
+    fn what_is_shown_has_no_secrets() {
+        let view = view(&settings()).unwrap();
+        assert_eq!(view.owner.long_name, "Casa");
+        assert_eq!(view.device.role, "CLIENT_BASE");
+        assert_eq!(view.lora.modem_preset, "NARROW_FAST");
+        assert_eq!(view.channels.len(), 8);
+        assert_eq!(view.channels[4].key, ChannelKey::Aes256);
+        assert_eq!(view.channels[5].role, "DISABLED");
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(!json.contains("psk") && !json.contains("public_key"));
+        assert!(view.choices.roles.contains(&"ROUTER".to_owned()));
+    }
+
+    #[test]
+    fn nothing_shown_before_the_radio_says() {
+        assert!(view(&Settings::default()).is_none());
+    }
+
+    #[test]
+    fn what_is_not_changed_goes_back_as_it_was() {
+        let current = settings();
+        let wanted = NodeSettingsChange {
+            lora: Some(LoraSettings {
+                region: "EU_N_868".into(),
+                use_preset: true,
+                modem_preset: "LONG_FAST".into(),
+                hop_limit: 3,
+                tx_enabled: true,
+            }),
+            ..Default::default()
+        };
+        let (change, reboots) = super::change(&current, &wanted, no_random).unwrap();
+        assert!(reboots);
+        let Some(config::PayloadVariant::Lora(lora)) = &change.configs[0].payload_variant else {
+            panic!("a LoRa config");
+        };
+        assert_eq!(lora.hop_limit, 3);
+        assert!(lora.sx126x_rx_boosted_gain, "untouched by the API, kept");
+    }
+
+    #[test]
+    fn the_same_settings_change_nothing() {
+        let current = settings();
+        let view = view(&current).unwrap();
+        let wanted = NodeSettingsChange {
+            device: Some(view.device),
+            lora: Some(view.lora),
+            ..Default::default()
+        };
+        let (change, reboots) = super::change(&current, &wanted, no_random).unwrap();
+        assert!(change.configs.is_empty());
+        assert!(!reboots);
+    }
+
+    #[test]
+    fn the_owner_keeps_its_key() {
+        let wanted = NodeSettingsChange {
+            owner: Some(OwnerSettings {
+                long_name: " Faro ".into(),
+                short_name: "🗼".into(),
+            }),
+            ..Default::default()
+        };
+        let (change, reboots) = super::change(&settings(), &wanted, no_random).unwrap();
+        let owner = change.owner.unwrap();
+        assert_eq!(owner.long_name, "Faro");
+        assert_eq!(owner.public_key, vec![9; 32]);
+        assert!(!reboots);
+    }
+
+    #[test]
+    fn a_channel_keeps_or_gets_its_key() {
+        let keep = ChannelChange {
+            index: 4,
+            role: "SECONDARY".into(),
+            name: "Moire".into(),
+            key: KeyChange::Keep,
+            uplink: false,
+            downlink: false,
+        };
+        let (change, _) = super::change(
+            &settings(),
+            &NodeSettingsChange {
+                channels: vec![keep.clone()],
+                ..Default::default()
+            },
+            no_random,
+        )
+        .unwrap();
+        assert_eq!(
+            change.channels[0].settings.as_ref().unwrap().psk,
+            vec![7; 32]
+        );
+
+        let new_key = ChannelChange {
+            index: 5,
+            name: "Nuevo".into(),
+            key: KeyChange::NewAes128,
+            ..keep
+        };
+        let (change, _) = super::change(
+            &settings(),
+            &NodeSettingsChange {
+                channels: vec![new_key],
+                ..Default::default()
+            },
+            |key| key.fill(3),
+        )
+        .unwrap();
+        assert_eq!(
+            change.channels[0].settings.as_ref().unwrap().psk,
+            vec![3; 16]
+        );
+    }
+
+    #[test]
+    fn what_the_radio_cannot_have_is_refused() {
+        let channel = |index: u32, role: &str, name: &str| ChannelChange {
+            index,
+            role: role.into(),
+            name: name.into(),
+            key: KeyChange::Keep,
+            uplink: false,
+            downlink: false,
+        };
+        let lora = |hop_limit, region: &str| LoraSettings {
+            region: region.into(),
+            use_preset: true,
+            modem_preset: "LONG_FAST".into(),
+            hop_limit,
+            tx_enabled: true,
+        };
+        let cases = [
+            NodeSettingsChange {
+                owner: Some(OwnerSettings {
+                    long_name: "x".repeat(40),
+                    short_name: "X".into(),
+                }),
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                owner: Some(OwnerSettings {
+                    long_name: "Faro".into(),
+                    short_name: "FAROS".into(),
+                }),
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                device: Some(DeviceSettings {
+                    role: "PIRATE".into(),
+                }),
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                lora: Some(lora(8, "EU_868")),
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                lora: Some(lora(3, "ATLANTIS")),
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                channels: vec![channel(1, "PRIMARY", "Dos")],
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                channels: vec![channel(0, "SECONDARY", "Uno")],
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                channels: vec![channel(3, "SECONDARY", "")],
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                channels: vec![channel(8, "DISABLED", "")],
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                channels: vec![channel(3, "SECONDARY", "Demasiado largo")],
+                ..Default::default()
+            },
+        ];
+        for wanted in cases {
+            assert!(
+                super::change(&settings(), &wanted, no_random).is_err(),
+                "{wanted:?}"
+            );
+        }
+    }
+}

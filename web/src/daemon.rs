@@ -11,7 +11,8 @@ use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
     API_V1, Channel, Conversation, Error, ErrorCode, Message, NewMessage, NewTraceroute, Node,
-    Peer, Radio, RadioId, RadioSettings, Status, TOKEN_HEADER, Traceroute,
+    NodeSettings, NodeSettingsChange, Peer, Radio, RadioId, RadioSettings, SettingsApplied, Status,
+    TOKEN_HEADER, Traceroute,
 };
 use serde::de::DeserializeOwned;
 
@@ -124,6 +125,21 @@ pub async fn messages(radio: RadioId, peer: Peer) -> Result<Vec<Message>, Failur
 pub async fn send_message(radio: RadioId, message: &NewMessage) -> Result<Message, Failure> {
     let request = with_token(Request::post(&url(&format!("/radios/{radio}/messages"))))
         .json(message)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+pub async fn settings(radio: RadioId) -> Result<NodeSettings, Failure> {
+    get(&format!("/radios/{radio}/settings")).await
+}
+
+pub async fn change_settings(
+    radio: RadioId,
+    change: &NodeSettingsChange,
+) -> Result<SettingsApplied, Failure> {
+    let request = with_token(Request::put(&url(&format!("/radios/{radio}/settings"))))
+        .json(change)
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)

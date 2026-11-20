@@ -121,6 +121,12 @@ pub enum Event {
     Ack(Ack),
     /// The answer to a traceroute sent.
     Traceroute(TracerouteAnswer),
+    /// The radio's answer to an admin request: the session passkey that
+    /// changing its settings takes. Taken by whoever asked; never broadcast.
+    AdminAnswer {
+        request_id: u32,
+        passkey: Vec<u8>,
+    },
 }
 
 /// What the firmware puts in a route for a hop it could not tell.
@@ -201,6 +207,50 @@ pub struct MeshState {
     pub local: Option<LocalNode>,
     pub channels: BTreeMap<u32, Channel>,
     pub nodes: BTreeMap<u32, Node>,
+    /// The radio's own settings, as it sent them on syncing.
+    pub settings: Settings,
+}
+
+/// The radio's settings, whole and as the protobufs carry them: what changing
+/// them starts from, so that whatever is not changed is sent back as it was.
+///
+/// They hold secrets (channel keys, the Wi-Fi password, the private key), and
+/// live in memory only: nothing stores them, and nothing serves them as they
+/// are.
+#[derive(Clone, Default)]
+pub struct Settings {
+    pub owner: Option<pb::User>,
+    pub config: pb::LocalConfig,
+    pub channels: BTreeMap<u32, pb::Channel>,
+}
+
+impl std::fmt::Debug for Settings {
+    // Never printed whole, secrets and all, into a log.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Settings")
+            .field("owner", &self.owner.as_ref().map(|o| &o.long_name))
+            .field("channels", &self.channels.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Settings {
+    /// Takes in one part of the configuration.
+    fn keep(&mut self, config: &pb::Config) {
+        use config::PayloadVariant as C;
+        let local = &mut self.config;
+        match config.payload_variant.clone() {
+            Some(C::Device(c)) => local.device = Some(c),
+            Some(C::Position(c)) => local.position = Some(c),
+            Some(C::Power(c)) => local.power = Some(c),
+            Some(C::Network(c)) => local.network = Some(c),
+            Some(C::Display(c)) => local.display = Some(c),
+            Some(C::Lora(c)) => local.lora = Some(c),
+            Some(C::Bluetooth(c)) => local.bluetooth = Some(c),
+            Some(C::Security(c)) => local.security = Some(c),
+            _ => {}
+        }
+    }
 }
 
 impl MeshState {
@@ -225,6 +275,7 @@ impl MeshState {
                 {
                     self.local = None;
                     self.channels.clear();
+                    self.settings = Settings::default();
                 }
                 self.local.get_or_insert_with(LocalNode::default).num = info.my_node_num;
                 None
@@ -236,6 +287,7 @@ impl MeshState {
                 None
             }
             Some(V::Config(config)) => {
+                self.settings.keep(&config);
                 let local = self.local.get_or_insert_with(LocalNode::default);
                 match config.payload_variant {
                     Some(config::PayloadVariant::Device(device)) => {
@@ -264,6 +316,7 @@ impl MeshState {
                 let role = enum_name(channel.role, |v| {
                     pb::channel::Role::try_from(v).ok().map(|r| r.as_str_name())
                 });
+                self.settings.channels.insert(index, channel.clone());
                 self.channels.insert(
                     index,
                     Channel {
@@ -274,7 +327,12 @@ impl MeshState {
                 );
                 None
             }
-            Some(V::NodeInfo(info)) => Some(self.node_info(info)),
+            Some(V::NodeInfo(info)) => {
+                if self.local.as_ref().is_some_and(|l| l.num == info.num) {
+                    self.settings.owner.clone_from(&info.user);
+                }
+                Some(self.node_info(info))
+            }
             Some(V::Packet(packet)) => {
                 // What the packet says counts even while syncing: a radio, or a
                 // tasticsplitter, replays the messages a client missed then.
@@ -393,6 +451,13 @@ fn said(packet: &pb::MeshPacket, now: u32) -> Option<Event> {
                     .then(|| packet.hop_start.saturating_sub(packet.hop_limit)),
                 via_mqtt: packet.via_mqtt,
             }))
+        }
+        Ok(PortNum::AdminApp) if data.request_id != 0 => {
+            let admin = pb::AdminMessage::decode(data.payload.as_slice()).ok()?;
+            Some(Event::AdminAnswer {
+                request_id: data.request_id,
+                passkey: admin.session_passkey,
+            })
         }
         // Only answers: a request to us the firmware answers on its own.
         Ok(PortNum::TracerouteApp) if data.request_id != 0 => {

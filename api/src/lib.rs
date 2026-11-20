@@ -61,6 +61,10 @@ pub enum ErrorCode {
     InvalidNode,
     /// The radio traced a route too recently; try again in a moment.
     TooSoon,
+    /// Not settings the radio can have; the reference says what each takes.
+    InvalidSettings,
+    /// The radio did not answer the request a change of settings starts with.
+    RadioDidNotAnswer,
 }
 
 /// The body of every error the API answers with.
@@ -387,6 +391,160 @@ pub struct Traceroute {
 pub struct NewTraceroute {
     /// The node's number.
     pub node: u32,
+}
+
+/// Who the radio says it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct OwnerSettings {
+    /// Up to 39 bytes.
+    #[cfg_attr(feature = "openapi", schema(example = "Faro de Hércules"))]
+    pub long_name: String,
+    /// Up to 4 bytes: four letters, or one emoji.
+    #[cfg_attr(feature = "openapi", schema(example = "FARO"))]
+    pub short_name: String,
+}
+
+/// What the radio does in the mesh.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DeviceSettings {
+    /// One of `choices.roles`.
+    #[cfg_attr(feature = "openapi", schema(example = "CLIENT"))]
+    pub role: String,
+}
+
+/// How the radio transmits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoraSettings {
+    /// One of `choices.regions`.
+    #[cfg_attr(feature = "openapi", schema(example = "EU_868"))]
+    pub region: String,
+    /// Whether it uses `modem_preset`. A radio set up by hand with its own
+    /// bandwidth, spreading factor and coding rate keeps them, but they are
+    /// not changed here.
+    pub use_preset: bool,
+    /// One of `choices.presets`.
+    #[cfg_attr(feature = "openapi", schema(example = "LONG_FAST"))]
+    pub modem_preset: String,
+    /// How many times a packet it sends may be relayed: 1 to 7.
+    pub hop_limit: u32,
+    /// Whether it transmits at all.
+    pub tx_enabled: bool,
+}
+
+/// What a channel's key is. The key itself never leaves the daemon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelKey {
+    /// No encryption.
+    None,
+    /// The well known default key, which everyone has.
+    Default,
+    /// One of the well known variants of the default key.
+    Simple,
+    /// A key of its own, 128 bits.
+    Aes128,
+    /// A key of its own, 256 bits.
+    Aes256,
+}
+
+/// One of the radio's channels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ChannelSettings {
+    /// Its slot, 0 to 7; 0 is the primary.
+    pub index: u32,
+    /// `PRIMARY`, `SECONDARY` or `DISABLED`.
+    pub role: String,
+    /// Up to 11 bytes. Empty for a primary channel that takes the modem
+    /// preset's name.
+    pub name: String,
+    pub key: ChannelKey,
+    /// Whether what it hears goes up to MQTT.
+    pub uplink: bool,
+    /// Whether what MQTT has comes down to it.
+    pub downlink: bool,
+}
+
+/// The codes each setting with a fixed set of values takes, as the
+/// protobufs this daemon was built with name them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SettingsChoices {
+    pub roles: Vec<String>,
+    pub regions: Vec<String>,
+    pub presets: Vec<String>,
+}
+
+/// The radio's own settings, as it last sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeSettings {
+    pub owner: OwnerSettings,
+    pub device: DeviceSettings,
+    pub lora: LoraSettings,
+    /// All eight slots, in order.
+    pub channels: Vec<ChannelSettings>,
+    pub choices: SettingsChoices,
+}
+
+/// What to do with a channel's key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum KeyChange {
+    /// Leave it as it is.
+    #[default]
+    Keep,
+    /// No encryption.
+    None,
+    /// The well known default key.
+    Default,
+    /// A new random key of 128 bits.
+    NewAes128,
+    /// A new random key of 256 bits.
+    NewAes256,
+}
+
+/// A channel as it is to be.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ChannelChange {
+    pub index: u32,
+    pub role: String,
+    pub name: String,
+    #[serde(default)]
+    pub key: KeyChange,
+    pub uplink: bool,
+    pub downlink: bool,
+}
+
+/// What to change of the radio's settings: each part given is set whole,
+/// each part left out stays as it is.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeSettingsChange {
+    #[serde(default)]
+    pub owner: Option<OwnerSettings>,
+    #[serde(default)]
+    pub device: Option<DeviceSettings>,
+    #[serde(default)]
+    pub lora: Option<LoraSettings>,
+    /// Only the channels to change.
+    #[serde(default)]
+    pub channels: Vec<ChannelChange>,
+}
+
+/// What a change of settings set off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SettingsApplied {
+    /// Whether the radio reboots to apply them, and so drops its link for a
+    /// moment.
+    pub reboots: bool,
 }
 
 #[cfg(test)]

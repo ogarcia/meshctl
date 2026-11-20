@@ -8,6 +8,7 @@ mod chat;
 mod daemon;
 mod mesh;
 mod radios;
+mod settings;
 mod traces;
 
 fn main() {

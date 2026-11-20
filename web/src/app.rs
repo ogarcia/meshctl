@@ -9,6 +9,7 @@ use crate::daemon::{self, Events, Failure};
 use crate::i18n::{I18nContextProvider, Locale, t, use_i18n};
 use crate::mesh::MeshView;
 use crate::radios::{RadioForm, RadiosView};
+use crate::settings::SettingsView;
 use crate::traces::TracesView;
 use gloo_timers::future::sleep;
 use leptos::prelude::*;
@@ -41,6 +42,7 @@ pub enum Page {
     Mesh,
     Chat,
     Traces,
+    Settings,
     Radios,
 }
 
@@ -68,6 +70,8 @@ pub struct Live {
     pub traceroutes: RwSignal<Vec<Traceroute>>,
     /// Why the last traceroute asked for was not sent.
     pub trace_error: RwSignal<Option<Failure>>,
+    /// Bumped each time the selected radio syncs, for what is read only then.
+    pub synced: RwSignal<u32>,
     /// Seconds since the epoch, ticking.
     pub now: RwSignal<u32>,
 }
@@ -87,6 +91,7 @@ impl Live {
             thread: RwSignal::new(Vec::new()),
             traceroutes: RwSignal::new(Vec::new()),
             trace_error: RwSignal::new(None),
+            synced: RwSignal::new(0),
             now: RwSignal::new(now()),
         }
     }
@@ -246,6 +251,7 @@ impl Live {
                     Ok(())
                 }
                 ServerMessage::Synced { radio } if self.is_selected(radio) => {
+                    self.synced.update(|n| *n += 1);
                     self.refresh_selected().await
                 }
                 ServerMessage::Message { radio, message } if self.is_selected(radio) => {
@@ -352,6 +358,7 @@ fn Shell() -> impl IntoView {
             Page::Mesh => t!(i18n, page_nodes).into_any(),
             Page::Chat => t!(i18n, page_chat).into_any(),
             Page::Traces => t!(i18n, page_traces).into_any(),
+            Page::Settings => t!(i18n, page_settings).into_any(),
             Page::Radios => t!(i18n, radios_manage).into_any(),
         };
         view! {
@@ -367,7 +374,10 @@ fn Shell() -> impl IntoView {
             <Show when=has_radios>
                 <RadioPicker />
                 <Connection />
-                <nav>{tab(Page::Mesh)} {tab(Page::Chat)} {tab(Page::Traces)} {tab(Page::Radios)}</nav>
+                <nav>
+                    {tab(Page::Mesh)} {tab(Page::Chat)} {tab(Page::Traces)} {tab(Page::Settings)}
+                    {tab(Page::Radios)}
+                </nav>
             </Show>
             <LanguageSwitch />
         </header>
@@ -383,6 +393,7 @@ fn Shell() -> impl IntoView {
                     Page::Mesh => view! { <MeshView /> }.into_any(),
                     Page::Chat => view! { <ChatView /> }.into_any(),
                     Page::Traces => view! { <TracesView /> }.into_any(),
+                    Page::Settings => view! { <SettingsView /> }.into_any(),
                     Page::Radios => view! { <RadiosView /> }.into_any(),
                 },
             }}
