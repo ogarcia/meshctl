@@ -5,7 +5,14 @@ them, chat, and trace routes. That is the whole list.
 
 meshctl stays connected to your radios around the clock, keeps what they hear
 in SQLite, and serves a web interface and an API from a single binary. One
-radio or a dozen, Meshtastic today and MeshCore next, all from the same panel.
+radio or a dozen, Meshtastic and MeshCore, all from the same panel.
+
+> [!WARNING]
+> **meshctl is just starting, and it is not stable at all.** It changes, and
+> breaks, from one commit to the next: the interface, the API and the
+> database alike. There are no releases yet, and no promise that a database
+> made today opens with tomorrow's build. Try it if you are curious; do not
+> rely on it for anything that matters.
 
 ## Goals
 
@@ -37,7 +44,8 @@ a reason to point at another tool, not to grow this one.
   [tasticsplitter](https://github.com/ogarcia/tasticsplitter) in front of it,
   and point meshctl at it as if it were the radio.
 
-MeshCore support is planned, after Meshtastic works well.
+Meshtastic comes first. MeshCore radios connect, and show their nodes and
+chats, but they can do less than Meshtastic ones for now.
 
 ## Running
 
@@ -50,7 +58,7 @@ That is all it needs. It keeps its database in `./data` (`--data` or
 radio. A radio's address is one of:
 
 ```text
-192.168.1.10              on the network, port 4403
+192.168.1.10              on the network, port 4403 (5000 for MeshCore)
 radio.lan:4404            on the network, another port
 /dev/ttyACM0              plugged in, at 115200
 /dev/ttyUSB0@921600       plugged in, at another speed
