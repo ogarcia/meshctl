@@ -106,7 +106,7 @@ impl Live {
         Ok(())
     }
 
-    async fn refresh(self) -> Result<(), Failure> {
+    pub async fn refresh(self) -> Result<(), Failure> {
         self.refresh_radios().await?;
         self.refresh_selected().await
     }
@@ -275,6 +275,7 @@ fn Welcome() -> impl IntoView {
 
 #[component]
 fn RadioPicker() -> impl IntoView {
+    let i18n = use_i18n();
     let live = expect_context::<Live>();
     let options = move || live.radios.get().unwrap_or_default();
     let change = move |ev| {
@@ -284,12 +285,17 @@ fn RadioPicker() -> impl IntoView {
     };
     view! {
         <select class="picker" on:change=change>
-            <For each=options key=|radio| (radio.id, radio.name.clone()) let:radio>
+            <For
+                each=options
+                key=|radio| (radio.id, radio.name.clone(), radio.enabled)
+                let:radio
+            >
                 <option
                     value=radio.id.to_string()
                     selected=move || live.selected.get() == Some(radio.id)
                 >
                     {radio.name.clone()}
+                    {(!radio.enabled).then(|| view! { " (" {t!(i18n, link_disabled)} ")" })}
                 </option>
             </For>
         </select>

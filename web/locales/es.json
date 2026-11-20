@@ -27,6 +27,8 @@
   "radio_save": "Guardar",
   "radio_cancel": "Cancelar",
   "radio_edit": "Cambiar",
+  "radio_enable": "Activar",
+  "radio_disable": "Desactivar",
   "radio_remove": "Quitar",
   "radio_remove_confirm": "¿Quitar esta radio? meshctl se desconectará de ella y olvidará lo que oyó.",
   "radio_disabled_note": "Esta radio está desactivada: meshctl no se conecta a ella. Actívala en Radios.",

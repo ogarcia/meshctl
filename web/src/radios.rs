@@ -58,9 +58,27 @@ fn RadioRow(radio: Radio, editing: RwSignal<Option<Radio>>) -> impl IntoView {
     let live = expect_context::<Live>();
     let id = radio.id;
     let link = radio.link;
+    let enabled = radio.enabled;
     let edit = {
         let radio = radio.clone();
         move |_| editing.set(Some(radio.clone()))
+    };
+    // One click, for a radio that comes and goes: the one in the car, say.
+    let toggle = {
+        let settings = RadioSettings {
+            name: radio.name.clone(),
+            kind: radio.kind,
+            address: radio.address.clone(),
+            enabled: !radio.enabled,
+        };
+        move |_| {
+            let settings = settings.clone();
+            spawn_local(async move {
+                if daemon::save_radio(Some(id), &settings).await.is_ok() {
+                    let _ = live.refresh().await;
+                }
+            });
+        }
     };
     let remove = move |_| {
         let sure = web_sys::window()
@@ -97,6 +115,13 @@ fn RadioRow(radio: Radio, editing: RwSignal<Option<Radio>>) -> impl IntoView {
                 </span>
             </td>
             <td class="actions">
+                <button on:click=toggle>
+                    {if enabled {
+                        t!(i18n, radio_disable).into_any()
+                    } else {
+                        t!(i18n, radio_enable).into_any()
+                    }}
+                </button>
                 <button on:click=edit>{t!(i18n, radio_edit)}</button>
                 <button class="danger" on:click=remove>{t!(i18n, radio_remove)}</button>
             </td>
