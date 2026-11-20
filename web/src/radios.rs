@@ -19,14 +19,25 @@ const GRIP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/gri
 const UP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-up.svg");
 const DOWN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 const EYE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye.svg");
+const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
 const EYE_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye-off.svg");
 
-/// What the radios' editor is open on, if anything.
+/// What the radios' editor is open on, if anything, and in which of its
+/// sections.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Editing {
     Closed,
     Adding,
-    Radio(RadioId),
+    Radio(RadioId, Section),
+}
+
+/// The editor's two sections: what the radio is and how meshctl reaches it,
+/// and how its button looks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Section {
+    #[default]
+    Connection,
+    Button,
 }
 
 /// What a radio is set to, as it is changed.
@@ -94,41 +105,28 @@ pub fn RadiosView() -> impl IntoView {
     };
     // The row being dragged, by its place.
     let dragging = RwSignal::new(None::<usize>);
-    let count = move || live.radios.with(|r| r.as_ref().map_or(0, Vec::len));
 
     view! {
-        <div class="radios">
-            <section class="radio-list" aria-label=move || t_string!(i18n, radios_title)>
-                <div class="radio-list-head">
-                    <span class="dim">{move || t!(i18n, radios_count, count = count())}</span>
-                    <button
-                        class="primary"
-                        on:click=move |_| live.radio_editing.set(Editing::Adding)
-                    >
-                        "+ "
-                        {t!(i18n, radio_add_title)}
-                    </button>
-                </div>
-                <For
-                    each=radios
-                    key=|(at, count, radio)| (*at, *count, radio.clone())
-                    let:((at, count, radio))
-                >
-                    <RadioRow radio at count dragging />
-                </For>
-                <p class="hint dim">{t!(i18n, radios_hint)}</p>
-            </section>
-            {move || {
-                // Open only on a radio picked, or on one to add.
-                match live.radio_editing.get() {
-                    Editing::Closed => ().into_any(),
-                    Editing::Adding => view! { <RadioEditor id=None closes=true /> }.into_any(),
-                    Editing::Radio(id) => {
-                        view! { <RadioEditor id=Some(id) closes=true /> }.into_any()
-                    }
+        <section class="radios" aria-label=move || t_string!(i18n, radios_title)>
+            <For
+                each=radios
+                key=|(at, count, radio)| (*at, *count, radio.clone())
+                let:((at, count, radio))
+            >
+                <RadioRow radio at count dragging />
+            </For>
+            <p class="hint dim">{t!(i18n, radios_hint)}</p>
+        </section>
+        {move || {
+            // Over the list, on a radio picked or on one to add.
+            match live.radio_editing.get() {
+                Editing::Closed => ().into_any(),
+                Editing::Adding => view! { <RadioEditor id=None modal=true /> }.into_any(),
+                Editing::Radio(id, section) => {
+                    view! { <RadioEditor id=Some(id) modal=true section /> }.into_any()
                 }
-            }}
-        </div>
+            }
+        }}
     }
 }
 
@@ -143,7 +141,7 @@ fn RadioRow(
     let live = expect_context::<Live>();
     let id = radio.id;
     let link = radio.link;
-    let selected = move || live.radio_editing.get() == Editing::Radio(id);
+    let selected = move || matches!(live.radio_editing.get(), Editing::Radio(at, _) if at == id);
     let over = RwSignal::new(false);
 
     let flip = {
@@ -215,10 +213,23 @@ fn RadioRow(
                     inner_html=DOWN
                 ></button>
             </span>
-            <button type="button" class="pick" on:click=move |_| live.radio_editing.set(Editing::Radio(id))>
+            // Its button opens how it looks; the rest of it, the rest.
+            <button
+                type="button"
+                class="face-button"
+                title=move || t_string!(i18n, radio_button_edit)
+                aria-label=move || t_string!(i18n, radio_button_edit)
+                on:click=move |_| live.radio_editing.set(Editing::Radio(id, Section::Button))
+            >
                 <span class=badge::class(&badge) style=badge::style(&badge)>
                     <Face name=name.clone() badge=badge.clone() />
                 </span>
+            </button>
+            <button
+                type="button"
+                class="pick"
+                on:click=move |_| live.radio_editing.set(Editing::Radio(id, Section::Connection))
+            >
                 <span class="who">
                     <span class="name">
                         <b>{name.clone()}</b>
@@ -395,11 +406,15 @@ impl Draft {
     }
 }
 
-/// Changes a radio, or adds one when given none. When it `closes`, it is
-/// closed once done with, saved or not; when not, it is the only thing on its
-/// page, which is left by adding the radio.
+/// Changes a radio, or adds one when given none. As a `modal`, over the list,
+/// it is closed once done with, saved or not; when not, it is the only thing
+/// on its page, which is left by adding the radio.
 #[component]
-pub fn RadioEditor(id: Option<RadioId>, #[prop(optional)] closes: bool) -> impl IntoView {
+pub fn RadioEditor(
+    id: Option<RadioId>,
+    #[prop(optional)] modal: bool,
+    #[prop(optional)] section: Section,
+) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     // What the daemon has of it, which may change while it is edited.
@@ -420,6 +435,26 @@ pub fn RadioEditor(id: Option<RadioId>, #[prop(optional)] closes: bool) -> impl 
     let draft = RwSignal::new(start);
     let error = RwSignal::new(None::<Failure>);
     let busy = RwSignal::new(false);
+    let section = RwSignal::new(section);
+    let close = move || live.radio_editing.set(Editing::Closed);
+    // Escape closes it, as its ✕ and Cancel do.
+    if modal {
+        let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+            if ev.key() == "Escape" {
+                close();
+            }
+        });
+        on_cleanup(move || escape.remove());
+    }
+    // A radio to add starts by its name.
+    let name_input = NodeRef::<leptos::html::Input>::new();
+    if id.is_none() && modal {
+        Effect::new(move |_| {
+            if let Some(input) = name_input.get() {
+                let _ = input.focus();
+            }
+        });
+    }
 
     Effect::new(move |_| {
         let Some(settings) = stored.get() else {
@@ -445,8 +480,8 @@ pub fn RadioEditor(id: Option<RadioId>, #[prop(optional)] closes: bool) -> impl 
                     base.set_value(saved.clone());
                     draft.set(saved);
                     let _ = live.refresh_radios().await;
-                    if closes {
-                        live.radio_editing.set(Editing::Closed);
+                    if modal {
+                        close();
                     } else {
                         live.select(radio.id);
                     }
@@ -456,7 +491,6 @@ pub fn RadioEditor(id: Option<RadioId>, #[prop(optional)] closes: bool) -> impl 
             busy.set(false);
         });
     };
-    let cancel = move |_| live.radio_editing.set(Editing::Closed);
     let remove = move |_| {
         let Some(id) = id else {
             return;
@@ -470,7 +504,7 @@ pub fn RadioEditor(id: Option<RadioId>, #[prop(optional)] closes: bool) -> impl 
         if sure {
             spawn_local(async move {
                 if daemon::remove_radio(id).await.is_ok() {
-                    live.radio_editing.set(Editing::Closed);
+                    close();
                     let _ = live.refresh_radios().await;
                 }
             });
@@ -514,11 +548,139 @@ pub fn RadioEditor(id: Option<RadioId>, #[prop(optional)] closes: bool) -> impl 
     });
     let name = Signal::derive(move || draft.with(|d| d.name.clone()));
     let look = Signal::derive(move || draft.with(Draft::badge));
+    let detail = move || {
+        draft.with(|d| match d.address.trim() {
+            "" => kind_name(d.kind).to_owned(),
+            address => format!("{} · {address}", kind_name(d.kind)),
+        })
+    };
+    let tabs = [Section::Connection, Section::Button].map(|tab| {
+        let on = move || section.get() == tab;
+        let label = move || match tab {
+            Section::Connection => t!(i18n, radio_connection).into_any(),
+            Section::Button => t!(i18n, radio_button).into_any(),
+        };
+        view! {
+            <button
+                type="button"
+                role="tab"
+                class:on=on
+                aria-selected=move || on().to_string()
+                on:click=move |_| section.set(tab)
+            >
+                {label}
+            </button>
+        }
+    });
+    let at = move || match section.get() {
+        Section::Connection => 0,
+        Section::Button => 1,
+    };
 
-    view! {
-        <form class="card radio-editor" on:submit=submit>
-            <div class="editor-head">
-                <h2>{title}</h2>
+    let form = view! {
+        <form
+            class="card radio-editor"
+            class:modal=modal
+            role=modal.then_some("dialog")
+            aria-modal=modal.then_some("true")
+            on:submit=submit
+        >
+            <header class="editor-head">
+                <span
+                    class=move || look.with(badge::class)
+                    style=move || look.with(badge::style)
+                >
+                    <Face name badge=look />
+                </span>
+                <span class="who">
+                    <h2>{title}</h2>
+                    <span class="mono dim">{detail}</span>
+                </span>
+                {modal
+                    .then(|| {
+                        view! {
+                            <button
+                                type="button"
+                                class="close"
+                                title=move || t_string!(i18n, radio_cancel)
+                                aria-label=move || t_string!(i18n, radio_cancel)
+                                on:click=move |_| close()
+                                inner_html=CLOSE
+                            ></button>
+                        }
+                    })}
+            </header>
+            <div class="segmented" role="tablist" style=move || format!("--at: {}; --n: 2", at())>
+                {tabs.into_iter().collect_view()}
+            </div>
+
+            <div class="editor-body">
+                <div class="fields" class:gone=move || section.get() != Section::Connection>
+                    <label>
+                        <span class="dim">{t!(i18n, radio_name)}</span>
+                        <input
+                            required
+                            maxlength="64"
+                            node_ref=name_input
+                            placeholder=move || t_string!(i18n, radio_name_hint)
+                            prop:value=move || draft.with(|d| d.name.clone())
+                            on:input=move |ev| {
+                                let name = event_target_value(&ev);
+                                draft.update(|d| d.name = name);
+                            }
+                        />
+                    </label>
+                    <div class="field">
+                        <span class="dim">{t!(i18n, radio_kind)}</span>
+                        <div class="choices" role="radiogroup">
+                            {kinds.into_iter().collect_view()}
+                        </div>
+                    </div>
+                    <label>
+                        <span class="dim">{t!(i18n, radio_address)}</span>
+                        <input
+                            required
+                            class="mono"
+                            placeholder="192.168.1.10 · /dev/ttyACM0"
+                            prop:value=move || draft.with(|d| d.address.clone())
+                            on:input=move |ev| {
+                                let address = event_target_value(&ev);
+                                draft.update(|d| d.address = address);
+                            }
+                        />
+                        <span class="hint dim">{t!(i18n, radio_address_hint)}</span>
+                    </label>
+                    <div class="toggle">
+                        <Switch
+                            on=Signal::derive(move || draft.with(|d| d.enabled))
+                            label=Signal::derive(move || t_string!(i18n, radio_enabled).to_string())
+                            flip=move |_| draft.update(|d| d.enabled = !d.enabled)
+                        />
+                        <span>
+                            {t!(i18n, radio_enabled)}
+                            <span class="dim">{t!(i18n, radio_enabled_hint)}</span>
+                        </span>
+                    </div>
+                    <div class="toggle">
+                        <Switch
+                            on=Signal::derive(move || draft.with(|d| d.shown))
+                            label=Signal::derive(move || t_string!(i18n, radio_shown).to_string())
+                            flip=move |_| draft.update(|d| d.shown = !d.shown)
+                        />
+                        <span>
+                            {t!(i18n, radio_shown)}
+                            <span class="dim">{t!(i18n, radio_shown_hint)}</span>
+                        </span>
+                    </div>
+                </div>
+                <div class="button-look" class:gone=move || section.get() != Section::Button>
+                    <ColorPicker draft />
+                    <ContentPicker draft />
+                </div>
+            </div>
+
+            <p class="error">{message}</p>
+            <div class="buttons">
                 {id
                     .is_some()
                     .then(|| {
@@ -528,84 +690,10 @@ pub fn RadioEditor(id: Option<RadioId>, #[prop(optional)] closes: bool) -> impl 
                             </button>
                         }
                     })}
-            </div>
-            <div class="fields">
-                <label>
-                    <span class="dim">{t!(i18n, radio_name)}</span>
-                    <input
-                        required
-                        maxlength="64"
-                        placeholder=move || t_string!(i18n, radio_name_hint)
-                        prop:value=move || draft.with(|d| d.name.clone())
-                        on:input=move |ev| {
-                            let name = event_target_value(&ev);
-                            draft.update(|d| d.name = name);
-                        }
-                    />
-                </label>
-                <div class="field">
-                    <span class="dim">{t!(i18n, radio_kind)}</span>
-                    <div class="choices" role="radiogroup">{kinds.into_iter().collect_view()}</div>
-                </div>
-                <label class="wide">
-                    <span class="dim">{t!(i18n, radio_address)}</span>
-                    <input
-                        required
-                        class="mono"
-                        placeholder="192.168.1.10 · /dev/ttyACM0"
-                        prop:value=move || draft.with(|d| d.address.clone())
-                        on:input=move |ev| {
-                            let address = event_target_value(&ev);
-                            draft.update(|d| d.address = address);
-                        }
-                    />
-                    <span class="hint dim">{t!(i18n, radio_address_hint)}</span>
-                </label>
-                <div class="toggle">
-                    <Switch
-                        on=Signal::derive(move || draft.with(|d| d.enabled))
-                        label=Signal::derive(move || t_string!(i18n, radio_enabled).to_string())
-                        flip=move |_| draft.update(|d| d.enabled = !d.enabled)
-                    />
-                    <span>
-                        {t!(i18n, radio_enabled)}
-                        <span class="dim">{t!(i18n, radio_enabled_hint)}</span>
-                    </span>
-                </div>
-                <div class="toggle">
-                    <Switch
-                        on=Signal::derive(move || draft.with(|d| d.shown))
-                        label=Signal::derive(move || t_string!(i18n, radio_shown).to_string())
-                        flip=move |_| draft.update(|d| d.shown = !d.shown)
-                    />
-                    <span>
-                        {t!(i18n, radio_shown)}
-                        <span class="dim">{t!(i18n, radio_shown_hint)}</span>
-                    </span>
-                </div>
-            </div>
-
-            <div class="button-look">
-                <h3>{t!(i18n, radio_button)}</h3>
-                <div class="preview">
-                    <span
-                        class=move || format!("{} big", look.with(badge::class))
-                        style=move || look.with(badge::style)
-                    >
-                        <Face name badge=look />
-                    </span>
-                    <span class="dim">{t!(i18n, radio_button_hint)}</span>
-                </div>
-                <ColorPicker draft />
-                <ContentPicker draft />
-            </div>
-
-            <p class="error">{message}</p>
-            <div class="buttons">
-                {closes
+                {modal
                     .then(|| {
                         view! {
-                            <button type="button" on:click=cancel>
+                            <button type="button" on:click=move |_| close()>
                                 {t!(i18n, radio_cancel)}
                             </button>
                         }
@@ -618,6 +706,14 @@ pub fn RadioEditor(id: Option<RadioId>, #[prop(optional)] closes: bool) -> impl 
                 </button>
             </div>
         </form>
+    };
+
+    if modal {
+        // A click off it does not close it: it is too easy to make by mistake,
+        // and what was changed would be lost.
+        view! { <div class="modal-back">{form}</div> }.into_any()
+    } else {
+        form.into_any()
     }
 }
 

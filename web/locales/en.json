@@ -188,8 +188,7 @@
   "radio_enabled_hint": "On start, and whenever it is lost.",
   "radio_shown": "Show on the rail",
   "radio_shown_hint": "Hidden, it stays set up here.",
-  "radio_button": "Button on the rail",
-  "radio_button_hint": "This is how it looks on the rail; the dot at its corner tells its state. With nothing picked, it shows its name's initials.",
+  "radio_button": "Button",
   "radio_color": "Colour",
   "radio_color_none": "The rail's own",
   "radio_color_other": "Another colour",
@@ -240,5 +239,7 @@
   "icon_solar_panel": "Solar panel",
   "icon_compass": "Compass",
   "icon_anchor": "Anchor",
-  "icon_router": "Router"
+  "icon_router": "Router",
+  "radio_connection": "Connection",
+  "radio_button_edit": "Change its button"
 }

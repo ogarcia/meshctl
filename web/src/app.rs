@@ -616,6 +616,8 @@ fn Content() -> impl IntoView {
     }
 }
 
+const GEAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/settings.svg");
+
 /// The first bar: the radios, and meshctl's own settings.
 #[component]
 fn Rail() -> impl IntoView {
@@ -649,29 +651,20 @@ fn Rail() -> impl IntoView {
             >
                 <RadioButton id=radio.id name=radio.name.clone() badge=radio.badge.clone() />
             </For>
-            <button
-                class="rail-button add"
-                title=move || t_string!(i18n, radio_add_title)
-                aria-label=move || t_string!(i18n, radio_add_title)
-                on:click=move |_| {
-                    live.radio_editing.set(Editing::Adding);
-                    live.go(Page::Radios);
-                }
-            >
-                "+"
-            </button>
             <span class="rail-space"></span>
             <button
                 class=settings_class
                 title=move || t_string!(i18n, nav_meshctl_settings)
                 aria-label=move || t_string!(i18n, nav_meshctl_settings)
-                on:click=move |_| live.go(Page::Preferences)
-            >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <circle cx="12" cy="12" r="3"></circle>
-                    <path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"></path>
-                </svg>
-            </button>
+                // meshctl's settings open on the radios, the most of them.
+                on:click=move |_| {
+                    if !live.page.get_untracked().is_meshctl() {
+                        live.radio_editing.set(Editing::Closed);
+                        live.go(Page::Radios);
+                    }
+                }
+                inner_html=GEAR
+            ></button>
         </nav>
     }
 }
@@ -761,7 +754,7 @@ fn MeshctlSidebar() -> impl IntoView {
             <h1>"meshctl"</h1>
             <span class="dim">{t!(i18n, nav_meshctl_settings)}</span>
         </header>
-        <div class="sidebar-body">{item(Page::Preferences)} {item(Page::Radios)}</div>
+        <div class="sidebar-body">{item(Page::Radios)} {item(Page::Preferences)}</div>
     }
 }
 
@@ -972,7 +965,22 @@ fn Topbar() -> impl IntoView {
         }
         .into_any(),
         Page::Preferences => view! { <h1>{t!(i18n, prefs_title)}</h1> }.into_any(),
-        Page::Radios => view! { <h1>{t!(i18n, radios_title)}</h1> }.into_any(),
+        Page::Radios => {
+            let count = move || live.radios.with(|r| r.as_ref().map_or(0, Vec::len));
+            view! {
+                <div class="heading">
+                    <h1>{t!(i18n, radios_title)}</h1>
+                    <span class="dim">{move || t!(i18n, radios_count, count = count())}</span>
+                </div>
+                <div class="actions">
+                    <button class="primary" on:click=move |_| live.radio_editing.set(Editing::Adding)>
+                        "+ "
+                        {t!(i18n, radio_add_title)}
+                    </button>
+                </div>
+            }
+            .into_any()
+        }
         Page::Chat => match live.open.get() {
             Some(peer) => view! { <PeerHeading peer /> }.into_any(),
             None => view! { <h1>{t!(i18n, page_chat)}</h1> }.into_any(),

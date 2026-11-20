@@ -188,8 +188,7 @@
   "radio_enabled_hint": "Al arrancar, y siempre que se pierda.",
   "radio_shown": "Mostrar en la barra",
   "radio_shown_hint": "Oculta, sigue configurada aquí.",
-  "radio_button": "Botón en la barra",
-  "radio_button_hint": "Así se ve en la barra; el punto de su esquina dice su estado. Sin elegir nada, lleva las iniciales de su nombre.",
+  "radio_button": "Botón",
   "radio_color": "Color",
   "radio_color_none": "El de la barra",
   "radio_color_other": "Otro color",
@@ -240,5 +239,7 @@
   "icon_solar_panel": "Placa solar",
   "icon_compass": "Brújula",
   "icon_anchor": "Ancla",
-  "icon_router": "Router"
+  "icon_router": "Router",
+  "radio_connection": "Conexión",
+  "radio_button_edit": "Cambiar su botón"
 }
