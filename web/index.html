@@ -626,6 +626,33 @@
           filter: invert(1) hue-rotate(180deg) brightness(0.85) saturate(0.75);
         }
       }
+      /* A route's colours, by how each hop was heard, and the band edging its
+         lines: for the map's own theme, which may not be the page's. Bright
+         and apart from the tiles' greens and the roads' reds and browns. */
+      :root {
+        --mc-route-casing: #ffffff;
+        --mc-route-good: #0ca678;
+        --mc-route-fair: #f08c00;
+        --mc-route-poor: #d6336c;
+        --mc-route-unknown: #495057;
+      }
+      :root[data-map-theme="dark"],
+      :root[data-theme="dark"]:not([data-map-theme="light"]) {
+        --mc-route-casing: #0b0f14;
+        --mc-route-good: #38d9a9;
+        --mc-route-fair: #ffd43b;
+        --mc-route-poor: #f783ac;
+        --mc-route-unknown: #dee2e6;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]):not([data-map-theme="light"]) {
+          --mc-route-casing: #0b0f14;
+          --mc-route-good: #38d9a9;
+          --mc-route-fair: #ffd43b;
+          --mc-route-poor: #f783ac;
+          --mc-route-unknown: #dee2e6;
+        }
+      }
       .leaflet-container { font: inherit; }
       .leaflet-tooltip {
         background: var(--mc-surface);
@@ -787,10 +814,9 @@
       /* An arrowhead on a route, pointing the way it went. */
       .mc-arrow {
         display: block;
-        width: 18px;
-        height: 18px;
+        width: 22px;
+        height: 22px;
         overflow: visible;
-        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
       }
       .map-route-notice button {
         flex: none;

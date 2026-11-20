@@ -365,10 +365,10 @@ window.meshctlMap = (() => {
   }
 
   const QUALITY_COLOR = {
-    good: "--mc-ok",
-    fair: "--mc-warn",
-    poor: "--mc-danger",
-    unknown: "--mc-muted",
+    good: "--mc-route-good",
+    fair: "--mc-route-fair",
+    poor: "--mc-route-poor",
+    unknown: "--mc-route-unknown",
   };
 
   // How far apart, in pixels, the way there and the way back run where they
@@ -391,7 +391,7 @@ window.meshctlMap = (() => {
   }
 
   // An arrowhead halfway along a stretch, pointing the way it went.
-  function arrow(stretch, fill) {
+  function arrow(stretch, fill, casing) {
     const middle = L.latLng(
       (stretch.from.lat + stretch.to.lat) / 2,
       (stretch.from.lng + stretch.to.lng) / 2,
@@ -399,13 +399,13 @@ window.meshctlMap = (() => {
     return L.marker(middle, {
       icon: L.divIcon({
         className: "",
-        // Ringed in white, as the nodes are, to stand out on any tile.
+        // Edged like the line it is on, to stand out on the map.
         html:
-          `<svg class="mc-arrow" viewBox="0 0 18 18" style="transform:rotate(${stretch.angle}deg)">` +
-          `<path d="M3 3 L16 9 L3 15 L7 9 Z" fill="${fill}" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>` +
+          `<svg class="mc-arrow" viewBox="0 0 22 22" style="transform:rotate(${stretch.angle}deg)">` +
+          `<path d="M4 4 L19 11 L4 18 L8.5 11 Z" fill="${fill}" stroke="${casing}" stroke-width="2.5" stroke-linejoin="round" paint-order="stroke"/>` +
           `</svg>`,
-        iconSize: [18, 18],
-        iconAnchor: [9, 9],
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
       }),
       interactive: false,
       keyboard: false,
@@ -419,9 +419,20 @@ window.meshctlMap = (() => {
     routeLayer = null;
     if (!map || !shownRoute) return;
     routeLayer = L.layerGroup();
+    // A wider band under each line, of the colour that stands apart from the
+    // tiles (light on a dark map, dark on a light one), as road maps edge
+    // their roads: the route reads on any terrain.
+    const casing = color("--mc-route-casing");
     const draw = (segment, back) => {
       const stretch = keepRight(segment.from, segment.to);
-      const fill = color(QUALITY_COLOR[segment.quality] || "--mc-muted");
+      const fill = color(QUALITY_COLOR[segment.quality] || "--mc-route-unknown");
+      L.polyline([stretch.from, stretch.to], {
+        color: casing,
+        weight: 7,
+        opacity: 0.85,
+        lineCap: "round",
+        interactive: false,
+      }).addTo(routeLayer);
       L.polyline([stretch.from, stretch.to], {
         // The colour says how the hop was heard: grey across nodes that
         // could not be placed, as then it cannot be told.
@@ -433,7 +444,7 @@ window.meshctlMap = (() => {
         dashArray: back ? "8 6" : null,
         interactive: false,
       }).addTo(routeLayer);
-      arrow(stretch, fill).addTo(routeLayer);
+      arrow(stretch, fill, casing).addTo(routeLayer);
     };
     shownRoute.towards.forEach((segment) => draw(segment, false));
     shownRoute.back.forEach((segment) => draw(segment, true));
