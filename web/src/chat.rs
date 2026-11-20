@@ -10,9 +10,7 @@ use crate::mesh::ago;
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{
-    BROADCAST, Conversation, ErrorCode, LinkState, Message, MessageStatus, NewMessage, Peer,
-};
+use meshctl_api::{BROADCAST, ErrorCode, LinkState, Message, MessageStatus, NewMessage, Peer};
 
 /// The longest text the daemon takes, in bytes.
 const MAX_TEXT_BYTES: usize = 200;
@@ -47,7 +45,7 @@ fn preset_name(preset: &str) -> String {
 }
 
 /// What a conversation is called.
-fn title(live: Live, peer: Peer) -> String {
+pub fn title(live: Live, peer: Peer) -> String {
     match peer {
         Peer::Channel { channel } => {
             let named = live.channels.with(|channels| {
@@ -74,7 +72,7 @@ fn title(live: Live, peer: Peer) -> String {
     }
 }
 
-fn node_name(live: Live, num: u32) -> String {
+pub fn node_name(live: Live, num: u32) -> String {
     live.nodes.with(|nodes| {
         nodes
             .get(&num)
@@ -83,7 +81,7 @@ fn node_name(live: Live, num: u32) -> String {
     })
 }
 
-fn short_name(live: Live, num: u32) -> String {
+pub fn short_name(live: Live, num: u32) -> String {
     live.nodes.with(|nodes| {
         nodes
             .get(&num)
@@ -92,73 +90,9 @@ fn short_name(live: Live, num: u32) -> String {
     })
 }
 
+/// The open conversation. Which ones there are is in the sidebar.
 #[component]
 pub fn ChatView() -> impl IntoView {
-    view! {
-        <section class="card chat">
-            <ConversationList />
-            <Thread />
-        </section>
-    }
-}
-
-#[component]
-fn ConversationList() -> impl IntoView {
-    let live = expect_context::<Live>();
-    let conversations = move || live.conversations.get();
-    view! {
-        <ul class="conversations">
-            <For each=conversations key=|c| (c.peer, c.last.as_ref().map(|m| m.id)) let:conversation>
-                <ConversationItem conversation />
-            </For>
-        </ul>
-    }
-}
-
-#[component]
-fn ConversationItem(conversation: Conversation) -> impl IntoView {
-    let live = expect_context::<Live>();
-    let peer = conversation.peer;
-    let class = move || {
-        if live.open.get() == Some(peer) {
-            "active"
-        } else {
-            ""
-        }
-    };
-    let last = conversation.last.clone();
-    let preview = last.as_ref().map(|m| {
-        if matches!(peer, Peer::Channel { .. }) && !m.outgoing {
-            let who = match (&m.sender_name, m.from) {
-                (Some(name), 0) => name.clone(),
-                _ => {
-                    let short = short_name(live, m.from);
-                    if short.is_empty() {
-                        node_name(live, m.from)
-                    } else {
-                        short
-                    }
-                }
-            };
-            format!("{who}: {}", m.text)
-        } else {
-            m.text.clone()
-        }
-    });
-    let at = last.map(|m| u32::try_from(m.at).unwrap_or_default());
-    view! {
-        <li class=class>
-            <button on:click=move |_| live.open_chat(peer)>
-                <span class="title">{move || title(live, peer)}</span>
-                <span class="when dim">{move || at.map(|at| ago(live.now.get(), at))}</span>
-                <span class="preview dim">{preview}</span>
-            </button>
-        </li>
-    }
-}
-
-#[component]
-fn Thread() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let list = NodeRef::<html::Div>::new();
@@ -176,7 +110,6 @@ fn Thread() -> impl IntoView {
             {move || match live.open.get() {
                 None => view! { <p class="empty dim">{t!(i18n, chat_pick)}</p> }.into_any(),
                 Some(peer) => view! {
-                    <h2>{move || title(live, peer)}</h2>
                     <div class="messages" node_ref=list>
                         <For
                             each=move || live.thread.get()

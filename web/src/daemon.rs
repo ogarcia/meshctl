@@ -11,8 +11,8 @@ use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
     API_V1, Channel, Conversation, Error, ErrorCode, Message, NewMessage, NewTraceroute, Node,
-    NodeSettings, NodeSettingsChange, Peer, Radio, RadioId, RadioSettings, SectionChange,
-    SettingsApplied, SettingsSection, Status, TOKEN_HEADER, Traceroute,
+    NodeSettings, NodeSettingsChange, Peer, Preferences, Radio, RadioId, RadioSettings,
+    SectionChange, SettingsApplied, SettingsSection, Status, TOKEN_HEADER, Traceroute,
 };
 use serde::de::DeserializeOwned;
 
@@ -170,6 +170,18 @@ pub async fn traceroutes(radio: RadioId) -> Result<Vec<Traceroute>, Failure> {
 pub async fn trace(radio: RadioId, node: u32) -> Result<Traceroute, Failure> {
     let request = with_token(Request::post(&url(&format!("/radios/{radio}/traceroutes"))))
         .json(&NewTraceroute { node })
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+pub async fn preferences() -> Result<Preferences, Failure> {
+    get("/preferences").await
+}
+
+pub async fn save_preferences(preferences: &Preferences) -> Result<Preferences, Failure> {
+    let request = with_token(Request::put(&url("/preferences")))
+        .json(preferences)
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
