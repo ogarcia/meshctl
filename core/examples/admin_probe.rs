@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             data.request_id,
             packet.from,
             admin.session_passkey.len(),
-            &what[..what.len().min(160)],
+            &what[..what.len().min(400)],
         );
     }
     Ok(())

@@ -79,6 +79,9 @@ pub struct Mesh {
     nonce: Arc<AtomicU32>,
     /// Admin requests waiting for their answer, by packet id.
     waiting: Arc<Mutex<HashMap<u32, oneshot::Sender<Vec<u8>>>>>,
+    /// When the last sync started, which the radio has [`SYNC_TIMEOUT`] to
+    /// answer from.
+    sync_started: Arc<Mutex<Instant>>,
 }
 
 /// A change to the radio's own settings, as the protobufs carry them, each
@@ -123,6 +126,7 @@ impl Mesh {
             next_id: Arc::new(AtomicU32::new(nonce())),
             nonce: Arc::new(AtomicU32::new(0)),
             waiting: Arc::default(),
+            sync_started: Arc::new(Mutex::new(Instant::now())),
         }
     }
 
@@ -335,11 +339,20 @@ impl Mesh {
     fn resync(&self) -> Result<(), AdminError> {
         let nonce = nonce();
         self.nonce.store(nonce, Ordering::Relaxed);
+        self.mark_sync_start();
         self.set_link(LinkState::Syncing);
         let message = ToRadio {
             payload_variant: Some(to_radio::PayloadVariant::WantConfigId(nonce)),
         };
         self.send_raw(message.encode_to_vec())
+    }
+
+    fn mark_sync_start(&self) {
+        *self.sync_started.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
+    }
+
+    fn sync_started(&self) -> Instant {
+        *self.sync_started.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn next_packet_id(&self) -> u32 {
@@ -413,13 +426,12 @@ impl Mesh {
     async fn exchange(&self, mut link: Link) -> &'static str {
         let nonce = nonce();
         self.nonce.store(nonce, Ordering::Relaxed);
+        self.mark_sync_start();
         self.set_link(LinkState::Syncing);
         if send(&link, to_radio::PayloadVariant::WantConfigId(nonce)).is_err() {
             return "link closed";
         }
 
-        let sync_deadline = tokio::time::sleep(SYNC_TIMEOUT);
-        tokio::pin!(sync_deadline);
         let mut heartbeat =
             tokio::time::interval_at(Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
 
@@ -453,7 +465,11 @@ impl Mesh {
                         return "link closed";
                     }
                 }
-                () = &mut sync_deadline, if self.read(|s| s.link) == LinkState::Syncing => {
+                // From when the last sync started: on connecting, or a resync
+                // later in the same session.
+                () = tokio::time::sleep_until(self.sync_started() + SYNC_TIMEOUT),
+                    if self.read(|s| s.link) == LinkState::Syncing =>
+                {
                     return "the radio did not send its configuration";
                 }
             }
@@ -754,6 +770,50 @@ mod tests {
             admin_message::PayloadVariant::CommitEditSettings(true)
         ));
         assert_eq!(changing.await.unwrap(), Ok(()));
+        task.abort();
+    }
+
+    /// What the radio is asked for next, skipping heartbeats.
+    async fn next_request(radio: &mut FakeRadio) -> to_radio::PayloadVariant {
+        loop {
+            match radio.receive().await.payload_variant {
+                Some(to_radio::PayloadVariant::Heartbeat(_)) => {}
+                Some(other) => return other,
+                None => panic!("an empty ToRadio"),
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_resync_late_in_a_session_has_its_own_time() {
+        let (mesh, mut radio, task) = connected().await;
+        let mut events = mesh.subscribe();
+        let to_radio::PayloadVariant::WantConfigId(nonce) = next_request(&mut radio).await else {
+            panic!("the configuration first");
+        };
+        radio
+            .send(from_radio::PayloadVariant::ConfigCompleteId(nonce))
+            .await;
+        assert_eq!(next_event(&mut events).await, Event::Link(LinkState::Ready));
+
+        // Long after the first sync's deadline would have passed.
+        tokio::time::advance(SYNC_TIMEOUT * 2).await;
+        mesh.resync().unwrap();
+        let to_radio::PayloadVariant::WantConfigId(again) = next_request(&mut radio).await else {
+            panic!("the configuration again");
+        };
+        assert_ne!(again, nonce);
+        radio
+            .send(from_radio::PayloadVariant::ConfigCompleteId(again))
+            .await;
+        // In sync again, without having dropped the link on the way.
+        loop {
+            match next_event(&mut events).await {
+                Event::Link(LinkState::Ready) => break,
+                Event::Link(LinkState::Disconnected) => panic!("the link dropped"),
+                _ => {}
+            }
+        }
         task.abort();
     }
 
