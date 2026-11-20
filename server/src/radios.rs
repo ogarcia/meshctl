@@ -10,7 +10,7 @@ use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
     Conversation, ErrorCode, Hop, LinkState, Message, MessageId, MessageStatus, NewMessage,
-    NodeSettings, NodeSettingsChange, Peer, Radio, RadioId, RadioKind, RadioSettings,
+    NodeSettings, NodeSettingsChange, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
     SettingsApplied, SettingsSection, Status, Traceroute,
 };
 use meshctl_core::link::Transport;
@@ -48,6 +48,8 @@ pub enum Change {
     },
     /// A traceroute sent, or what became of it.
     Traceroute(RadioId, Traceroute),
+    /// The interface's preferences changed.
+    Preferences(Preferences),
     /// Events of a radio were lost on their way here.
     Lagged,
 }
@@ -601,6 +603,18 @@ impl Radios {
                 tracing::warn!(radio = id, error = format_args!("{err:#}"), "cannot store");
             }
         }
+    }
+
+    /// The interface's preferences.
+    pub async fn preferences(&self) -> Result<Preferences> {
+        self.store.preferences().await
+    }
+
+    /// Keeps the interface's preferences, and tells every client.
+    pub async fn set_preferences(&self, preferences: Preferences) -> Result<()> {
+        self.store.set_preferences(&preferences).await?;
+        let _ = self.changes.send(Change::Preferences(preferences));
+        Ok(())
     }
 
     /// Resolves once [`Self::stop`] has been called, for whoever follows the

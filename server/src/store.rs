@@ -6,8 +6,8 @@
 
 use anyhow::{Context, Result};
 use meshctl_api::{
-    BROADCAST, Conversation, Hop, Message, MessageId, MessageStatus, Peer, RadioId, RadioKind,
-    RadioSettings, Traceroute, TracerouteId, TracerouteStatus,
+    BROADCAST, Conversation, Hop, Message, MessageId, MessageStatus, Peer, Preferences, RadioId,
+    RadioKind, RadioSettings, Traceroute, TracerouteId, TracerouteStatus,
 };
 use meshctl_core::mesh::{LocalNode, Node, Position, User};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
@@ -225,6 +225,33 @@ impl Store {
     /// Closes the database, leaving only its file behind.
     pub async fn close(&self) {
         self.pool.close().await;
+    }
+
+    /// The interface's preferences, or the defaults when none were set. A row
+    /// that does not read, written by a newer meshctl, counts as none.
+    pub async fn preferences(&self) -> Result<Preferences> {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT value FROM preference WHERE key = 'interface'")
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row
+            .and_then(|(value,)| {
+                serde_json::from_str(&value)
+                    .inspect_err(|err| tracing::warn!(%err, "ignoring the stored preferences"))
+                    .ok()
+            })
+            .unwrap_or_default())
+    }
+
+    pub async fn set_preferences(&self, preferences: &Preferences) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO preference (key, value) VALUES ('interface', ?) \
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(serde_json::to_string(preferences)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn radios(&self) -> Result<Vec<RadioRecord>> {
@@ -813,6 +840,28 @@ mod tests {
             address: "192.168.1.10:4403".into(),
             enabled: true,
         }
+    }
+
+    #[tokio::test]
+    async fn preferences_are_kept() {
+        let store = Store::in_memory().await;
+        assert_eq!(store.preferences().await.unwrap(), Preferences::default());
+
+        let dark = Preferences {
+            theme: meshctl_api::Theme::Dark,
+            language: Some(meshctl_api::Language::Es),
+            ..Default::default()
+        };
+        store.set_preferences(&dark).await.unwrap();
+        store.set_preferences(&dark).await.unwrap();
+        assert_eq!(store.preferences().await.unwrap(), dark);
+
+        // A newer meshctl's, which this one cannot read.
+        sqlx::query("UPDATE preference SET value = '{\"theme\":\"sepia\"}'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(store.preferences().await.unwrap(), Preferences::default());
     }
 
     #[tokio::test]

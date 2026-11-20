@@ -17,6 +17,7 @@ mod auth;
 pub mod convert;
 mod events;
 mod messages;
+mod preferences;
 mod radios;
 mod settings;
 mod traceroutes;
@@ -68,6 +69,7 @@ const SCALAR_HTML: &str = r#"<!doctype html>
         (name = "chat", description = "What each radio hears and says"),
         (name = "traceroutes", description = "The routes from each radio to other nodes"),
         (name = "settings", description = "Each radio's own settings"),
+        (name = "preferences", description = "How the interface looks, for every browser"),
         (name = "events", description = "What changes, as it changes"),
     ),
     components(schemas(
@@ -95,6 +97,7 @@ pub fn router(state: AppState) -> Router {
         .merge(messages::router())
         .merge(traceroutes::router())
         .merge(settings::router())
+        .merge(preferences::router())
         .layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
             auth::check,

@@ -622,9 +622,84 @@ pub struct SettingsApplied {
     pub reboots: bool,
 }
 
+/// How the interface looks and speaks, the same in every browser that opens
+/// it: kept by the daemon, not by each browser.
+///
+/// Whatever is missing when it is written takes its default, so a client that
+/// does not know of a newer preference leaves it as it was meant to be.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default)]
+pub struct Preferences {
+    pub theme: Theme,
+    pub accent: Accent,
+    /// The maps' own theme, which may differ from the rest.
+    pub map_theme: MapTheme,
+    /// The interface's language; none for the browser's.
+    pub language: Option<Language>,
+}
+
+/// Light or dark.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    /// Whichever the system of each browser prefers.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// The colour that marks what is active and what can be done.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Accent {
+    #[default]
+    Amber,
+}
+
+/// The maps' theme.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MapTheme {
+    /// The same as the rest of the interface.
+    #[default]
+    Page,
+    Light,
+    Dark,
+}
+
+/// A language the interface speaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Language {
+    En,
+    Es,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preferences_fill_in_what_is_missing() {
+        let preferences: Preferences = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(
+            preferences,
+            Preferences {
+                theme: Theme::Dark,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            serde_json::to_string(&Preferences::default()).unwrap(),
+            r#"{"theme":"system","accent":"amber","map_theme":"page","language":null}"#
+        );
+    }
 
     #[test]
     fn errors_travel_as_codes() {
