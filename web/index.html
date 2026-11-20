@@ -361,7 +361,7 @@
           position: fixed;
           top: 0;
           bottom: 0;
-          z-index: 20;
+          z-index: 2000;
         }
         .app.menu-open .rail { left: 0; width: 72px; }
         .app.menu-open .sidebar {
@@ -369,11 +369,15 @@
           width: min(264px, calc(100vw - 72px));
           box-shadow: var(--mc-shadow);
         }
-        .app.menu-open .page::after {
-          content: "";
+        /* Behind the bars and over the page: a touch on it closes them. */
+        .app.menu-open .menu-backdrop {
+          display: block;
           position: fixed;
           inset: 0;
-          z-index: 10;
+          z-index: 1999;
+          border: 0;
+          border-radius: 0;
+          padding: 0;
           background: rgba(0, 0, 0, 0.4);
         }
         .menu-toggle {
@@ -576,7 +580,10 @@
       .hop.unknown { color: var(--mc-muted); }
 
       main:has(> .map-page) { display: flex; padding: 0; overflow: hidden; }
-      .map-page { position: relative; flex: 1; min-width: 0; min-height: 0; }
+      /* Leaflet's panes and controls go up to z-index 1000: kept to the map,
+         so that they never come over the rest of the page. */
+      .map-page { position: relative; flex: 1; min-width: 0; min-height: 0; isolation: isolate; }
+      .menu-backdrop { display: none; }
       .map { position: absolute; inset: 0; background: var(--mc-map); }
       .map-legend {
         position: absolute;

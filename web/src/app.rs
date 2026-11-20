@@ -562,6 +562,14 @@ fn Shell() -> impl IntoView {
         <div class=class class:on-map=move || live.page.get() == Page::Map>
             <Rail />
             <Sidebar />
+            // Over the page while the bars are open on a narrow screen: a touch
+            // anywhere off them closes them.
+            <button
+                class="menu-backdrop"
+                tabindex="-1"
+                aria-hidden="true"
+                on:click=move |_| live.menu.set(false)
+            ></button>
             <div class="page">
                 <Topbar />
                 <main>
