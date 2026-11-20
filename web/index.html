@@ -503,6 +503,43 @@
       .hop.poor { color: var(--mc-danger); }
       .hop.unknown { color: var(--mc-muted); }
 
+      .packets { padding: 0; overflow: hidden; }
+      .packets > p { margin: 0; padding: 14px 16px; }
+      .packet-list { list-style: none; margin: 0; padding: 0; }
+      .packet { border-bottom: 1px solid var(--mc-border); }
+      .packet-line {
+        display: grid;
+        grid-template-columns: 64px 128px minmax(140px, 1fr) minmax(0, 2fr) auto;
+        gap: 12px;
+        align-items: baseline;
+        width: 100%;
+        padding: 8px 16px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        text-align: left;
+      }
+      .packet-line:disabled { opacity: 1; cursor: default; }
+      .packet-line:hover, .packet.open .packet-line { background: var(--mc-surface-2); }
+      .packet-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .packet .port { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--mc-primary); }
+      .packet .reception { font-size: 11px; }
+      .packet .payload {
+        margin: 0;
+        padding: 8px 16px 14px 92px;
+        background: var(--mc-surface-2);
+        font-size: 12px;
+        white-space: pre-wrap;
+        overflow-x: auto;
+      }
+      .packets .older { margin: 12px 16px; }
+      @media (max-width: 760px) {
+        .packet-line { grid-template-columns: 64px minmax(0, 1fr) auto; gap: 4px 10px; }
+        .packet .route { grid-column: 2 / -1; grid-row: 2; }
+        .packet .summary { grid-column: 1 / -1; grid-row: 3; }
+        .packet .payload { padding-left: 16px; }
+      }
+
       .thread { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
       .thread .empty { margin: auto; }
       .messages {

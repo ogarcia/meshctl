@@ -81,12 +81,14 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
         Change::Mesh(
             _,
             mesh::Event::Message(_)
+            | mesh::Event::Packet(_)
             | mesh::Event::Ack(_)
             | mesh::Event::Traceroute(_)
             | mesh::Event::AdminAnswer { .. },
         ) => return None,
         Change::Traceroute(radio, traceroute) => ServerMessage::Traceroute { radio, traceroute },
         Change::Message(radio, message) => ServerMessage::Message { radio, message },
+        Change::Packet(radio, packet) => ServerMessage::Packet { radio, packet },
         Change::Preferences(preferences) => ServerMessage::Preferences { preferences },
         Change::MessageStatus {
             radio,

@@ -11,8 +11,8 @@ use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
     API_V1, Channel, Conversation, Error, ErrorCode, Message, NewMessage, NewTraceroute, Node,
-    NodeSettings, NodeSettingsChange, Peer, Preferences, Radio, RadioId, RadioSettings,
-    SectionChange, SettingsApplied, SettingsSection, Status, TOKEN_HEADER, Traceroute,
+    NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioSettings,
+    SectionChange, SettingsApplied, SettingsSection, SightingId, Status, TOKEN_HEADER, Traceroute,
 };
 use serde::de::DeserializeOwned;
 
@@ -173,6 +173,12 @@ pub async fn trace(radio: RadioId, node: u32) -> Result<Traceroute, Failure> {
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// The packets a radio heard, the newest first: before one, for older pages.
+pub async fn packets(radio: RadioId, before: Option<SightingId>) -> Result<Vec<Packet>, Failure> {
+    let before = before.map_or_else(String::new, |id| format!("&before={id}"));
+    get(&format!("/radios/{radio}/packets?limit=200{before}")).await
 }
 
 pub async fn preferences() -> Result<Preferences, Failure> {

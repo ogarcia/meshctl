@@ -123,5 +123,9 @@
   "map_light": "Always light",
   "map_dark": "Always dark",
   "prefs_language": "Language",
-  "language_browser": "As the browser"
+  "language_browser": "As the browser",
+  "page_packets": "Live",
+  "packets_empty": "Nothing heard yet: packets show here as the radio hears them.",
+  "packets_older": "Older",
+  "packets_encrypted": "Encrypted"
 }

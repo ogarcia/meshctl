@@ -113,6 +113,10 @@ pub enum Event {
     /// read before is out of date.
     Synced,
     Node(Node),
+    /// A packet the radio heard, whatever it carries: what a log of the mesh
+    /// keeps. What it means, a message or an answer, comes as its own event
+    /// besides.
+    Packet(Heard),
     /// A text message heard. Messages are not kept here: whoever wants them,
     /// keeps them.
     Message(TextMessage),
@@ -190,6 +194,80 @@ pub struct TextMessage {
     pub rssi: Option<i32>,
     pub hops_away: Option<u32>,
     pub via_mqtt: bool,
+}
+
+/// A packet as the radio heard it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Heard {
+    /// The packet's id, which with `from` names it across the mesh.
+    pub packet_id: u32,
+    pub from: u32,
+    /// [`BROADCAST`] for everyone.
+    pub to: u32,
+    /// The channel's slot on the radio that heard it.
+    pub channel: u32,
+    /// What it carries, as the protobufs number it; none when the radio could
+    /// not decrypt it, and then `payload` is still encrypted.
+    pub portnum: Option<i32>,
+    pub payload: Vec<u8>,
+    /// The packet it answers, for an answer.
+    pub request_id: Option<u32>,
+    /// The packet it replies to, for a message that does.
+    pub reply_id: Option<u32>,
+    /// Whether whoever sent it asked for an answer.
+    pub want_response: bool,
+    /// Whether it was encrypted to the radio's own key, not a channel's.
+    pub pki: bool,
+    /// When it was received, in seconds since the epoch.
+    pub at: u32,
+    pub snr: Option<f32>,
+    pub rssi: Option<i32>,
+    pub hop_limit: u32,
+    /// How many hops it was sent with; 0 when the firmware that sent it is
+    /// too old to say.
+    pub hop_start: u32,
+    /// The last byte of the node that relayed it last, when the firmware says.
+    pub relay_node: Option<u32>,
+    pub via_mqtt: bool,
+}
+
+impl Heard {
+    fn from(packet: &pb::MeshPacket, now: u32) -> Self {
+        let (portnum, payload, request_id, reply_id, want_response) = match &packet.payload_variant
+        {
+            Some(mesh_packet::PayloadVariant::Decoded(data)) => (
+                Some(data.portnum),
+                data.payload.clone(),
+                (data.request_id != 0).then_some(data.request_id),
+                (data.reply_id != 0).then_some(data.reply_id),
+                data.want_response,
+            ),
+            Some(mesh_packet::PayloadVariant::Encrypted(bytes)) => {
+                (None, bytes.clone(), None, None, false)
+            }
+            None => (None, Vec::new(), None, None, false),
+        };
+        let reception = !packet.via_mqtt;
+        Self {
+            packet_id: packet.id,
+            from: packet.from,
+            to: packet.to,
+            channel: packet.channel,
+            portnum,
+            payload,
+            request_id,
+            reply_id,
+            want_response,
+            pki: packet.pki_encrypted,
+            at: packet.rx_time.filter(|t| *t > 0).unwrap_or(now),
+            snr: reception.then_some(packet.rx_snr).filter(|s| *s != 0.0),
+            rssi: packet.rx_rssi.filter(|r| reception && *r != 0),
+            hop_limit: packet.hop_limit,
+            hop_start: packet.hop_start,
+            relay_node: (packet.relay_node != 0).then_some(packet.relay_node),
+            via_mqtt: packet.via_mqtt,
+        }
+    }
 }
 
 /// What became of a packet sent with want_ack.
@@ -366,12 +444,14 @@ impl MeshState {
             Some(V::Packet(packet)) => {
                 // What the packet says counts even while syncing: a radio, or a
                 // tasticsplitter, replays the messages a client missed then.
+                let heard = Event::Packet(Heard::from(&packet, now));
                 let said = said(&packet, now);
                 let node = self.packet(packet, now);
-                let mut events: Vec<Event> = said.into_iter().collect();
+                let mut events = vec![heard];
                 if !quiet {
-                    events.insert(0, Event::Node(node));
+                    events.push(Event::Node(node));
                 }
+                events.extend(said);
                 return events;
             }
             _ => None,
@@ -621,7 +701,8 @@ mod tests {
         assert_eq!(node.snr, Some(6.5));
         assert_eq!(node.rssi, Some(-90));
         assert_eq!(node.hops_away, Some(2));
-        assert_eq!(events.first(), Some(&Event::Node(node.clone())));
+        assert!(matches!(events.first(), Some(Event::Packet(h)) if h.from == 0x1234_5678));
+        assert_eq!(events.get(1), Some(&Event::Node(node.clone())));
     }
 
     #[test]
@@ -788,7 +869,10 @@ mod tests {
         assert_eq!(message.channel, 4);
         assert_eq!(message.reply_id, Some(41));
         assert_eq!(message.hops_away, Some(2));
-        assert!(matches!(events.first(), Some(Event::Node(_))));
+        assert!(matches!(
+            events.as_slice(),
+            [Event::Packet(_), Event::Node(_), Event::Message(_)]
+        ));
     }
 
     #[test]
@@ -801,7 +885,10 @@ mod tests {
             from_radio(V::Packet(packet(7, PortNum::TextMessageApp, "hola".into()))),
             1,
         );
-        assert!(matches!(events.as_slice(), [Event::Message(_)]));
+        assert!(matches!(
+            events.as_slice(),
+            [Event::Packet(_), Event::Message(_)]
+        ));
     }
 
     fn routing(from: u32, request_id: u32, error: pb::routing::Error) -> pb::MeshPacket {

@@ -10,8 +10,8 @@ use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
     Conversation, ErrorCode, Hop, LinkState, Message, MessageId, MessageStatus, NewMessage,
-    NodeSettings, NodeSettingsChange, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
-    SettingsApplied, SettingsSection, Status, Traceroute,
+    NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioKind,
+    RadioSettings, SettingsApplied, SettingsSection, SightingId, Status, Traceroute,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -48,6 +48,8 @@ pub enum Change {
     },
     /// A traceroute sent, or what became of it.
     Traceroute(RadioId, Traceroute),
+    /// A packet a radio heard, as kept.
+    Packet(RadioId, Packet),
     /// The interface's preferences changed.
     Preferences(Preferences),
     /// Events of a radio were lost on their way here.
@@ -526,6 +528,22 @@ impl Radios {
         Ok(Some(self.store.traceroutes(id, node, limit).await?))
     }
 
+    /// The packets a radio heard, the newest first, or `None` if there is no
+    /// such radio.
+    pub async fn packets(
+        &self,
+        id: RadioId,
+        before: Option<SightingId>,
+        node: Option<u32>,
+        limit: u32,
+    ) -> Result<Option<Vec<Packet>>> {
+        if self.mesh(id).is_none() {
+            return Ok(None);
+        }
+        let rows = self.store.packets(id, before, node, limit).await?;
+        Ok(Some(rows.into_iter().map(crate::packets::packet).collect()))
+    }
+
     pub async fn list(&self) -> Result<Vec<Radio>> {
         let records = self.store.radios().await?;
         Ok(records
@@ -698,6 +716,7 @@ impl Radios {
                     // These go out once kept, from `persist`.
                     Ok(
                         mesh::Event::Message(_)
+                        | mesh::Event::Packet(_)
                         | mesh::Event::Ack(_)
                         | mesh::Event::Traceroute(_)
                         | mesh::Event::AdminAnswer { .. },
@@ -744,6 +763,14 @@ impl Radios {
                 };
                 let stored = match event {
                     Ok(mesh::Event::Node(node)) => store.save_node(id, &node).await,
+                    Ok(mesh::Event::Packet(heard)) => {
+                        store.add_packet(id, &heard).await.map(|kept| {
+                            if let Some(row) = kept {
+                                let packet = crate::packets::packet(row);
+                                let _ = changes.send(Change::Packet(id, packet));
+                            }
+                        })
+                    }
                     Ok(mesh::Event::Traceroute(answer)) => {
                         answer_traceroute(&store, &changes, id, &answer).await
                     }
@@ -800,6 +827,12 @@ impl Radios {
                 }
             }
         })
+    }
+
+    /// The store, for the tests to put things in it.
+    #[cfg(test)]
+    pub fn store(&self) -> &Store {
+        &self.store
     }
 
     /// Puts a mesh in place of a radio's link, for the tests.

@@ -7,9 +7,9 @@
 use anyhow::{Context, Result};
 use meshctl_api::{
     BROADCAST, Conversation, Hop, Message, MessageId, MessageStatus, Peer, Preferences, RadioId,
-    RadioKind, RadioSettings, Traceroute, TracerouteId, TracerouteStatus,
+    RadioKind, RadioSettings, SightingId, Traceroute, TracerouteId, TracerouteStatus,
 };
-use meshctl_core::mesh::{LocalNode, Node, Position, User};
+use meshctl_core::mesh::{Heard, LocalNode, Node, Position, User};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -401,6 +401,111 @@ impl Store {
 
     /// Keeps a message; `None` if it was already kept, as a message replayed
     /// on reconnecting is.
+    /// Keeps a packet a radio heard: the packet, once whoever hears it, and
+    /// this radio's hearing of it. `None` when this radio had already heard
+    /// it, as when it replays packets on reconnecting.
+    pub async fn add_packet(&self, radio: RadioId, heard: &Heard) -> Result<Option<PacketRow>> {
+        let mut tx = self.pool.begin().await?;
+        // A packet first heard encrypted is read in full once a radio that can
+        // decrypt it hears it too.
+        sqlx::query(
+            "INSERT INTO packet (packet_id, from_num, to_num, portnum, payload, request_id,
+                reply_id, want_response, pki, at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (from_num, packet_id) DO UPDATE SET
+                portnum = excluded.portnum,
+                payload = excluded.payload,
+                request_id = excluded.request_id,
+                reply_id = excluded.reply_id,
+                want_response = excluded.want_response
+            WHERE packet.portnum IS NULL AND excluded.portnum IS NOT NULL",
+        )
+        .bind(i64::from(heard.packet_id))
+        .bind(i64::from(heard.from))
+        .bind(i64::from(heard.to))
+        .bind(heard.portnum)
+        .bind(&heard.payload)
+        .bind(heard.request_id.map(i64::from))
+        .bind(heard.reply_id.map(i64::from))
+        .bind(heard.want_response)
+        .bind(heard.pki)
+        .bind(i64::from(heard.at))
+        .execute(&mut *tx)
+        .await?;
+        let (packet,): (i64,) =
+            sqlx::query_as("SELECT id FROM packet WHERE from_num = ? AND packet_id = ?")
+                .bind(i64::from(heard.from))
+                .bind(i64::from(heard.packet_id))
+                .fetch_one(&mut *tx)
+                .await?;
+        let seen = sqlx::query(
+            "INSERT INTO packet_seen (packet, radio_id, channel, at, snr, rssi, hop_limit,
+                hop_start, relay_node, via_mqtt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (packet, radio_id) DO NOTHING",
+        )
+        .bind(packet)
+        .bind(radio)
+        .bind(i64::from(heard.channel))
+        .bind(i64::from(heard.at))
+        .bind(heard.snr)
+        .bind(heard.rssi)
+        .bind(i64::from(heard.hop_limit))
+        .bind(i64::from(heard.hop_start))
+        .bind(heard.relay_node.map(i64::from))
+        .bind(heard.via_mqtt)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        if seen.rows_affected() == 0 {
+            return Ok(None);
+        }
+        let row = sqlx::query_as(
+            "SELECT s.id, p.packet_id, p.from_num, p.to_num, s.channel, p.portnum, p.payload,
+                p.request_id, p.reply_id, p.want_response, p.pki, s.at, s.snr, s.rssi,
+                s.hop_limit, s.hop_start, s.relay_node, s.via_mqtt
+            FROM packet_seen s JOIN packet p ON p.id = s.packet
+            WHERE s.id = ?",
+        )
+        .bind(seen.last_insert_rowid())
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// The packets a radio heard, the newest first: those heard before a
+    /// hearing, with `before`, and those from or to a node, with `node`.
+    pub async fn packets(
+        &self,
+        radio: RadioId,
+        before: Option<SightingId>,
+        node: Option<u32>,
+        limit: u32,
+    ) -> Result<Vec<PacketRow>> {
+        let node = node.map(i64::from);
+        let rows = sqlx::query_as(
+            "SELECT s.id, p.packet_id, p.from_num, p.to_num, s.channel, p.portnum, p.payload,
+                p.request_id, p.reply_id, p.want_response, p.pki, s.at, s.snr, s.rssi,
+                s.hop_limit, s.hop_start, s.relay_node, s.via_mqtt
+            FROM packet_seen s JOIN packet p ON p.id = s.packet
+            WHERE s.radio_id = ?
+                AND (? IS NULL OR s.id < ?)
+                AND (? IS NULL OR p.from_num = ? OR p.to_num = ?)
+            ORDER BY s.id DESC
+            LIMIT ?",
+        )
+        .bind(radio)
+        .bind(before)
+        .bind(before)
+        .bind(node)
+        .bind(node)
+        .bind(node)
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
     pub async fn add_message(
         &self,
         radio: RadioId,
@@ -755,6 +860,30 @@ pub struct NewMessageRow {
     pub snr: Option<f32>,
     pub rssi: Option<i32>,
     pub hops_away: Option<u32>,
+    pub via_mqtt: bool,
+}
+
+/// A packet as kept, with one radio's hearing of it.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PacketRow {
+    /// The hearing's id.
+    pub id: SightingId,
+    pub packet_id: i64,
+    pub from_num: i64,
+    pub to_num: i64,
+    pub channel: i64,
+    pub portnum: Option<i32>,
+    pub payload: Vec<u8>,
+    pub request_id: Option<i64>,
+    pub reply_id: Option<i64>,
+    pub want_response: bool,
+    pub pki: bool,
+    pub at: i64,
+    pub snr: Option<f32>,
+    pub rssi: Option<i32>,
+    pub hop_limit: i64,
+    pub hop_start: i64,
+    pub relay_node: Option<i64>,
     pub via_mqtt: bool,
 }
 

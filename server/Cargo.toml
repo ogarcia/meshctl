@@ -23,7 +23,7 @@ meshctl-api = { workspace = true, features = ["openapi"] }
 meshctl-core.workspace = true
 meshctl-proto.workspace = true
 prost.workspace = true
-prost-reflect = "0.16"
+prost-reflect = { version = "0.16", features = ["serde"] }
 # Fresh channel keys, when one is asked for.
 getrandom = "0.4"
 # The interface trunk builds into web/dist. When it has not been built the

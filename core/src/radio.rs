@@ -693,6 +693,10 @@ mod tests {
                 ..Default::default()
             }))
             .await;
+        let Event::Packet(heard) = next_event(&mut events).await else {
+            panic!("the packet, first");
+        };
+        assert_eq!(heard.from, 3);
         let Event::Node(node) = next_event(&mut events).await else {
             panic!("a node event");
         };

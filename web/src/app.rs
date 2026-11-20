@@ -14,6 +14,7 @@ use crate::chat::{ChatView, peer_of, short_name, title};
 use crate::daemon::{self, Events, Failure};
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
 use crate::mesh::{MeshView, ago};
+use crate::packets::{KEPT, PacketsView};
 use crate::preferences::PreferencesView;
 use crate::radios::{RadioForm, RadiosView};
 use crate::settings::SettingsView;
@@ -23,8 +24,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
 use meshctl_api::{
-    Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, Node, Peer, Preferences,
-    Radio, RadioId, RadioKind, Status, Theme, Traceroute,
+    Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, Node, Packet, Peer,
+    Preferences, Radio, RadioId, RadioKind, Status, Theme, Traceroute,
 };
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -49,6 +50,8 @@ pub enum Daemon {
 pub enum Page {
     /// The selected radio's nodes.
     Nodes,
+    /// What the selected radio hears, as it hears it.
+    Packets,
     /// The open conversation.
     Chat,
     Traces,
@@ -92,6 +95,8 @@ pub struct Live {
     pub thread: RwSignal<Vec<Message>>,
     /// Of the selected radio, the newest first.
     pub traceroutes: RwSignal<Vec<Traceroute>>,
+    /// What the selected radio heard, the newest first.
+    pub packets: RwSignal<Vec<Packet>>,
     /// Why the last traceroute asked for was not sent.
     pub trace_error: RwSignal<Option<Failure>>,
     /// Bumped each time the selected radio syncs, for what is read only then.
@@ -116,6 +121,7 @@ impl Live {
             open: RwSignal::new(None),
             thread: RwSignal::new(Vec::new()),
             traceroutes: RwSignal::new(Vec::new()),
+            packets: RwSignal::new(Vec::new()),
             trace_error: RwSignal::new(None),
             synced: RwSignal::new(0),
             now: RwSignal::new(now()),
@@ -214,6 +220,7 @@ impl Live {
         let channels = daemon::channels(radio).await?;
         let conversations = daemon::conversations(radio).await?;
         let traceroutes = daemon::traceroutes(radio).await?;
+        let packets = daemon::packets(radio, None).await?;
         // The selection may have moved on while we were asking.
         if self.selected.get_untracked() == Some(radio) {
             self.status.set(Some(status));
@@ -222,6 +229,7 @@ impl Live {
             self.channels.set(channels);
             self.conversations.set(conversations);
             self.traceroutes.set(traceroutes);
+            self.packets.set(packets);
         }
         self.refresh_thread().await
     }
@@ -342,6 +350,13 @@ impl Live {
                 }
                 ServerMessage::Traceroute { radio, traceroute } if self.is_selected(radio) => {
                     self.keep_traceroute(traceroute);
+                    Ok(())
+                }
+                ServerMessage::Packet { radio, packet } if self.is_selected(radio) => {
+                    self.packets.update(|packets| {
+                        packets.insert(0, packet);
+                        packets.truncate(KEPT);
+                    });
                     Ok(())
                 }
                 ServerMessage::Preferences { preferences } => {
@@ -499,6 +514,7 @@ fn Content() -> impl IntoView {
         (_, Some(_), Page::Nodes) => view! { <MeshView /> }.into_any(),
         (_, Some(_), Page::Chat) => view! { <ChatView /> }.into_any(),
         (_, Some(_), Page::Traces) => view! { <TracesView /> }.into_any(),
+        (_, Some(_), Page::Packets) => view! { <PacketsView /> }.into_any(),
         (_, Some(_), Page::RadioSettings) => view! { <SettingsView /> }.into_any(),
     }
 }
@@ -661,6 +677,7 @@ fn RadioSidebar() -> impl IntoView {
                 t!(i18n, nodes_title).into_any(),
                 Some(Signal::derive(move || live.nodes.with(BTreeMap::len))),
             ),
+            Page::Packets => (t!(i18n, page_packets).into_any(), None),
             _ => (t!(i18n, page_traces).into_any(), None),
         };
         view! {
@@ -694,6 +711,7 @@ fn RadioSidebar() -> impl IntoView {
             <RadioHead />
             <div class="sidebar-body">
                 {page_item(Page::Nodes)}
+                {page_item(Page::Packets)}
                 {page_item(Page::Traces)}
                 <h2>{t!(i18n, nav_channels)}</h2>
                 <For each=channels key=|peer| *peer let:peer>
@@ -832,6 +850,7 @@ fn Topbar() -> impl IntoView {
     let heading = move || match live.page.get() {
         Page::Nodes => view! { <h1>{t!(i18n, nodes_title)}</h1> }.into_any(),
         Page::Traces => view! { <h1>{t!(i18n, page_traces)}</h1> }.into_any(),
+        Page::Packets => view! { <h1>{t!(i18n, page_packets)}</h1> }.into_any(),
         Page::RadioSettings => view! {
             <h1>{t!(i18n, nav_radio_settings)}</h1>
         }

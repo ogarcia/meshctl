@@ -16,7 +16,8 @@
 //! [`ServerMessage::Lagged`], that everything is. Either way, read it again.
 
 use crate::{
-    ErrorCode, LinkState, Message, MessageId, MessageStatus, Node, Preferences, RadioId, Traceroute,
+    ErrorCode, LinkState, Message, MessageId, MessageStatus, Node, Packet, Preferences, RadioId,
+    Traceroute,
 };
 use serde::{Deserialize, Serialize};
 
@@ -68,6 +69,8 @@ pub enum ServerMessage {
         radio: RadioId,
         traceroute: Traceroute,
     },
+    /// A packet a radio heard.
+    Packet { radio: RadioId, packet: Packet },
     /// The interface's preferences changed, maybe from another browser.
     Preferences { preferences: Preferences },
 }

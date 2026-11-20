@@ -7,6 +7,7 @@ mod app;
 mod chat;
 mod daemon;
 mod mesh;
+mod packets;
 mod preferences;
 mod radios;
 mod sections;

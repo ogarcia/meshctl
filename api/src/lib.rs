@@ -622,6 +622,49 @@ pub struct SettingsApplied {
     pub reboots: bool,
 }
 
+/// One radio's hearing of a packet, in the order they are kept.
+pub type SightingId = i64;
+
+/// A packet a radio heard, whatever it carries: what the radio sees of the
+/// mesh, as it sees it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Packet {
+    /// This hearing of it, by which pages of them are read.
+    pub id: SightingId,
+    /// Its id on the mesh, which with `from` names it.
+    pub packet_id: u32,
+    pub from: u32,
+    /// 4294967295 for everyone.
+    pub to: u32,
+    /// The channel's slot on the radio.
+    pub channel: u32,
+    /// What it carries, as the protobufs name it, or its number when they
+    /// do not know it; none while it is encrypted.
+    #[cfg_attr(feature = "openapi", schema(example = "TEXT_MESSAGE_APP"))]
+    pub port: Option<String>,
+    /// What it carries, read: a text as a string, a protobuf as its JSON. None
+    /// when it cannot be read, or is kept back, as the radios' administration.
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub payload: Option<serde_json::Value>,
+    pub request_id: Option<u32>,
+    pub reply_id: Option<u32>,
+    pub want_response: bool,
+    /// Encrypted to the radio's own key, not a channel's.
+    pub pki: bool,
+    /// When it was received, in seconds since the epoch.
+    pub at: i64,
+    pub snr: Option<f32>,
+    pub rssi: Option<i32>,
+    /// How many hops it took, when it says.
+    pub hops_away: Option<u32>,
+    pub hop_limit: u32,
+    pub hop_start: u32,
+    /// The last byte of the node that relayed it last.
+    pub relay_node: Option<u32>,
+    pub via_mqtt: bool,
+}
+
 /// How the interface looks and speaks, the same in every browser that opens
 /// it: kept by the daemon, not by each browser.
 ///
