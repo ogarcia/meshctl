@@ -620,11 +620,11 @@
       .map-legend.folded .map-legend-toggle { width: 34px; height: 34px; }
       .map-legend.folded .map-legend-toggle svg { transform: rotate(180deg); }
       .map-legend span { display: flex; align-items: center; gap: 6px; }
-      .map-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--mc-node-far); }
-      .map-legend i.local { background: var(--mc-primary); }
-      .map-legend i.direct { background: var(--mc-node-direct); }
-      .map-legend i.near { background: var(--mc-node-near); }
-      .map-legend i.mid { background: var(--mc-node-mid); }
+      .map-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--mc-pin-far); }
+      .map-legend i.local { background: var(--mc-pin-local); }
+      .map-legend i.direct { background: var(--mc-pin-direct); }
+      .map-legend i.near { background: var(--mc-pin-near); }
+      .map-legend i.mid { background: var(--mc-pin-mid); }
       .map-empty {
         position: absolute;
         top: 12px;
@@ -647,13 +647,20 @@
       }
       /* A route's colours, by how each hop was heard, and the band edging its
          lines: for the map's own theme, which may not be the page's. Bright
-         and apart from the tiles' greens and the roads' reds and browns. */
+         and apart from the tiles' greens and the roads' reds and browns.
+         So the nodes' pins too, the --mc-pin-* colours: those of --mc-node-*
+         for the map's theme, as the sidebar's marks go by the page's. */
       :root {
         --mc-route-casing: #ffffff;
         --mc-route-good: #0ca678;
         --mc-route-fair: #f08c00;
         --mc-route-poor: #e03131;
         --mc-route-unknown: #495057;
+        --mc-pin-local: #9a5b00;
+        --mc-pin-direct: #099268;
+        --mc-pin-near: #1971c2;
+        --mc-pin-mid: #7048e8;
+        --mc-pin-far: #6c757d;
       }
       :root[data-map-theme="dark"],
       :root[data-theme="dark"]:not([data-map-theme="light"]) {
@@ -662,6 +669,11 @@
         --mc-route-fair: #ffd43b;
         --mc-route-poor: #ff8787;
         --mc-route-unknown: #dee2e6;
+        --mc-pin-local: #f0a63a;
+        --mc-pin-direct: #38d9a9;
+        --mc-pin-near: #4dabf7;
+        --mc-pin-mid: #b197fc;
+        --mc-pin-far: #a5aeb8;
       }
       @media (prefers-color-scheme: dark) {
         :root:not([data-theme="light"]):not([data-map-theme="light"]) {
@@ -670,6 +682,11 @@
           --mc-route-fair: #ffd43b;
           --mc-route-poor: #ff8787;
           --mc-route-unknown: #dee2e6;
+          --mc-pin-local: #f0a63a;
+          --mc-pin-direct: #38d9a9;
+          --mc-pin-near: #4dabf7;
+          --mc-pin-mid: #b197fc;
+          --mc-pin-far: #a5aeb8;
         }
       }
       .leaflet-container { font: inherit; }
@@ -737,11 +754,11 @@
       .leaflet-popup-content-wrapper { border: 1px solid var(--mc-border); border-radius: 12px; }
       .leaflet-container a.leaflet-popup-close-button { color: var(--mc-muted); }
       .leaflet-popup-content { margin: 12px 14px; font-size: 13px; line-height: 1.4; }
-      .mc-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--mc-node-far); }
-      .mc-dot.local, .mc-pin.local { background: var(--mc-primary); }
-      .mc-dot.direct, .mc-pin.direct { background: var(--mc-node-direct); }
-      .mc-dot.near, .mc-pin.near { background: var(--mc-node-near); }
-      .mc-dot.mid, .mc-pin.mid { background: var(--mc-node-mid); }
+      .mc-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--mc-pin-far); }
+      .mc-dot.local, .mc-pin.local { background: var(--mc-pin-local); }
+      .mc-dot.direct, .mc-pin.direct { background: var(--mc-pin-direct); }
+      .mc-dot.near, .mc-pin.near { background: var(--mc-pin-near); }
+      .mc-dot.mid, .mc-pin.mid { background: var(--mc-pin-mid); }
       /* A node on the map: a dot of its kind's colour, ringed in white and
          outlined in dark so that it stands out on light tiles and dark ones;
          with its role's icon on it when it has one. */
@@ -754,7 +771,7 @@
         box-sizing: border-box;
         border-radius: 50%;
         border: 2px solid #fff;
-        background: var(--mc-node-far);
+        background: var(--mc-pin-far);
         box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.35);
       }
       .mc-pin.selected { box-shadow: 0 0 0 3px var(--mc-text), 0 1px 6px rgba(0, 0, 0, 0.4); }
