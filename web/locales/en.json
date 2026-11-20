@@ -168,5 +168,7 @@
   "map_base": "Base station",
   "map_one_hop": "1 hop",
   "map_hops": "{n} hops",
-  "power_external": "External"
+  "power_external": "External",
+  "map_legend_hide": "Fold the legend away",
+  "map_legend_show": "Show the legend"
 }

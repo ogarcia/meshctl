@@ -376,6 +376,8 @@ pub fn MapView() -> impl IntoView {
     });
     on_cleanup(move || escape.remove());
 
+    let folded = move || live.preferences.with(|p| p.map_legend_folded);
+
     // The page's size changes with the window and with the bars.
     let resize = window_event_listener(leptos::ev::resize, move |_| map_resize());
     on_cleanup(move || resize.remove());
@@ -383,13 +385,43 @@ pub fn MapView() -> impl IntoView {
     view! {
         <div class="map-page">
             <div class="map" node_ref=element></div>
-            <div class="map-legend">
-                <span><i class="local"></i>{t!(i18n, map_local)}</span>
-                <span><i class="direct"></i>{t!(i18n, map_direct)}</span>
-                <span><i class="near"></i>{t!(i18n, map_near)}</span>
-                <span><i class="far"></i>{t!(i18n, map_far)}</span>
-                <span><b class="icon router"></b>{t!(i18n, map_router)}</span>
-                <span><b class="icon base"></b>{t!(i18n, map_base)}</span>
+            <div class="map-legend" class:folded=folded>
+                // Folds the legend away into itself, for more map, and back.
+                <button
+                    class="map-legend-toggle"
+                    aria-expanded=move || (!folded()).to_string()
+                    aria-label=move || {
+                        if folded() {
+                            t_string!(i18n, map_legend_show)
+                        } else {
+                            t_string!(i18n, map_legend_hide)
+                        }
+                    }
+                    title=move || {
+                        if folded() {
+                            t_string!(i18n, map_legend_show)
+                        } else {
+                            t_string!(i18n, map_legend_hide)
+                        }
+                    }
+                    on:click=move |_| {
+                        let mut preferences = live.preferences.get_untracked();
+                        preferences.map_legend_folded = !preferences.map_legend_folded;
+                        live.prefer(preferences);
+                    }
+                >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M15 6l-6 6l6 6"></path>
+                    </svg>
+                </button>
+                <div class="map-legend-items">
+                    <span><i class="local"></i>{t!(i18n, map_local)}</span>
+                    <span><i class="direct"></i>{t!(i18n, map_direct)}</span>
+                    <span><i class="near"></i>{t!(i18n, map_near)}</span>
+                    <span><i class="far"></i>{t!(i18n, map_far)}</span>
+                    <span><b class="icon router"></b>{t!(i18n, map_router)}</span>
+                    <span><b class="icon base"></b>{t!(i18n, map_base)}</span>
+                </div>
             </div>
             <Show when=move || placed(live) == 0>
                 <p class="map-empty card dim">{t!(i18n, map_empty)}</p>

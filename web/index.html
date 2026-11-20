@@ -573,15 +573,34 @@
         bottom: 24px;
         z-index: 500;
         display: flex;
-        flex-wrap: wrap;
-        gap: 6px 14px;
-        padding: 8px 12px;
+        max-width: calc(100% - 24px);
         background: color-mix(in srgb, var(--mc-surface) 92%, transparent);
         border: 1px solid var(--mc-border);
         border-radius: 10px;
+        box-shadow: var(--mc-shadow);
         font-size: 12px;
         color: var(--mc-muted);
+        overflow: hidden;
       }
+      .map-legend-items { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 12px 8px 6px; }
+      /* The legend folds away into the button before it, as in meshview. */
+      .map-legend-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+        width: 22px;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: var(--mc-muted);
+      }
+      .map-legend-toggle:hover { background: var(--mc-raised); color: var(--mc-text); }
+      .map-legend-toggle svg { width: 16px; height: 16px; transition: transform 0.2s ease; }
+      .map-legend.folded .map-legend-items { display: none; }
+      .map-legend.folded .map-legend-toggle { width: 34px; height: 34px; }
+      .map-legend.folded .map-legend-toggle svg { transform: rotate(180deg); }
       .map-legend span { display: flex; align-items: center; gap: 6px; }
       .map-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--mc-node-far); }
       .map-legend i.local { background: var(--mc-primary); }
@@ -634,10 +653,32 @@
       }
       .mc-tip-title span { font-weight: 600; }
       .mc-tip-heard { margin-top: 2px; font-family: var(--mc-mono); font-size: 11px; color: var(--mc-muted); text-align: center; }
-      .leaflet-bar a, .leaflet-bar a:hover {
+      /* The zoom buttons, rounded and raised like the legend. */
+      .leaflet-touch .leaflet-bar, .leaflet-bar {
+        border: 1px solid var(--mc-border);
+        border-radius: 10px;
+        box-shadow: var(--mc-shadow);
+        overflow: hidden;
+        background-clip: padding-box;
+      }
+      .leaflet-bar a, .leaflet-bar a:hover,
+      .leaflet-touch .leaflet-bar a {
+        width: 34px;
+        height: 34px;
+        line-height: 34px;
         background: var(--mc-surface);
         color: var(--mc-text);
         border-bottom-color: var(--mc-border);
+        font-size: 18px;
+      }
+      .leaflet-bar a:hover { background: var(--mc-raised); }
+      .leaflet-bar a:first-child, .leaflet-touch .leaflet-bar a:first-child {
+        border-top-left-radius: 9px;
+        border-top-right-radius: 9px;
+      }
+      .leaflet-bar a:last-child, .leaflet-touch .leaflet-bar a:last-child {
+        border-bottom-left-radius: 9px;
+        border-bottom-right-radius: 9px;
       }
       .leaflet-popup-content-wrapper, .leaflet-popup-tip {
         background: var(--mc-surface);

@@ -168,5 +168,7 @@
   "map_base": "Estación base",
   "map_one_hop": "1 salto",
   "map_hops": "{n} saltos",
-  "power_external": "Externa"
+  "power_external": "Externa",
+  "map_legend_hide": "Ocultar la leyenda",
+  "map_legend_show": "Mostrar la leyenda"
 }

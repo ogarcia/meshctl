@@ -757,6 +757,8 @@ pub struct Preferences {
     /// Whether picking a node on the map shows its last traced route at once,
     /// rather than when asked for.
     pub map_routes: bool,
+    /// Whether the map's legend is folded away, for more map.
+    pub map_legend_folded: bool,
     /// The interface's language; none for the browser's.
     pub language: Option<Language>,
 }
@@ -819,7 +821,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_routes":false,"language":null}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_routes":false,"map_legend_folded":false,"language":null}"#
         );
     }
 
