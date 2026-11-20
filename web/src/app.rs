@@ -556,7 +556,10 @@ fn Shell() -> impl IntoView {
         }
     };
     view! {
-        <div class=class>
+        // On a wide screen the map takes the whole page, without the bar over
+        // it: what that would say, its nodes' cards say. The style sheet
+        // decides, by the width.
+        <div class=class class:on-map=move || live.page.get() == Page::Map>
             <Rail />
             <Sidebar />
             <div class="page">
@@ -999,18 +1002,18 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 }
                 Some(parts.join(" · "))
             };
-            // Where else there is to go with the node: its chat, its page, or
-            // both from the map.
+            // Where else there is to go with the node: from the chat, its page;
+            // from its page, the chat. On the map its card has both already.
             let action = move || {
                 let page = live.page.get();
-                let chat = (page != Page::Chat).then(|| {
+                let chat = (page == Page::Node).then(|| {
                     view! {
                         <button class="primary" on:click=move |_| live.open_chat(peer)>
                             {t!(i18n, node_message)}
                         </button>
                     }
                 });
-                let profile = (page != Page::Node).then(|| {
+                let profile = (page == Page::Chat).then(|| {
                     view! {
                         <button on:click=move |_| live.open_node(node)>{t!(i18n, node_page)}</button>
                     }

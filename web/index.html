@@ -335,6 +335,12 @@
       .topbar .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
       .topbar .actions button { min-height: 36px; font-weight: 600; }
       .menu-toggle { display: none; }
+      /* On a wide screen the map goes without the bar over it, as its nodes'
+         cards say all it would. A narrow one keeps it, for its menu button,
+         until phones get a design of their own. */
+      @media (min-width: 761px) {
+        .app.on-map .topbar { display: none; }
+      }
       main {
         flex: 1;
         display: grid;
