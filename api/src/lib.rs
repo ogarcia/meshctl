@@ -68,6 +68,11 @@ pub enum ErrorCode {
     RadioDidNotAnswer,
     /// The radio has no such channel, or it is disabled.
     InvalidChannel,
+    /// Not a button a radio can have: a colour that is not `#rrggbb`, text of
+    /// other than one or two characters, or an emoji that is not one.
+    InvalidBadge,
+    /// Not an order of the radios: every radio's id, each once, and no other.
+    InvalidOrder,
 }
 
 /// The body of every error the API answers with.
@@ -104,6 +109,10 @@ pub struct Radio {
     /// Whether meshctl connects to it on its own, when it starts and whenever
     /// the link drops.
     pub enabled: bool,
+    /// Whether it has a button on the interface's rail.
+    pub shown: bool,
+    /// How its button looks.
+    pub badge: Badge,
     pub link: LinkState,
     /// When it was last connected and in sync, in seconds since the epoch;
     /// none if it never was. What meshctl shows of a radio that is not
@@ -122,10 +131,113 @@ pub struct RadioSettings {
     pub address: String,
     #[serde(default = "enabled")]
     pub enabled: bool,
+    /// Whether it has a button on the interface's rail. A radio hidden from
+    /// it is still kept, and connected to if enabled.
+    #[serde(default = "enabled")]
+    pub shown: bool,
+    /// How its button looks.
+    #[serde(default)]
+    pub badge: Badge,
 }
 
 fn enabled() -> bool {
     true
+}
+
+/// How a radio's button looks.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default)]
+pub struct Badge {
+    /// Its colour, as `#rrggbb`; none for the rail's own.
+    #[cfg_attr(feature = "openapi", schema(example = "#f0a63a"))]
+    pub color: Option<String>,
+    pub content: BadgeContent,
+}
+
+/// What a radio's button shows.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BadgeContent {
+    /// The first letters of its name.
+    #[default]
+    Initials,
+    /// One or two characters.
+    Text { text: String },
+    /// One emoji.
+    Emoji { emoji: String },
+    /// One of the interface's icons.
+    Icon { icon: BadgeIcon },
+}
+
+/// The icons a radio's button can show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum BadgeIcon {
+    Meshtastic,
+    Meshcore,
+    Home,
+    Car,
+    Bike,
+    Walk,
+    Boat,
+    Plane,
+    Tower,
+    Antenna,
+    Mountain,
+    Tent,
+    Backpack,
+    Briefcase,
+    Building,
+    Flask,
+    Sun,
+    Star,
+    Walkie,
+    Satellite,
+    Flag,
+    Bolt,
+    Tree,
+    Heart,
+}
+
+impl BadgeIcon {
+    /// Every one, in the order the interface offers them.
+    pub const ALL: [Self; 24] = [
+        Self::Meshtastic,
+        Self::Meshcore,
+        Self::Home,
+        Self::Car,
+        Self::Bike,
+        Self::Walk,
+        Self::Boat,
+        Self::Plane,
+        Self::Tower,
+        Self::Antenna,
+        Self::Mountain,
+        Self::Tent,
+        Self::Backpack,
+        Self::Briefcase,
+        Self::Building,
+        Self::Flask,
+        Self::Sun,
+        Self::Star,
+        Self::Walkie,
+        Self::Satellite,
+        Self::Flag,
+        Self::Bolt,
+        Self::Tree,
+        Self::Heart,
+    ];
+}
+
+/// The order of the radios, as the interface lists them: every radio's id,
+/// each once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioOrder {
+    pub radios: Vec<RadioId>,
 }
 
 /// How the link to a radio is doing.
@@ -829,6 +941,27 @@ pub enum Language {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_badge_says_what_it_shows() {
+        let badge = Badge {
+            color: Some("#f0a63a".into()),
+            content: BadgeContent::Icon {
+                icon: BadgeIcon::Meshtastic,
+            },
+        };
+        assert_eq!(
+            serde_json::to_string(&badge).unwrap(),
+            r##"{"color":"#f0a63a","content":{"kind":"icon","icon":"meshtastic"}}"##
+        );
+        // A radio added without one: the rail's colour, and its initials.
+        let settings: RadioSettings =
+            serde_json::from_str(r#"{"name":"Home","kind":"meshtastic","address":"192.168.1.10"}"#)
+                .unwrap();
+        assert!(settings.shown);
+        assert_eq!(settings.badge, Badge::default());
+        assert_eq!(settings.badge.content, BadgeContent::Initials);
+    }
 
     #[test]
     fn preferences_fill_in_what_is_missing() {

@@ -6,8 +6,8 @@
 
 use anyhow::{Context, Result};
 use meshctl_api::{
-    BROADCAST, Conversation, Hop, Message, MessageId, MessageStatus, Peer, Preferences, RadioId,
-    RadioKind, RadioSettings, SightingId, Traceroute, TracerouteId, TracerouteStatus,
+    BROADCAST, Badge, Conversation, Hop, Message, MessageId, MessageStatus, Peer, Preferences,
+    RadioId, RadioKind, RadioSettings, SightingId, Traceroute, TracerouteId, TracerouteStatus,
 };
 use meshctl_core::mesh::{Heard, LocalNode, Node, Position, PositionSource, User};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
@@ -15,6 +15,14 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod requests;
+
+/// A radio's button as stored: NULL for the one every radio has by default.
+fn badge_json(badge: &Badge) -> Result<Option<String>> {
+    if *badge == Badge::default() {
+        return Ok(None);
+    }
+    Ok(Some(serde_json::to_string(badge)?))
+}
 
 /// The database's file, inside the data directory.
 const DATABASE_FILE: &str = "meshctl.db";
@@ -35,6 +43,8 @@ struct RadioRow {
     kind: String,
     address: String,
     enabled: bool,
+    shown: bool,
+    badge: Option<String>,
     last_connected: Option<i64>,
 }
 
@@ -49,6 +59,12 @@ impl RadioRow {
                 kind: kind_from(&self.kind)?,
                 address: self.address,
                 enabled: self.enabled,
+                shown: self.shown,
+                // A button this build cannot read is shown as it is by default.
+                badge: self
+                    .badge
+                    .and_then(|badge| serde_json::from_str(&badge).ok())
+                    .unwrap_or_default(),
             },
             last_connected: self.last_connected,
         })
@@ -289,7 +305,8 @@ impl Store {
 
     pub async fn radios(&self) -> Result<Vec<RadioRecord>> {
         let rows: Vec<RadioRow> = sqlx::query_as(
-            "SELECT id, name, kind, address, enabled, last_connected FROM radio ORDER BY id",
+            "SELECT id, name, kind, address, enabled, shown, badge, last_connected FROM radio
+            ORDER BY position, id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -298,7 +315,8 @@ impl Store {
 
     pub async fn radio(&self, id: RadioId) -> Result<Option<RadioRecord>> {
         let row: Option<RadioRow> = sqlx::query_as(
-            "SELECT id, name, kind, address, enabled, last_connected FROM radio WHERE id = ?",
+            "SELECT id, name, kind, address, enabled, shown, badge, last_connected FROM radio
+            WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -308,12 +326,15 @@ impl Store {
 
     pub async fn add_radio(&self, settings: &RadioSettings) -> Result<RadioRecord> {
         let id = sqlx::query(
-            "INSERT INTO radio (name, kind, address, enabled, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO radio (name, kind, address, enabled, shown, badge, position, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM radio), ?)",
         )
         .bind(&settings.name)
         .bind(kind_name(settings.kind))
         .bind(&settings.address)
         .bind(settings.enabled)
+        .bind(settings.shown)
+        .bind(badge_json(&settings.badge)?)
         .bind(now())
         .execute(&self.pool)
         .await?
@@ -328,17 +349,34 @@ impl Store {
     /// Changes a radio; `false` if there is no such radio.
     pub async fn update_radio(&self, id: RadioId, settings: &RadioSettings) -> Result<bool> {
         let changed = sqlx::query(
-            "UPDATE radio SET name = ?, kind = ?, address = ?, enabled = ? WHERE id = ?",
+            "UPDATE radio SET name = ?, kind = ?, address = ?, enabled = ?, shown = ?, badge = ?
+            WHERE id = ?",
         )
         .bind(&settings.name)
         .bind(kind_name(settings.kind))
         .bind(&settings.address)
         .bind(settings.enabled)
+        .bind(settings.shown)
+        .bind(badge_json(&settings.badge)?)
         .bind(id)
         .execute(&self.pool)
         .await?
         .rows_affected();
         Ok(changed > 0)
+    }
+
+    /// Puts the radios in the order given, which names each of them once.
+    pub async fn set_radio_order(&self, radios: &[RadioId]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for (position, id) in radios.iter().enumerate() {
+            sqlx::query("UPDATE radio SET position = ? WHERE id = ?")
+                .bind(position as i64 + 1)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Removes a radio; `false` if there is no such radio.
@@ -1008,6 +1046,8 @@ mod tests {
             kind: RadioKind::Meshtastic,
             address: "192.168.1.10:4403".into(),
             enabled: true,
+            shown: true,
+            badge: Default::default(),
         }
     }
 
@@ -1053,6 +1093,27 @@ mod tests {
                 .settings
                 .enabled
         );
+
+        // How its button looks, and whether it is shown, are kept too.
+        changed.shown = false;
+        changed.badge = Badge {
+            color: Some("#f0a63a".into()),
+            content: meshctl_api::BadgeContent::Emoji {
+                emoji: "📡".into()
+            },
+        };
+        assert!(store.update_radio(added.id, &changed).await.unwrap());
+        let kept = store.radio(added.id).await.unwrap().unwrap();
+        assert_eq!(kept.settings, changed);
+        // Back to the button every radio has, nothing is kept of it.
+        changed.badge = Badge::default();
+        assert!(store.update_radio(added.id, &changed).await.unwrap());
+        let badge: Option<String> = sqlx::query_scalar("SELECT badge FROM radio WHERE id = ?")
+            .bind(added.id)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert!(badge.is_none());
 
         assert!(store.remove_radio(added.id).await.unwrap());
         assert!(!store.remove_radio(added.id).await.unwrap());

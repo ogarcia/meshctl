@@ -248,6 +248,8 @@ mod tests {
                 kind: RadioKind::Meshtastic,
                 address: "127.0.0.1:1".into(),
                 enabled: false,
+                shown: true,
+                badge: Default::default(),
             })
             .await
             .unwrap();

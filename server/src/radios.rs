@@ -9,10 +9,10 @@
 use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
-    Conversation, ErrorCode, Hop, LinkState, Message, MessageId, MessageStatus, NewMessage,
-    NewRequest, NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId,
-    RadioKind, RadioSettings, Request, RequestKind, SettingsApplied, SettingsSection, SightingId,
-    Status, Traceroute,
+    Badge, BadgeContent, Conversation, ErrorCode, Hop, LinkState, Message, MessageId,
+    MessageStatus, NewMessage, NewRequest, NodeSettings, NodeSettingsChange, Packet, Peer,
+    Preferences, Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind, SettingsApplied,
+    SettingsSection, SightingId, Status, Traceroute,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -272,7 +272,41 @@ pub fn validate(settings: &RadioSettings) -> Result<Transport, ErrorCode> {
         RadioKind::Meshtastic => meshctl_core::link::DEFAULT_TCP_PORT,
         RadioKind::Meshcore => meshctl_core::meshcore::DEFAULT_TCP_PORT,
     };
-    Transport::parse(settings.address.trim(), port).map_err(|_| ErrorCode::InvalidAddress)
+    let transport =
+        Transport::parse(settings.address.trim(), port).map_err(|_| ErrorCode::InvalidAddress)?;
+    if !valid_badge(&settings.badge) {
+        return Err(ErrorCode::InvalidBadge);
+    }
+    Ok(transport)
+}
+
+/// The most an emoji takes, in characters: enough for those joined of
+/// several, such as families or flags of regions.
+const EMOJI_MAX: usize = 16;
+
+/// Whether a radio's button can be shown: a colour as `#rrggbb`, one or two
+/// characters, or an emoji, which has no letters, digits or spaces.
+fn valid_badge(badge: &Badge) -> bool {
+    let color = badge.color.as_deref().is_none_or(|color| {
+        color.len() == 7
+            && color.starts_with('#')
+            && color[1..].chars().all(|c| c.is_ascii_hexdigit())
+    });
+    let shown = |text: &str| text.chars().all(|c| !c.is_whitespace() && !c.is_control());
+    let content = match &badge.content {
+        BadgeContent::Initials | BadgeContent::Icon { .. } => true,
+        BadgeContent::Text { text } => {
+            let text = text.trim();
+            (1..=2).contains(&text.chars().count()) && shown(text)
+        }
+        BadgeContent::Emoji { emoji } => {
+            let emoji = emoji.trim();
+            (1..=EMOJI_MAX).contains(&emoji.chars().count())
+                && shown(emoji)
+                && !emoji.chars().any(|c| c.is_alphanumeric())
+        }
+    };
+    color && content
 }
 
 /// Settings as they are kept: trimmed.
@@ -280,6 +314,18 @@ pub fn tidy(settings: RadioSettings) -> RadioSettings {
     RadioSettings {
         name: settings.name.trim().to_owned(),
         address: settings.address.trim().to_owned(),
+        badge: Badge {
+            color: settings.badge.color.map(|color| color.to_ascii_lowercase()),
+            content: match settings.badge.content {
+                BadgeContent::Text { text } => BadgeContent::Text {
+                    text: text.trim().to_owned(),
+                },
+                BadgeContent::Emoji { emoji } => BadgeContent::Emoji {
+                    emoji: emoji.trim().to_owned(),
+                },
+                content => content,
+            },
+        },
         ..settings
     }
 }
@@ -720,14 +766,31 @@ impl Radios {
         Ok(self.radio(record))
     }
 
-    /// Changes a radio, already validated, reconnecting to it as it is now.
+    /// Changes a radio, already validated, reconnecting to it as it is now
+    /// when what it connects to, or whether it does, changed.
     pub async fn update(&self, id: RadioId, settings: RadioSettings) -> Result<Option<Radio>> {
+        let before = self.store.radio(id).await?;
         if !self.store.update_radio(id, &settings).await? {
             return Ok(None);
         }
         let Some(record) = self.store.radio(id).await? else {
             return Ok(None);
         };
+        // How it shows alone changes nothing of its link.
+        let link = |settings: &RadioSettings| {
+            (
+                settings.name.clone(),
+                settings.kind,
+                settings.address.clone(),
+                settings.enabled,
+            )
+        };
+        if before.is_some_and(|before| link(&before.settings) == link(&record.settings))
+            && self.lock().contains_key(&id)
+        {
+            self.changed();
+            return Ok(Some(self.radio(record)));
+        }
         // What it knew carries over, more current than what was stored.
         let previous = self.lock().remove(&id);
         let state = match previous {
@@ -748,6 +811,21 @@ impl Radios {
         self.run(&record, state);
         self.changed();
         Ok(Some(self.radio(record)))
+    }
+
+    /// Puts the radios in the order given; `false`, changing nothing, unless
+    /// it names each radio there is once.
+    pub async fn reorder(&self, radios: &[RadioId]) -> Result<bool> {
+        let mut given = radios.to_vec();
+        given.sort_unstable();
+        let mut there: Vec<RadioId> = self.store.radios().await?.iter().map(|r| r.id).collect();
+        there.sort_unstable();
+        if given != there {
+            return Ok(false);
+        }
+        self.store.set_radio_order(radios).await?;
+        self.changed();
+        Ok(true)
     }
 
     /// Removes a radio and disconnects from it; `false` if there was none.
@@ -814,6 +892,8 @@ impl Radios {
             kind: record.settings.kind,
             address: record.settings.address,
             enabled: record.settings.enabled,
+            shown: record.settings.shown,
+            badge: record.settings.badge,
             last_connected: record.last_connected,
         }
     }
@@ -1066,6 +1146,8 @@ mod tests {
             kind,
             address: address.into(),
             enabled: true,
+            shown: true,
+            badge: Default::default(),
         }
     }
 
@@ -1168,6 +1250,128 @@ mod tests {
         for (settings, error) in cases {
             assert_eq!(validate(&settings).unwrap_err(), error, "{settings:?}");
         }
+    }
+
+    #[test]
+    fn what_a_radio_button_may_show() {
+        let with = |color: Option<&str>, content| {
+            let mut radio = settings("Home", RadioKind::Meshtastic, "192.168.1.10");
+            radio.badge = Badge {
+                color: color.map(Into::into),
+                content,
+            };
+            radio
+        };
+        let text = |text: &str| BadgeContent::Text { text: text.into() };
+        let emoji = |emoji: &str| BadgeContent::Emoji {
+            emoji: emoji.into(),
+        };
+        let good = [
+            with(Some("#F0a63a"), BadgeContent::Initials),
+            with(None, text("Ñ")),
+            with(None, text(" TM ")),
+            with(None, emoji("📡")),
+            with(None, emoji("👨‍👩‍👧")),
+            with(None, emoji("🇪🇸")),
+            with(
+                Some("#000000"),
+                BadgeContent::Icon {
+                    icon: meshctl_api::BadgeIcon::Meshcore,
+                },
+            ),
+        ];
+        for radio in good {
+            assert!(validate(&radio).is_ok(), "{radio:?}");
+        }
+        let bad = [
+            with(Some("f0a63a"), BadgeContent::Initials),
+            with(Some("#f0a63"), BadgeContent::Initials),
+            with(Some("#g0a63a"), BadgeContent::Initials),
+            with(Some("#f0a63a00"), BadgeContent::Initials),
+            with(None, text("")),
+            with(None, text("ABC")),
+            with(None, text("A B")),
+            with(None, emoji("")),
+            with(None, emoji("ok")),
+            with(None, emoji("📡 📡")),
+            with(None, emoji(&"📡".repeat(17))),
+        ];
+        for radio in bad {
+            assert_eq!(
+                validate(&radio).unwrap_err(),
+                ErrorCode::InvalidBadge,
+                "{radio:?}"
+            );
+        }
+        // Kept trimmed, and the colour in lower case.
+        let kept = tidy(with(Some("#F0A63A"), text(" TM ")));
+        assert_eq!(kept.badge.color.as_deref(), Some("#f0a63a"));
+        assert_eq!(kept.badge.content, text("TM"));
+    }
+
+    #[tokio::test]
+    async fn radios_keep_the_order_given() {
+        let radios = Radios::start(Store::in_memory().await).await.unwrap();
+        let mut ids = Vec::new();
+        for name in ["A", "B", "C"] {
+            let mut radio = settings(name, RadioKind::Meshtastic, "127.0.0.1:1");
+            radio.enabled = false;
+            ids.push(radios.add(radio).await.unwrap().id);
+        }
+        let names = async || {
+            let list = radios.list().await.unwrap();
+            list.into_iter().map(|r| r.name).collect::<Vec<_>>()
+        };
+        assert_eq!(names().await, ["A", "B", "C"]);
+
+        let mut changes = radios.subscribe();
+        assert!(radios.reorder(&[ids[2], ids[0], ids[1]]).await.unwrap());
+        assert!(matches!(changes.recv().await.unwrap(), Change::Radios));
+        assert_eq!(names().await, ["C", "A", "B"]);
+
+        // Every radio, once: else nothing changes.
+        for wrong in [
+            vec![ids[0], ids[1]],
+            vec![ids[0], ids[1], ids[1]],
+            vec![ids[0], ids[1], ids[2], 99],
+        ] {
+            assert!(!radios.reorder(&wrong).await.unwrap(), "{wrong:?}");
+        }
+        assert_eq!(names().await, ["C", "A", "B"]);
+
+        // One added later goes last.
+        let mut last = settings("D", RadioKind::Meshtastic, "127.0.0.1:1");
+        last.enabled = false;
+        radios.add(last).await.unwrap();
+        assert_eq!(names().await, ["C", "A", "B", "D"]);
+    }
+
+    #[tokio::test]
+    async fn a_new_look_keeps_the_link() {
+        let radios = Radios::start(Store::in_memory().await).await.unwrap();
+        let radio = radios
+            .add(settings("Home", RadioKind::Meshtastic, "127.0.0.1:1"))
+            .await
+            .unwrap();
+        let running = |radios: &Radios| {
+            let lock = radios.lock();
+            let tasks = &lock[&radio.id].tasks;
+            tasks.iter().map(|task| task.id()).collect::<Vec<_>>()
+        };
+        let before = running(&radios);
+
+        let mut look = settings("Home", RadioKind::Meshtastic, "127.0.0.1:1");
+        look.shown = false;
+        look.badge.color = Some("#3a86f0".into());
+        let changed = radios.update(radio.id, look).await.unwrap().unwrap();
+        assert!(!changed.shown);
+        assert_eq!(changed.badge.color.as_deref(), Some("#3a86f0"));
+        assert_eq!(running(&radios), before);
+
+        // Another address is another link.
+        let moved = settings("Home", RadioKind::Meshtastic, "127.0.0.1:2");
+        radios.update(radio.id, moved).await.unwrap();
+        assert_ne!(running(&radios), before);
     }
 
     #[tokio::test]

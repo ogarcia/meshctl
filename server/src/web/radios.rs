@@ -11,7 +11,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Channel, Error, ErrorCode, LinkState, Node, Radio, RadioId, RadioSettings, Status,
+    Channel, Error, ErrorCode, LinkState, Node, Radio, RadioId, RadioOrder, RadioSettings, Status,
 };
 use meshctl_core::radio::Mesh;
 use utoipa_axum::router::OpenApiRouter;
@@ -20,6 +20,7 @@ use utoipa_axum::routes;
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list, add))
+        .routes(routes!(reorder))
         .routes(routes!(get, update, remove))
         .routes(routes!(status))
         .routes(routes!(channels))
@@ -71,7 +72,7 @@ async fn list(State(state): State<AppState>) -> Response {
     responses(
         (status = 201, description = "Added", body = Radio),
         (status = 401, description = "The access token is missing or wrong", body = Error),
-        (status = 422, description = "Not a radio meshctl can have: `invalid_name`, `invalid_address` or `unsupported_kind`", body = Error),
+        (status = 422, description = "Not a radio meshctl can have: `invalid_name`, `invalid_address`, `invalid_badge` or `unsupported_kind`", body = Error),
     )
 )]
 async fn add(State(state): State<AppState>, Json(settings): Json<RadioSettings>) -> Response {
@@ -80,6 +81,28 @@ async fn add(State(state): State<AppState>, Json(settings): Json<RadioSettings>)
     }
     match state.radios.add(tidy(settings)).await {
         Ok(radio) => (StatusCode::CREATED, Json(radio)).into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Order the radios
+///
+/// Puts the radios in the order the interface lists them in.
+#[utoipa::path(
+    put,
+    path = "/radios/order",
+    tag = "radios",
+    request_body = RadioOrder,
+    responses(
+        (status = 204, description = "Ordered"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 422, description = "The order does not name every radio once: `invalid_order`", body = Error),
+    )
+)]
+async fn reorder(State(state): State<AppState>, Json(order): Json<RadioOrder>) -> Response {
+    match state.radios.reorder(&order.radios).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidOrder),
         Err(err) => failed(&err),
     }
 }
@@ -119,7 +142,7 @@ async fn get(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Respo
         (status = 200, description = "Changed", body = Radio),
         (status = 401, description = "The access token is missing or wrong", body = Error),
         (status = 404, description = "There is no such radio", body = Error),
-        (status = 422, description = "Not a radio meshctl can have: `invalid_name`, `invalid_address` or `unsupported_kind`", body = Error),
+        (status = 422, description = "Not a radio meshctl can have: `invalid_name`, `invalid_address`, `invalid_badge` or `unsupported_kind`", body = Error),
     )
 )]
 async fn update(

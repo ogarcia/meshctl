@@ -71,6 +71,8 @@ fn RadioRow(radio: Radio, editing: RwSignal<Option<Radio>>) -> impl IntoView {
             kind: radio.kind,
             address: radio.address.clone(),
             enabled: !radio.enabled,
+            shown: radio.shown,
+            badge: radio.badge.clone(),
         };
         move |_| {
             let settings = settings.clone();
@@ -177,13 +179,20 @@ pub fn RadioForm(editing: RwSignal<Option<Radio>>) -> impl IntoView {
 
     let submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
+        let editing_now = editing.get_untracked();
+        // How it shows is not changed here: it is kept as it was.
         let settings = RadioSettings {
             name: name.get_untracked(),
             kind: kind.get_untracked(),
             address: address.get_untracked(),
             enabled: enabled.get_untracked(),
+            shown: editing_now.as_ref().is_none_or(|r| r.shown),
+            badge: editing_now
+                .as_ref()
+                .map(|r| r.badge.clone())
+                .unwrap_or_default(),
         };
-        let id: Option<RadioId> = editing.get_untracked().map(|r| r.id);
+        let id: Option<RadioId> = editing_now.map(|r| r.id);
         busy.set(true);
         spawn_local(async move {
             match daemon::save_radio(id, &settings).await {
