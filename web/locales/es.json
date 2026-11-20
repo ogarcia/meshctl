@@ -19,7 +19,7 @@
   "radio_kind_soon": "próximamente",
   "radio_address": "Dirección",
   "radio_address_hint": "En la red: host o host:puerto (4403 si no se indica). Conectada por USB: la ruta del dispositivo, como /dev/ttyACM0, con @velocidad si no es 115200.",
-  "radio_enabled": "Mantener conectada",
+  "radio_enabled": "Conectar automáticamente",
   "radio_state": "Estado",
   "radio_add_title": "Añadir una radio",
   "radio_edit_title": "Cambiar la radio",

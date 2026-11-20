@@ -85,7 +85,8 @@ pub struct Radio {
     /// `@speed`.
     #[cfg_attr(feature = "openapi", schema(example = "192.168.1.10:4403"))]
     pub address: String,
-    /// Whether meshctl keeps connected to it.
+    /// Whether meshctl connects to it on its own, when it starts and whenever
+    /// the link drops.
     pub enabled: bool,
     pub link: LinkState,
     /// When it was last connected and in sync, in seconds since the epoch;

@@ -19,7 +19,7 @@
   "radio_kind_soon": "soon",
   "radio_address": "Address",
   "radio_address_hint": "On the network: host or host:port (4403 if left out). Plugged in: the device's path, such as /dev/ttyACM0, with @speed if it is not 115200.",
-  "radio_enabled": "Keep connected",
+  "radio_enabled": "Connect automatically",
   "radio_state": "State",
   "radio_add_title": "Add a radio",
   "radio_edit_title": "Change the radio",

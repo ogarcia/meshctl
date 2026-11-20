@@ -337,21 +337,6 @@ impl Store {
         at: i64,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        // Another radio behind the same address: the last one's mesh is not
-        // this one's.
-        let previous: Option<i64> = sqlx::query_scalar("SELECT local_num FROM radio WHERE id = ?")
-            .bind(radio)
-            .fetch_optional(&mut *tx)
-            .await?
-            .flatten();
-        if let (Some(previous), Some(local)) = (previous, local)
-            && previous != i64::from(local.num)
-        {
-            sqlx::query("DELETE FROM node WHERE radio_id = ?")
-                .bind(radio)
-                .execute(&mut *tx)
-                .await?;
-        }
         sqlx::query(
             "UPDATE radio SET last_connected = ?, local_num = ?, local_firmware_version = ?,
                 local_hw_model = ?, local_role = ?, local_region = ?, local_modem_preset = ?
@@ -492,7 +477,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn another_radio_at_the_same_address_starts_afresh() {
+    async fn a_new_node_behind_the_radio_keeps_what_the_old_one_knew() {
         let store = Store::in_memory().await;
         let radio = store.add_radio(&home()).await.unwrap().id;
         store
@@ -503,14 +488,16 @@ mod tests {
             .save_sync(radio, Some(&local(8)), &[node(2, "Mar")], 2)
             .await
             .unwrap();
-        let nums: Vec<_> = store
+        let mut nums: Vec<_> = store
             .nodes(radio)
             .await
             .unwrap()
             .iter()
             .map(|n| n.num)
             .collect();
-        assert_eq!(nums, [2]);
+        nums.sort_unstable();
+        assert_eq!(nums, [1, 2]);
+        assert_eq!(store.local(radio).await.unwrap().unwrap().num, 8);
     }
 
     #[tokio::test]

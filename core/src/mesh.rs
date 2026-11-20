@@ -136,13 +136,15 @@ impl MeshState {
         let quiet = self.link == LinkState::Syncing;
         let changed = match message.payload_variant {
             Some(V::MyInfo(info)) => {
-                // Another radio on the same address: what was known is theirs.
+                // Another node behind the same radio, as when its owner swaps
+                // hardware: its description and channels are its own, but the
+                // nodes heard so far are still the mesh around, and are kept.
                 if self
                     .local
                     .as_ref()
                     .is_some_and(|l| l.num != info.my_node_num)
                 {
-                    self.nodes.clear();
+                    self.local = None;
                     self.channels.clear();
                 }
                 self.local.get_or_insert_with(LocalNode::default).num = info.my_node_num;
@@ -489,11 +491,18 @@ mod tests {
     }
 
     #[test]
-    fn another_radio_forgets_the_last_ones_mesh() {
+    fn another_node_behind_the_radio_keeps_the_mesh_heard() {
         let mut state = ready();
         state.apply(
             from_radio(V::MyInfo(pb::MyNodeInfo {
                 my_node_num: 1,
+                ..Default::default()
+            })),
+            1,
+        );
+        state.apply(
+            from_radio(V::Metadata(pb::DeviceMetadata {
+                firmware_version: "2.7.0".into(),
                 ..Default::default()
             })),
             1,
@@ -509,8 +518,11 @@ mod tests {
             })),
             1,
         );
-        assert!(state.nodes.is_empty());
-        assert_eq!(state.local.unwrap().num, 2);
+        assert!(state.nodes.contains_key(&7));
+        let local = state.local.unwrap();
+        assert_eq!(local.num, 2);
+        // What the old node said of itself is not the new one's.
+        assert_eq!(local.firmware_version, None);
     }
 
     #[test]
