@@ -280,13 +280,16 @@ pub fn validate(settings: &RadioSettings) -> Result<Transport, ErrorCode> {
     Ok(transport)
 }
 
+/// The most a button's text takes, in bytes.
+const TEXT_MAX: usize = 4;
+
 /// The most an emoji takes, in characters: enough for those joined of
 /// several, such as families or flags of regions.
 const EMOJI_MAX: usize = 16;
 
 /// Whether a radio's button can be shown: a colour of the palette, or one as
-/// `#rrggbb`; one or two
-/// characters, or an emoji, which has no letters, digits or spaces.
+/// `#rrggbb`; up to four bytes of text, as a node's short name; or an emoji,
+/// which has no letters, digits or spaces.
 fn valid_badge(badge: &Badge) -> bool {
     let color = badge.color.as_deref().is_none_or(|color| {
         BADGE_COLORS.contains(&color)
@@ -299,7 +302,9 @@ fn valid_badge(badge: &Badge) -> bool {
         BadgeContent::Initials | BadgeContent::Icon { .. } => true,
         BadgeContent::Text { text } => {
             let text = text.trim();
-            (1..=2).contains(&text.chars().count()) && shown(text)
+            // As Meshtastic's short names: four bytes, which is four letters,
+            // fewer with accents, or one emoji.
+            (1..=TEXT_MAX).contains(&text.len()) && shown(text)
         }
         BadgeContent::Emoji { emoji } => {
             let emoji = emoji.trim();
@@ -895,9 +900,23 @@ impl Radios {
             address: record.settings.address,
             enabled: record.settings.enabled,
             shown: record.settings.shown,
+            short_name: (record.settings.kind == RadioKind::Meshtastic)
+                .then(|| self.short_name(record.id))
+                .flatten(),
             badge: record.settings.badge,
             last_connected: record.last_connected,
         }
+    }
+
+    /// The short name of a radio's own node, as it last said it.
+    fn short_name(&self, id: RadioId) -> Option<String> {
+        let lock = self.lock();
+        let running = lock.get(&id)?;
+        running.mesh.read(|state| {
+            let local = state.local.as_ref()?.num;
+            let short = &state.nodes.get(&local)?.user.as_ref()?.short_name;
+            (!short.trim().is_empty()).then(|| short.clone())
+        })
     }
 
     /// What was stored of a radio, to start its mesh from.
@@ -1273,6 +1292,9 @@ mod tests {
             with(Some("teal"), BadgeContent::Initials),
             with(None, text("Ñ")),
             with(None, text(" TM ")),
+            with(None, text("G3L0")),
+            with(None, text("ÑU")),
+            with(None, text("🦊")),
             with(None, emoji("📡")),
             with(None, emoji("👨‍👩‍👧")),
             with(None, emoji("🇪🇸")),
@@ -1293,7 +1315,9 @@ mod tests {
             with(Some("#g0a63a"), BadgeContent::Initials),
             with(Some("#f0a63a00"), BadgeContent::Initials),
             with(None, text("")),
-            with(None, text("ABC")),
+            with(None, text("ABCDE")),
+            with(None, text("ÑAND")),
+            with(None, text("🦊M")),
             with(None, text("A B")),
             with(None, emoji("")),
             with(None, emoji("ok")),
@@ -1431,5 +1455,59 @@ mod tests {
 
         radios.stop().await;
         assert!(radios.mesh(added.id).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_meshtastic_radio_goes_by_its_short_name() {
+        let store = Store::in_memory().await;
+        let mut off = settings("Car", RadioKind::Meshtastic, "/dev/ttyACM0");
+        off.enabled = false;
+        let car = store.add_radio(&off).await.unwrap();
+        let mut core = settings("Core", RadioKind::Meshcore, "/dev/ttyACM1");
+        core.enabled = false;
+        let core = store.add_radio(&core).await.unwrap();
+        let own = |num| mesh::Node {
+            num,
+            user: Some(mesh::User {
+                long_name: "G3L0 M0V1L".into(),
+                short_name: "G3L0".into(),
+                hw_model: "HELTEC_V3".into(),
+                role: "CLIENT".into(),
+            }),
+            position: None,
+            last_heard: None,
+            snr: None,
+            rssi: None,
+            hops_away: Some(0),
+            via_mqtt: false,
+            favorite: false,
+            battery_level: None,
+            voltage: None,
+            channel_utilization: None,
+        };
+        let local = |num| mesh::LocalNode {
+            num,
+            firmware_version: None,
+            hw_model: None,
+            role: None,
+            region: None,
+            modem_preset: None,
+        };
+        for (radio, num) in [(car.id, 7), (core.id, 8)] {
+            store
+                .save_sync(radio, Some(&local(num)), &[own(num)], 1)
+                .await
+                .unwrap();
+        }
+
+        let radios = Radios::start(store).await.unwrap();
+        let short = |id| radios.get(id);
+        assert_eq!(
+            short(car.id).await.unwrap().unwrap().short_name.as_deref(),
+            Some("G3L0")
+        );
+        // MeshCore's nodes have no short names.
+        assert_eq!(short(core.id).await.unwrap().unwrap().short_name, None);
+        radios.stop().await;
     }
 }

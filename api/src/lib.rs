@@ -69,7 +69,7 @@ pub enum ErrorCode {
     /// The radio has no such channel, or it is disabled.
     InvalidChannel,
     /// Not a button a radio can have: a colour that is not `#rrggbb`, text of
-    /// other than one or two characters, or an emoji that is not one.
+    /// other than up to four bytes of text, or an emoji that is not one.
     InvalidBadge,
     /// Not an order of the radios: every radio's id, each once, and no other.
     InvalidOrder,
@@ -113,6 +113,10 @@ pub struct Radio {
     pub shown: bool,
     /// How its button looks.
     pub badge: Badge,
+    /// Its node's short name, for a Meshtastic radio that told it: what its
+    /// button shows when nothing else was picked for it.
+    #[cfg_attr(feature = "openapi", schema(example = "G3L0"))]
+    pub short_name: Option<String>,
     pub link: LinkState,
     /// When it was last connected and in sync, in seconds since the epoch;
     /// none if it never was. What meshctl shows of a radio that is not
@@ -171,7 +175,8 @@ pub enum BadgeContent {
     /// The first letters of its name.
     #[default]
     Initials,
-    /// One or two characters.
+    /// Up to four bytes of text, as Meshtastic's short names: four letters,
+    /// fewer with accents, or one emoji.
     Text { text: String },
     /// One emoji.
     Emoji { emoji: String },

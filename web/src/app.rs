@@ -391,7 +391,13 @@ impl Live {
                             }
                         });
                     }
-                    Ok(())
+                    // In sync: what it said of itself, its short name, is
+                    // read again.
+                    if link == LinkState::Ready {
+                        self.refresh_radios().await
+                    } else {
+                        Ok(())
+                    }
                 }
                 ServerMessage::Node { radio, node } => {
                     if self.is_selected(radio) {
@@ -646,10 +652,17 @@ fn Rail() -> impl IntoView {
             <span class="rail-rule"></span>
             <For
                 each=radios
-                key=|radio| (radio.id, radio.name.clone(), radio.badge.clone())
+                key=|radio| {
+                    (radio.id, radio.name.clone(), radio.badge.clone(), radio.short_name.clone())
+                }
                 let:radio
             >
-                <RadioButton id=radio.id name=radio.name.clone() badge=radio.badge.clone() />
+                <RadioButton
+                    id=radio.id
+                    name=radio.name.clone()
+                    badge=radio.badge.clone()
+                    short=radio.short_name.clone()
+                />
             </For>
             <span class="rail-space"></span>
             <button
@@ -670,7 +683,12 @@ fn Rail() -> impl IntoView {
 }
 
 #[component]
-fn RadioButton(id: RadioId, name: String, badge: meshctl_api::Badge) -> impl IntoView {
+fn RadioButton(
+    id: RadioId,
+    name: String,
+    badge: meshctl_api::Badge,
+    short: Option<String>,
+) -> impl IntoView {
     let live = expect_context::<Live>();
     let link = move || {
         live.radios.with(|radios| {
@@ -700,7 +718,7 @@ fn RadioButton(id: RadioId, name: String, badge: meshctl_api::Badge) -> impl Int
             aria-label=name.clone()
             on:click=move |_| live.select(id)
         >
-            <Face name=name.clone() badge=badge.clone() />
+            <Face name=name.clone() badge=badge.clone() short=short.clone() />
             <span class=move || format!("dot {}", link_class(link()))></span>
         </button>
     }

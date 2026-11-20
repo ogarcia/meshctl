@@ -195,17 +195,50 @@ pub fn color_name(name: &str) -> String {
     }
 }
 
+/// The most a button's text takes, in bytes, as Meshtastic's short names:
+/// four letters, fewer with accents, or one emoji.
+pub const TEXT_MAX: usize = 4;
+
+/// As much of a text as a button takes, in whole characters.
+pub fn fit(text: &str) -> String {
+    let mut fitted = String::new();
+    for c in text.chars() {
+        if fitted.len() + c.len_utf8() > TEXT_MAX {
+            break;
+        }
+        fitted.push(c);
+    }
+    fitted
+}
+
+/// A button's text: an emoji alone at an emoji's size, three or four
+/// letters smaller, to fit.
+fn text(text: String) -> AnyView {
+    let class = if !text.chars().any(char::is_alphanumeric) {
+        "emoji"
+    } else if text.chars().count() > 2 {
+        "glyph long"
+    } else {
+        "glyph"
+    };
+    view! { <span class=class>{text}</span> }.into_any()
+}
+
 /// What a button shows inside: the box around it is its holder's.
 #[component]
 pub fn Face(
     #[prop(into)] name: Signal<String>,
     #[prop(into)] badge: Signal<Badge>,
+    /// Its node's short name, if it has one: shown when nothing was picked.
+    #[prop(into, optional)]
+    short: MaybeProp<String>,
 ) -> impl IntoView {
     move || match badge.get().content {
-        BadgeContent::Initials => {
-            view! { <span class="glyph">{initials(&name.get())}</span> }.into_any()
-        }
-        BadgeContent::Text { text } => view! { <span class="glyph">{text}</span> }.into_any(),
+        BadgeContent::Initials => match short.get() {
+            Some(short) => text(short),
+            None => view! { <span class="glyph">{initials(&name.get())}</span> }.into_any(),
+        },
+        BadgeContent::Text { text: chosen } => text(chosen),
         BadgeContent::Emoji { emoji } => view! { <span class="emoji">{emoji}</span> }.into_any(),
         BadgeContent::Icon { icon } => {
             view! { <span class="pict" aria-hidden="true" inner_html=svg(icon)></span> }.into_any()
@@ -244,6 +277,15 @@ mod tests {
             "--badge: color-mix(in srgb, #1c3d8f 50%, var(--mc-rail)); \
              --badge-ink: #ffffff; --badge-on: #1c3d8f; --badge-on-ink: #ffffff"
         );
+    }
+
+    #[test]
+    fn a_text_fits_in_four_bytes() {
+        use super::fit;
+        assert_eq!(fit("G3L0 M0V1L"), "G3L0");
+        assert_eq!(fit("ÑANDÚ"), "ÑAN");
+        assert_eq!(fit("🦊M"), "🦊");
+        assert_eq!(fit("M🦊"), "M");
     }
 
     #[test]

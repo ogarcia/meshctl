@@ -1150,6 +1150,8 @@
       .face .emoji { font-size: 20px; line-height: 1; font-weight: 400; }
       .face .pict, .rail-button .pict { display: flex; }
       .face .pict svg { width: 20px; height: 20px; }
+      /* Three or four characters, as a node's short name, smaller to fit. */
+      .glyph.long { font-size: 0.8em; letter-spacing: -0.02em; }
       .face.big { width: 72px; height: 72px; border-radius: 20px; font-size: 22px; }
       .face.big .emoji { font-size: 34px; }
       .face.big .pict svg { width: 34px; height: 34px; }
@@ -1428,11 +1430,11 @@
         font-size: 12px;
       }
       .look-text input {
-        width: 96px;
+        width: 140px;
         height: 64px;
         text-align: center;
         font-weight: 700;
-        font-size: 28px;
+        font-size: 26px;
       }
       .look-emoji { align-self: stretch; flex: 1; min-height: 0; display: flex; }
       .look-emoji .emoji-picker {

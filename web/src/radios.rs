@@ -222,7 +222,7 @@ fn RadioRow(
                 on:click=move |_| live.radio_editing.set(Editing::Radio(id, Section::Button))
             >
                 <span class=badge::class(&badge) style=badge::style(&badge)>
-                    <Face name=name.clone() badge=badge.clone() />
+                    <Face name=name.clone() badge=badge.clone() short=radio.short_name.clone() />
                 </span>
             </button>
             <button
@@ -296,7 +296,7 @@ enum Mode {
 #[derive(Debug, Clone, PartialEq)]
 struct Look {
     mode: Mode,
-    /// One or two characters; none for the initials.
+    /// One to four characters; none for the initials.
     text: String,
     emoji: String,
     icon: BadgeIcon,
@@ -550,6 +550,17 @@ pub fn RadioEditor(
     });
     let name = Signal::derive(move || draft.with(|d| d.name.clone()));
     let look = Signal::derive(move || draft.with(Draft::badge));
+    // Its node's short name, what it shows with nothing picked.
+    let short = Signal::derive(move || {
+        let id = id?;
+        live.radios.with(|radios| {
+            radios
+                .iter()
+                .flatten()
+                .find(|r| r.id == id)
+                .and_then(|r| r.short_name.clone())
+        })
+    });
     let detail = move || {
         draft.with(|d| match d.address.trim() {
             "" => kind_name(d.kind).to_owned(),
@@ -592,7 +603,7 @@ pub fn RadioEditor(
                     class=move || look.with(badge::class)
                     style=move || look.with(badge::style)
                 >
-                    <Face name badge=look />
+                    <Face name badge=look short />
                 </span>
                 <span class="who">
                     <h2>{title}</h2>
@@ -684,7 +695,7 @@ pub fn RadioEditor(
                 </div>
                 <div class="button-look" class:gone=move || section.get() != Section::Button>
                     <ColorPicker draft />
-                    <ContentPicker draft />
+                    <ContentPicker draft short />
                 </div>
             </div>
 
@@ -802,7 +813,7 @@ fn ColorPicker(draft: RwSignal<Draft>) -> impl IntoView {
 
 /// What the button shows: initials or characters, an emoji, or an icon.
 #[component]
-fn ContentPicker(draft: RwSignal<Draft>) -> impl IntoView {
+fn ContentPicker(draft: RwSignal<Draft>, short: Signal<Option<String>>) -> impl IntoView {
     let i18n = use_i18n();
     let mode = move || draft.with(|d| d.look.mode);
     let tabs = [Mode::Initials, Mode::Emoji, Mode::Icon].map(|tab| {
@@ -872,11 +883,11 @@ fn ContentPicker(draft: RwSignal<Draft>) -> impl IntoView {
             <div class="look-panel">
             <div class="look-text" class:gone=move || mode() != Mode::Initials>
                 <input
-                    maxlength="2"
-                    placeholder=move || draft.with(|d| initials(&d.name))
+                    maxlength="4"
+                    placeholder=move || short.get().unwrap_or_else(|| draft.with(|d| initials(&d.name)))
                     prop:value=move || draft.with(|d| d.look.text.clone())
                     on:input=move |ev| {
-                        let text = event_target_value(&ev);
+                        let text = badge::fit(&event_target_value(&ev));
                         draft.update(|d| d.look.text = text);
                     }
                 />
