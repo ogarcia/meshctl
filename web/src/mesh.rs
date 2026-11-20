@@ -136,6 +136,7 @@ fn NodeList() -> impl IntoView {
                             <th class="num">"SNR"</th>
                             <th class="num">{t!(i18n, nodes_battery)}</th>
                             <th>{t!(i18n, nodes_hardware)}</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -162,6 +163,7 @@ fn matches(node: &Node, needle: &str) -> bool {
 
 #[component]
 fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
+    let i18n = use_i18n();
     let heard = node.last_heard;
     let hops = if node.via_mqtt {
         "MQTT".to_owned()
@@ -202,6 +204,11 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
             <td class="num">{snr}</td>
             <td class="num">{battery}</td>
             <td class="dim">{node.hw_model.clone()}</td>
+            <td class="actions">
+                <button class="small" title=move || t_string!(i18n, trace_send) on:click=move |_| live.trace(num)>
+                    "⇢"
+                </button>
+            </td>
         </tr>
     }
 }

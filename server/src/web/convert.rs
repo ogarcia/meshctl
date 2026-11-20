@@ -77,8 +77,12 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
             radio,
             node: node(&n),
         },
-        // Clients hear of these once kept, as the two below.
-        Change::Mesh(_, mesh::Event::Message(_) | mesh::Event::Ack(_)) => return None,
+        // Clients hear of these once kept, as the ones below.
+        Change::Mesh(
+            _,
+            mesh::Event::Message(_) | mesh::Event::Ack(_) | mesh::Event::Traceroute(_),
+        ) => return None,
+        Change::Traceroute(radio, traceroute) => ServerMessage::Traceroute { radio, traceroute },
         Change::Message(radio, message) => ServerMessage::Message { radio, message },
         Change::MessageStatus {
             radio,

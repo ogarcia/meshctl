@@ -9,11 +9,14 @@ use crate::daemon::{self, Events, Failure};
 use crate::i18n::{I18nContextProvider, Locale, t, use_i18n};
 use crate::mesh::MeshView;
 use crate::radios::{RadioForm, RadiosView};
+use crate::traces::TracesView;
 use gloo_timers::future::sleep;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
-use meshctl_api::{Channel, Conversation, LinkState, Message, Node, Peer, Radio, RadioId, Status};
+use meshctl_api::{
+    Channel, Conversation, LinkState, Message, Node, Peer, Radio, RadioId, Status, Traceroute,
+};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -37,6 +40,7 @@ pub enum Daemon {
 pub enum Page {
     Mesh,
     Chat,
+    Traces,
     Radios,
 }
 
@@ -60,6 +64,10 @@ pub struct Live {
     pub open: RwSignal<Option<Peer>>,
     /// The messages of the open conversation, oldest first.
     pub thread: RwSignal<Vec<Message>>,
+    /// Of the selected radio, the newest first.
+    pub traceroutes: RwSignal<Vec<Traceroute>>,
+    /// Why the last traceroute asked for was not sent.
+    pub trace_error: RwSignal<Option<Failure>>,
     /// Seconds since the epoch, ticking.
     pub now: RwSignal<u32>,
 }
@@ -77,6 +85,8 @@ impl Live {
             conversations: RwSignal::new(Vec::new()),
             open: RwSignal::new(None),
             thread: RwSignal::new(Vec::new()),
+            traceroutes: RwSignal::new(Vec::new()),
+            trace_error: RwSignal::new(None),
             now: RwSignal::new(now()),
         }
     }
@@ -151,6 +161,7 @@ impl Live {
         let nodes = daemon::nodes(radio).await?;
         let channels = daemon::channels(radio).await?;
         let conversations = daemon::conversations(radio).await?;
+        let traceroutes = daemon::traceroutes(radio).await?;
         // The selection may have moved on while we were asking.
         if self.selected.get_untracked() == Some(radio) {
             self.status.set(Some(status));
@@ -158,8 +169,34 @@ impl Live {
                 .set(nodes.into_iter().map(|node| (node.num, node)).collect());
             self.channels.set(channels);
             self.conversations.set(conversations);
+            self.traceroutes.set(traceroutes);
         }
         self.refresh_thread().await
+    }
+
+    /// Traces the route to a node from the selected radio, and shows it.
+    pub fn trace(self, node: u32) {
+        let Some(radio) = self.selected.get_untracked() else {
+            return;
+        };
+        self.page.set(Page::Traces);
+        self.trace_error.set(None);
+        spawn_local(async move {
+            match daemon::trace(radio, node).await {
+                Ok(traceroute) => self.keep_traceroute(traceroute),
+                Err(failure) => self.trace_error.set(Some(failure)),
+            }
+        });
+    }
+
+    /// Puts a traceroute in the list, or where it was, as it is now.
+    fn keep_traceroute(self, traceroute: Traceroute) {
+        self.traceroutes.update(|traceroutes| {
+            match traceroutes.iter_mut().find(|t| t.id == traceroute.id) {
+                Some(kept) => *kept = traceroute,
+                None => traceroutes.insert(0, traceroute),
+            }
+        });
     }
 
     pub async fn refresh(self) -> Result<(), Failure> {
@@ -233,6 +270,10 @@ impl Live {
                             message.error = error;
                         }
                     });
+                    Ok(())
+                }
+                ServerMessage::Traceroute { radio, traceroute } if self.is_selected(radio) => {
+                    self.keep_traceroute(traceroute);
                     Ok(())
                 }
                 ServerMessage::Radios | ServerMessage::Lagged => self.refresh().await,
@@ -310,6 +351,7 @@ fn Shell() -> impl IntoView {
         let label = move || match page {
             Page::Mesh => t!(i18n, page_nodes).into_any(),
             Page::Chat => t!(i18n, page_chat).into_any(),
+            Page::Traces => t!(i18n, page_traces).into_any(),
             Page::Radios => t!(i18n, radios_manage).into_any(),
         };
         view! {
@@ -325,7 +367,7 @@ fn Shell() -> impl IntoView {
             <Show when=has_radios>
                 <RadioPicker />
                 <Connection />
-                <nav>{tab(Page::Mesh)} {tab(Page::Chat)} {tab(Page::Radios)}</nav>
+                <nav>{tab(Page::Mesh)} {tab(Page::Chat)} {tab(Page::Traces)} {tab(Page::Radios)}</nav>
             </Show>
             <LanguageSwitch />
         </header>
@@ -340,6 +382,7 @@ fn Shell() -> impl IntoView {
                 (_, Some(_)) => match live.page.get() {
                     Page::Mesh => view! { <MeshView /> }.into_any(),
                     Page::Chat => view! { <ChatView /> }.into_any(),
+                    Page::Traces => view! { <TracesView /> }.into_any(),
                     Page::Radios => view! { <RadiosView /> }.into_any(),
                 },
             }}

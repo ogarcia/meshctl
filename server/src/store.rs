@@ -6,8 +6,8 @@
 
 use anyhow::{Context, Result};
 use meshctl_api::{
-    BROADCAST, Conversation, Message, MessageId, MessageStatus, Peer, RadioId, RadioKind,
-    RadioSettings,
+    BROADCAST, Conversation, Hop, Message, MessageId, MessageStatus, Peer, RadioId, RadioKind,
+    RadioSettings, Traceroute, TracerouteId, TracerouteStatus,
 };
 use meshctl_core::mesh::{LocalNode, Node, Position, User};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
@@ -527,6 +527,174 @@ impl Store {
             })
             .collect())
     }
+
+    /// Keeps a traceroute just sent.
+    pub async fn add_traceroute(
+        &self,
+        radio: RadioId,
+        packet_id: u32,
+        origin: u32,
+        target: u32,
+        at: i64,
+    ) -> Result<Traceroute> {
+        let id = sqlx::query(
+            "INSERT INTO traceroute (radio_id, packet_id, origin, target, at, status)
+            VALUES (?, ?, ?, ?, ?, 'pending')",
+        )
+        .bind(radio)
+        .bind(i64::from(packet_id))
+        .bind(i64::from(origin))
+        .bind(i64::from(target))
+        .bind(at)
+        .execute(&self.pool)
+        .await?
+        .last_insert_rowid();
+        self.traceroute(id)
+            .await?
+            .context("a traceroute just kept is not there")
+    }
+
+    async fn traceroute(&self, id: TracerouteId) -> Result<Option<Traceroute>> {
+        let row: Option<TracerouteRow> = sqlx::query_as("SELECT * FROM traceroute WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(TracerouteRow::traceroute))
+    }
+
+    /// The traceroute still waiting for the answer to a packet: its id, and
+    /// the two ends of the route.
+    pub async fn pending_traceroute(
+        &self,
+        radio: RadioId,
+        packet_id: u32,
+    ) -> Result<Option<(TracerouteId, u32, u32)>> {
+        let row: Option<(i64, i64, i64)> = sqlx::query_as(
+            "SELECT id, origin, target FROM traceroute
+            WHERE radio_id = ? AND packet_id = ? AND status = 'pending'",
+        )
+        .bind(radio)
+        .bind(i64::from(packet_id))
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(id, origin, target)| (id, u32_from(origin), u32_from(target))))
+    }
+
+    /// Settles a pending traceroute: answered, with its routes, or failed.
+    pub async fn settle_traceroute(
+        &self,
+        id: TracerouteId,
+        outcome: Result<(&[Hop], &[Hop]), &str>,
+    ) -> Result<Option<Traceroute>> {
+        let (status, error, towards, back) = match outcome {
+            Ok((towards, back)) => (
+                TracerouteStatus::Done,
+                None,
+                Some(serde_json::to_string(towards)?),
+                Some(serde_json::to_string(back)?),
+            ),
+            Err(error) => (TracerouteStatus::Failed, Some(error), None, None),
+        };
+        sqlx::query(
+            "UPDATE traceroute SET status = ?, error = ?, towards = ?, back = ?
+            WHERE id = ? AND status = 'pending'",
+        )
+        .bind(traceroute_status_name(status))
+        .bind(error)
+        .bind(towards)
+        .bind(back)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        self.traceroute(id).await
+    }
+
+    /// Gives up on the traceroutes sent before `before` that were never
+    /// answered, and returns them.
+    pub async fn expire_traceroutes(&self, radio: RadioId, before: i64) -> Result<Vec<Traceroute>> {
+        let rows: Vec<TracerouteRow> = sqlx::query_as(
+            "UPDATE traceroute SET status = 'failed', error = 'TIMEOUT'
+            WHERE radio_id = ? AND status = 'pending' AND at < ?
+            RETURNING *",
+        )
+        .bind(radio)
+        .bind(before)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(TracerouteRow::traceroute).collect())
+    }
+
+    /// A radio's traceroutes, to one node or to any, the newest first.
+    pub async fn traceroutes(
+        &self,
+        radio: RadioId,
+        node: Option<u32>,
+        limit: u32,
+    ) -> Result<Vec<Traceroute>> {
+        let rows: Vec<TracerouteRow> = sqlx::query_as(
+            "SELECT * FROM traceroute
+            WHERE radio_id = ? AND (? IS NULL OR target = ?)
+            ORDER BY id DESC LIMIT ?",
+        )
+        .bind(radio)
+        .bind(node.map(i64::from))
+        .bind(node.map(i64::from))
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(TracerouteRow::traceroute).collect())
+    }
+
+    /// When the radio last sent a traceroute, if ever.
+    pub async fn last_traceroute_at(&self, radio: RadioId) -> Result<Option<i64>> {
+        Ok(
+            sqlx::query_scalar("SELECT max(at) FROM traceroute WHERE radio_id = ?")
+                .bind(radio)
+                .fetch_one(&self.pool)
+                .await?,
+        )
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct TracerouteRow {
+    id: i64,
+    target: i64,
+    at: i64,
+    status: String,
+    error: Option<String>,
+    towards: Option<String>,
+    back: Option<String>,
+}
+
+impl TracerouteRow {
+    fn traceroute(self) -> Traceroute {
+        let hops = |json: Option<String>| -> Vec<Hop> {
+            json.and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default()
+        };
+        Traceroute {
+            id: self.id,
+            target: u32_from(self.target),
+            at: self.at,
+            status: match self.status.as_str() {
+                "done" => TracerouteStatus::Done,
+                "failed" => TracerouteStatus::Failed,
+                _ => TracerouteStatus::Pending,
+            },
+            error: self.error,
+            towards: hops(self.towards),
+            back: hops(self.back),
+        }
+    }
+}
+
+fn traceroute_status_name(status: TracerouteStatus) -> &'static str {
+    match status {
+        TracerouteStatus::Pending => "pending",
+        TracerouteStatus::Done => "done",
+        TracerouteStatus::Failed => "failed",
+    }
 }
 
 /// Who a message was exchanged with.
@@ -881,6 +1049,57 @@ mod tests {
                 (Peer::Node { node: 9 }, 3),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn a_traceroute_is_answered_failed_or_given_up_on() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        let first = store.add_traceroute(radio, 41, 7, 9, 100).await.unwrap();
+        let second = store.add_traceroute(radio, 42, 7, 9, 130).await.unwrap();
+        let third = store.add_traceroute(radio, 43, 7, 8, 160).await.unwrap();
+        assert_eq!(first.status, TracerouteStatus::Pending);
+        assert_eq!(store.last_traceroute_at(radio).await.unwrap(), Some(160));
+
+        let (id, origin, target) = store.pending_traceroute(radio, 41).await.unwrap().unwrap();
+        assert_eq!((id, origin, target), (first.id, 7, 9));
+        let hops = [
+            Hop {
+                node: Some(7),
+                snr: None,
+            },
+            Hop {
+                node: Some(9),
+                snr: Some(6.0),
+            },
+        ];
+        let done = store
+            .settle_traceroute(id, Ok((&hops, &hops)))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(done.status, TracerouteStatus::Done);
+        assert_eq!(done.towards, hops);
+        // Settled once: no longer waiting for anything.
+        assert!(store.pending_traceroute(radio, 41).await.unwrap().is_none());
+
+        let failed = store
+            .settle_traceroute(second.id, Err("NO_RESPONSE"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed.status, TracerouteStatus::Failed);
+        assert_eq!(failed.error.as_deref(), Some("NO_RESPONSE"));
+
+        let expired = store.expire_traceroutes(radio, 200).await.unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].id, third.id);
+        assert_eq!(expired[0].error.as_deref(), Some("TIMEOUT"));
+
+        let to_nine = store.traceroutes(radio, Some(9), 50).await.unwrap();
+        let ids: Vec<_> = to_nine.iter().map(|t| t.id).collect();
+        assert_eq!(ids, [second.id, first.id]);
+        assert_eq!(store.traceroutes(radio, None, 50).await.unwrap().len(), 3);
     }
 
     #[tokio::test]

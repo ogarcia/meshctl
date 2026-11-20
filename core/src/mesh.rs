@@ -119,6 +119,41 @@ pub enum Event {
     /// The answer to a packet sent with want_ack: delivered, heard relayed,
     /// or given up on.
     Ack(Ack),
+    /// The answer to a traceroute sent.
+    Traceroute(TracerouteAnswer),
+}
+
+/// What the firmware puts in a route for a hop it could not tell.
+pub const UNKNOWN_HOP: u32 = 0xffff_ffff;
+
+/// What a traced node answered: the route there and back, with the SNR each
+/// hop was heard at, in dB, `None` where it could not be told.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TracerouteAnswer {
+    /// The id of the traceroute sent.
+    pub request_id: u32,
+    /// The node traced, which is who answered.
+    pub from: u32,
+    /// The relays on the way there, [`UNKNOWN_HOP`] for one not told.
+    pub route: Vec<u32>,
+    /// One for each hop there: to each relay, and to the node traced.
+    pub snr_towards: Vec<Option<f32>>,
+    /// The relays on the way back.
+    pub route_back: Vec<u32>,
+    /// One for each hop back; one more than relays when the answer was heard
+    /// arriving home, which it was, since here it is.
+    pub snr_back: Vec<Option<f32>>,
+}
+
+/// What the firmware puts for an SNR it could not tell: INT8_MIN.
+const UNKNOWN_SNR: i32 = -128;
+
+fn snrs(scaled: &[i32]) -> Vec<Option<f32>> {
+    scaled
+        .iter()
+        // Scaled by four, which an i8 range fits in an f32 exactly.
+        .map(|&s| (s != UNKNOWN_SNR).then(|| s as f32 / 4.0))
+        .collect()
 }
 
 /// The node number that stands for everyone: what a channel message is sent to.
@@ -357,6 +392,18 @@ fn said(packet: &pb::MeshPacket, now: u32) -> Option<Event> {
                 hops_away: (reception && packet.hop_start > 0)
                     .then(|| packet.hop_start.saturating_sub(packet.hop_limit)),
                 via_mqtt: packet.via_mqtt,
+            }))
+        }
+        // Only answers: a request to us the firmware answers on its own.
+        Ok(PortNum::TracerouteApp) if data.request_id != 0 => {
+            let discovery = pb::RouteDiscovery::decode(data.payload.as_slice()).ok()?;
+            Some(Event::Traceroute(TracerouteAnswer {
+                request_id: data.request_id,
+                from: packet.from,
+                route: discovery.route,
+                snr_towards: snrs(&discovery.snr_towards),
+                route_back: discovery.route_back,
+                snr_back: snrs(&discovery.snr_back),
             }))
         }
         Ok(PortNum::RoutingApp) if data.request_id != 0 => {
@@ -696,6 +743,42 @@ mod tests {
             panic!("an ack");
         };
         assert_eq!(ack.error.as_deref(), Some("MAX_RETRANSMIT"));
+    }
+
+    #[test]
+    fn a_traceroute_answer_is_heard() {
+        let mut state = ready();
+        let discovery = pb::RouteDiscovery {
+            route: vec![5, UNKNOWN_HOP],
+            snr_towards: vec![24, -128, 10],
+            route_back: vec![5],
+            snr_back: vec![-6, 40],
+        };
+        let mut answer = packet(9, PortNum::TracerouteApp, discovery.encode_to_vec());
+        if let Some(mesh_packet::PayloadVariant::Decoded(data)) = &mut answer.payload_variant {
+            data.request_id = 42;
+        }
+        let events = state.apply(from_radio(V::Packet(answer)), 1);
+        let Some(Event::Traceroute(traced)) = events.last() else {
+            panic!("a traceroute answer");
+        };
+        assert_eq!(traced.request_id, 42);
+        assert_eq!(traced.from, 9);
+        assert_eq!(traced.route, [5, UNKNOWN_HOP]);
+        assert_eq!(traced.snr_towards, [Some(6.0), None, Some(2.5)]);
+        assert_eq!(traced.snr_back, [Some(-1.5), Some(10.0)]);
+    }
+
+    #[test]
+    fn a_traceroute_request_is_not_an_answer() {
+        let mut state = ready();
+        let request = packet(
+            9,
+            PortNum::TracerouteApp,
+            pb::RouteDiscovery::default().encode_to_vec(),
+        );
+        let events = state.apply(from_radio(V::Packet(request)), 1);
+        assert!(!events.iter().any(|e| matches!(e, Event::Traceroute(_))));
     }
 
     #[test]

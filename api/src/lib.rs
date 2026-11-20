@@ -57,6 +57,10 @@ pub enum ErrorCode {
     /// A message needs some text, of up to 200 bytes, and either a channel the
     /// radio has or a node, not both.
     InvalidMessage,
+    /// Not a node that can be traced: everyone, or the radio itself.
+    InvalidNode,
+    /// The radio traced a route too recently; try again in a moment.
+    TooSoon,
 }
 
 /// The body of every error the API answers with.
@@ -277,7 +281,8 @@ pub struct Message {
     pub text: String,
     /// When it was heard or sent, in seconds since the epoch.
     pub at: i64,
-    /// Whether it was sent from meshctl.
+    /// Whether this radio sent it: from meshctl, or from another client of
+    /// the same radio.
     pub outgoing: bool,
     pub status: MessageStatus,
     /// Why it failed, as the protobufs name it.
@@ -327,6 +332,61 @@ pub struct Conversation {
     pub peer: Peer,
     /// The newest message in it, if any.
     pub last: Option<Message>,
+}
+
+/// How a traceroute is identified in the API.
+pub type TracerouteId = i64;
+
+/// Where a traceroute is at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum TracerouteStatus {
+    /// Sent, with no answer yet.
+    Pending,
+    /// Answered: the routes there and back are known.
+    Done,
+    /// No answer: `error` says why, `TIMEOUT` if none came in time.
+    Failed,
+}
+
+/// A node on a route, and how well it heard the hop before it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Hop {
+    /// None for a relay that could not be told.
+    pub node: Option<u32>,
+    /// The SNR it heard the hop before it at, in dB. None for the first node
+    /// of a route, and where it could not be told.
+    pub snr: Option<f32>,
+}
+
+/// A traceroute from a radio to a node: the route there and the route back,
+/// each from its first node to its last.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Traceroute {
+    pub id: TracerouteId,
+    /// The node traced.
+    pub target: u32,
+    /// When it was sent, in seconds since the epoch.
+    pub at: i64,
+    pub status: TracerouteStatus,
+    /// Why it failed, as the protobufs name it, or `TIMEOUT`.
+    #[cfg_attr(feature = "openapi", schema(example = "NO_RESPONSE"))]
+    pub error: Option<String>,
+    /// From the radio to the node traced, once answered.
+    pub towards: Vec<Hop>,
+    /// From the node traced back to the radio, once answered.
+    pub back: Vec<Hop>,
+}
+
+/// A node to trace the route to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NewTraceroute {
+    /// The node's number.
+    pub node: u32,
 }
 
 #[cfg(test)]

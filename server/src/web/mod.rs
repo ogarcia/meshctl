@@ -18,6 +18,7 @@ pub mod convert;
 mod events;
 mod messages;
 mod radios;
+mod traceroutes;
 
 pub use auth::Auth;
 
@@ -64,6 +65,7 @@ const SCALAR_HTML: &str = r#"<!doctype html>
         (name = "radios", description = "The radios meshctl keeps connected to"),
         (name = "nodes", description = "The nodes each radio hears"),
         (name = "chat", description = "What each radio hears and says"),
+        (name = "traceroutes", description = "The routes from each radio to other nodes"),
         (name = "events", description = "What changes, as it changes"),
     ),
     components(schemas(
@@ -89,6 +91,7 @@ pub fn router(state: AppState) -> Router {
     let guarded = api::router()
         .merge(radios::router())
         .merge(messages::router())
+        .merge(traceroutes::router())
         .layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
             auth::check,

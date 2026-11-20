@@ -10,7 +10,8 @@
 use crate::link::{self, Link, Transport};
 use crate::mesh::{Event, LinkState, MeshState};
 use meshctl_proto::meshtastic::{
-    Data, FromRadio, Heartbeat, MeshPacket, PortNum, ToRadio, from_radio, mesh_packet, to_radio,
+    Data, FromRadio, Heartbeat, MeshPacket, PortNum, RouteDiscovery, ToRadio, from_radio,
+    mesh_packet, to_radio,
 };
 use prost::Message;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -99,6 +100,45 @@ impl Mesh {
         if outgoing.text.trim().is_empty() || outgoing.text.len() > MAX_TEXT_BYTES {
             return Err(SendError::BadText);
         }
+        self.send_packet(
+            outgoing.to,
+            outgoing.channel,
+            true,
+            Data {
+                portnum: PortNum::TextMessageApp as i32,
+                payload: outgoing.text.as_bytes().to_vec(),
+                reply_id: outgoing.reply_id.unwrap_or_default(),
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Asks a node for the route to it and back. Returns the request's id,
+    /// which the [`crate::mesh::Event::Traceroute`] that answers it carries; a
+    /// relay that gives up says so with an [`crate::mesh::Event::Ack`] for it.
+    pub fn send_traceroute(&self, to: u32, channel: u32) -> Result<u32, SendError> {
+        self.send_packet(
+            to,
+            channel,
+            false,
+            Data {
+                portnum: PortNum::TracerouteApp as i32,
+                payload: RouteDiscovery::default().encode_to_vec(),
+                want_response: true,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Hands a packet to the radio, which fills in who it is from and, left
+    /// at zero, the hop limit it is configured with.
+    fn send_packet(
+        &self,
+        to: u32,
+        channel: u32,
+        want_ack: bool,
+        data: Data,
+    ) -> Result<u32, SendError> {
         if self.read(|state| state.link) != LinkState::Ready {
             return Err(SendError::NotConnected);
         }
@@ -113,16 +153,11 @@ impl Mesh {
         // uses zero.
         let id = (self.next_id.fetch_add(1, Ordering::Relaxed) & 0x7fff_ffff).max(1);
         let packet = MeshPacket {
-            to: outgoing.to,
-            channel: outgoing.channel,
+            to,
+            channel,
             id,
-            want_ack: true,
-            payload_variant: Some(mesh_packet::PayloadVariant::Decoded(Data {
-                portnum: PortNum::TextMessageApp as i32,
-                payload: outgoing.text.as_bytes().to_vec(),
-                reply_id: outgoing.reply_id.unwrap_or_default(),
-                ..Default::default()
-            })),
+            want_ack,
+            payload_variant: Some(mesh_packet::PayloadVariant::Decoded(data)),
             ..Default::default()
         };
         let message = ToRadio {

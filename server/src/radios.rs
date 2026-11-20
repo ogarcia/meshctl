@@ -9,8 +9,8 @@
 use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
-    Conversation, ErrorCode, LinkState, Message, MessageId, MessageStatus, NewMessage, Peer, Radio,
-    RadioId, RadioKind, RadioSettings, Status,
+    Conversation, ErrorCode, Hop, LinkState, Message, MessageId, MessageStatus, NewMessage, Peer,
+    Radio, RadioId, RadioKind, RadioSettings, Status, Traceroute,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -45,6 +45,8 @@ pub enum Change {
         status: MessageStatus,
         error: Option<String>,
     },
+    /// A traceroute sent, or what became of it.
+    Traceroute(RadioId, Traceroute),
     /// Events of a radio were lost on their way here.
     Lagged,
 }
@@ -62,6 +64,94 @@ impl From<anyhow::Error> for SendFailure {
     fn from(err: anyhow::Error) -> Self {
         Self::Failed(err)
     }
+}
+
+/// How long a radio waits between traceroutes, as the official clients do:
+/// each one floods the mesh both ways.
+pub const TRACEROUTE_INTERVAL: i64 = 30;
+
+/// How long a traceroute is waited for before it is given up on.
+const TRACEROUTE_TIMEOUT: i64 = 120;
+
+/// How often traceroutes waited for too long are looked for.
+const TRACEROUTE_EXPIRY_TICK: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Why a traceroute was not sent.
+#[derive(Debug)]
+pub enum TraceFailure {
+    NoSuchRadio,
+    NotConnected,
+    /// Everyone, or the radio itself.
+    InvalidNode,
+    /// The last one was this many seconds ago; wait the rest.
+    TooSoon {
+        wait: i64,
+    },
+    Failed(anyhow::Error),
+}
+
+impl From<anyhow::Error> for TraceFailure {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Failed(err)
+    }
+}
+
+/// The routes a traceroute answer tells, each from its first node to its last:
+/// from the radio to the node traced, and back. Each hop with the SNR it was
+/// heard at, which the firmware gives one for each hop, in order.
+pub fn routes(origin: u32, answer: &mesh::TracerouteAnswer) -> (Vec<Hop>, Vec<Hop>) {
+    let path = |first: u32, relays: &[u32], last: u32, snrs: &[Option<f32>]| -> Vec<Hop> {
+        let first = Hop {
+            node: Some(first),
+            snr: None,
+        };
+        let rest = relays
+            .iter()
+            .copied()
+            .chain([last])
+            .enumerate()
+            .map(|(i, node)| Hop {
+                node: (node != mesh::UNKNOWN_HOP).then_some(node),
+                snr: snrs.get(i).copied().flatten(),
+            });
+        std::iter::once(first).chain(rest).collect()
+    };
+    (
+        path(origin, &answer.route, answer.from, &answer.snr_towards),
+        path(answer.from, &answer.route_back, origin, &answer.snr_back),
+    )
+}
+
+async fn answer_traceroute(
+    store: &Store,
+    changes: &broadcast::Sender<Change>,
+    radio: RadioId,
+    answer: &mesh::TracerouteAnswer,
+) -> Result<()> {
+    let Some((id, origin, _)) = store.pending_traceroute(radio, answer.request_id).await? else {
+        return Ok(());
+    };
+    let (towards, back) = routes(origin, answer);
+    if let Some(traceroute) = store.settle_traceroute(id, Ok((&towards, &back))).await? {
+        let _ = changes.send(Change::Traceroute(radio, traceroute));
+    }
+    Ok(())
+}
+
+async fn fail_traceroute(
+    store: &Store,
+    changes: &broadcast::Sender<Change>,
+    radio: RadioId,
+    packet_id: u32,
+    error: &str,
+) -> Result<()> {
+    let Some((id, _, _)) = store.pending_traceroute(radio, packet_id).await? else {
+        return Ok(());
+    };
+    if let Some(traceroute) = store.settle_traceroute(id, Err(error)).await? {
+        let _ = changes.send(Change::Traceroute(radio, traceroute));
+    }
+    Ok(())
 }
 
 /// Checks what a client asks a radio to be, and says where it is.
@@ -273,6 +363,52 @@ impl Radios {
         Ok(Some(self.store.messages(id, peer, before, limit).await?))
     }
 
+    /// Traces the route from a radio to a node.
+    pub async fn traceroute(&self, id: RadioId, node: u32) -> Result<Traceroute, TraceFailure> {
+        let mesh = self.mesh(id).ok_or(TraceFailure::NoSuchRadio)?;
+        let origin = mesh.read(|state| state.local.as_ref().map(|l| l.num));
+        if node == mesh::BROADCAST || origin == Some(node) {
+            return Err(TraceFailure::InvalidNode);
+        }
+        if self.link(id) != LinkState::Ready {
+            return Err(TraceFailure::NotConnected);
+        }
+        let at = now();
+        if let Some(last) = self.store.last_traceroute_at(id).await? {
+            let since = at - last;
+            if since < TRACEROUTE_INTERVAL {
+                return Err(TraceFailure::TooSoon {
+                    wait: TRACEROUTE_INTERVAL - since,
+                });
+            }
+        }
+        let packet_id = mesh.send_traceroute(node, 0).map_err(|error| match error {
+            SendError::NotConnected | SendError::BadText => TraceFailure::NotConnected,
+        })?;
+        let traceroute = self
+            .store
+            .add_traceroute(id, packet_id, origin.unwrap_or_default(), node, at)
+            .await?;
+        let _ = self
+            .changes
+            .send(Change::Traceroute(id, traceroute.clone()));
+        Ok(traceroute)
+    }
+
+    /// A radio's traceroutes, to one node or to any, the newest first, if there
+    /// is such a radio.
+    pub async fn traceroutes(
+        &self,
+        id: RadioId,
+        node: Option<u32>,
+        limit: u32,
+    ) -> Result<Option<Vec<Traceroute>>> {
+        if self.mesh(id).is_none() {
+            return Ok(None);
+        }
+        Ok(Some(self.store.traceroutes(id, node, limit).await?))
+    }
+
     pub async fn list(&self) -> Result<Vec<Radio>> {
         let records = self.store.radios().await?;
         Ok(records
@@ -430,7 +566,9 @@ impl Radios {
             loop {
                 let change = match events.recv().await {
                     // These go out once kept, from `persist`.
-                    Ok(mesh::Event::Message(_) | mesh::Event::Ack(_)) => continue,
+                    Ok(
+                        mesh::Event::Message(_) | mesh::Event::Ack(_) | mesh::Event::Traceroute(_),
+                    ) => continue,
                     Ok(event) => Change::Mesh(id, event),
                     Err(RecvError::Lagged(_)) => Change::Lagged,
                     Err(RecvError::Closed) => return,
@@ -450,11 +588,35 @@ impl Radios {
         let changes = self.changes.clone();
         tokio::spawn(async move {
             let mut connected = false;
+            let mut expiry = tokio::time::interval(TRACEROUTE_EXPIRY_TICK);
             loop {
-                let stored = match events.recv().await {
+                let event = tokio::select! {
+                    event = events.recv() => event,
+                    _ = expiry.tick() => {
+                        let before = now() - TRACEROUTE_TIMEOUT;
+                        match store.expire_traceroutes(id, before).await {
+                            Ok(expired) => {
+                                for traceroute in expired {
+                                    let _ = changes.send(Change::Traceroute(id, traceroute));
+                                }
+                            }
+                            Err(err) => tracing::warn!(
+                                radio = id,
+                                error = format_args!("{err:#}"),
+                                "cannot store"
+                            ),
+                        }
+                        continue;
+                    }
+                };
+                let stored = match event {
                     Ok(mesh::Event::Node(node)) => store.save_node(id, &node).await,
+                    Ok(mesh::Event::Traceroute(answer)) => {
+                        answer_traceroute(&store, &changes, id, &answer).await
+                    }
                     Ok(mesh::Event::Message(heard)) => {
-                        let kept = store.add_message(id, &heard_row(heard)).await;
+                        let local = mesh.read(|s| s.local.as_ref().map(|l| l.num));
+                        let kept = store.add_message(id, &heard_row(heard, local)).await;
                         kept.map(|kept| {
                             if let Some(message) = kept {
                                 let _ = changes.send(Change::Message(id, message));
@@ -462,6 +624,17 @@ impl Radios {
                         })
                     }
                     Ok(mesh::Event::Ack(ack)) => {
+                        // A relay giving up on a traceroute says so this way.
+                        if let Some(error) = &ack.error
+                            && let Err(err) =
+                                fail_traceroute(&store, &changes, id, ack.packet_id, error).await
+                        {
+                            tracing::warn!(
+                                radio = id,
+                                error = format_args!("{err:#}"),
+                                "cannot store"
+                            );
+                        }
                         let answered = store
                             .ack(id, ack.packet_id, ack.from, ack.error.as_deref())
                             .await;
@@ -512,7 +685,12 @@ impl Radios {
 }
 
 /// A message heard, as kept.
-fn heard_row(heard: mesh::TextMessage) -> NewMessageRow {
+///
+/// One from the radio itself was sent through it by another client (a phone,
+/// or another one behind the same tasticsplitter): it is ours as much as one
+/// sent from meshctl, and as far as anyone here can tell, it went out.
+fn heard_row(heard: mesh::TextMessage, local: Option<u32>) -> NewMessageRow {
+    let ours = local == Some(heard.from);
     NewMessageRow {
         packet_id: heard.packet_id,
         from: heard.from,
@@ -520,8 +698,12 @@ fn heard_row(heard: mesh::TextMessage) -> NewMessageRow {
         channel: heard.channel,
         text: heard.text,
         at: i64::from(heard.at),
-        outgoing: false,
-        status: MessageStatus::Received,
+        outgoing: ours,
+        status: if ours {
+            MessageStatus::Sent
+        } else {
+            MessageStatus::Received
+        },
         reply_id: heard.reply_id,
         emoji: heard.emoji,
         snr: heard.snr,
@@ -552,6 +734,76 @@ mod tests {
             address: address.into(),
             enabled: true,
         }
+    }
+
+    #[test]
+    fn an_answer_reads_as_two_routes_from_end_to_end() {
+        let answer = mesh::TracerouteAnswer {
+            request_id: 1,
+            from: 9,
+            route: vec![5, mesh::UNKNOWN_HOP],
+            snr_towards: vec![Some(6.0), None, Some(2.5)],
+            route_back: vec![5],
+            snr_back: vec![Some(-1.5), Some(10.0)],
+        };
+        let (towards, back) = routes(7, &answer);
+        let hop = |node, snr| Hop { node, snr };
+        assert_eq!(
+            towards,
+            [
+                hop(Some(7), None),
+                hop(Some(5), Some(6.0)),
+                hop(None, None),
+                hop(Some(9), Some(2.5)),
+            ]
+        );
+        assert_eq!(
+            back,
+            [
+                hop(Some(9), None),
+                hop(Some(5), Some(-1.5)),
+                hop(Some(7), Some(10.0))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_direct_answer_is_one_hop_each_way() {
+        let answer = mesh::TracerouteAnswer {
+            request_id: 1,
+            from: 9,
+            route: vec![],
+            snr_towards: vec![Some(8.0)],
+            route_back: vec![],
+            snr_back: vec![Some(7.0)],
+        };
+        let (towards, back) = routes(7, &answer);
+        assert_eq!(towards.len(), 2);
+        assert_eq!(back[1].snr, Some(7.0));
+    }
+
+    #[test]
+    fn what_another_client_sent_through_the_radio_is_ours() {
+        let heard = mesh::TextMessage {
+            packet_id: 1,
+            from: 7,
+            to: 9,
+            channel: 0,
+            text: "hola".into(),
+            at: 1,
+            reply_id: None,
+            emoji: false,
+            snr: None,
+            rssi: None,
+            hops_away: None,
+            via_mqtt: false,
+        };
+        let ours = heard_row(heard.clone(), Some(7));
+        assert!(ours.outgoing);
+        assert_eq!(ours.status, MessageStatus::Sent);
+        let theirs = heard_row(heard, Some(9));
+        assert!(!theirs.outgoing);
+        assert_eq!(theirs.status, MessageStatus::Received);
     }
 
     #[test]

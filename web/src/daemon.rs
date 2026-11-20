@@ -10,8 +10,8 @@ use gloo_net::websocket::Message as Frame;
 use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
-    API_V1, Channel, Conversation, Error, ErrorCode, Message, NewMessage, Node, Peer, Radio,
-    RadioId, RadioSettings, Status, TOKEN_HEADER,
+    API_V1, Channel, Conversation, Error, ErrorCode, Message, NewMessage, NewTraceroute, Node,
+    Peer, Radio, RadioId, RadioSettings, Status, TOKEN_HEADER, Traceroute,
 };
 use serde::de::DeserializeOwned;
 
@@ -124,6 +124,18 @@ pub async fn messages(radio: RadioId, peer: Peer) -> Result<Vec<Message>, Failur
 pub async fn send_message(radio: RadioId, message: &NewMessage) -> Result<Message, Failure> {
     let request = with_token(Request::post(&url(&format!("/radios/{radio}/messages"))))
         .json(message)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+pub async fn traceroutes(radio: RadioId) -> Result<Vec<Traceroute>, Failure> {
+    get(&format!("/radios/{radio}/traceroutes?limit=100")).await
+}
+
+pub async fn trace(radio: RadioId, node: u32) -> Result<Traceroute, Failure> {
+    let request = with_token(Request::post(&url(&format!("/radios/{radio}/traceroutes"))))
+        .json(&NewTraceroute { node })
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
