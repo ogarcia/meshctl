@@ -172,5 +172,13 @@
   "map_legend_hide": "Ocultar la leyenda",
   "map_legend_show": "Mostrar la leyenda",
   "map_route_there": "ida",
-  "map_route_back": "vuelta"
+  "map_route_back": "vuelta",
+  "map_mid": "3–4 saltos",
+  "node_altitude": "Altitud",
+  "node_precision": "Precisión",
+  "node_source": "Origen de la posición",
+  "position_manual": "Fijada a mano",
+  "position_internal": "GPS",
+  "position_external": "GPS externo",
+  "node_channel_use": "Uso del canal"
 }

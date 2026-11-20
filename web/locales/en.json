@@ -172,5 +172,13 @@
   "map_legend_hide": "Fold the legend away",
   "map_legend_show": "Show the legend",
   "map_route_there": "there",
-  "map_route_back": "back"
+  "map_route_back": "back",
+  "map_mid": "3–4 hops",
+  "node_altitude": "Altitude",
+  "node_precision": "Precision",
+  "node_source": "Position from",
+  "position_manual": "Fixed by hand",
+  "position_internal": "GPS",
+  "position_external": "External GPS",
+  "node_channel_use": "Channel use"
 }

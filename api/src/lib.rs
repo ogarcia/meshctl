@@ -207,6 +207,25 @@ pub struct Position {
     pub longitude: f64,
     /// Metres above sea level.
     pub altitude: Option<i32>,
+    /// How far, in metres, it may be from where the node is, when the node
+    /// shares it rounded, as most do; none when it is exact or does not say.
+    #[cfg_attr(feature = "openapi", schema(example = 2918))]
+    pub radius: Option<u32>,
+    /// How the node came by it, when it says.
+    pub source: Option<PositionSource>,
+}
+
+/// How a node came by its position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum PositionSource {
+    /// Set by hand, as a fixed position.
+    Manual,
+    /// From its own GPS.
+    Internal,
+    /// From a GPS outside it: a phone, say.
+    External,
 }
 
 /// A node of the mesh, as heard from the radio.
@@ -244,6 +263,8 @@ pub struct Node {
     pub battery_level: Option<u32>,
     /// Battery voltage, in volts.
     pub voltage: Option<f32>,
+    /// How busy it hears the channel, as a percentage of the time.
+    pub channel_utilization: Option<f32>,
 }
 
 /// How a message is identified in the API.

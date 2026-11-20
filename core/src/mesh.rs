@@ -63,6 +63,22 @@ pub struct Position {
     pub latitude: f64,
     pub longitude: f64,
     pub altitude: Option<i32>,
+    /// How far, in metres, it may be from where the node is, when the node
+    /// shares it rounded; none when it is exact or does not say.
+    pub radius: Option<u32>,
+    /// How the node came by it, when it says.
+    pub source: Option<PositionSource>,
+}
+
+/// How a node came by its position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PositionSource {
+    /// Set by hand, as a fixed position.
+    Manual,
+    /// From its own GPS.
+    Internal,
+    /// From a GPS outside it: a phone, say.
+    External,
 }
 
 /// A node of the mesh, as heard from the radio.
@@ -80,6 +96,8 @@ pub struct Node {
     pub favorite: bool,
     pub battery_level: Option<u32>,
     pub voltage: Option<f32>,
+    /// How busy it hears the channel, as a percentage of the time.
+    pub channel_utilization: Option<f32>,
 }
 
 impl Node {
@@ -96,6 +114,7 @@ impl Node {
             favorite: false,
             battery_level: None,
             voltage: None,
+            channel_utilization: None,
         }
     }
 
@@ -477,6 +496,7 @@ impl MeshState {
         if let Some(metrics) = info.device_metrics {
             node.battery_level = metrics.battery_level.or(node.battery_level);
             node.voltage = metrics.voltage.or(node.voltage);
+            node.channel_utilization = metrics.channel_utilization.or(node.channel_utilization);
         }
         node.last_heard = (info.last_heard > 0).then_some(info.last_heard);
         node.snr = (info.snr != 0.0).then_some(info.snr);
@@ -528,6 +548,8 @@ impl MeshState {
                     {
                         node.battery_level = metrics.battery_level.or(node.battery_level);
                         node.voltage = metrics.voltage.or(node.voltage);
+                        node.channel_utilization =
+                            metrics.channel_utilization.or(node.channel_utilization);
                     }
                 }
                 _ => {}
@@ -624,7 +646,28 @@ fn position_from(position: pb::Position) -> Option<Position> {
         latitude: f64::from(latitude) * 1e-7,
         longitude: f64::from(longitude) * 1e-7,
         altitude: position.altitude,
+        radius: radius(position.precision_bits),
+        source: match pb::position::LocSource::try_from(position.location_source) {
+            Ok(pb::position::LocSource::LocManual) => Some(PositionSource::Manual),
+            Ok(pb::position::LocSource::LocInternal) => Some(PositionSource::Internal),
+            Ok(pb::position::LocSource::LocExternal) => Some(PositionSource::External),
+            _ => None,
+        },
     })
+}
+
+/// How far, in metres, a position shared rounded may be from where the node
+/// is: half the side of the cell its precision rounds to, as the official
+/// apps tell it. None when it is exact (32 bits) or does not say (0).
+fn radius(precision_bits: u32) -> Option<u32> {
+    if !(1..32).contains(&precision_bits) {
+        return None;
+    }
+    // A degree of latitude is about 111 320 m; coordinates go by 1e-7 degrees.
+    let side = f64::from(1_u32 << (32 - precision_bits)) * 1e-7 * 111_320.0;
+    // Under 1 m and over 3000 km cannot happen with 1 to 31 bits.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    Some((side / 2.0).round() as u32)
 }
 
 /// The protobuf name of an enum value, or the number when these protobufs are
@@ -703,6 +746,15 @@ mod tests {
         assert_eq!(node.hops_away, Some(2));
         assert!(matches!(events.first(), Some(Event::Packet(h)) if h.from == 0x1234_5678));
         assert_eq!(events.get(1), Some(&Event::Node(node.clone())));
+    }
+
+    #[test]
+    fn a_rounded_position_says_how_far_off_it_may_be() {
+        // As the official apps tell them.
+        assert_eq!(radius(13), Some(2918));
+        assert_eq!(radius(16), Some(365));
+        assert_eq!(radius(32), None);
+        assert_eq!(radius(0), None);
     }
 
     #[test]

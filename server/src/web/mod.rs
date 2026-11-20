@@ -176,6 +176,7 @@ pub(crate) mod tests {
                     favorite: false,
                     battery_level: None,
                     voltage: None,
+                    channel_utilization: None,
                 },
             );
         }

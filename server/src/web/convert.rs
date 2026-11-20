@@ -50,6 +50,12 @@ pub fn node(node: &mesh::Node) -> api::Node {
             latitude: p.latitude,
             longitude: p.longitude,
             altitude: p.altitude,
+            radius: p.radius,
+            source: p.source.map(|source| match source {
+                mesh::PositionSource::Manual => api::PositionSource::Manual,
+                mesh::PositionSource::Internal => api::PositionSource::Internal,
+                mesh::PositionSource::External => api::PositionSource::External,
+            }),
         }),
         last_heard: node.last_heard,
         snr: node.snr,
@@ -59,6 +65,7 @@ pub fn node(node: &mesh::Node) -> api::Node {
         favorite: node.favorite,
         battery_level: node.battery_level,
         voltage: node.voltage,
+        channel_utilization: node.channel_utilization,
     }
 }
 

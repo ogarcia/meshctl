@@ -255,7 +255,7 @@ window.meshctlMap = (() => {
     head.append(title);
     const facts = element("dl", "mc-card-facts");
     for (const fact of node.facts) {
-      const pair = element("div");
+      const pair = element("div", fact.wide ? "wide" : "");
       const term = element("dt");
       // One of the bundled Tabler icons, by its name.
       const icon = element("span", "mc-icon");

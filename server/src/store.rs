@@ -9,7 +9,7 @@ use meshctl_api::{
     BROADCAST, Conversation, Hop, Message, MessageId, MessageStatus, Peer, Preferences, RadioId,
     RadioKind, RadioSettings, SightingId, Traceroute, TracerouteId, TracerouteStatus,
 };
-use meshctl_core::mesh::{Heard, LocalNode, Node, Position, User};
+use meshctl_core::mesh::{Heard, LocalNode, Node, Position, PositionSource, User};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -75,6 +75,8 @@ struct NodeRow {
     latitude: Option<f64>,
     longitude: Option<f64>,
     altitude: Option<i32>,
+    position_radius: Option<i64>,
+    position_source: Option<String>,
     last_heard: Option<i64>,
     snr: Option<f32>,
     rssi: Option<i32>,
@@ -83,6 +85,7 @@ struct NodeRow {
     favorite: bool,
     battery_level: Option<i64>,
     voltage: Option<f32>,
+    channel_utilization: Option<f32>,
 }
 
 impl NodeRow {
@@ -100,6 +103,8 @@ impl NodeRow {
                 latitude,
                 longitude,
                 altitude: self.altitude,
+                radius: self.position_radius.map(u32_from),
+                source: self.position_source.as_deref().and_then(source_from),
             }),
             _ => None,
         };
@@ -115,7 +120,25 @@ impl NodeRow {
             favorite: self.favorite,
             battery_level: self.battery_level.map(u32_from),
             voltage: self.voltage,
+            channel_utilization: self.channel_utilization,
         }
+    }
+}
+
+fn source_name(source: PositionSource) -> &'static str {
+    match source {
+        PositionSource::Manual => "manual",
+        PositionSource::Internal => "internal",
+        PositionSource::External => "external",
+    }
+}
+
+fn source_from(name: &str) -> Option<PositionSource> {
+    match name {
+        "manual" => Some(PositionSource::Manual),
+        "internal" => Some(PositionSource::Internal),
+        "external" => Some(PositionSource::External),
+        _ => None,
     }
 }
 
@@ -126,17 +149,22 @@ fn u32_from(value: i64) -> u32 {
 }
 
 const NODE_UPSERT: &str = "INSERT INTO node (radio_id, num, long_name, short_name, hw_model, role,
-        latitude, longitude, altitude, last_heard, snr, rssi, hops_away, via_mqtt, favorite,
-        battery_level, voltage)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        latitude, longitude, altitude, position_radius, position_source, last_heard, snr, rssi,
+        hops_away,
+        via_mqtt, favorite,
+        battery_level, voltage, channel_utilization)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (radio_id, num) DO UPDATE SET
         long_name = excluded.long_name, short_name = excluded.short_name,
         hw_model = excluded.hw_model, role = excluded.role,
         latitude = excluded.latitude, longitude = excluded.longitude,
-        altitude = excluded.altitude, last_heard = excluded.last_heard,
+        altitude = excluded.altitude, position_radius = excluded.position_radius,
+        position_source = excluded.position_source,
+        last_heard = excluded.last_heard,
         snr = excluded.snr, rssi = excluded.rssi, hops_away = excluded.hops_away,
         via_mqtt = excluded.via_mqtt, favorite = excluded.favorite,
-        battery_level = excluded.battery_level, voltage = excluded.voltage";
+        battery_level = excluded.battery_level, voltage = excluded.voltage,
+        channel_utilization = excluded.channel_utilization";
 
 async fn upsert_node<'e, E>(executor: E, radio: RadioId, node: &Node) -> Result<()>
 where
@@ -153,6 +181,8 @@ where
         .bind(node.position.map(|p| p.latitude))
         .bind(node.position.map(|p| p.longitude))
         .bind(node.position.and_then(|p| p.altitude))
+        .bind(node.position.and_then(|p| p.radius).map(i64::from))
+        .bind(node.position.and_then(|p| p.source).map(source_name))
         .bind(node.last_heard.map(i64::from))
         .bind(node.snr)
         .bind(node.rssi)
@@ -161,6 +191,7 @@ where
         .bind(node.favorite)
         .bind(node.battery_level.map(i64::from))
         .bind(node.voltage)
+        .bind(node.channel_utilization)
         .execute(executor)
         .await?;
     Ok(())
@@ -346,7 +377,9 @@ impl Store {
     pub async fn nodes(&self, radio: RadioId) -> Result<Vec<Node>> {
         let rows: Vec<NodeRow> = sqlx::query_as(
             "SELECT num, long_name, short_name, hw_model, role, latitude, longitude, altitude,
-                last_heard, snr, rssi, hops_away, via_mqtt, favorite, battery_level, voltage
+                position_radius, position_source,
+                last_heard, snr, rssi, hops_away, via_mqtt, favorite, battery_level, voltage,
+                channel_utilization
             FROM node WHERE radio_id = ?",
         )
         .bind(radio)
@@ -1039,6 +1072,8 @@ mod tests {
                 latitude: 43.36,
                 longitude: -8.41,
                 altitude: Some(12),
+                radius: Some(2918),
+                source: Some(PositionSource::Manual),
             }),
             last_heard: Some(1_795_000_000),
             snr: Some(6.5),
@@ -1048,6 +1083,7 @@ mod tests {
             favorite: true,
             battery_level: Some(101),
             voltage: Some(4.2),
+            channel_utilization: Some(12.5),
         }
     }
 

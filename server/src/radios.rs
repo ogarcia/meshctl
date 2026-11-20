@@ -1212,6 +1212,7 @@ mod tests {
             favorite: false,
             battery_level: None,
             voltage: None,
+            channel_utilization: None,
         };
         store.save_node(added.id, &faro).await.unwrap();
 

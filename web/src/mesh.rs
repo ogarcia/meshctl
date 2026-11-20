@@ -70,7 +70,7 @@ fn LocalCard() -> impl IntoView {
                     <dt>{t!(i18n, local_id)}</dt>
                     <dd class="mono">{move || local().map(|l| l.id)}</dd>
                     <dt>{t!(i18n, local_hardware)}</dt>
-                    <dd>{move || local().and_then(|l| l.hw_model)}</dd>
+                    <dd>{move || local().and_then(|l| l.hw_model).map(|m| model(&m))}</dd>
                     <dt>{t!(i18n, local_firmware)}</dt>
                     <dd class="mono">{move || local().and_then(|l| l.firmware_version)}</dd>
                     <dt>{t!(i18n, local_role)}</dt>
@@ -205,7 +205,7 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
             <td class="num">{hops}</td>
             <td class="num">{snr}</td>
             <td class="num">{battery}</td>
-            <td class="dim">{node.hw_model.clone()}</td>
+            <td class="dim">{node.hw_model.as_deref().map(model)}</td>
             <td class="actions">
                 <button
                     class="small"
@@ -217,6 +217,29 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
             </td>
         </tr>
     }
+}
+
+/// A hardware model as people write it, from the protobufs' name for it:
+/// `HELTEC_WIRELESS_TRACKER` is Heltec Wireless Tracker. Words with a digit,
+/// and short ones, are left as they are: `RAK4631`, `NRF52`, `M1`, `DIY`.
+pub fn model(raw: &str) -> String {
+    raw.split('_')
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            if word.len() <= 3 || word.chars().any(|c| c.is_ascii_digit()) {
+                word.to_owned()
+            } else {
+                let mut chars = word.chars();
+                chars.next().map_or_else(String::new, |first| {
+                    first
+                        .to_uppercase()
+                        .chain(chars.flat_map(char::to_lowercase))
+                        .collect()
+                })
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// What a node runs on: its battery's level, and its voltage when given;
@@ -238,6 +261,16 @@ pub fn power(level: Option<u32>, voltage: Option<f32>, external: &str) -> Option
     }
 }
 
+/// How far off a rounded position may be: in metres up to a kilometre, in
+/// kilometres beyond.
+pub fn radius(metres: u32) -> String {
+    if metres < 1000 {
+        format!("± {metres} m")
+    } else {
+        format!("± {:.1} km", f64::from(metres) / 1000.0)
+    }
+}
+
 /// How long ago, in the largest unit that fits. The units are the same in
 /// every language the interface speaks.
 pub fn ago(now: u32, then: u32) -> String {
@@ -247,5 +280,25 @@ pub fn ago(now: u32, then: u32) -> String {
         60..3_600 => format!("{} min", seconds / 60),
         3_600..86_400 => format!("{} h", seconds / 3_600),
         _ => format!("{} d", seconds / 86_400),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::model;
+
+    #[test]
+    fn models_read_as_people_write_them() {
+        assert_eq!(model("HELTEC_WIRELESS_TRACKER"), "Heltec Wireless Tracker");
+        assert_eq!(model("RAK4631"), "RAK4631");
+        assert_eq!(model("NRF52_PROMICRO_DIY"), "NRF52 Promicro DIY");
+        assert_eq!(model("THINKNODE_M1"), "Thinknode M1");
+        assert_eq!(model("T_ECHO"), "T Echo");
+    }
+
+    #[test]
+    fn a_radius_reads_in_the_unit_that_fits() {
+        assert_eq!(super::radius(365), "± 365 m");
+        assert_eq!(super::radius(2918), "± 2.9 km");
     }
 }

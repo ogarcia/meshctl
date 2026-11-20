@@ -275,6 +275,8 @@ fn position(lat: i32, lon: i32) -> Option<Position> {
         latitude: f64::from(lat) / 1e6,
         longitude: f64::from(lon) / 1e6,
         altitude: None,
+        radius: None,
+        source: None,
     })
 }
 
@@ -308,6 +310,7 @@ fn node_from(contact: &Contact) -> Node {
         favorite: contact.flags & 1 != 0,
         battery_level: None,
         voltage: None,
+        channel_utilization: None,
     }
 }
 

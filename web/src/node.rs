@@ -8,11 +8,13 @@ use crate::app::Live;
 use crate::chat::title;
 use crate::daemon::Failure;
 use crate::i18n::{t, t_string, use_i18n};
-use crate::mesh::{ago, power};
+use crate::mesh::{ago, model, power, radius};
 use crate::packets::summary;
 use crate::traces::TraceCard;
 use leptos::prelude::*;
-use meshctl_api::{ErrorCode, LinkState, Peer, RadioKind, Request, RequestKind, RequestStatus};
+use meshctl_api::{
+    ErrorCode, LinkState, Peer, PositionSource, RadioKind, Request, RequestKind, RequestStatus,
+};
 
 #[component]
 pub fn NodeView() -> impl IntoView {
@@ -72,20 +74,41 @@ fn Details(num: u32) -> impl IntoView {
             let altitude = p.altitude.map_or_else(String::new, |a| format!(" · {a} m"));
             Some(format!("{:.5}, {:.5}{altitude}", p.latitude, p.longitude))
         });
+        let precision = node
+            .as_ref()
+            .and_then(|n| n.position.as_ref()?.radius)
+            .map(radius);
+        let source = node
+            .as_ref()
+            .and_then(|n| n.position.as_ref()?.source)
+            .map(|source| {
+                match source {
+                    PositionSource::Manual => t_string!(i18n, position_manual),
+                    PositionSource::Internal => t_string!(i18n, position_internal),
+                    PositionSource::External => t_string!(i18n, position_external),
+                }
+                .to_owned()
+            });
         view! {
             <section class="card node-details">
                 <dl>
                     {row(t!(i18n, nodes_id).into_any(), Some(format!("!{num:08x}")))}
                     {row(
                         t!(i18n, local_hardware).into_any(),
-                        node.as_ref().and_then(|n| n.hw_model.clone()),
+                        node.as_ref().and_then(|n| n.hw_model.as_deref().map(model)),
                     )}
                     {row(t!(i18n, local_role).into_any(), node.as_ref().and_then(|n| n.role.clone()))}
                     {row(t!(i18n, nodes_heard).into_any(), heard)}
                     {row(t!(i18n, nodes_hops).into_any(), hops)}
                     {row(t!(i18n, node_signal).into_any(), signal)}
                     {row(t!(i18n, nodes_battery).into_any(), battery)}
+                    {row(
+                        t!(i18n, node_channel_use).into_any(),
+                        node.as_ref().and_then(|n| n.channel_utilization).map(|busy| format!("{busy:.1} %")),
+                    )}
                     {row(t!(i18n, node_position).into_any(), position)}
+                    {row(t!(i18n, node_precision).into_any(), precision)}
+                    {row(t!(i18n, node_source).into_any(), source)}
                 </dl>
             </section>
         }

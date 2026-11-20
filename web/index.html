@@ -43,9 +43,11 @@
         --mc-shadow: 0 12px 32px rgba(22, 27, 34, 0.14);
         --mc-map: #e9eef2;
         /* Nodes, by how far: their own colours, whatever the accent, sharp on
-           any tile. */
-        --mc-node-direct: #1971c2;
-        --mc-node-near: #7048e8;
+           any tile. Cool, and dimmer the further, with no red or orange to
+           read as something wrong: teal, blue, violet, grey. */
+        --mc-node-direct: #099268;
+        --mc-node-near: #1971c2;
+        --mc-node-mid: #7048e8;
         --mc-node-far: #6c757d;
         --mc-font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
         --mc-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -64,8 +66,9 @@
         --mc-danger: #f0a0a0;
         --mc-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
         --mc-map: #0b1520;
-        --mc-node-direct: #4dabf7;
-        --mc-node-near: #b197fc;
+        --mc-node-direct: #38d9a9;
+        --mc-node-near: #4dabf7;
+        --mc-node-mid: #b197fc;
         --mc-node-far: #a5aeb8;
       }
       @media (prefers-color-scheme: dark) {
@@ -83,8 +86,9 @@
           --mc-danger: #f0a0a0;
           --mc-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
           --mc-map: #0b1520;
-          --mc-node-direct: #4dabf7;
-          --mc-node-near: #b197fc;
+          --mc-node-direct: #38d9a9;
+          --mc-node-near: #4dabf7;
+          --mc-node-mid: #b197fc;
           --mc-node-far: #a5aeb8;
         }
       }
@@ -270,6 +274,7 @@
       .mark-node { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--mc-node-far); }
       .mark-node.direct { background: var(--mc-node-direct); }
       .mark-node.near { background: var(--mc-node-near); }
+      .mark-node.mid { background: var(--mc-node-mid); }
 
       .avatar {
         flex: none;
@@ -606,6 +611,7 @@
       .map-legend i.local { background: var(--mc-primary); }
       .map-legend i.direct { background: var(--mc-node-direct); }
       .map-legend i.near { background: var(--mc-node-near); }
+      .map-legend i.mid { background: var(--mc-node-mid); }
       .map-empty {
         position: absolute;
         top: 12px;
@@ -633,7 +639,7 @@
         --mc-route-casing: #ffffff;
         --mc-route-good: #0ca678;
         --mc-route-fair: #f08c00;
-        --mc-route-poor: #d6336c;
+        --mc-route-poor: #e03131;
         --mc-route-unknown: #495057;
       }
       :root[data-map-theme="dark"],
@@ -641,7 +647,7 @@
         --mc-route-casing: #0b0f14;
         --mc-route-good: #38d9a9;
         --mc-route-fair: #ffd43b;
-        --mc-route-poor: #f783ac;
+        --mc-route-poor: #ff8787;
         --mc-route-unknown: #dee2e6;
       }
       @media (prefers-color-scheme: dark) {
@@ -649,7 +655,7 @@
           --mc-route-casing: #0b0f14;
           --mc-route-good: #38d9a9;
           --mc-route-fair: #ffd43b;
-          --mc-route-poor: #f783ac;
+          --mc-route-poor: #ff8787;
           --mc-route-unknown: #dee2e6;
         }
       }
@@ -722,6 +728,7 @@
       .mc-dot.local, .mc-pin.local { background: var(--mc-primary); }
       .mc-dot.direct, .mc-pin.direct { background: var(--mc-node-direct); }
       .mc-dot.near, .mc-pin.near { background: var(--mc-node-near); }
+      .mc-dot.mid, .mc-pin.mid { background: var(--mc-node-mid); }
       /* A node on the map: a dot of its kind's colour, ringed in white and
          outlined in dark so that it stands out on light tiles and dark ones;
          with its role's icon on it when it has one. */
@@ -758,7 +765,7 @@
       }
       .map-legend .icon.router { --icon: url(/tabler-icons-3.51.0/icons/outline/building-broadcast-tower.svg); }
       .map-legend .icon.base { --icon: url(/tabler-icons-3.51.0/icons/outline/home-signal.svg); }
-      .mc-card { display: grid; gap: 10px; min-width: 220px; }
+      .mc-card { display: grid; gap: 10px; min-width: 260px; }
       .mc-card-head { display: flex; align-items: center; gap: 10px; padding-right: 14px; }
       .mc-card-title { display: flex; flex-direction: column; min-width: 0; }
       .mc-card-title strong { font-size: 14px; }
@@ -775,6 +782,7 @@
         mask: var(--icon) center / contain no-repeat;
       }
       .mc-card-facts dd { padding-left: 17px; }
+      .mc-card-facts .wide { grid-column: 1 / -1; }
       .mc-card-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
       .mc-card-buttons { display: flex; gap: 8px; }
       .mc-card-buttons button { flex: 1; min-height: 34px; }

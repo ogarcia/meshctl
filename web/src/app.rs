@@ -14,7 +14,7 @@ use crate::chat::{ChatView, peer_of, short_name, title};
 use crate::daemon::{self, Events, Failure};
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
 use crate::map::{MapView, placed};
-use crate::mesh::{MeshView, ago};
+use crate::mesh::{MeshView, ago, model};
 use crate::node::NodeView;
 use crate::packets::{KEPT, PacketsView};
 use crate::preferences::PreferencesView;
@@ -852,6 +852,7 @@ fn PeerItem(peer: Peer) -> impl IntoView {
                 <span class=move || match hops() {
                     Some(0) => "mark-node direct",
                     Some(1..=2) => "mark-node near",
+                    Some(3..=4) => "mark-node mid",
                     _ => "mark-node far",
                 }></span>
             }
@@ -886,7 +887,7 @@ fn LocalFoot() -> impl IntoView {
     };
     let short = move || num().map(|num| short_name(live, num)).unwrap_or_default();
     let detail = move || {
-        local().map(|l| match l.hw_model {
+        local().map(|l| match l.hw_model.as_deref().map(model) {
             Some(hw) => format!("{} · {hw}", l.id),
             None => l.id,
         })
