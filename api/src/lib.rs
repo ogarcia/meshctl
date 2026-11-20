@@ -57,14 +57,17 @@ pub enum ErrorCode {
     /// A message needs some text, of up to 200 bytes, and either a channel the
     /// radio has or a node, not both.
     InvalidMessage,
-    /// Not a node that can be traced: everyone, or the radio itself.
+    /// Not a node that can be traced or asked: everyone, or the radio itself.
     InvalidNode,
-    /// The radio traced a route too recently; try again in a moment.
+    /// The radio traced a route too recently, or the same request is still
+    /// waiting for its answer; try again in a moment.
     TooSoon,
     /// Not settings the radio can have; the reference says what each takes.
     InvalidSettings,
     /// The radio did not answer the request a change of settings starts with.
     RadioDidNotAnswer,
+    /// The radio has no such channel, or it is disabled.
+    InvalidChannel,
 }
 
 /// The body of every error the API answers with.
@@ -395,6 +398,79 @@ pub struct Traceroute {
 pub struct NewTraceroute {
     /// The node's number.
     pub node: u32,
+    /// The channel's slot to trace on, 0 if not said. The node has to have
+    /// that channel too.
+    #[serde(default)]
+    pub channel: u32,
+}
+
+/// What a node can be asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RequestKind {
+    /// Who it is. A node answers the same asker once in 12 hours at most.
+    NodeInfo,
+    /// Where it is, at the precision of the channel asked on. Once in three
+    /// minutes at most.
+    Position,
+    /// Its battery, voltage and how busy the channel is.
+    DeviceTelemetry,
+    /// What its environment sensors read; only a node with some answers.
+    EnvironmentTelemetry,
+    /// What its power sensors read; only a node with some answers.
+    PowerTelemetry,
+    /// How it sees the mesh: nodes online, packets, noise.
+    LocalStats,
+    /// The nodes it hears directly. Once in three minutes at most.
+    Neighbors,
+}
+
+/// Where a request is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RequestStatus {
+    /// Sent, and waiting for the answer.
+    Pending,
+    Answered,
+    /// No answer, and why: `NO_RESPONSE` when the node had nothing to tell,
+    /// `TIMEOUT` when nothing came at all, which a node that answered
+    /// recently does on purpose.
+    Failed,
+}
+
+/// Something to ask a node for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NewRequest {
+    /// The node's number.
+    pub node: u32,
+    pub kind: RequestKind,
+    /// The channel's slot to ask on, 0 if not said. The node has to have that
+    /// channel too, and answers on it.
+    #[serde(default)]
+    pub channel: u32,
+}
+
+pub type RequestId = i64;
+
+/// Something a node was asked for, and what it answered.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Request {
+    pub id: RequestId,
+    pub node: u32,
+    pub kind: RequestKind,
+    pub channel: u32,
+    pub status: RequestStatus,
+    /// Why it failed, as the protobufs name it, or `TIMEOUT`.
+    pub error: Option<String>,
+    /// When it was sent, in seconds since the epoch.
+    pub at: i64,
+    pub answered_at: Option<i64>,
+    /// The packet that answered it, as heard.
+    pub answer: Option<Packet>,
 }
 
 /// Who the radio says it is.

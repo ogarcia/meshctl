@@ -90,6 +90,7 @@ async fn list(
         (status = 404, description = "There is no such radio", body = Error),
         (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
         (status = 422, description = "Everyone, or the radio itself: `invalid_node`", body = Error),
+        (status = 422, description = "A channel the radio does not use: `invalid_channel`", body = Error),
         (status = 429, description = "Too soon after the last one: `too_soon`, with `Retry-After`", body = Error),
     )
 )]
@@ -98,7 +99,11 @@ async fn trace(
     Path(radio): Path<RadioId>,
     Json(request): Json<NewTraceroute>,
 ) -> Response {
-    match state.radios.traceroute(radio, request.node).await {
+    match state
+        .radios
+        .traceroute(radio, request.node, request.channel)
+        .await
+    {
         Ok(traceroute) => (StatusCode::ACCEPTED, Json(traceroute)).into_response(),
         Err(TraceFailure::NoSuchRadio) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         Err(TraceFailure::NotConnected) => {
@@ -109,6 +114,9 @@ async fn trace(
         }
         Err(TraceFailure::InvalidNode) => {
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidNode)
+        }
+        Err(TraceFailure::InvalidChannel) => {
+            error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidChannel)
         }
         Err(TraceFailure::TooSoon { wait }) => (
             StatusCode::TOO_MANY_REQUESTS,

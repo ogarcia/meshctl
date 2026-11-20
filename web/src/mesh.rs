@@ -186,7 +186,7 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
     let num = node.num;
     let open = move |ev: leptos::ev::MouseEvent| {
         ev.prevent_default();
-        live.open_chat(Peer::Node { node: num });
+        live.open_node(num);
     };
 
     view! {
@@ -209,15 +209,13 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
             <td class="num">{battery}</td>
             <td class="dim">{node.hw_model.clone()}</td>
             <td class="actions">
-                <Show when=move || live.selected_kind() != Some(meshctl_api::RadioKind::Meshcore)>
-                    <button
-                        class="small"
-                        title=move || t_string!(i18n, trace_send)
-                        on:click=move |_| live.trace(num)
-                    >
-                        "⇢"
-                    </button>
-                </Show>
+                <button
+                    class="small"
+                    title=move || t_string!(i18n, node_message)
+                    on:click=move |_| live.open_chat(Peer::Node { node: num })
+                >
+                    "✉"
+                </button>
             </td>
         </tr>
     }

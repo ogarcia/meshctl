@@ -17,7 +17,7 @@
 
 use crate::{
     ErrorCode, LinkState, Message, MessageId, MessageStatus, Node, Packet, Preferences, RadioId,
-    Traceroute,
+    Request, Traceroute,
 };
 use serde::{Deserialize, Serialize};
 
@@ -69,6 +69,8 @@ pub enum ServerMessage {
         radio: RadioId,
         traceroute: Traceroute,
     },
+    /// Something a node was asked for through a radio, or what became of it.
+    Request { radio: RadioId, request: Request },
     /// A packet a radio heard.
     Packet { radio: RadioId, packet: Packet },
     /// The interface's preferences changed, maybe from another browser.

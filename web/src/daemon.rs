@@ -167,9 +167,25 @@ pub async fn traceroutes(radio: RadioId) -> Result<Vec<Traceroute>, Failure> {
     get(&format!("/radios/{radio}/traceroutes?limit=100")).await
 }
 
-pub async fn trace(radio: RadioId, node: u32) -> Result<Traceroute, Failure> {
+pub async fn trace(radio: RadioId, node: u32, channel: u32) -> Result<Traceroute, Failure> {
     let request = with_token(Request::post(&url(&format!("/radios/{radio}/traceroutes"))))
-        .json(&NewTraceroute { node })
+        .json(&NewTraceroute { node, channel })
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// What a node was asked for through a radio, the newest first.
+pub async fn requests(radio: RadioId, node: u32) -> Result<Vec<meshctl_api::Request>, Failure> {
+    get(&format!("/radios/{radio}/requests?node={node}&limit=50")).await
+}
+
+pub async fn ask(
+    radio: RadioId,
+    new: &meshctl_api::NewRequest,
+) -> Result<meshctl_api::Request, Failure> {
+    let request = with_token(Request::post(&url(&format!("/radios/{radio}/requests"))))
+        .json(new)
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)

@@ -14,6 +14,8 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePo
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod requests;
+
 /// The database's file, inside the data directory.
 const DATABASE_FILE: &str = "meshctl.db";
 
@@ -460,6 +462,11 @@ impl Store {
         if seen.rows_affected() == 0 {
             return Ok(None);
         }
+        self.sighting(seen.last_insert_rowid()).await
+    }
+
+    /// A radio's hearing of a packet, with the packet.
+    pub async fn sighting(&self, id: SightingId) -> Result<Option<PacketRow>> {
         let row = sqlx::query_as(
             "SELECT s.id, p.packet_id, p.from_num, p.to_num, s.channel, p.portnum, p.payload,
                 p.request_id, p.reply_id, p.want_response, p.pki, s.at, s.snr, s.rssi,
@@ -467,7 +474,7 @@ impl Store {
             FROM packet_seen s JOIN packet p ON p.id = s.packet
             WHERE s.id = ?",
         )
-        .bind(seen.last_insert_rowid())
+        .bind(id)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row)

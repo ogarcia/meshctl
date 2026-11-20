@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
-//! Traceroutes: tracing the route to a node, and the routes traced.
+//! Traceroutes: the routes traced to a node, hop by hop.
 
 use crate::app::Live;
-use crate::daemon::Failure;
+
 use crate::i18n::{t, use_i18n};
 use crate::mesh::ago;
 use leptos::prelude::*;
-use meshctl_api::{ErrorCode, Hop, LinkState, Traceroute, TracerouteStatus};
+use meshctl_api::{Hop, Traceroute, TracerouteStatus};
 
 fn node_label(live: Live, num: u32) -> String {
     live.nodes.with(|nodes| {
@@ -30,107 +30,7 @@ fn node_title(live: Live, num: u32) -> String {
 }
 
 #[component]
-pub fn TracesView() -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let supported = move || live.selected_kind() != Some(meshctl_api::RadioKind::Meshcore);
-    view! {
-        <Show
-            when=supported
-            fallback=move || view! { <p class="card dim">{t!(i18n, meshcore_not_yet)}</p> }
-        >
-            <TraceForm />
-        </Show>
-        <section class="card traces">
-            <For
-                each=move || live.traceroutes.get()
-                key=|t| (t.id, t.status)
-                let:traceroute
-            >
-                <TraceCard traceroute />
-            </For>
-        </section>
-    }
-}
-
-#[component]
-fn TraceForm() -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let chosen = RwSignal::new(None::<u32>);
-    let local = move || {
-        live.status
-            .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num))
-    };
-    // The nodes heard, by name; a route can only be traced to someone else.
-    let options = move || {
-        let me = local();
-        let mut nodes: Vec<(u32, String)> = live.nodes.with(|nodes| {
-            nodes
-                .values()
-                .filter(|n| Some(n.num) != me)
-                .map(|n| (n.num, node_title(live, n.num)))
-                .collect()
-        });
-        nodes.sort_by_key(|(_, name)| name.to_lowercase());
-        nodes
-    };
-    let connected = move || {
-        live.status
-            .with(|s| s.as_ref().is_some_and(|s| s.link == LinkState::Ready))
-    };
-    let submit = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
-        if let Some(node) = chosen.get_untracked() {
-            live.trace(node);
-        }
-    };
-    let problem = move || {
-        if !connected() {
-            return Some(t!(i18n, trace_not_connected).into_any());
-        }
-        live.trace_error.get().map(|failure| match failure {
-            Failure::Rejected(ErrorCode::TooSoon) => t!(i18n, trace_too_soon).into_any(),
-            Failure::Rejected(ErrorCode::RadioNotConnected) => {
-                t!(i18n, trace_not_connected).into_any()
-            }
-            _ => t!(i18n, error_failed).into_any(),
-        })
-    };
-
-    view! {
-        <form class="card trace-form" on:submit=submit>
-            <h2>{t!(i18n, trace_title)}</h2>
-            <p class="dim">{t!(i18n, trace_text)}</p>
-            <div class="row">
-                <select on:change=move |ev| chosen.set(event_target_value(&ev).parse().ok())>
-                    <option value="" selected=move || chosen.get().is_none()>
-                        {t!(i18n, trace_pick)}
-                    </option>
-                    <For each=options key=|(num, name)| (*num, name.clone()) let:option>
-                        <option
-                            value=option.0.to_string()
-                            selected=move || chosen.get() == Some(option.0)
-                        >
-                            {option.1.clone()}
-                        </option>
-                    </For>
-                </select>
-                <button
-                    type="submit"
-                    class="primary"
-                    disabled=move || chosen.get().is_none() || !connected()
-                >
-                    {t!(i18n, trace_send)}
-                </button>
-            </div>
-            <p class="error">{problem}</p>
-        </form>
-    }
-}
-
-#[component]
-fn TraceCard(traceroute: Traceroute) -> impl IntoView {
+pub fn TraceCard(traceroute: Traceroute) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let at = u32::try_from(traceroute.at).unwrap_or_default();

@@ -10,12 +10,13 @@ use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
     Conversation, ErrorCode, Hop, LinkState, Message, MessageId, MessageStatus, NewMessage,
-    NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioKind,
-    RadioSettings, SettingsApplied, SettingsSection, SightingId, Status, Traceroute,
+    NewRequest, NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId,
+    RadioKind, RadioSettings, Request, RequestKind, SettingsApplied, SettingsSection, SightingId,
+    Status, Traceroute,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
-use meshctl_core::radio::{AdminError, Mesh, OutgoingText, Protocol, SendError};
+use meshctl_core::radio::{AdminError, Ask, Mesh, OutgoingText, Protocol, SendError};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast::error::RecvError;
@@ -50,6 +51,8 @@ pub enum Change {
     Traceroute(RadioId, Traceroute),
     /// A packet a radio heard, as kept.
     Packet(RadioId, Packet),
+    /// Something a node was asked for, or what became of it.
+    Request(RadioId, Request),
     /// The interface's preferences changed.
     Preferences(Preferences),
     /// Events of a radio were lost on their way here.
@@ -81,6 +84,31 @@ const TRACEROUTE_TIMEOUT: i64 = 120;
 /// How often traceroutes waited for too long are looked for.
 const TRACEROUTE_EXPIRY_TICK: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How long a request is waited for before it is given up on.
+const REQUEST_TIMEOUT: i64 = 120;
+
+/// Why a request was not sent.
+#[derive(Debug)]
+pub enum AskFailure {
+    NoSuchRadio,
+    NotConnected,
+    /// Not something meshctl does with this kind of radio yet.
+    Unsupported,
+    /// Everyone, or the radio itself.
+    InvalidNode,
+    /// The radio has no such channel, or it is disabled.
+    InvalidChannel,
+    /// The same was asked of the same node, and is still waiting.
+    Pending,
+    Failed(anyhow::Error),
+}
+
+impl From<anyhow::Error> for AskFailure {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Failed(err)
+    }
+}
+
 /// Why a radio's settings were not shown or changed.
 #[derive(Debug)]
 pub enum SettingsFailure {
@@ -103,6 +131,8 @@ pub enum TraceFailure {
     Unsupported,
     /// Everyone, or the radio itself.
     InvalidNode,
+    /// The radio has no such channel, or it is disabled.
+    InvalidChannel,
     /// The last one was this many seconds ago; wait the rest.
     TooSoon {
         wait: i64,
@@ -172,6 +202,63 @@ async fn fail_traceroute(
         let _ = changes.send(Change::Traceroute(radio, traceroute));
     }
     Ok(())
+}
+
+/// Keeps a packet a radio heard, tells of it, and takes it as the answer to a
+/// request when it is one.
+async fn keep_packet(
+    store: &Store,
+    changes: &broadcast::Sender<Change>,
+    radio: RadioId,
+    heard: &mesh::Heard,
+) -> Result<()> {
+    let Some(row) = store.add_packet(radio, heard).await? else {
+        return Ok(());
+    };
+    let sighting = row.id;
+    let _ = changes.send(Change::Packet(radio, crate::packets::packet(row)));
+    if let Some(request_id) = heard.request_id
+        && let Some(request) = store
+            .answer_request(
+                radio,
+                request_id,
+                heard.from,
+                heard.portnum,
+                sighting,
+                i64::from(heard.at),
+            )
+            .await?
+    {
+        let _ = changes.send(Change::Request(radio, request));
+    }
+    Ok(())
+}
+
+/// Gives up on the traceroutes and requests waited for too long.
+async fn expire(store: &Store, changes: &broadcast::Sender<Change>, radio: RadioId) -> Result<()> {
+    for traceroute in store
+        .expire_traceroutes(radio, now() - TRACEROUTE_TIMEOUT)
+        .await?
+    {
+        let _ = changes.send(Change::Traceroute(radio, traceroute));
+    }
+    for request in store
+        .expire_requests(radio, now() - REQUEST_TIMEOUT)
+        .await?
+    {
+        let _ = changes.send(Change::Request(radio, request));
+    }
+    Ok(())
+}
+
+/// Whether a radio has a channel in that slot that it uses.
+fn has_channel(mesh: &Mesh, channel: u32) -> bool {
+    mesh.read(|state| {
+        state
+            .channels
+            .get(&channel)
+            .is_some_and(|c| c.role != "DISABLED")
+    })
 }
 
 /// Checks what a client asks a radio to be, and says where it is.
@@ -407,11 +494,19 @@ impl Radios {
     }
 
     /// Traces the route from a radio to a node.
-    pub async fn traceroute(&self, id: RadioId, node: u32) -> Result<Traceroute, TraceFailure> {
+    pub async fn traceroute(
+        &self,
+        id: RadioId,
+        node: u32,
+        channel: u32,
+    ) -> Result<Traceroute, TraceFailure> {
         let mesh = self.mesh(id).ok_or(TraceFailure::NoSuchRadio)?;
         let origin = mesh.read(|state| state.local.as_ref().map(|l| l.num));
         if node == mesh::BROADCAST || origin == Some(node) {
             return Err(TraceFailure::InvalidNode);
+        }
+        if !has_channel(&mesh, channel) {
+            return Err(TraceFailure::InvalidChannel);
         }
         if self.protocol(id) != Some(Protocol::Meshtastic) {
             return Err(TraceFailure::Unsupported);
@@ -428,12 +523,14 @@ impl Radios {
                 });
             }
         }
-        let packet_id = mesh.send_traceroute(node, 0).map_err(|error| match error {
-            SendError::Unsupported => TraceFailure::Unsupported,
-            SendError::NotConnected | SendError::BadText | SendError::Refused => {
-                TraceFailure::NotConnected
-            }
-        })?;
+        let packet_id = mesh
+            .send_traceroute(node, channel)
+            .map_err(|error| match error {
+                SendError::Unsupported => TraceFailure::Unsupported,
+                SendError::NotConnected | SendError::BadText | SendError::Refused => {
+                    TraceFailure::NotConnected
+                }
+            })?;
         let traceroute = self
             .store
             .add_traceroute(id, packet_id, origin.unwrap_or_default(), node, at)
@@ -442,6 +539,65 @@ impl Radios {
             .changes
             .send(Change::Traceroute(id, traceroute.clone()));
         Ok(traceroute)
+    }
+
+    /// Asks a node for something it tells on request; the answer, or the lack
+    /// of one, comes on the event stream as the request changes.
+    pub async fn request(&self, id: RadioId, new: NewRequest) -> Result<Request, AskFailure> {
+        let mesh = self.mesh(id).ok_or(AskFailure::NoSuchRadio)?;
+        let origin = mesh.read(|state| state.local.as_ref().map(|l| l.num));
+        if new.node == mesh::BROADCAST || origin == Some(new.node) {
+            return Err(AskFailure::InvalidNode);
+        }
+        if self.protocol(id) != Some(Protocol::Meshtastic) {
+            return Err(AskFailure::Unsupported);
+        }
+        if self.link(id) != LinkState::Ready {
+            return Err(AskFailure::NotConnected);
+        }
+        if !has_channel(&mesh, new.channel) {
+            return Err(AskFailure::InvalidChannel);
+        }
+        if self.store.is_asking(id, new.node, new.kind).await? {
+            return Err(AskFailure::Pending);
+        }
+        let ask = match new.kind {
+            RequestKind::NodeInfo => Ask::NodeInfo,
+            RequestKind::Position => Ask::Position,
+            RequestKind::DeviceTelemetry => Ask::DeviceTelemetry,
+            RequestKind::EnvironmentTelemetry => Ask::EnvironmentTelemetry,
+            RequestKind::PowerTelemetry => Ask::PowerTelemetry,
+            RequestKind::LocalStats => Ask::LocalStats,
+            RequestKind::Neighbors => Ask::Neighbors,
+        };
+        let packet_id =
+            mesh.send_request(new.node, new.channel, ask)
+                .map_err(|error| match error {
+                    SendError::Unsupported => AskFailure::Unsupported,
+                    SendError::NotConnected | SendError::BadText | SendError::Refused => {
+                        AskFailure::NotConnected
+                    }
+                })?;
+        let request = self
+            .store
+            .add_request(id, new.node, new.kind, new.channel, packet_id, now())
+            .await?;
+        let _ = self.changes.send(Change::Request(id, request.clone()));
+        Ok(request)
+    }
+
+    /// The requests sent through a radio, the newest first, or `None` if
+    /// there is no such radio.
+    pub async fn requests(
+        &self,
+        id: RadioId,
+        node: Option<u32>,
+        limit: u32,
+    ) -> Result<Option<Vec<Request>>> {
+        if self.mesh(id).is_none() {
+            return Ok(None);
+        }
+        Ok(Some(self.store.requests(id, node, limit).await?))
     }
 
     /// A radio's own settings, as it sent them on syncing. Only while it is
@@ -745,18 +901,12 @@ impl Radios {
                 let event = tokio::select! {
                     event = events.recv() => event,
                     _ = expiry.tick() => {
-                        let before = now() - TRACEROUTE_TIMEOUT;
-                        match store.expire_traceroutes(id, before).await {
-                            Ok(expired) => {
-                                for traceroute in expired {
-                                    let _ = changes.send(Change::Traceroute(id, traceroute));
-                                }
-                            }
-                            Err(err) => tracing::warn!(
+                        if let Err(err) = expire(&store, &changes, id).await {
+                            tracing::warn!(
                                 radio = id,
                                 error = format_args!("{err:#}"),
                                 "cannot store"
-                            ),
+                            );
                         }
                         continue;
                     }
@@ -764,12 +914,7 @@ impl Radios {
                 let stored = match event {
                     Ok(mesh::Event::Node(node)) => store.save_node(id, &node).await,
                     Ok(mesh::Event::Packet(heard)) => {
-                        store.add_packet(id, &heard).await.map(|kept| {
-                            if let Some(row) = kept {
-                                let packet = crate::packets::packet(row);
-                                let _ = changes.send(Change::Packet(id, packet));
-                            }
-                        })
+                        keep_packet(&store, &changes, id, &heard).await
                     }
                     Ok(mesh::Event::Traceroute(answer)) => {
                         answer_traceroute(&store, &changes, id, &answer).await
@@ -784,16 +929,27 @@ impl Radios {
                         })
                     }
                     Ok(mesh::Event::Ack(ack)) => {
-                        // A relay giving up on a traceroute says so this way.
-                        if let Some(error) = &ack.error
-                            && let Err(err) =
-                                fail_traceroute(&store, &changes, id, ack.packet_id, error).await
-                        {
-                            tracing::warn!(
-                                radio = id,
-                                error = format_args!("{err:#}"),
-                                "cannot store"
-                            );
+                        // A relay giving up on a traceroute or a request, or a
+                        // node with nothing to tell, says so this way.
+                        if let Some(error) = &ack.error {
+                            let failed =
+                                match fail_traceroute(&store, &changes, id, ack.packet_id, error)
+                                    .await
+                                {
+                                    Ok(()) => store.fail_request(id, ack.packet_id, error).await,
+                                    Err(err) => Err(err),
+                                };
+                            match failed {
+                                Ok(Some(request)) => {
+                                    let _ = changes.send(Change::Request(id, request));
+                                }
+                                Ok(None) => {}
+                                Err(err) => tracing::warn!(
+                                    radio = id,
+                                    error = format_args!("{err:#}"),
+                                    "cannot store"
+                                ),
+                            }
                         }
                         let answered = store
                             .ack(id, ack.packet_id, ack.from, ack.error.as_deref())

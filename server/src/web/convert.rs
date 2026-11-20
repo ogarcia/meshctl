@@ -89,6 +89,7 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
         Change::Traceroute(radio, traceroute) => ServerMessage::Traceroute { radio, traceroute },
         Change::Message(radio, message) => ServerMessage::Message { radio, message },
         Change::Packet(radio, packet) => ServerMessage::Packet { radio, packet },
+        Change::Request(radio, request) => ServerMessage::Request { radio, request },
         Change::Preferences(preferences) => ServerMessage::Preferences { preferences },
         Change::MessageStatus {
             radio,

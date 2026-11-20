@@ -10,8 +10,9 @@
 use crate::link::{self, Link, Transport};
 use crate::mesh::{Event, LinkState, MeshState};
 use meshctl_proto::meshtastic::{
-    AdminMessage, Channel, Config, Data, FromRadio, Heartbeat, MeshPacket, ModuleConfig, PortNum,
-    RouteDiscovery, ToRadio, User, admin_message, from_radio, mesh_packet, to_radio,
+    AdminMessage, Channel, Config, Data, DeviceMetrics, EnvironmentMetrics, FromRadio, Heartbeat,
+    LocalStats, MeshPacket, ModuleConfig, NeighborInfo, PortNum, PowerMetrics, RouteDiscovery,
+    Telemetry, ToRadio, User, admin_message, from_radio, mesh_packet, telemetry, to_radio,
 };
 use prost::Message;
 use std::collections::HashMap;
@@ -67,6 +68,25 @@ pub enum SendError {
     Unsupported,
     /// The radio would not take it.
     Refused,
+}
+
+/// What a node can be asked for, and answers on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ask {
+    /// Who it is.
+    NodeInfo,
+    /// Where it is.
+    Position,
+    /// Its battery, voltage and how busy the channel is.
+    DeviceTelemetry,
+    /// What its environment sensors read, if it has any.
+    EnvironmentTelemetry,
+    /// What its power sensors read, if it has any.
+    PowerTelemetry,
+    /// How it sees the mesh: nodes online, packets, noise.
+    LocalStats,
+    /// The nodes it hears directly.
+    Neighbors,
 }
 
 /// Which mesh a radio speaks, and so which driver keeps it.
@@ -213,6 +233,71 @@ impl Mesh {
             Data {
                 portnum: PortNum::TracerouteApp as i32,
                 payload: RouteDiscovery::default().encode_to_vec(),
+                want_response: true,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Asks a node for something it tells on request. Returns the request's
+    /// id, which the answer carries as its `request_id`, as a
+    /// [`crate::mesh::Event::Packet`]; a node that has nothing to tell, or a
+    /// relay that gives up, says so with an [`crate::mesh::Event::Ack`] for it.
+    ///
+    /// The node answers on the channel asked on, if it has it: a position, at
+    /// the precision that channel gives.
+    pub fn send_request(&self, to: u32, channel: u32, ask: Ask) -> Result<u32, SendError> {
+        if self.is_meshcore() {
+            return Err(SendError::Unsupported);
+        }
+        let telemetry = |variant: telemetry::Variant| Telemetry {
+            variant: Some(variant),
+            ..Default::default()
+        };
+        let (portnum, payload) = match ask {
+            // Who we are, as the official clients send it: the node answers
+            // with who it is.
+            Ask::NodeInfo => (
+                PortNum::NodeinfoApp,
+                self.read(|state| state.settings.owner.clone())
+                    .unwrap_or_default()
+                    .encode_to_vec(),
+            ),
+            // An empty position, which tells nothing of ours.
+            Ask::Position => (PortNum::PositionApp, Vec::new()),
+            Ask::DeviceTelemetry => (
+                PortNum::TelemetryApp,
+                telemetry(telemetry::Variant::DeviceMetrics(DeviceMetrics::default()))
+                    .encode_to_vec(),
+            ),
+            Ask::EnvironmentTelemetry => (
+                PortNum::TelemetryApp,
+                telemetry(telemetry::Variant::EnvironmentMetrics(
+                    EnvironmentMetrics::default(),
+                ))
+                .encode_to_vec(),
+            ),
+            Ask::PowerTelemetry => (
+                PortNum::TelemetryApp,
+                telemetry(telemetry::Variant::PowerMetrics(PowerMetrics::default()))
+                    .encode_to_vec(),
+            ),
+            Ask::LocalStats => (
+                PortNum::TelemetryApp,
+                telemetry(telemetry::Variant::LocalStats(LocalStats::default())).encode_to_vec(),
+            ),
+            Ask::Neighbors => (
+                PortNum::NeighborinfoApp,
+                NeighborInfo::default().encode_to_vec(),
+            ),
+        };
+        self.send_packet(
+            to,
+            channel,
+            false,
+            Data {
+                portnum: portnum as i32,
+                payload,
                 want_response: true,
                 ..Default::default()
             },
@@ -745,6 +830,39 @@ mod tests {
             ..text
         };
         assert_eq!(mesh.send_text(&too_long).await, Err(SendError::BadText));
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_request_asks_for_an_answer_on_its_channel() {
+        let (mesh, mut radio, task) = connected().await;
+        let mut events = mesh.subscribe();
+        let Some(to_radio::PayloadVariant::WantConfigId(nonce)) =
+            radio.receive().await.payload_variant
+        else {
+            panic!("the configuration first");
+        };
+        radio
+            .send(from_radio::PayloadVariant::ConfigCompleteId(nonce))
+            .await;
+        assert_eq!(next_event(&mut events).await, Event::Link(LinkState::Ready));
+
+        let id = mesh.send_request(0x5568_b843, 4, Ask::LocalStats).unwrap();
+        let Some(to_radio::PayloadVariant::Packet(packet)) = radio.receive().await.payload_variant
+        else {
+            panic!("a packet");
+        };
+        assert_eq!((packet.id, packet.to, packet.channel), (id, 0x5568_b843, 4));
+        let Some(mesh_packet::PayloadVariant::Decoded(data)) = packet.payload_variant else {
+            panic!("in the clear");
+        };
+        assert!(data.want_response);
+        assert_eq!(data.portnum, PortNum::TelemetryApp as i32);
+        let asked = Telemetry::decode(data.payload.as_slice()).unwrap();
+        assert!(matches!(
+            asked.variant,
+            Some(telemetry::Variant::LocalStats(_))
+        ));
         task.abort();
     }
 

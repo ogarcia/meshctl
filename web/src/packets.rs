@@ -150,7 +150,7 @@ fn clock(at: i64) -> String {
 }
 
 /// What a packet says, in a line.
-fn summary(packet: &Packet) -> String {
+pub fn summary(packet: &Packet) -> String {
     let Some(payload) = &packet.payload else {
         return String::new();
     };

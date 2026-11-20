@@ -14,18 +14,19 @@ use crate::chat::{ChatView, peer_of, short_name, title};
 use crate::daemon::{self, Events, Failure};
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
 use crate::mesh::{MeshView, ago};
+use crate::node::NodeView;
 use crate::packets::{KEPT, PacketsView};
 use crate::preferences::PreferencesView;
 use crate::radios::{RadioForm, RadiosView};
 use crate::settings::SettingsView;
-use crate::traces::TracesView;
 use gloo_timers::future::sleep;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
 use meshctl_api::{
-    Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, Node, Packet, Peer,
-    Preferences, Radio, RadioId, RadioKind, Status, Theme, Traceroute,
+    Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, NewRequest, Node,
+    Packet, Peer, Preferences, Radio, RadioId, RadioKind, Request, RequestKind, Status, Theme,
+    Traceroute,
 };
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -54,7 +55,8 @@ pub enum Page {
     Packets,
     /// The open conversation.
     Chat,
-    Traces,
+    /// The open node.
+    Node,
     /// The selected radio's own settings.
     RadioSettings,
     /// meshctl's: how the interface looks.
@@ -97,8 +99,12 @@ pub struct Live {
     pub traceroutes: RwSignal<Vec<Traceroute>>,
     /// What the selected radio heard, the newest first.
     pub packets: RwSignal<Vec<Packet>>,
-    /// Why the last traceroute asked for was not sent.
-    pub trace_error: RwSignal<Option<Failure>>,
+    /// The node whose page is open, if any.
+    pub node: RwSignal<Option<u32>>,
+    /// What the open node was asked for, the newest first.
+    pub requests: RwSignal<Vec<Request>>,
+    /// Why the last request or traceroute was not sent.
+    pub ask_error: RwSignal<Option<Failure>>,
     /// Bumped each time the selected radio syncs, for what is read only then.
     pub synced: RwSignal<u32>,
     /// Seconds since the epoch, ticking.
@@ -122,7 +128,9 @@ impl Live {
             thread: RwSignal::new(Vec::new()),
             traceroutes: RwSignal::new(Vec::new()),
             packets: RwSignal::new(Vec::new()),
-            trace_error: RwSignal::new(None),
+            node: RwSignal::new(None),
+            requests: RwSignal::new(Vec::new()),
+            ask_error: RwSignal::new(None),
             synced: RwSignal::new(0),
             now: RwSignal::new(now()),
         }
@@ -139,7 +147,10 @@ impl Live {
         self.selected.set(Some(radio));
         self.open.set(None);
         self.thread.set(Vec::new());
-        if matches!(self.page.get_untracked(), Page::Chat) || self.page.get_untracked().is_meshctl()
+        self.node.set(None);
+        self.requests.set(Vec::new());
+        if matches!(self.page.get_untracked(), Page::Chat | Page::Node)
+            || self.page.get_untracked().is_meshctl()
         {
             self.page.set(Page::Nodes);
         }
@@ -234,17 +245,67 @@ impl Live {
         self.refresh_thread().await
     }
 
-    /// Traces the route to a node from the selected radio, and shows it.
-    pub fn trace(self, node: u32) {
+    /// Opens a node's page.
+    pub fn open_node(self, node: u32) {
+        self.node.set(Some(node));
+        self.requests.set(Vec::new());
+        self.ask_error.set(None);
+        self.go(Page::Node);
         let Some(radio) = self.selected.get_untracked() else {
             return;
         };
-        self.go(Page::Traces);
-        self.trace_error.set(None);
         spawn_local(async move {
-            match daemon::trace(radio, node).await {
+            if let Ok(requests) = daemon::requests(radio, node).await
+                && self.node.get_untracked() == Some(node)
+                && self.selected.get_untracked() == Some(radio)
+            {
+                self.requests.set(requests);
+            }
+        });
+    }
+
+    /// Asks a node for something, on a channel of the selected radio.
+    pub fn ask(self, node: u32, kind: RequestKind, channel: u32) {
+        let Some(radio) = self.selected.get_untracked() else {
+            return;
+        };
+        self.ask_error.set(None);
+        spawn_local(async move {
+            let new = NewRequest {
+                node,
+                kind,
+                channel,
+            };
+            match daemon::ask(radio, &new).await {
+                Ok(request) => self.keep_request(request),
+                Err(failure) => self.ask_error.set(Some(failure)),
+            }
+        });
+    }
+
+    /// Puts a request of the open node in its list, or where it was.
+    fn keep_request(self, request: Request) {
+        if self.node.get_untracked() != Some(request.node) {
+            return;
+        }
+        self.requests.update(
+            |requests| match requests.iter_mut().find(|r| r.id == request.id) {
+                Some(kept) => *kept = request,
+                None => requests.insert(0, request),
+            },
+        );
+    }
+
+    /// Traces the route to a node from the selected radio, on a channel.
+    pub fn trace(self, node: u32, channel: u32) {
+        let Some(radio) = self.selected.get_untracked() else {
+            return;
+        };
+        self.ask_error.set(None);
+        spawn_local(async move {
+            match daemon::trace(radio, node, channel).await {
                 Ok(traceroute) => self.keep_traceroute(traceroute),
-                Err(failure) => self.trace_error.set(Some(failure)),
+                Err(failure) => self.ask_error.set(Some(failure)),
             }
         });
     }
@@ -350,6 +411,10 @@ impl Live {
                 }
                 ServerMessage::Traceroute { radio, traceroute } if self.is_selected(radio) => {
                     self.keep_traceroute(traceroute);
+                    Ok(())
+                }
+                ServerMessage::Request { radio, request } if self.is_selected(radio) => {
+                    self.keep_request(request);
                     Ok(())
                 }
                 ServerMessage::Packet { radio, packet } if self.is_selected(radio) => {
@@ -513,7 +578,7 @@ fn Content() -> impl IntoView {
         (_, Some(0), _) => view! { <Welcome /> }.into_any(),
         (_, Some(_), Page::Nodes) => view! { <MeshView /> }.into_any(),
         (_, Some(_), Page::Chat) => view! { <ChatView /> }.into_any(),
-        (_, Some(_), Page::Traces) => view! { <TracesView /> }.into_any(),
+        (_, Some(_), Page::Node) => view! { <NodeView /> }.into_any(),
         (_, Some(_), Page::Packets) => view! { <PacketsView /> }.into_any(),
         (_, Some(_), Page::RadioSettings) => view! { <SettingsView /> }.into_any(),
     }
@@ -677,8 +742,7 @@ fn RadioSidebar() -> impl IntoView {
                 t!(i18n, nodes_title).into_any(),
                 Some(Signal::derive(move || live.nodes.with(BTreeMap::len))),
             ),
-            Page::Packets => (t!(i18n, page_packets).into_any(), None),
-            _ => (t!(i18n, page_traces).into_any(), None),
+            _ => (t!(i18n, page_packets).into_any(), None),
         };
         view! {
             <button class=class on:click=move |_| live.go(page)>
@@ -712,7 +776,6 @@ fn RadioSidebar() -> impl IntoView {
             <div class="sidebar-body">
                 {page_item(Page::Nodes)}
                 {page_item(Page::Packets)}
-                {page_item(Page::Traces)}
                 <h2>{t!(i18n, nav_channels)}</h2>
                 <For each=channels key=|peer| *peer let:peer>
                     <PeerItem peer />
@@ -849,8 +912,11 @@ fn Topbar() -> impl IntoView {
     let live = expect_context::<Live>();
     let heading = move || match live.page.get() {
         Page::Nodes => view! { <h1>{t!(i18n, nodes_title)}</h1> }.into_any(),
-        Page::Traces => view! { <h1>{t!(i18n, page_traces)}</h1> }.into_any(),
         Page::Packets => view! { <h1>{t!(i18n, page_packets)}</h1> }.into_any(),
+        Page::Node => match live.node.get() {
+            Some(node) => view! { <PeerHeading peer=Peer::Node { node } /> }.into_any(),
+            None => ().into_any(),
+        },
         Page::RadioSettings => view! {
             <h1>{t!(i18n, nav_radio_settings)}</h1>
         }
@@ -911,18 +977,29 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 }
                 Some(parts.join(" · "))
             };
-            let can_trace = move || live.selected_kind() != Some(RadioKind::Meshcore);
+            // From the chat, the node's page; from its page, the chat.
+            let action = move || {
+                if live.page.get() == Page::Node {
+                    view! {
+                        <button class="primary" on:click=move |_| live.open_chat(peer)>
+                            {t!(i18n, node_message)}
+                        </button>
+                    }
+                    .into_any()
+                } else {
+                    view! {
+                        <button on:click=move |_| live.open_node(node)>{t!(i18n, node_page)}</button>
+                    }
+                    .into_any()
+                }
+            };
             view! {
                 <span class="avatar">{move || short_name(live, node)}</span>
                 <div class="heading">
                     <h1>{move || title(live, peer)}</h1>
                     <span class="mono dim">{detail}</span>
                 </div>
-                <div class="actions">
-                    <Show when=can_trace>
-                        <button on:click=move |_| live.trace(node)>{t!(i18n, trace_send)}</button>
-                    </Show>
-                </div>
+                <div class="actions">{action}</div>
             }
             .into_any()
         }
