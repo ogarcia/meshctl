@@ -2547,6 +2547,7 @@ dependencies = [
  "meshctl-api",
  "serde",
  "serde_json",
+ "wasm-bindgen",
  "web-sys",
 ]
 

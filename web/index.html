@@ -11,6 +11,12 @@
       data-cargo-profile-release="wasm-release"
       data-wasm-opt="z"
     />
+    <link data-trunk rel="copy-dir" href="vendor/leaflet-1.9.4" />
+    <!-- Leaflet's directory carries its version, and map.js gets a hash from
+         trunk: both can be kept by browsers for good, as the server says. -->
+    <link rel="stylesheet" href="/leaflet-1.9.4/dist/leaflet.css" />
+    <script src="/leaflet-1.9.4/dist/leaflet.js"></script>
+    <script data-trunk src="map.js"></script>
     <style>
       /*
        * Colours. The preferences come as attributes on <html>, put there by
@@ -545,6 +551,109 @@
       .hop.fair { color: var(--mc-warn); }
       .hop.poor { color: var(--mc-danger); }
       .hop.unknown { color: var(--mc-muted); }
+
+      main:has(> .map-page) { display: flex; padding: 0; overflow: hidden; }
+      .map-page { position: relative; flex: 1; min-width: 0; min-height: 0; }
+      .map { position: absolute; inset: 0; background: var(--mc-map); }
+      .map-legend {
+        position: absolute;
+        left: 12px;
+        bottom: 24px;
+        z-index: 500;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 14px;
+        padding: 8px 12px;
+        background: color-mix(in srgb, var(--mc-surface) 92%, transparent);
+        border: 1px solid var(--mc-border);
+        border-radius: 10px;
+        font-size: 12px;
+        color: var(--mc-muted);
+      }
+      .map-legend span { display: flex; align-items: center; gap: 6px; }
+      .map-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--mc-far); }
+      .map-legend i.local { background: var(--mc-primary); }
+      .map-legend i.direct { background: var(--mc-second); }
+      .map-legend i.near { background: var(--mc-near); }
+      .map-empty {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 500;
+        margin: 0;
+        max-width: calc(100% - 24px);
+      }
+      /* The tiles, darkened when the map is dark: as asked for, or following
+         the interface's theme, given or the system's. */
+      :root[data-map-theme="dark"] .leaflet-tile-pane,
+      :root[data-theme="dark"]:not([data-map-theme="light"]) .leaflet-tile-pane {
+        filter: invert(1) hue-rotate(180deg) brightness(0.85) saturate(0.75);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]):not([data-map-theme="light"]) .leaflet-tile-pane {
+          filter: invert(1) hue-rotate(180deg) brightness(0.85) saturate(0.75);
+        }
+      }
+      .leaflet-container { font: inherit; }
+      .leaflet-tooltip {
+        background: var(--mc-surface);
+        color: var(--mc-text);
+        border: 1px solid var(--mc-border);
+        box-shadow: var(--mc-shadow);
+      }
+      .leaflet-tooltip-top::before { border-top-color: var(--mc-border); }
+      .leaflet-bar a, .leaflet-bar a:hover {
+        background: var(--mc-surface);
+        color: var(--mc-text);
+        border-bottom-color: var(--mc-border);
+      }
+      .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+        background: var(--mc-surface);
+        color: var(--mc-text);
+        box-shadow: var(--mc-shadow);
+      }
+      .leaflet-popup-content-wrapper { border: 1px solid var(--mc-border); border-radius: 12px; }
+      .leaflet-container a.leaflet-popup-close-button { color: var(--mc-muted); }
+      .leaflet-popup-content { margin: 12px 14px; font-size: 13px; line-height: 1.4; }
+      .mc-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+      .mc-card { display: grid; gap: 10px; min-width: 220px; }
+      .mc-card-head { display: flex; align-items: center; gap: 10px; padding-right: 14px; }
+      .mc-card-title { display: flex; flex-direction: column; min-width: 0; }
+      .mc-card-title strong { font-size: 14px; }
+      .mc-card-id { font-family: var(--mc-mono); font-size: 11px; color: var(--mc-muted); }
+      .mc-card-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; margin: 0; }
+      .mc-card-facts dt { font-size: 11px; color: var(--mc-muted); }
+      .mc-card-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+      .mc-card-buttons { display: flex; gap: 8px; }
+      .mc-card-buttons button { flex: 1; min-height: 34px; }
+      .mc-picker-popup .leaflet-popup-content { margin: 6px; width: 260px !important; max-width: calc(100vw - 64px); }
+      .mc-picker-head { display: flex; align-items: center; gap: 8px; padding: 2px 22px 4px 8px; }
+      .mc-picker-head p { flex: 1; margin: 0; font-size: 12px; color: var(--mc-muted); }
+      .mc-picker-zoom { width: 30px; height: 30px; padding: 0; border: 0; background: transparent; color: var(--mc-muted); font-size: 18px; }
+      .mc-picker-zoom:hover { background: var(--mc-raised); color: var(--mc-text); }
+      .mc-picker-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+      .mc-picker-item {
+        display: grid;
+        grid-template-columns: 10px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 9px;
+        width: 100%;
+        min-height: 40px;
+        padding: 6px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        text-align: left;
+      }
+      .mc-picker-item:hover, .mc-picker-item:focus-visible { background: var(--mc-raised); }
+      .mc-picker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .mc-picker-name strong { margin-right: 6px; }
+      .mc-picker-name span, .mc-picker-seen { font-size: 12px; color: var(--mc-muted); white-space: nowrap; }
+      .leaflet-control-attribution {
+        background: color-mix(in srgb, var(--mc-surface) 85%, transparent) !important;
+        color: var(--mc-muted);
+      }
 
       .packets { padding: 0; overflow: hidden; }
       .packets > p { margin: 0; padding: 14px 16px; }

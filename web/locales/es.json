@@ -145,5 +145,13 @@
   "request_answered": "Respondida",
   "request_failed": "Sin respuesta",
   "request_no_response": "no tiene ese dato",
-  "request_timeout": "nada en dos minutos; puede que ya respondiera hace poco"
+  "request_timeout": "nada en dos minutos; puede que ya respondiera hace poco",
+  "page_map": "Mapa",
+  "map_local": "Esta radio",
+  "map_direct": "Directo",
+  "map_near": "1–2 saltos",
+  "map_far": "Más lejos",
+  "map_empty": "Ningún nodo de esta radio ha dicho aún dónde está.",
+  "map_here": "{n} nodos aquí",
+  "map_zoom": "Acercar a ellos"
 }

@@ -13,6 +13,7 @@
 use crate::chat::{ChatView, peer_of, short_name, title};
 use crate::daemon::{self, Events, Failure};
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
+use crate::map::{MapView, placed};
 use crate::mesh::{MeshView, ago};
 use crate::node::NodeView;
 use crate::packets::{KEPT, PacketsView};
@@ -49,6 +50,8 @@ pub enum Daemon {
 /// Which page is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
+    /// The selected radio's nodes where they are: the front page.
+    Map,
     /// The selected radio's nodes.
     Nodes,
     /// What the selected radio hears, as it hears it.
@@ -101,6 +104,8 @@ pub struct Live {
     pub packets: RwSignal<Vec<Packet>>,
     /// The node whose page is open, if any.
     pub node: RwSignal<Option<u32>>,
+    /// The node picked on the map, if any.
+    pub map_pick: RwSignal<Option<u32>>,
     /// What the open node was asked for, the newest first.
     pub requests: RwSignal<Vec<Request>>,
     /// Why the last request or traceroute was not sent.
@@ -115,7 +120,7 @@ impl Live {
     fn new() -> Self {
         Self {
             daemon: RwSignal::new(Daemon::Connecting),
-            page: RwSignal::new(Page::Nodes),
+            page: RwSignal::new(Page::Map),
             menu: RwSignal::new(false),
             preferences: RwSignal::new(Preferences::default()),
             radios: RwSignal::new(None),
@@ -129,6 +134,7 @@ impl Live {
             traceroutes: RwSignal::new(Vec::new()),
             packets: RwSignal::new(Vec::new()),
             node: RwSignal::new(None),
+            map_pick: RwSignal::new(None),
             requests: RwSignal::new(Vec::new()),
             ask_error: RwSignal::new(None),
             synced: RwSignal::new(0),
@@ -149,10 +155,11 @@ impl Live {
         self.thread.set(Vec::new());
         self.node.set(None);
         self.requests.set(Vec::new());
+        self.map_pick.set(None);
         if matches!(self.page.get_untracked(), Page::Chat | Page::Node)
             || self.page.get_untracked().is_meshctl()
         {
-            self.page.set(Page::Nodes);
+            self.page.set(Page::Map);
         }
         self.menu.set(false);
         spawn_local(async move {
@@ -576,6 +583,7 @@ fn Content() -> impl IntoView {
         (_, _, Page::Preferences) => view! { <PreferencesView /> }.into_any(),
         (_, _, Page::Radios) => view! { <RadiosView /> }.into_any(),
         (_, Some(0), _) => view! { <Welcome /> }.into_any(),
+        (_, Some(_), Page::Map) => view! { <MapView /> }.into_any(),
         (_, Some(_), Page::Nodes) => view! { <MeshView /> }.into_any(),
         (_, Some(_), Page::Chat) => view! { <ChatView /> }.into_any(),
         (_, Some(_), Page::Node) => view! { <NodeView /> }.into_any(),
@@ -738,6 +746,10 @@ fn RadioSidebar() -> impl IntoView {
             }
         };
         let (label, count) = match page {
+            Page::Map => (
+                t!(i18n, page_map).into_any(),
+                Some(Signal::derive(move || placed(live))),
+            ),
             Page::Nodes => (
                 t!(i18n, nodes_title).into_any(),
                 Some(Signal::derive(move || live.nodes.with(BTreeMap::len))),
@@ -774,6 +786,7 @@ fn RadioSidebar() -> impl IntoView {
         <Show when=move || live.selected.get().is_some()>
             <RadioHead />
             <div class="sidebar-body">
+                {page_item(Page::Map)}
                 {page_item(Page::Nodes)}
                 {page_item(Page::Packets)}
                 <h2>{t!(i18n, nav_channels)}</h2>
@@ -912,6 +925,10 @@ fn Topbar() -> impl IntoView {
     let live = expect_context::<Live>();
     let heading = move || match live.page.get() {
         Page::Nodes => view! { <h1>{t!(i18n, nodes_title)}</h1> }.into_any(),
+        Page::Map => match live.map_pick.get() {
+            Some(node) => view! { <PeerHeading peer=Peer::Node { node } /> }.into_any(),
+            None => view! { <h1>{t!(i18n, page_map)}</h1> }.into_any(),
+        },
         Page::Packets => view! { <h1>{t!(i18n, page_packets)}</h1> }.into_any(),
         Page::Node => match live.node.get() {
             Some(node) => view! { <PeerHeading peer=Peer::Node { node } /> }.into_any(),
@@ -977,21 +994,23 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 }
                 Some(parts.join(" · "))
             };
-            // From the chat, the node's page; from its page, the chat.
+            // Where else there is to go with the node: its chat, its page, or
+            // both from the map.
             let action = move || {
-                if live.page.get() == Page::Node {
+                let page = live.page.get();
+                let chat = (page != Page::Chat).then(|| {
                     view! {
                         <button class="primary" on:click=move |_| live.open_chat(peer)>
                             {t!(i18n, node_message)}
                         </button>
                     }
-                    .into_any()
-                } else {
+                });
+                let profile = (page != Page::Node).then(|| {
                     view! {
                         <button on:click=move |_| live.open_node(node)>{t!(i18n, node_page)}</button>
                     }
-                    .into_any()
-                }
+                });
+                view! { {profile} {chat} }
             };
             view! {
                 <span class="avatar">{move || short_name(live, node)}</span>

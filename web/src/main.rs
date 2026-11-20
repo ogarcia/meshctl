@@ -6,6 +6,7 @@ include!(concat!(env!("OUT_DIR"), "/i18n/mod.rs"));
 mod app;
 mod chat;
 mod daemon;
+mod map;
 mod mesh;
 mod node;
 mod packets;

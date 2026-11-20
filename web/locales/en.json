@@ -145,5 +145,13 @@
   "request_answered": "Answered",
   "request_failed": "No answer",
   "request_no_response": "it has nothing to tell",
-  "request_timeout": "none in two minutes; it may have answered recently"
+  "request_timeout": "none in two minutes; it may have answered recently",
+  "page_map": "Map",
+  "map_local": "This radio",
+  "map_direct": "Direct",
+  "map_near": "1–2 hops",
+  "map_far": "Further",
+  "map_empty": "None of this radio's nodes has said where it is yet.",
+  "map_here": "{n} nodes here",
+  "map_zoom": "Zoom in on them"
 }
