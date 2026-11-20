@@ -34,6 +34,9 @@
         --mc-surface: #ffffff;
         --mc-surface-2: #f8f9fa;
         --mc-raised: #eef0f3;
+        /* The radios' buttons on the rail: white on its grey, to stand out. */
+        --mc-rail-button: #ffffff;
+        --mc-rail-button-edge: #cfd5dc;
         --mc-border: #d8dde3;
         --mc-text: #161b22;
         --mc-muted: #57606a;
@@ -58,6 +61,8 @@
         --mc-surface: #12161c;
         --mc-surface-2: #0f1318;
         --mc-raised: #1b222b;
+        --mc-rail-button: #1b222b;
+        --mc-rail-button-edge: transparent;
         --mc-border: #2a3340;
         --mc-text: #e6edf3;
         --mc-muted: #9aa7b4;
@@ -78,6 +83,8 @@
           --mc-surface: #12161c;
           --mc-surface-2: #0f1318;
           --mc-raised: #1b222b;
+          --mc-rail-button: #1b222b;
+          --mc-rail-button-edge: transparent;
           --mc-border: #2a3340;
           --mc-text: #e6edf3;
           --mc-muted: #9aa7b4;
@@ -182,9 +189,9 @@
         width: 48px;
         height: 48px;
         padding: 0;
-        border: 0;
+        border: 1px solid var(--mc-rail-button-edge);
         border-radius: 24px;
-        background: var(--mc-raised);
+        background: var(--mc-rail-button);
         color: var(--mc-text);
         font-weight: 700;
         font-size: 13px;
@@ -194,6 +201,7 @@
       .rail-button.active {
         border-radius: 14px;
         background: var(--mc-primary);
+        border-color: var(--mc-primary);
         color: var(--mc-on-primary);
       }
       /* The one selected, marked by a pill on the rail's left edge. */
