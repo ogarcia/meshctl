@@ -18,11 +18,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
     files.sort();
 
-    let descriptors = protox::compile(&files, [root])?;
+    let mut compiler = protox::Compiler::new([root])?;
+    compiler.include_imports(true).open_files(&files)?;
+
+    // The descriptors themselves, for reading settings by their description:
+    // labels, units, limits and which fields are secret. See `descriptors()`.
+    // Encoded by protox rather than through prost's types, which would drop
+    // the field options' extensions: the very metadata wanted here.
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR")?);
+    std::fs::write(
+        out.join("descriptors.bin"),
+        compiler.encode_file_descriptor_set(),
+    )?;
 
     // Enums stay as i32 on the wire types, which is what lets a value a newer
     // firmware sends, and these files do not know yet, arrive intact.
-    prost_build::Config::new().compile_fds(descriptors)?;
+    prost_build::Config::new().compile_fds(compiler.file_descriptor_set())?;
 
     println!("cargo:rerun-if-changed={PROTO_ROOT}");
     Ok(())

@@ -9,6 +9,19 @@
 
 pub mod frame;
 
+use prost_reflect::DescriptorPool;
+use std::sync::LazyLock;
+
+/// Every message these protobufs describe, with their options: what reads
+/// and writes a message field by field, by its description, works from here.
+pub fn descriptors() -> &'static DescriptorPool {
+    static POOL: LazyLock<DescriptorPool> = LazyLock::new(|| {
+        DescriptorPool::decode(&include_bytes!(concat!(env!("OUT_DIR"), "/descriptors.bin"))[..])
+            .expect("the descriptors built with these protobufs decode")
+    });
+    &POOL
+}
+
 /// Everything in the `meshtastic` protobuf package.
 #[allow(clippy::all, clippy::pedantic, missing_docs)]
 pub mod meshtastic {
@@ -19,6 +32,31 @@ pub mod meshtastic {
 mod tests {
     use super::meshtastic::{FromRadio, MyNodeInfo, ToRadio, from_radio, to_radio};
     use prost::Message;
+
+    #[test]
+    fn the_descriptors_carry_what_fields_say_of_themselves() {
+        use prost_reflect::Value;
+        let pool = super::descriptors();
+        let metadata = pool
+            .get_extension_by_name("meshtastic.field_metadata")
+            .expect("the field metadata extension");
+        let mqtt = pool
+            .get_message_by_name("meshtastic.ModuleConfig.MQTTConfig")
+            .expect("the MQTT config");
+        let password = mqtt.get_field_by_name("password").unwrap();
+        let options = password.options();
+        let Value::Message(said) = options.get_extension(&metadata).into_owned() else {
+            panic!("metadata");
+        };
+        assert_eq!(
+            said.get_field_by_name("sensitive").unwrap().as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            said.get_field_by_name("label").unwrap().as_str(),
+            Some("Password")
+        );
+    }
 
     #[test]
     fn a_config_request_survives_the_round_trip() {

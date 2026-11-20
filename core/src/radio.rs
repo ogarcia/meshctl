@@ -10,8 +10,8 @@
 use crate::link::{self, Link, Transport};
 use crate::mesh::{Event, LinkState, MeshState};
 use meshctl_proto::meshtastic::{
-    AdminMessage, Channel, Config, Data, FromRadio, Heartbeat, MeshPacket, PortNum, RouteDiscovery,
-    ToRadio, User, admin_message, from_radio, mesh_packet, to_radio,
+    AdminMessage, Channel, Config, Data, FromRadio, Heartbeat, MeshPacket, ModuleConfig, PortNum,
+    RouteDiscovery, ToRadio, User, admin_message, from_radio, mesh_packet, to_radio,
 };
 use prost::Message;
 use std::collections::HashMap;
@@ -90,6 +90,7 @@ pub struct Mesh {
 pub struct SettingsChange {
     pub owner: Option<User>,
     pub configs: Vec<Config>,
+    pub module_configs: Vec<ModuleConfig>,
     pub channels: Vec<Channel>,
 }
 
@@ -274,6 +275,7 @@ impl Mesh {
         let mut steps = vec![A::BeginEditSettings(true)];
         steps.extend(change.owner.map(A::SetOwner));
         steps.extend(change.configs.into_iter().map(A::SetConfig));
+        steps.extend(change.module_configs.into_iter().map(A::SetModuleConfig));
         steps.extend(change.channels.into_iter().map(A::SetChannel));
         steps.push(A::CommitEditSettings(true));
         for step in steps {

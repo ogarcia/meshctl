@@ -10,8 +10,9 @@ publish = false
 
 [dependencies]
 meshctl-proto.workspace = true
+prost-reflect = "0.16"
 prost.workspace = true
-tokio ={ workspace = true, features = ["io-util", "net", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 # Without libudev: it is only for listing ports with their USB details, which
 # a path given in the configuration does not need, and it would keep a static
 # musl build from linking.

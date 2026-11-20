@@ -2483,6 +2483,7 @@ version = "0.1.0-dev"
 dependencies = [
  "meshctl-proto",
  "prost",
+ "prost-reflect",
  "tokio",
  "tokio-serial",
  "tracing",
@@ -2495,6 +2496,7 @@ dependencies = [
  "bytes",
  "prost",
  "prost-build",
+ "prost-reflect",
  "protox",
  "tracing",
 ]
@@ -2512,6 +2514,8 @@ dependencies = [
  "meshctl-api",
  "meshctl-core",
  "meshctl-proto",
+ "prost",
+ "prost-reflect",
  "rust-embed",
  "serde",
  "serde_json",

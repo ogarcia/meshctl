@@ -7,10 +7,12 @@
 use crate::app::Live;
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
+use crate::sections::Sections;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{
     ChannelChange, ChannelKey, ErrorCode, KeyChange, LinkState, NodeSettings, NodeSettingsChange,
+    SettingsSection,
 };
 
 /// What changed between the settings read and the ones in the form.
@@ -53,6 +55,7 @@ pub fn SettingsView() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let loaded = RwSignal::new(None::<NodeSettings>);
+    let sections = RwSignal::new(Vec::<SettingsSection>::new());
     let draft = RwSignal::new(None::<NodeSettings>);
     let keys = RwSignal::new(vec![KeyChange::Keep; 8]);
     let notice = RwSignal::new(None::<Result<bool, Failure>>);
@@ -61,6 +64,14 @@ pub fn SettingsView() -> impl IntoView {
     let ready = move || {
         live.status
             .with(|s| s.as_ref().is_some_and(|s| s.link == LinkState::Ready))
+    };
+    // Still shown while the radio only syncs again, as after every change:
+    // what is being edited elsewhere on the page must not vanish under it.
+    let shown = move || {
+        live.status.with(|s| {
+            s.as_ref()
+                .is_some_and(|s| matches!(s.link, LinkState::Ready | LinkState::Syncing))
+        })
     };
 
     // Read them whenever the radio is (again) in sync: on opening the page,
@@ -77,6 +88,9 @@ pub fn SettingsView() -> impl IntoView {
                 keys.set(vec![KeyChange::Keep; settings.channels.len()]);
                 draft.set(Some(settings.clone()));
                 loaded.set(Some(settings));
+            }
+            if let Ok(read) = daemon::sections(radio).await {
+                sections.set(read);
             }
         });
     });
@@ -135,7 +149,7 @@ pub fn SettingsView() -> impl IntoView {
 
     view! {
         <Show
-            when=ready
+            when=shown
             fallback=move || view! { <p class="card dim">{t!(i18n, settings_not_connected)}</p> }
         >
             {notice_view}
@@ -172,6 +186,7 @@ pub fn SettingsView() -> impl IntoView {
                         }
                     })
             }}
+            <Sections sections />
         </Show>
     }
 }

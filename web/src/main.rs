@@ -8,6 +8,7 @@ mod chat;
 mod daemon;
 mod mesh;
 mod radios;
+mod sections;
 mod settings;
 mod traces;
 

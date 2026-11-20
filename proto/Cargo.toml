@@ -11,6 +11,9 @@ publish = false
 [dependencies]
 bytes = "1"
 prost.workspace = true
+# Messages read and written by their description: settings shown and changed
+# field by field, with what the protobufs say of each.
+prost-reflect = "0.16"
 tracing.workspace = true
 
 [build-dependencies]

@@ -10,12 +10,18 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, ErrorCode, NodeSettings, NodeSettingsChange, RadioId, SettingsApplied};
+use meshctl_api::{
+    Error, ErrorCode, NodeSettings, NodeSettingsChange, RadioId, SectionChange, SettingsApplied,
+    SettingsSection,
+};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(show, change))
+    OpenApiRouter::new()
+        .routes(routes!(show, change))
+        .routes(routes!(sections))
+        .routes(routes!(change_section))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -27,7 +33,7 @@ fn refused(failure: SettingsFailure) -> Response {
         SettingsFailure::NoSuchRadio => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         SettingsFailure::NotConnected => error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
         SettingsFailure::Invalid(why) => {
-            tracing::debug!(setting = why.0, "invalid settings");
+            tracing::debug!(setting = %why, "invalid settings");
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidSettings)
         }
         SettingsFailure::NoAnswer => {
@@ -96,6 +102,70 @@ async fn change(
     Json(wanted): Json<NodeSettingsChange>,
 ) -> Response {
     match state.radios.change_settings(radio, &wanted).await {
+        Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Sections
+///
+/// The rest of the radio's configuration and every module it has, section by
+/// section, each field as the protobufs describe it: label, description,
+/// unit, limits and choices, in English. Secrets show only whether they are
+/// set. Only while the radio is connected. Left out: LoRa and the role, which
+/// `settings` covers, and security, where a slip locks the owner out.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/sections",
+    tag = "settings",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    responses(
+        (status = 200, description = "The sections", body = Vec<SettingsSection>),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+    )
+)]
+async fn sections(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
+    match state.radios.sections(radio) {
+        Ok(sections) => Json(sections).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Change a section
+///
+/// Sets the fields given, by their names in the section, and leaves the rest
+/// as the radio has them; a secret is written only when given. The radio
+/// reboots for nearly any of them, and drops its link for a moment.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/sections/{section}",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("section" = String, Path, description = "The section's id", example = "module.telemetry"),
+    ),
+    request_body = SectionChange,
+    responses(
+        (status = 202, description = "Sent to the radio", body = SettingsApplied),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "No such section or field, or a value it does not take: `invalid_settings`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn change_section(
+    State(state): State<AppState>,
+    Path((radio, section)): Path<(RadioId, String)>,
+    Json(change): Json<SectionChange>,
+) -> Response {
+    match state
+        .radios
+        .change_section(radio, &section, &change.values)
+        .await
+    {
         Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
         Err(failure) => refused(failure),
     }

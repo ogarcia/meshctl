@@ -12,10 +12,9 @@ publish = false
 # later, into the TUI. Nothing here may pull in a runtime or I/O.
 [dependencies]
 serde.workspace = true
-utoipa = { version = "6", optional = true }
-
-[dev-dependencies]
+# Setting values, whatever their kind, as they travel.
 serde_json = "1"
+utoipa = { version = "6", optional = true }
 
 [features]
 # The OpenAPI schemas of these types. The daemon turns it on to document its

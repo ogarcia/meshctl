@@ -538,6 +538,77 @@ pub struct NodeSettingsChange {
     pub channels: Vec<ChannelChange>,
 }
 
+/// What a setting holds, and so how it is shown and what it takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum FieldKind {
+    /// `true` or `false`.
+    Bool,
+    /// A whole number, within `min` and `max` when given.
+    Integer,
+    /// A number, within `min` and `max` when given.
+    Number,
+    Text,
+    /// One of `choices`, by its code.
+    Choice,
+}
+
+/// One setting of a section, as the protobufs describe it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SettingsField {
+    /// Its path in the section, with dots into what it nests.
+    #[cfg_attr(feature = "openapi", schema(example = "position_broadcast_secs"))]
+    pub name: String,
+    /// What the protobufs call it, in English.
+    #[cfg_attr(feature = "openapi", schema(example = "Broadcast Interval"))]
+    pub label: Option<String>,
+    /// What the protobufs say of it, in English.
+    pub description: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(example = "seconds"))]
+    pub unit: Option<String>,
+    pub kind: FieldKind,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    /// For a choice, the codes it takes.
+    pub choices: Vec<String>,
+    /// A password or a key: never shown, only whether it is set, and only
+    /// ever written.
+    pub secret: bool,
+    /// Whether it is only for radios built by hand.
+    pub diy_only: bool,
+    /// What it is now; none for a secret.
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub value: Option<serde_json::Value>,
+    /// Whether it holds something: for a secret, whether one is set.
+    pub set: bool,
+}
+
+/// A part of the radio's configuration, or of one of its modules.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SettingsSection {
+    /// `config.` or `module.` and its name in the protobufs.
+    #[cfg_attr(feature = "openapi", schema(example = "module.telemetry"))]
+    pub id: String,
+    /// Its name in the protobufs.
+    #[cfg_attr(feature = "openapi", schema(example = "telemetry"))]
+    pub name: String,
+    /// Whether it is a module rather than the radio's own configuration.
+    pub module: bool,
+    pub fields: Vec<SettingsField>,
+}
+
+/// New values for some settings of a section, by their names. What is not
+/// given stays as it is.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SectionChange {
+    #[cfg_attr(feature = "openapi", schema(value_type = Object, example = json!({"device_update_interval": 1800})))]
+    pub values: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
 /// What a change of settings set off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

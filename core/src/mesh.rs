@@ -221,6 +221,10 @@ pub struct MeshState {
 pub struct Settings {
     pub owner: Option<pb::User>,
     pub config: pb::LocalConfig,
+    /// Each module's configuration, by the name its part of `ModuleConfig`
+    /// has in the protobufs (`mqtt`, `telemetry`…): whichever modules the
+    /// radio's firmware has, these protobufs knowing them or not.
+    pub modules: BTreeMap<String, pb::ModuleConfig>,
     pub channels: BTreeMap<u32, pb::Channel>,
 }
 
@@ -235,6 +239,24 @@ impl std::fmt::Debug for Settings {
 }
 
 impl Settings {
+    /// Takes in one module's configuration.
+    fn keep_module(&mut self, module: &pb::ModuleConfig) {
+        let Some(descriptor) =
+            meshctl_proto::descriptors().get_message_by_name("meshtastic.ModuleConfig")
+        else {
+            return;
+        };
+        let Ok(dynamic) =
+            prost_reflect::DynamicMessage::decode(descriptor, module.encode_to_vec().as_slice())
+        else {
+            return;
+        };
+        // The one part that is set says which module it is.
+        if let Some((field, _)) = dynamic.fields().next() {
+            self.modules.insert(field.name().to_owned(), module.clone());
+        }
+    }
+
     /// Takes in one part of the configuration.
     fn keep(&mut self, config: &pb::Config) {
         use config::PayloadVariant as C;
@@ -309,6 +331,10 @@ impl MeshState {
                     }
                     _ => {}
                 }
+                None
+            }
+            Some(V::ModuleConfig(module)) => {
+                self.settings.keep_module(&module);
                 None
             }
             Some(V::Channel(channel)) => {
@@ -844,6 +870,22 @@ mod tests {
         );
         let events = state.apply(from_radio(V::Packet(request)), 1);
         assert!(!events.iter().any(|e| matches!(e, Event::Traceroute(_))));
+    }
+
+    #[test]
+    fn each_module_is_kept_by_its_name() {
+        let mut state = ready();
+        let telemetry = pb::ModuleConfig {
+            payload_variant: Some(pb::module_config::PayloadVariant::Telemetry(
+                pb::module_config::TelemetryConfig {
+                    device_update_interval: 900,
+                    ..Default::default()
+                },
+            )),
+        };
+        state.apply(from_radio(V::ModuleConfig(telemetry.clone())), 1);
+        assert_eq!(state.settings.modules.get("telemetry"), Some(&telemetry));
+        assert_eq!(state.settings.modules.len(), 1);
     }
 
     #[test]

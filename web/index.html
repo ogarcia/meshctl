@@ -173,6 +173,31 @@
       .settings .channels input:not([type=checkbox]) { width: 9em; }
       .settings .save { display: flex; gap: 8px; }
       .note.bad { border-left-color: var(--bad); }
+      .sections { display: grid; gap: 0; }
+      .sections h2 { margin-bottom: 6px; }
+      details.section { border-top: 1px solid var(--line); }
+      details.section summary {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 10px 2px;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      details.section summary .count { font-weight: normal; font-size: 12px; }
+      details.section form { padding: 4px 2px 14px; display: grid; gap: 12px; }
+      details.section .fields {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 12px 16px;
+        align-items: end;
+      }
+      details.section label { display: grid; gap: 4px; }
+      details.section label span { color: var(--dim); font-size: 12px; }
+      details.section label.check { display: flex; gap: 8px; align-items: center; padding-bottom: 8px; }
+      details.section label.check span { font-size: inherit; color: inherit; }
+      details.section .note { padding: 8px 12px; }
+      details.section .buttons { display: flex; gap: 8px; }
       button.small { padding: 2px 8px; font-size: 12px; }
       .trace-form h2 { margin-bottom: 4px; }
       .trace-form p { margin: 0 0 10px; }

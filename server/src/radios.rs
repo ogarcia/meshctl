@@ -11,12 +11,12 @@ use anyhow::Result;
 use meshctl_api::{
     Conversation, ErrorCode, Hop, LinkState, Message, MessageId, MessageStatus, NewMessage,
     NodeSettings, NodeSettingsChange, Peer, Radio, RadioId, RadioKind, RadioSettings,
-    SettingsApplied, Status, Traceroute,
+    SettingsApplied, SettingsSection, Status, Traceroute,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
 use meshctl_core::radio::{AdminError, Mesh, OutgoingText, SendError};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, watch};
@@ -83,7 +83,8 @@ pub enum SettingsFailure {
     NoSuchRadio,
     /// Not connected, or not yet in sync: its settings are known only then.
     NotConnected,
-    Invalid(crate::settings::Invalid),
+    /// Which setting it is that the radio cannot have.
+    Invalid(String),
     NoAnswer,
 }
 
@@ -435,7 +436,7 @@ impl Radios {
                     getrandom::fill(key).expect("the system has randomness to give");
                 })
             })
-            .map_err(SettingsFailure::Invalid)?;
+            .map_err(|why| SettingsFailure::Invalid(why.0.to_owned()))?;
         mesh.change_settings(change)
             .await
             .map_err(|error| match error {
@@ -444,6 +445,44 @@ impl Radios {
             })?;
         tracing::info!(radio = id, reboots, "settings changed");
         Ok(SettingsApplied { reboots })
+    }
+
+    /// The rest of a radio's configuration and its modules, section by
+    /// section; like its settings, only while it is connected.
+    pub fn sections(&self, id: RadioId) -> Result<Vec<SettingsSection>, SettingsFailure> {
+        let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
+        if self.link(id) != LinkState::Ready {
+            return Err(SettingsFailure::NotConnected);
+        }
+        Ok(mesh.read(|state| crate::sections::sections(&state.settings)))
+    }
+
+    /// Changes some settings of one section. The firmware reboots for nearly
+    /// any of them, so it is always said that it does.
+    pub async fn change_section(
+        &self,
+        id: RadioId,
+        section: &str,
+        values: &BTreeMap<String, serde_json::Value>,
+    ) -> Result<SettingsApplied, SettingsFailure> {
+        let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
+        if self.link(id) != LinkState::Ready {
+            return Err(SettingsFailure::NotConnected);
+        }
+        if values.is_empty() {
+            return Err(SettingsFailure::Invalid(section.to_owned()));
+        }
+        let change = mesh
+            .read(|state| crate::sections::change(&state.settings, section, values))
+            .map_err(|why| SettingsFailure::Invalid(why.0))?;
+        mesh.change_settings(change)
+            .await
+            .map_err(|error| match error {
+                AdminError::NotConnected => SettingsFailure::NotConnected,
+                AdminError::NoAnswer => SettingsFailure::NoAnswer,
+            })?;
+        tracing::info!(radio = id, section, "settings changed");
+        Ok(SettingsApplied { reboots: true })
     }
 
     /// A radio's traceroutes, to one node or to any, the newest first, if there
