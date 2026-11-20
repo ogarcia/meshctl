@@ -401,24 +401,15 @@ window.meshctlMap = (() => {
         interactive: false,
       }).addTo(routeLayer);
     }
-    // Under the nodes, so that they can still be picked.
+    // Lines go in Leaflet's overlay pane, under the markers' own: the nodes
+    // stay on top, and can still be picked.
     routeLayer.addTo(map);
-    markers.eachLayer((marker) => marker.bringToFront());
     // A route shown for the first time: the popup goes out of its way, and
-    // the view takes it all in, clear of the notice above and the legend
-    // below. Clicking the node brings the popup back.
+    // the view stays where it is. Clicking the node brings the popup back.
     if (drawn.id !== routeShown) {
       routeShown = drawn.id;
       cardAway = true;
       showCard();
-      const points = [...drawn.towards, ...drawn.back].flatMap((s) => [s.from, s.to]);
-      if (points.length > 0) {
-        map.flyToBounds(points, {
-          paddingTopLeft: [40, 80],
-          paddingBottomRight: [40, 80],
-          maxZoom: 15,
-        });
-      }
     }
   }
 
