@@ -36,6 +36,8 @@ window.meshctlMap = (() => {
   // The traceroute last drawn, so that the view goes to a route once, not at
   // every redrawing; and whether the picked node's popup is put away for it.
   let routeShown = null;
+  // The route drawn, as the Rust side gave it, to draw again at each zoom.
+  let shownRoute = null;
   let cardAway = false;
 
   // Picks a node: its popup shows again, even when it was put away for a
@@ -83,6 +85,8 @@ window.meshctlMap = (() => {
     });
     // Escape on the map, which Leaflet keeps from reaching the page, takes the
     // route away as it does elsewhere.
+    // A route keeps its sides a few pixels apart, whatever the zoom.
+    map.on("zoomend", drawRoute);
     map.on("keydown", (event) => {
       if (event.originalEvent.key === "Escape") {
         act && act(0, "unroute");
@@ -110,6 +114,7 @@ window.meshctlMap = (() => {
     popupFor = null;
     preview = null;
     routeLayer = null;
+    shownRoute = null;
   }
 
   // The nodes near a point of the map's, the nearest first.
@@ -366,33 +371,73 @@ window.meshctlMap = (() => {
     unknown: "--mc-muted",
   };
 
-  // A traced route, as JSON: {towards: [segment], back: [segment], relays:
-  // [[lat, lon]]}, each segment {from: [lat, lon], to: [lat, lon], quality,
-  // gap}, gap when nodes between its ends could not be placed. Or null, to
-  // take the route off the map.
-  function route(json) {
-    if (!map) return;
+  // How far apart, in pixels, the way there and the way back run where they
+  // go between the same nodes: each keeps to its right, as on a road.
+  const ROUTE_SIDE = 4;
+
+  // A stretch moved to the right of the way it goes, in pixels on the screen
+  // as the map is now; with the angle it goes at, in degrees.
+  function keepRight(from, to) {
+    const a = map.latLngToLayerPoint(from);
+    const b = map.latLngToLayerPoint(to);
+    const length = a.distanceTo(b) || 1;
+    // The right of the way from a to b, on a screen whose y goes down.
+    const side = L.point(-(b.y - a.y) / length, (b.x - a.x) / length).multiplyBy(ROUTE_SIDE);
+    return {
+      from: map.layerPointToLatLng(a.add(side)),
+      to: map.layerPointToLatLng(b.add(side)),
+      angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI,
+    };
+  }
+
+  // An arrowhead halfway along a stretch, pointing the way it went.
+  function arrow(stretch, fill) {
+    const middle = L.latLng(
+      (stretch.from.lat + stretch.to.lat) / 2,
+      (stretch.from.lng + stretch.to.lng) / 2,
+    );
+    return L.marker(middle, {
+      icon: L.divIcon({
+        className: "",
+        // Ringed in white, as the nodes are, to stand out on any tile.
+        html:
+          `<svg class="mc-arrow" viewBox="0 0 18 18" style="transform:rotate(${stretch.angle}deg)">` +
+          `<path d="M3 3 L16 9 L3 15 L7 9 Z" fill="${fill}" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>` +
+          `</svg>`,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      }),
+      interactive: false,
+      keyboard: false,
+    });
+  }
+
+  // Draws the route shown again: at every zoom, as the sides it keeps to are
+  // a few pixels, whatever the scale.
+  function drawRoute() {
     if (routeLayer) routeLayer.remove();
     routeLayer = null;
-    const drawn = json ? JSON.parse(json) : null;
-    if (!drawn) {
-      routeShown = null;
-      return;
-    }
+    if (!map || !shownRoute) return;
     routeLayer = L.layerGroup();
-    const draw = (segment, back) =>
-      L.polyline([segment.from, segment.to], {
-        color: color(QUALITY_COLOR[segment.quality] || "--mc-muted"),
-        weight: back ? 2 : 4,
-        opacity: 0.9,
-        // There, solid; back, dashed; across nodes that could not be placed,
-        // dotted.
-        dashArray: segment.gap ? "2 8" : back ? "8 6" : null,
+    const draw = (segment, back) => {
+      const stretch = keepRight(segment.from, segment.to);
+      const fill = color(QUALITY_COLOR[segment.quality] || "--mc-muted");
+      L.polyline([stretch.from, stretch.to], {
+        // The colour says how the hop was heard: grey across nodes that
+        // could not be placed, as then it cannot be told.
+        color: fill,
+        weight: 3,
+        // There, solid; back, dashed and a little lighter: always, as the
+        // notice's key says.
+        opacity: back ? 0.8 : 0.95,
+        dashArray: back ? "8 6" : null,
         interactive: false,
       }).addTo(routeLayer);
-    drawn.towards.forEach((segment) => draw(segment, false));
-    drawn.back.forEach((segment) => draw(segment, true));
-    for (const relay of drawn.relays) {
+      arrow(stretch, fill).addTo(routeLayer);
+    };
+    shownRoute.towards.forEach((segment) => draw(segment, false));
+    shownRoute.back.forEach((segment) => draw(segment, true));
+    for (const relay of shownRoute.relays) {
       L.circleMarker(relay, {
         radius: 11,
         color: color("--mc-text"),
@@ -404,12 +449,39 @@ window.meshctlMap = (() => {
     // Lines go in Leaflet's overlay pane, under the markers' own: the nodes
     // stay on top, and can still be picked.
     routeLayer.addTo(map);
+  }
+
+  // A traced route, as JSON: {towards: [segment], back: [segment], relays:
+  // [[lat, lon]]}, each segment {from: [lat, lon], to: [lat, lon], quality,
+  // gap}, gap when nodes between its ends could not be placed. Or null, to
+  // take the route off the map.
+  function route(json) {
+    if (!map) return;
+    if (routeLayer) routeLayer.remove();
+    routeLayer = null;
+    const drawn = json ? JSON.parse(json) : null;
+    if (!drawn) {
+      routeShown = null;
+      shownRoute = null;
+      return;
+    }
+    shownRoute = drawn;
+    drawRoute();
     // A route shown for the first time: the popup goes out of its way, and
-    // the view stays where it is. Clicking the node brings the popup back.
+    // the view takes it all in, at once, clear of the notice above and the
+    // legend below. Clicking the node brings the popup back.
     if (drawn.id !== routeShown) {
       routeShown = drawn.id;
       cardAway = true;
       showCard();
+      const points = [...drawn.towards, ...drawn.back].flatMap((s) => [s.from, s.to]);
+      if (points.length > 0) {
+        map.fitBounds(points, {
+          paddingTopLeft: [40, 80],
+          paddingBottomRight: [40, 80],
+          maxZoom: 15,
+        });
+      }
     }
   }
 

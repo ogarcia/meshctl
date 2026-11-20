@@ -170,5 +170,7 @@
   "map_hops": "{n} hops",
   "power_external": "External",
   "map_legend_hide": "Fold the legend away",
-  "map_legend_show": "Show the legend"
+  "map_legend_show": "Show the legend",
+  "map_route_there": "there",
+  "map_route_back": "back"
 }

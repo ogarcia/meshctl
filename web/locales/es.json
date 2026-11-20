@@ -170,5 +170,7 @@
   "map_hops": "{n} saltos",
   "power_external": "Externa",
   "map_legend_hide": "Ocultar la leyenda",
-  "map_legend_show": "Mostrar la leyenda"
+  "map_legend_show": "Mostrar la leyenda",
+  "map_route_there": "ida",
+  "map_route_back": "vuelta"
 }

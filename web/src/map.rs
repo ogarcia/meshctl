@@ -459,6 +459,10 @@ fn RouteNotice() -> impl IntoView {
         Some(view! {
             <div class="map-route-notice" role="status">
                 <span>{what}</span>
+                <span class="route-key" aria-hidden="true">
+                    <i></i>{t!(i18n, map_route_there)}
+                    <i class="back"></i>{t!(i18n, map_route_back)}
+                </span>
                 <button
                     aria-label=move || t_string!(i18n, map_route_hide)
                     title=move || t_string!(i18n, map_route_hide)
