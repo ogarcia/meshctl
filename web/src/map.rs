@@ -8,7 +8,7 @@
 use crate::app::Live;
 use crate::chat::title;
 use crate::i18n::{t, t_string, use_i18n};
-use crate::mesh::ago;
+use crate::mesh::{ago, power};
 use crate::traces::quality;
 use leptos::html;
 use leptos::prelude::*;
@@ -113,12 +113,17 @@ struct Marker {
     short: String,
     /// How long ago it was heard.
     seen: String,
-    /// What its popup tells, label and value.
-    facts: Vec<(String, String)>,
+    /// How it is heard, in a line: its signal when directly, its hops when
+    /// through others, MQTT when over it.
+    heard: String,
+    /// What its popup tells.
+    facts: Vec<Fact>,
     lat: f64,
     lon: f64,
     /// `local`, `direct`, `near` or `far`, which the map colours.
     kind: &'static str,
+    /// What it is there for, which the map marks with an icon, as [`role`] says.
+    role: Option<&'static str>,
     selected: bool,
     /// For the node picked, what its route button does: `show`, `hide`,
     /// `trace` or `tracing`; none when routes cannot be traced.
@@ -141,6 +146,17 @@ fn traces_of(live: Live, node: u32) -> (Option<Traceroute>, Option<Traceroute>) 
 
 /// What kind of node it is to the radio: itself, heard directly, a hop or
 /// two away, or further.
+/// What a node is there for, when the map marks it with an icon: `router`
+/// for those that carry the mesh (routers and repeaters, Meshtastic's and
+/// MeshCore's), `base` for a client at a fixed base station.
+pub fn role(role: Option<&str>) -> Option<&'static str> {
+    match role? {
+        "ROUTER" | "ROUTER_LATE" | "ROUTER_CLIENT" | "REPEATER" => Some("router"),
+        "CLIENT_BASE" => Some("base"),
+        _ => None,
+    }
+}
+
 pub fn kind(local: Option<u32>, num: u32, hops: Option<u32>, via_mqtt: bool) -> &'static str {
     if local == Some(num) {
         "local"
@@ -240,11 +256,18 @@ pub fn MapView() -> impl IntoView {
                 },
             )
         };
+        let hop_words = HopWords {
+            direct: t_string!(i18n, map_direct).to_owned(),
+            one: t_string!(i18n, map_one_hop).to_owned(),
+            many: t_string!(i18n, map_hops).to_owned(),
+        };
         let fact_labels = FactLabels {
             heard: t_string!(i18n, nodes_heard).to_owned(),
             hops: t_string!(i18n, nodes_hops).to_owned(),
             signal: t_string!(i18n, node_signal).to_owned(),
             battery: t_string!(i18n, nodes_battery).to_owned(),
+            external: t_string!(i18n, power_external).to_owned(),
+            direct: t_string!(i18n, map_direct).to_owned(),
             hardware: t_string!(i18n, local_hardware).to_owned(),
         };
         let mut markers: Vec<Marker> = live.nodes.with(|nodes| {
@@ -258,10 +281,12 @@ pub fn MapView() -> impl IntoView {
                         name: n.long_name.clone().unwrap_or_else(|| n.id.clone()),
                         short: n.short_name.clone().unwrap_or_default(),
                         seen: n.last_heard.map(|at| ago(now, at)).unwrap_or_default(),
+                        heard: heard(n, &hop_words),
                         facts: facts(n, now, &fact_labels),
                         lat: position.latitude,
                         lon: position.longitude,
                         kind: kind(local, n.num, n.hops_away, n.via_mqtt),
+                        role: role(n.role.as_deref()),
                         selected: picked == Some(n.num),
                         route: route_button(n.num),
                     })
@@ -363,6 +388,8 @@ pub fn MapView() -> impl IntoView {
                 <span><i class="direct"></i>{t!(i18n, map_direct)}</span>
                 <span><i class="near"></i>{t!(i18n, map_near)}</span>
                 <span><i class="far"></i>{t!(i18n, map_far)}</span>
+                <span><b class="icon router"></b>{t!(i18n, map_router)}</span>
+                <span><b class="icon base"></b>{t!(i18n, map_base)}</span>
             </div>
             <Show when=move || placed(live) == 0>
                 <p class="map-empty card dim">{t!(i18n, map_empty)}</p>
@@ -412,28 +439,72 @@ fn RouteNotice() -> impl IntoView {
     }
 }
 
+/// How hops are said, in the interface's language.
+struct HopWords {
+    /// Heard directly, when there is no signal to tell.
+    direct: String,
+    one: String,
+    /// With `{n}` where the number of hops goes.
+    many: String,
+}
+
+/// How a node is heard, in a line: the signal it was heard at when directly,
+/// which says more than "no hops"; its hops when through others.
+fn heard(node: &Node, words: &HopWords) -> String {
+    if node.via_mqtt {
+        return "MQTT".into();
+    }
+    match node.hops_away {
+        Some(0) => match (node.snr, node.rssi) {
+            (Some(snr), Some(rssi)) => format!("SNR {snr:.1} dB · RSSI {rssi} dBm"),
+            (Some(snr), None) => format!("SNR {snr:.1} dB"),
+            _ => words.direct.clone(),
+        },
+        Some(1) => words.one.clone(),
+        Some(hops) => words.many.replace("{n}", &hops.to_string()),
+        None => String::new(),
+    }
+}
+
 /// The labels of a node's facts, in the interface's language.
 struct FactLabels {
     heard: String,
     hops: String,
     signal: String,
     battery: String,
+    /// The power, for a node plugged in.
+    external: String,
+    /// The hops, for a node heard directly.
+    direct: String,
     hardware: String,
 }
 
 /// What a node's popup tells: whatever is known of these.
-fn facts(node: &Node, now: u32, labels: &FactLabels) -> Vec<(String, String)> {
+fn facts(node: &Node, now: u32, labels: &FactLabels) -> Vec<Fact> {
     let mut facts = Vec::new();
+    let mut tell = |icon, label: &String, value| {
+        facts.push(Fact {
+            icon,
+            label: label.clone(),
+            value,
+        });
+    };
     if let Some(heard) = node.last_heard {
-        facts.push((labels.heard.clone(), ago(now, heard)));
+        tell("clock", &labels.heard, ago(now, heard));
     }
     let hops = if node.via_mqtt {
         Some("MQTT".to_owned())
     } else {
-        node.hops_away.map(|h| h.to_string())
+        node.hops_away.map(|h| {
+            if h == 0 {
+                labels.direct.clone()
+            } else {
+                h.to_string()
+            }
+        })
     };
     if let Some(hops) = hops {
-        facts.push((labels.hops.clone(), hops));
+        tell("route", &labels.hops, hops);
     }
     // Heard through others, the SNR is the last relay's, not this node's.
     if let Some(snr) = node
@@ -444,22 +515,29 @@ fn facts(node: &Node, now: u32, labels: &FactLabels) -> Vec<(String, String)> {
             Some(rssi) => format!("{snr:.1} dB · {rssi} dBm"),
             None => format!("{snr:.1} dB"),
         };
-        facts.push((labels.signal.clone(), signal));
+        tell("antenna-bars-5", &labels.signal, signal);
     }
-    let battery = match (node.battery_level, node.voltage) {
-        (Some(level), _) if level > 100 => Some("⚡".to_owned()),
-        (Some(level), Some(voltage)) => Some(format!("{level} % · {voltage:.2} V")),
-        (Some(level), None) => Some(format!("{level} %")),
-        (None, Some(voltage)) => Some(format!("{voltage:.2} V")),
-        (None, None) => None,
-    };
-    if let Some(battery) = battery {
-        facts.push((labels.battery.clone(), battery));
+    if let Some(battery) = power(node.battery_level, node.voltage, &labels.external) {
+        let plugged = node.battery_level.is_some_and(|level| level > 100);
+        tell(
+            if plugged { "plug" } else { "battery-2" },
+            &labels.battery,
+            battery,
+        );
     }
     if let Some(hardware) = &node.hw_model {
-        facts.push((labels.hardware.clone(), hardware.clone()));
+        tell("cpu", &labels.hardware, hardware.clone());
     }
     facts
+}
+
+/// Something a node's popup tells, with the icon it goes with: the name of
+/// one of the bundled Tabler icons.
+#[derive(Debug, Serialize)]
+struct Fact {
+    icon: &'static str,
+    label: String,
+    value: String,
 }
 
 #[cfg(test)]
@@ -474,6 +552,48 @@ mod tests {
         assert_eq!(kind(Some(1), 2, Some(3), false), "far");
         assert_eq!(kind(Some(1), 2, Some(0), true), "far");
         assert_eq!(kind(None, 2, None, false), "far");
+    }
+
+    #[test]
+    fn hovering_says_how_a_node_is_heard() {
+        let words = HopWords {
+            direct: "direct".into(),
+            one: "1 hop".into(),
+            many: "{n} hops".into(),
+        };
+        let mut node = Node {
+            num: 1,
+            id: "!00000001".into(),
+            long_name: None,
+            short_name: None,
+            hw_model: None,
+            role: None,
+            position: None,
+            last_heard: None,
+            snr: Some(11.5),
+            rssi: Some(-30),
+            hops_away: Some(0),
+            via_mqtt: false,
+            favorite: false,
+            battery_level: None,
+            voltage: None,
+        };
+        assert_eq!(heard(&node, &words), "SNR 11.5 dB · RSSI -30 dBm");
+        node.hops_away = Some(3);
+        assert_eq!(heard(&node, &words), "3 hops");
+        node.hops_away = Some(1);
+        assert_eq!(heard(&node, &words), "1 hop");
+        node.via_mqtt = true;
+        assert_eq!(heard(&node, &words), "MQTT");
+    }
+
+    #[test]
+    fn routers_and_bases_are_marked() {
+        assert_eq!(role(Some("ROUTER_LATE")), Some("router"));
+        assert_eq!(role(Some("REPEATER")), Some("router"));
+        assert_eq!(role(Some("CLIENT_BASE")), Some("base"));
+        assert_eq!(role(Some("CLIENT_MUTE")), None);
+        assert_eq!(role(None), None);
     }
 
     #[test]
@@ -523,11 +643,13 @@ mod tests {
             hops: "hops".into(),
             signal: "signal".into(),
             battery: "battery".into(),
+            external: "external".into(),
+            direct: "direct".into(),
             hardware: "hardware".into(),
         };
         let told: Vec<String> = facts(&node, 1000, &labels)
             .into_iter()
-            .map(|(label, value)| format!("{label}={value}"))
+            .map(|fact| format!("{}={}", fact.label, fact.value))
             .collect();
         // Two hops away: no SNR of its own.
         assert_eq!(

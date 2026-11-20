@@ -92,7 +92,7 @@
   "nodes_id": "ID",
   "nodes_heard": "Heard",
   "nodes_hops": "Hops",
-  "nodes_battery": "Battery",
+  "nodes_battery": "Power",
   "nodes_hardware": "Hardware",
   "search": "Search",
   "nav_radios": "Radios",
@@ -163,5 +163,10 @@
   "map_route_none": "{{ name }} did not answer the traceroute",
   "prefs_routes": "Routes on the map",
   "routes_asked": "When asked for",
-  "routes_picked": "On picking a node"
+  "routes_picked": "On picking a node",
+  "map_router": "Router or repeater",
+  "map_base": "Base station",
+  "map_one_hop": "1 hop",
+  "map_hops": "{n} hops",
+  "power_external": "External"
 }

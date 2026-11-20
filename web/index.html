@@ -12,6 +12,7 @@
       data-wasm-opt="z"
     />
     <link data-trunk rel="copy-dir" href="vendor/leaflet-1.9.4" />
+    <link data-trunk rel="copy-dir" href="vendor/tabler-icons-3.51.0" />
     <!-- Leaflet's directory carries its version, and map.js gets a hash from
          trunk: both can be kept by browsers for good, as the server says. -->
     <link rel="stylesheet" href="/leaflet-1.9.4/dist/leaflet.css" />
@@ -41,6 +42,11 @@
         --mc-danger: #b42318;
         --mc-shadow: 0 12px 32px rgba(22, 27, 34, 0.14);
         --mc-map: #e9eef2;
+        /* Nodes, by how far: their own colours, whatever the accent, sharp on
+           any tile. */
+        --mc-node-direct: #1971c2;
+        --mc-node-near: #7048e8;
+        --mc-node-far: #6c757d;
         --mc-font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
         --mc-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
       }
@@ -58,6 +64,9 @@
         --mc-danger: #f0a0a0;
         --mc-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
         --mc-map: #0b1520;
+        --mc-node-direct: #4dabf7;
+        --mc-node-near: #b197fc;
+        --mc-node-far: #a5aeb8;
       }
       @media (prefers-color-scheme: dark) {
         :root:not([data-theme="light"]) {
@@ -74,6 +83,9 @@
           --mc-danger: #f0a0a0;
           --mc-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
           --mc-map: #0b1520;
+          --mc-node-direct: #4dabf7;
+          --mc-node-near: #b197fc;
+          --mc-node-far: #a5aeb8;
         }
       }
       /* Amber, the default. */
@@ -255,9 +267,9 @@
       .item .count { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--mc-muted); }
       .item .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .mark-channel { width: 8px; text-align: center; color: var(--mc-muted); }
-      .mark-node { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--mc-far); }
-      .mark-node.direct { background: var(--mc-second); }
-      .mark-node.near { background: var(--mc-near); }
+      .mark-node { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--mc-node-far); }
+      .mark-node.direct { background: var(--mc-node-direct); }
+      .mark-node.near { background: var(--mc-node-near); }
 
       .avatar {
         flex: none;
@@ -571,10 +583,10 @@
         color: var(--mc-muted);
       }
       .map-legend span { display: flex; align-items: center; gap: 6px; }
-      .map-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--mc-far); }
+      .map-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--mc-node-far); }
       .map-legend i.local { background: var(--mc-primary); }
-      .map-legend i.direct { background: var(--mc-second); }
-      .map-legend i.near { background: var(--mc-near); }
+      .map-legend i.direct { background: var(--mc-node-direct); }
+      .map-legend i.near { background: var(--mc-node-near); }
       .map-empty {
         position: absolute;
         top: 12px;
@@ -603,6 +615,25 @@
         box-shadow: var(--mc-shadow);
       }
       .leaflet-tooltip-top::before { border-top-color: var(--mc-border); }
+      /* Hovering a node: who it is, and below, how it is heard. */
+      .leaflet-tooltip.mc-tip {
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-size: 13px;
+        line-height: 1.35;
+        white-space: nowrap;
+      }
+      .mc-tip-title { display: flex; align-items: baseline; justify-content: center; gap: 6px; }
+      .mc-tip-title strong {
+        padding: 0 5px;
+        border-radius: 4px;
+        background: var(--mc-raised);
+        font-family: var(--mc-mono);
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .mc-tip-title span { font-weight: 600; }
+      .mc-tip-heard { margin-top: 2px; font-family: var(--mc-mono); font-size: 11px; color: var(--mc-muted); text-align: center; }
       .leaflet-bar a, .leaflet-bar a:hover {
         background: var(--mc-surface);
         color: var(--mc-text);
@@ -616,14 +647,63 @@
       .leaflet-popup-content-wrapper { border: 1px solid var(--mc-border); border-radius: 12px; }
       .leaflet-container a.leaflet-popup-close-button { color: var(--mc-muted); }
       .leaflet-popup-content { margin: 12px 14px; font-size: 13px; line-height: 1.4; }
-      .mc-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+      .mc-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--mc-node-far); }
+      .mc-dot.local, .mc-pin.local { background: var(--mc-primary); }
+      .mc-dot.direct, .mc-pin.direct { background: var(--mc-node-direct); }
+      .mc-dot.near, .mc-pin.near { background: var(--mc-node-near); }
+      /* A node on the map: a dot of its kind's colour, ringed in white and
+         outlined in dark so that it stands out on light tiles and dark ones;
+         with its role's icon on it when it has one. */
+      .mc-pin {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        box-sizing: border-box;
+        border-radius: 50%;
+        border: 2px solid #fff;
+        background: var(--mc-node-far);
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.35);
+      }
+      .mc-pin.selected { box-shadow: 0 0 0 3px var(--mc-text), 0 1px 6px rgba(0, 0, 0, 0.4); }
+      .mc-pin i { display: none; }
+      .mc-pin[class*="role-"] i {
+        display: block;
+        width: 16px;
+        height: 16px;
+        background: #fff;
+        -webkit-mask: var(--icon) center / contain no-repeat;
+        mask: var(--icon) center / contain no-repeat;
+      }
+      .mc-pin.role-router { --icon: url(/tabler-icons-3.51.0/icons/outline/building-broadcast-tower.svg); }
+      .mc-pin.role-base { --icon: url(/tabler-icons-3.51.0/icons/outline/home-signal.svg); }
+      .map-legend .icon {
+        width: 14px;
+        height: 14px;
+        background: var(--mc-muted);
+        -webkit-mask: var(--icon) center / contain no-repeat;
+        mask: var(--icon) center / contain no-repeat;
+      }
+      .map-legend .icon.router { --icon: url(/tabler-icons-3.51.0/icons/outline/building-broadcast-tower.svg); }
+      .map-legend .icon.base { --icon: url(/tabler-icons-3.51.0/icons/outline/home-signal.svg); }
       .mc-card { display: grid; gap: 10px; min-width: 220px; }
       .mc-card-head { display: flex; align-items: center; gap: 10px; padding-right: 14px; }
       .mc-card-title { display: flex; flex-direction: column; min-width: 0; }
       .mc-card-title strong { font-size: 14px; }
       .mc-card-id { font-family: var(--mc-mono); font-size: 11px; color: var(--mc-muted); }
       .mc-card-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; margin: 0; }
-      .mc-card-facts dt { font-size: 11px; color: var(--mc-muted); }
+      .mc-card-facts dt { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--mc-muted); }
+      /* A bundled Tabler icon, in the colour of the text around it. */
+      .mc-icon {
+        flex: none;
+        width: 13px;
+        height: 13px;
+        background: currentColor;
+        -webkit-mask: var(--icon) center / contain no-repeat;
+        mask: var(--icon) center / contain no-repeat;
+      }
+      .mc-card-facts dd { padding-left: 17px; }
       .mc-card-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
       .mc-card-buttons { display: flex; gap: 8px; }
       .mc-card-buttons button { flex: 1; min-height: 34px; }

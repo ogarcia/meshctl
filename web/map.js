@@ -57,13 +57,6 @@ window.meshctlMap = (() => {
   const color = (name) =>
     getComputedStyle(document.body).getPropertyValue(name).trim();
 
-  const KIND_COLOR = {
-    local: "--mc-primary",
-    direct: "--mc-second",
-    near: "--mc-near",
-    far: "--mc-far",
-  };
-
   // An element with a class and, if given, its text.
   function element(tag, className, text) {
     const made = document.createElement(tag);
@@ -161,10 +154,43 @@ window.meshctlMap = (() => {
     }).addTo(map);
   }
 
+  // A node's colour, as the style sheet gives it to its kind.
   function dot(node) {
-    const made = element("span", "mc-dot");
-    made.style.background = color(KIND_COLOR[node.kind] || "--mc-far");
-    return made;
+    return element("span", `mc-dot ${node.kind}`);
+  }
+
+  // How big a node's pin is: bigger with an icon, for what its role is, and
+  // for the radio's own.
+  function pinSize(node) {
+    if (node.role === "router") return 30;
+    if (node.role) return 26;
+    return node.kind === "local" ? 18 : 14;
+  }
+
+  // What hovering a node says: who it is, and how it is heard.
+  function tip(node) {
+    const box = element("div");
+    const title = element("div", "mc-tip-title");
+    if (node.short) title.append(element("strong", "", node.short));
+    title.append(element("span", "", node.name));
+    box.append(title);
+    if (node.heard) box.append(element("div", "mc-tip-heard", node.heard));
+    return box;
+  }
+
+  // A node's pin: a dot of its kind's colour, with its role's icon on it.
+  function pin(node) {
+    const size = pinSize(node);
+    const classes = ["mc-pin", node.kind];
+    if (node.role) classes.push(`role-${node.role}`);
+    if (node.selected) classes.push("selected");
+    return L.divIcon({
+      className: "",
+      html: `<span class="${classes.join(" ")}"><i></i></span>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      tooltipAnchor: [0, -size / 2],
+    });
   }
 
   // The list of the nodes that overlap where a click fell.
@@ -223,9 +249,18 @@ window.meshctlMap = (() => {
     title.append(element("span", "mc-card-id", node.short ? `${node.short} · ${node.id}` : node.id));
     head.append(title);
     const facts = element("dl", "mc-card-facts");
-    for (const [label, value] of node.facts) {
+    for (const fact of node.facts) {
       const pair = element("div");
-      pair.append(element("dt", "", label), element("dd", "", value));
+      const term = element("dt");
+      // One of the bundled Tabler icons, by its name.
+      const icon = element("span", "mc-icon");
+      icon.style.setProperty(
+        "--icon",
+        `url(/tabler-icons-3.51.0/icons/outline/${fact.icon}.svg)`,
+      );
+      icon.setAttribute("aria-hidden", "true");
+      term.append(icon, fact.label);
+      pair.append(term, element("dd", "", fact.value));
       facts.append(pair);
     }
     const buttons = element("div", "mc-card-buttons");
@@ -299,20 +334,17 @@ window.meshctlMap = (() => {
     if (!map) return;
     shown = JSON.parse(json);
     const list = shown.nodes;
-    const border = color("--mc-surface");
     markers.clearLayers();
     for (const node of list) {
-      const marker = L.circleMarker([node.lat, node.lon], {
-        radius: node.kind === "local" || node.selected ? 9 : 6,
-        color: node.selected ? color("--mc-text") : border,
-        weight: node.selected ? 3 : 2,
-        fillColor: color(KIND_COLOR[node.kind] || "--mc-far"),
-        fillOpacity: 1,
+      const marker = L.marker([node.lat, node.lon], {
+        icon: pin(node),
+        keyboard: false,
+        // The picked node and the radio's own over the rest.
+        zIndexOffset: node.selected ? 1000 : node.kind === "local" ? 500 : node.role ? 100 : 0,
         // Clicks reach the map, which looks for every node near them.
         bubblingMouseEvents: true,
       });
-      const label = node.short ? `${node.short} · ${node.name}` : node.name;
-      marker.bindTooltip(label, { direction: "top", offset: [0, -8] });
+      marker.bindTooltip(tip(node), { direction: "top", className: "mc-tip" });
       marker.addTo(markers);
     }
     if (!placed && list.length > 0) {

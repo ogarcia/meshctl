@@ -7,8 +7,8 @@
 use crate::app::Live;
 use crate::chat::title;
 use crate::daemon::Failure;
-use crate::i18n::{t, use_i18n};
-use crate::mesh::ago;
+use crate::i18n::{t, t_string, use_i18n};
+use crate::mesh::{ago, power};
 use crate::packets::summary;
 use crate::traces::TraceCard;
 use leptos::prelude::*;
@@ -44,7 +44,13 @@ fn Details(num: u32) -> impl IntoView {
             if n.via_mqtt {
                 Some("MQTT".to_owned())
             } else {
-                n.hops_away.map(|h| h.to_string())
+                n.hops_away.map(|h| {
+                    if h == 0 {
+                        t_string!(i18n, map_direct).to_owned()
+                    } else {
+                        h.to_string()
+                    }
+                })
             }
         });
         let signal = node.as_ref().and_then(|n| {
@@ -58,21 +64,9 @@ fn Details(num: u32) -> impl IntoView {
             .as_ref()
             .and_then(|n| n.last_heard)
             .map(|at| ago(live.now.get(), at));
-        let battery = node.as_ref().and_then(|n| {
-            let level = n.battery_level.map(|l| {
-                if l > 100 {
-                    "⚡".to_owned()
-                } else {
-                    format!("{l} %")
-                }
-            });
-            match (level, n.voltage) {
-                (Some(level), Some(voltage)) => Some(format!("{level} · {voltage:.2} V")),
-                (Some(level), None) => Some(level),
-                (None, Some(voltage)) => Some(format!("{voltage:.2} V")),
-                (None, None) => None,
-            }
-        });
+        let battery = node
+            .as_ref()
+            .and_then(|n| power(n.battery_level, n.voltage, t_string!(i18n, power_external)));
         let position = node.as_ref().and_then(|n| {
             let p = n.position.as_ref()?;
             let altitude = p.altitude.map_or_else(String::new, |a| format!(" · {a} m"));

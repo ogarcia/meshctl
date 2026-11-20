@@ -92,7 +92,7 @@
   "nodes_id": "ID",
   "nodes_heard": "Oído",
   "nodes_hops": "Saltos",
-  "nodes_battery": "Batería",
+  "nodes_battery": "Alimentación",
   "nodes_hardware": "Hardware",
   "search": "Buscar",
   "nav_radios": "Radios",
@@ -163,5 +163,10 @@
   "map_route_none": "{{ name }} no respondió a la traza",
   "prefs_routes": "Rutas en el mapa",
   "routes_asked": "Al pedirlas",
-  "routes_picked": "Al elegir un nodo"
+  "routes_picked": "Al elegir un nodo",
+  "map_router": "Router o repetidor",
+  "map_base": "Estación base",
+  "map_one_hop": "1 salto",
+  "map_hops": "{n} saltos",
+  "power_external": "Externa"
 }

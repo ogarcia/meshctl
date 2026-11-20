@@ -176,11 +176,9 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
         .filter(|_| node.hops_away == Some(0) && !node.via_mqtt)
         .map(|s| format!("{s:.1} dB"))
         .unwrap_or_default();
-    let battery = match node.battery_level {
-        Some(level) if level > 100 => "⚡".to_owned(),
-        Some(level) => format!("{level} %"),
-        None => String::new(),
-    };
+    // The table has room for the level only; the voltage is on the node's page.
+    let battery =
+        power(node.battery_level, None, t_string!(i18n, power_external)).unwrap_or_default();
 
     let live = expect_context::<Live>();
     let num = node.num;
@@ -218,6 +216,25 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
                 </button>
             </td>
         </tr>
+    }
+}
+
+/// What a node runs on: its battery's level, and its voltage when given;
+/// `external` (in the interface's words) when it is plugged in, which the
+/// firmware says with a level over 100.
+pub fn power(level: Option<u32>, voltage: Option<f32>, external: &str) -> Option<String> {
+    let level = level.map(|level| {
+        if level > 100 {
+            external.to_owned()
+        } else {
+            format!("{level} %")
+        }
+    });
+    match (level, voltage) {
+        (Some(level), Some(voltage)) => Some(format!("{level} · {voltage:.2} V")),
+        (Some(level), None) => Some(level),
+        (None, Some(voltage)) => Some(format!("{voltage:.2} V")),
+        (None, None) => None,
     }
 }
 
