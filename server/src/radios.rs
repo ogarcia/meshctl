@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
-//! The radios meshctl keeps connected to: what is stored, and a running link
-//! for each one that is enabled, started, restarted and stopped as they are
-//! added, changed and removed.
+//! The radios meshctl knows of. Each one has a mesh, started from what was
+//! stored of it and kept stored as it changes; an enabled one also has a link
+//! that keeps that mesh current. They are started, restarted and stopped as
+//! radios are added, changed and removed.
 
-use crate::store::{RadioRecord, Store};
+use crate::store::{RadioRecord, Store, now};
 use anyhow::Result;
-use meshctl_api::{ErrorCode, LinkState, Radio, RadioId, RadioKind, RadioSettings};
+use meshctl_api::{ErrorCode, LinkState, Radio, RadioId, RadioKind, RadioSettings, Status};
 use meshctl_core::link::Transport;
-use meshctl_core::mesh;
+use meshctl_core::mesh::{self, MeshState};
 use meshctl_core::radio::Mesh;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -59,9 +60,11 @@ pub fn tidy(settings: RadioSettings) -> RadioSettings {
     }
 }
 
-/// A radio meshctl is connected to, or trying to be.
+/// A radio's mesh, and the tasks that keep it: its link when it is enabled,
+/// and always one that passes its events on and one that stores them.
 struct Running {
     mesh: Mesh,
+    enabled: bool,
     tasks: Vec<JoinHandle<()>>,
 }
 
@@ -83,7 +86,7 @@ pub struct Radios {
 }
 
 impl Radios {
-    /// Starts every enabled radio in the store.
+    /// Starts every radio in the store, and connects to the enabled ones.
     pub async fn start(store: Store) -> Result<Self> {
         let radios = Self {
             store,
@@ -92,7 +95,8 @@ impl Radios {
             stopped: watch::channel(false).0,
         };
         for record in radios.store.radios().await? {
-            radios.run(&record);
+            let state = radios.stored_state(record.id).await?;
+            radios.run(&record, state);
         }
         Ok(radios)
     }
@@ -102,9 +106,31 @@ impl Radios {
         self.changes.subscribe()
     }
 
-    /// The live state of a radio, if it is running.
+    /// What a radio knows, live if it is connected and as last stored if not.
     pub fn mesh(&self, id: RadioId) -> Option<Mesh> {
         self.lock().get(&id).map(|running| running.mesh.clone())
+    }
+
+    /// How a radio's link is doing; [`LinkState::Disabled`] for one that is
+    /// not meant to be connected, or not running at all.
+    pub fn link(&self, id: RadioId) -> LinkState {
+        match self.lock().get(&id) {
+            Some(running) if running.enabled => {
+                crate::web::convert::link(running.mesh.read(|state| state.link))
+            }
+            _ => LinkState::Disabled,
+        }
+    }
+
+    /// A radio's link and what it said of itself, if there is such a radio.
+    pub fn status(&self, id: RadioId) -> Option<Status> {
+        let local = self
+            .mesh(id)?
+            .read(|state| state.local.as_ref().map(crate::web::convert::local));
+        Some(Status {
+            link: self.link(id),
+            local,
+        })
     }
 
     pub async fn list(&self) -> Result<Vec<Radio>> {
@@ -122,7 +148,7 @@ impl Radios {
     /// Adds a radio, already validated, and connects to it if it is enabled.
     pub async fn add(&self, settings: RadioSettings) -> Result<Radio> {
         let record = self.store.add_radio(&settings).await?;
-        self.run(&record);
+        self.run(&record, MeshState::default());
         self.changed();
         Ok(self.radio(record))
     }
@@ -132,9 +158,27 @@ impl Radios {
         if !self.store.update_radio(id, &settings).await? {
             return Ok(None);
         }
-        let record = RadioRecord { id, settings };
-        self.lock().remove(&id);
-        self.run(&record);
+        let Some(record) = self.store.radio(id).await? else {
+            return Ok(None);
+        };
+        // What it knew carries over, more current than what was stored.
+        let previous = self.lock().remove(&id);
+        let state = match previous {
+            Some(running) => running.mesh.read(MeshState::clone),
+            None => self.stored_state(id).await?,
+        };
+        // Its link goes with the old settings: it was connected until now.
+        let record = if state.link == mesh::LinkState::Ready {
+            let at = now();
+            self.store.set_last_connected(id, at).await?;
+            RadioRecord {
+                last_connected: Some(at),
+                ..record
+            }
+        } else {
+            record
+        };
+        self.run(&record, state);
         self.changed();
         Ok(Some(self.radio(record)))
     }
@@ -149,10 +193,23 @@ impl Radios {
         Ok(true)
     }
 
-    /// Disconnects from every radio, for good: the daemon is stopping.
-    pub fn stop(&self) {
+    /// Disconnects from every radio, for good: the daemon is stopping. Those
+    /// that were connected until now are stored as such.
+    pub async fn stop(&self) {
         self.stopped.send_replace(true);
+        let connected: Vec<RadioId> = self
+            .lock()
+            .iter()
+            .filter(|(_, running)| running.mesh.read(|s| s.link) == mesh::LinkState::Ready)
+            .map(|(id, _)| *id)
+            .collect();
         self.lock().clear();
+        let at = now();
+        for id in connected {
+            if let Err(err) = self.store.set_last_connected(id, at).await {
+                tracing::warn!(radio = id, error = format_args!("{err:#}"), "cannot store");
+            }
+        }
     }
 
     /// Resolves once [`Self::stop`] has been called, for whoever follows the
@@ -171,40 +228,56 @@ impl Radios {
     }
 
     fn radio(&self, record: RadioRecord) -> Radio {
-        let link = self.mesh(record.id).map_or(LinkState::Disabled, |mesh| {
-            crate::web::convert::link(mesh.read(|state| state.link))
-        });
         Radio {
             id: record.id,
+            link: self.link(record.id),
             name: record.settings.name,
             kind: record.settings.kind,
             address: record.settings.address,
             enabled: record.settings.enabled,
-            link,
+            last_connected: record.last_connected,
         }
     }
 
-    /// Connects to a radio, if it is enabled and can be.
-    fn run(&self, record: &RadioRecord) {
-        if !record.settings.enabled {
-            return;
-        }
-        let transport = match validate(&record.settings) {
-            Ok(transport) => transport,
-            Err(error) => {
-                tracing::warn!(radio = record.id, ?error, "not starting radio");
-                return;
+    /// What was stored of a radio, to start its mesh from.
+    async fn stored_state(&self, id: RadioId) -> Result<MeshState> {
+        let local = self.store.local(id).await?;
+        let nodes = self.store.nodes(id).await?;
+        Ok(MeshState {
+            local,
+            nodes: nodes.into_iter().map(|node| (node.num, node)).collect(),
+            ..MeshState::default()
+        })
+    }
+
+    /// Starts a radio's mesh from `state`, and connects to it if it is
+    /// enabled and can be.
+    fn run(&self, record: &RadioRecord, state: MeshState) {
+        let id = record.id;
+        let mesh = Mesh::new(MeshState {
+            link: mesh::LinkState::Disconnected,
+            ..state
+        });
+        let mut tasks = vec![self.forward(id, &mesh), self.persist(id, &mesh)];
+        let mut enabled = record.settings.enabled;
+        if enabled {
+            match validate(&record.settings) {
+                Ok(transport) => {
+                    tracing::info!(radio = id, name = %record.settings.name, %transport, "connecting");
+                    tasks.push(mesh.spawn(transport));
+                }
+                Err(error) => {
+                    tracing::warn!(radio = id, ?error, "cannot connect to this radio");
+                    enabled = false;
+                }
             }
-        };
-        tracing::info!(radio = record.id, name = %record.settings.name, %transport, "starting radio");
-        let mesh = Mesh::default();
-        let link = mesh.spawn(transport);
-        let forward = self.forward(record.id, &mesh);
+        }
         self.lock().insert(
-            record.id,
+            id,
             Running {
                 mesh,
-                tasks: vec![link, forward],
+                enabled,
+                tasks,
             },
         );
     }
@@ -225,6 +298,38 @@ impl Radios {
         })
     }
 
+    /// Stores what a radio learns as it learns it: each node as it changes,
+    /// everything at once when the radio syncs, and when it was last connected
+    /// as it drops.
+    fn persist(&self, id: RadioId, mesh: &Mesh) -> JoinHandle<()> {
+        let mut events = mesh.subscribe();
+        let mesh = mesh.clone();
+        let store = self.store.clone();
+        tokio::spawn(async move {
+            let mut connected = false;
+            loop {
+                let stored = match events.recv().await {
+                    Ok(mesh::Event::Node(node)) => store.save_node(id, &node).await,
+                    Ok(mesh::Event::Synced) => {
+                        connected = true;
+                        save_all(&store, id, &mesh).await
+                    }
+                    // Something was missed: store it all again, if it is current.
+                    Err(RecvError::Lagged(_)) if connected => save_all(&store, id, &mesh).await,
+                    Ok(mesh::Event::Link(link)) if connected && link != mesh::LinkState::Ready => {
+                        connected = false;
+                        store.set_last_connected(id, now()).await
+                    }
+                    Err(RecvError::Closed) => return,
+                    _ => Ok(()),
+                };
+                if let Err(err) = stored {
+                    tracing::warn!(radio = id, error = format_args!("{err:#}"), "cannot store");
+                }
+            }
+        })
+    }
+
     /// Puts a mesh in place of a radio's link, for the tests.
     #[cfg(test)]
     pub fn insert_mesh(&self, id: RadioId, mesh: Mesh) {
@@ -233,10 +338,21 @@ impl Radios {
             id,
             Running {
                 mesh,
+                enabled: true,
                 tasks: vec![forward],
             },
         );
     }
+}
+
+async fn save_all(store: &Store, id: RadioId, mesh: &Mesh) -> Result<()> {
+    let (local, nodes) = mesh.read(|state| {
+        (
+            state.local.clone(),
+            state.nodes.values().cloned().collect::<Vec<_>>(),
+        )
+    });
+    store.save_sync(id, local.as_ref(), &nodes, now()).await
 }
 
 #[cfg(test)]
@@ -280,7 +396,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_enabled_radio_runs_and_a_disabled_one_does_not() {
+    async fn a_disabled_radio_keeps_its_mesh_but_no_link() {
         let radios = Radios::start(Store::in_memory().await).await.unwrap();
         let mut changes = radios.subscribe();
 
@@ -290,28 +406,46 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(changes.recv().await.unwrap(), Change::Radios));
-        assert!(radios.mesh(radio.id).is_some());
+        assert_ne!(radios.link(radio.id), LinkState::Disabled);
 
         let mut off = settings("Home", RadioKind::Meshtastic, "127.0.0.1:1");
         off.enabled = false;
         let radio = radios.update(radio.id, off).await.unwrap().unwrap();
         assert_eq!(radio.link, LinkState::Disabled);
-        assert!(radios.mesh(radio.id).is_none());
+        assert!(radios.mesh(radio.id).is_some());
 
         assert!(radios.remove(radio.id).await.unwrap());
+        assert!(radios.mesh(radio.id).is_none());
         assert!(radios.list().await.unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn stored_radios_start_with_the_daemon() {
+    async fn stored_radios_start_with_what_they_knew() {
         let store = Store::in_memory().await;
-        let added = store
-            .add_radio(&settings("Home", RadioKind::Meshtastic, "127.0.0.1:1"))
-            .await
-            .unwrap();
+        let mut off = settings("Car", RadioKind::Meshtastic, "/dev/ttyACM0");
+        off.enabled = false;
+        let added = store.add_radio(&off).await.unwrap();
+        let faro = mesh::Node {
+            num: 9,
+            user: None,
+            position: None,
+            last_heard: Some(5),
+            snr: None,
+            rssi: None,
+            hops_away: Some(1),
+            via_mqtt: false,
+            favorite: false,
+            battery_level: None,
+            voltage: None,
+        };
+        store.save_node(added.id, &faro).await.unwrap();
+
         let radios = Radios::start(store).await.unwrap();
-        assert!(radios.mesh(added.id).is_some());
-        radios.stop();
+        let known = radios.mesh(added.id).unwrap().read(|s| s.nodes.clone());
+        assert_eq!(known.get(&9), Some(&faro));
+        assert_eq!(radios.link(added.id), LinkState::Disabled);
+
+        radios.stop().await;
         assert!(radios.mesh(added.id).is_none());
     }
 }

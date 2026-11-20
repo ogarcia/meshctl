@@ -11,21 +11,42 @@ use std::collections::BTreeMap;
 
 #[component]
 pub fn MeshView() -> impl IntoView {
+    view! {
+        <OfflineNote />
+        <LocalCard />
+        <NodeList />
+    }
+}
+
+/// For a radio that is not connected: why, and how old what it shows is.
+#[component]
+fn OfflineNote() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let disabled = move || {
-        live.status
-            .get()
-            .is_some_and(|status| status.link == LinkState::Disabled)
+    let radio = move || {
+        let id = live.selected.get()?;
+        live.radios
+            .with(|radios| radios.as_ref()?.iter().find(|r| r.id == id).cloned())
     };
-    view! {
-        <Show
-            when=move || !disabled()
-            fallback=move || view! { <p class="card dim">{t!(i18n, radio_disabled_note)}</p> }
-        >
-            <LocalCard />
-            <NodeList />
-        </Show>
+    move || {
+        let radio = radio()?;
+        let why = match radio.link {
+            LinkState::Ready | LinkState::Syncing => return None,
+            LinkState::Disabled => t!(i18n, radio_disabled_note).into_any(),
+            LinkState::Connecting | LinkState::Disconnected => {
+                // While it first connects there is nothing to explain yet.
+                radio.last_connected?;
+                t!(i18n, radio_offline_note).into_any()
+            }
+        };
+        let since = radio.last_connected.map(|at| {
+            let at = u32::try_from(at).unwrap_or_default();
+            view! {
+                " "
+                {t!(i18n, radio_last_connected, ago = move || ago(live.now.get(), at))}
+            }
+        });
+        Some(view! { <p class="card note">{why} {since}</p> })
     }
 }
 
@@ -178,7 +199,7 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
 
 /// How long ago, in the largest unit that fits. The units are the same in
 /// every language the interface speaks.
-fn ago(now: u32, then: u32) -> String {
+pub fn ago(now: u32, then: u32) -> String {
     let seconds = now.saturating_sub(then);
     match seconds {
         0..60 => format!("{seconds} s"),

@@ -88,6 +88,10 @@ pub struct Radio {
     /// Whether meshctl keeps connected to it.
     pub enabled: bool,
     pub link: LinkState,
+    /// When it was last connected and in sync, in seconds since the epoch;
+    /// none if it never was. What meshctl shows of a radio that is not
+    /// connected is what it knew then.
+    pub last_connected: Option<i64>,
 }
 
 /// What it takes to add a radio, or to change one.

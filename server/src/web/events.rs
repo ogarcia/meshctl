@@ -163,7 +163,7 @@ mod tests {
         client.send(Message::text("{}")).await.unwrap();
         assert_eq!(message(receive(&mut client).await), ServerMessage::Ready);
 
-        radios.stop();
+        radios.stop().await;
         let Some(Message::Close(Some(frame))) = receive(&mut client).await else {
             panic!("a close frame");
         };

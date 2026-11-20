@@ -6,9 +6,10 @@
 use crate::app::{LinkLabel, Live, link_class};
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
+use crate::mesh::ago;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{ErrorCode, Radio, RadioId, RadioKind, RadioSettings};
+use meshctl_api::{ErrorCode, LinkState, Radio, RadioId, RadioKind, RadioSettings};
 
 #[component]
 pub fn RadiosView() -> impl IntoView {
@@ -113,6 +114,17 @@ fn RadioRow(radio: Radio, editing: RwSignal<Option<Radio>>) -> impl IntoView {
                 <span class=format!("badge {}", link_class(link))>
                     <LinkLabel link=Signal::stored(link) />
                 </span>
+                {(link != LinkState::Ready)
+                    .then_some(radio.last_connected)
+                    .flatten()
+                    .map(|at| {
+                        let at = u32::try_from(at).unwrap_or_default();
+                        view! {
+                            <span class="dim">
+                                " · " {move || ago(live.now.get(), at)}
+                            </span>
+                        }
+                    })}
             </td>
             <td class="actions">
                 <button on:click=toggle>

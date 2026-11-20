@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
             shutdown().await;
             // Ends the event streams too, which would otherwise keep the
             // server waiting for them forever.
-            stopping.stop();
+            stopping.stop().await;
         })
         .await?;
 

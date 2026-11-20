@@ -199,17 +199,13 @@ async fn mesh_of(state: &AppState, radio: RadioId) -> Result<Option<Mesh>, Missi
     )
 )]
 async fn status(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
-    let status = match mesh_of(&state, radio).await {
-        Ok(Some(mesh)) => mesh.read(|mesh| Status {
-            link: convert::link(mesh.link),
-            local: mesh.local.as_ref().map(convert::local),
-        }),
-        Ok(None) => Status {
-            link: LinkState::Disabled,
-            local: None,
-        },
-        Err(missing) => return missing.into_response(),
-    };
+    if let Err(missing) = mesh_of(&state, radio).await {
+        return missing.into_response();
+    }
+    let status = state.radios.status(radio).unwrap_or(Status {
+        link: LinkState::Disabled,
+        local: None,
+    });
     Json(status).into_response()
 }
 
