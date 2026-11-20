@@ -4,8 +4,10 @@
 include!(concat!(env!("OUT_DIR"), "/i18n/mod.rs"));
 
 mod app;
+mod badge;
 mod chat;
 mod daemon;
+mod emoji;
 mod map;
 mod mesh;
 mod node;

@@ -11,8 +11,9 @@ use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
     API_V1, Channel, Conversation, Error, ErrorCode, Message, NewMessage, NewTraceroute, Node,
-    NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioSettings,
-    SectionChange, SettingsApplied, SettingsSection, SightingId, Status, TOKEN_HEADER, Traceroute,
+    NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioOrder,
+    RadioSettings, SectionChange, SettingsApplied, SettingsSection, SightingId, Status,
+    TOKEN_HEADER, Traceroute,
 };
 use serde::de::DeserializeOwned;
 
@@ -223,6 +224,17 @@ pub async fn save_radio(
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// Puts the radios in this order, which names each of them once.
+pub async fn order_radios(radios: &[RadioId]) -> Result<(), Failure> {
+    let order = RadioOrder {
+        radios: radios.to_vec(),
+    };
+    let request = with_token(Request::put(&url("/radios/order")))
+        .json(&order)
+        .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
 }
 
 pub async fn remove_radio(radio: RadioId) -> Result<(), Failure> {

@@ -10,6 +10,7 @@
 //! channels and its direct conversations, and the radio itself at its foot.
 //! Over the page, a bar says what is showing and what can be done with it.
 
+use crate::badge::{self, Face};
 use crate::chat::{ChatView, peer_of, short_name, title};
 use crate::daemon::{self, Events, Failure};
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
@@ -18,7 +19,7 @@ use crate::mesh::{MeshView, ago, model};
 use crate::node::NodeView;
 use crate::packets::{KEPT, PacketsView};
 use crate::preferences::PreferencesView;
-use crate::radios::{RadioForm, RadiosView};
+use crate::radios::{Editing, RadioEditor, RadiosView};
 use crate::settings::SettingsView;
 use gloo_timers::future::sleep;
 use leptos::prelude::*;
@@ -86,6 +87,8 @@ pub struct Live {
     /// `None` until the daemon has said which radios there are.
     pub radios: RwSignal<Option<Vec<Radio>>>,
     pub selected: RwSignal<Option<RadioId>>,
+    /// What the radios' editor is open on.
+    pub radio_editing: RwSignal<Editing>,
     /// Of the selected radio.
     pub status: RwSignal<Option<Status>>,
     /// Of the selected radio.
@@ -127,6 +130,7 @@ impl Live {
             preferences: RwSignal::new(Preferences::default()),
             radios: RwSignal::new(None),
             selected: RwSignal::new(daemon::last_radio()),
+            radio_editing: RwSignal::new(Editing::Closed),
             status: RwSignal::new(None),
             nodes: RwSignal::new(BTreeMap::new()),
             channels: RwSignal::new(Vec::new()),
@@ -221,7 +225,12 @@ impl Live {
         let radios = daemon::radios().await?;
         let selected = self.selected.get_untracked();
         if !selected.is_some_and(|id| radios.iter().any(|r| r.id == id)) {
-            let first = radios.first().map(|r| r.id);
+            // The first on the rail, if any is.
+            let first = radios
+                .iter()
+                .find(|r| r.shown)
+                .or(radios.first())
+                .map(|r| r.id);
             self.selected.set(first);
         }
         self.radios.set(Some(radios));
@@ -612,7 +621,11 @@ fn Content() -> impl IntoView {
 fn Rail() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let radios = move || live.radios.get().unwrap_or_default();
+    // Those to be shown, in their order.
+    let radios = move || {
+        let radios = live.radios.get().unwrap_or_default();
+        radios.into_iter().filter(|r| r.shown).collect::<Vec<_>>()
+    };
     let settings_class = move || {
         if live.page.get().is_meshctl() {
             "rail-button active"
@@ -629,14 +642,21 @@ fn Rail() -> impl IntoView {
                 <path d="M7.3 11 16.7 6M7.3 13l9.4 5"></path>
             </svg>
             <span class="rail-rule"></span>
-            <For each=radios key=|radio| (radio.id, radio.name.clone()) let:radio>
-                <RadioButton id=radio.id name=radio.name.clone() />
+            <For
+                each=radios
+                key=|radio| (radio.id, radio.name.clone(), radio.badge.clone())
+                let:radio
+            >
+                <RadioButton id=radio.id name=radio.name.clone() badge=radio.badge.clone() />
             </For>
             <button
                 class="rail-button add"
                 title=move || t_string!(i18n, radio_add_title)
                 aria-label=move || t_string!(i18n, radio_add_title)
-                on:click=move |_| live.go(Page::Radios)
+                on:click=move |_| {
+                    live.radio_editing.set(Editing::Adding);
+                    live.go(Page::Radios);
+                }
             >
                 "+"
             </button>
@@ -656,26 +676,8 @@ fn Rail() -> impl IntoView {
     }
 }
 
-/// Two letters for a radio: its words' first, or its first two.
-fn initials(name: &str) -> String {
-    let words: Vec<&str> = name.split_whitespace().collect();
-    let letters: String = match words.as_slice() {
-        [first, second, ..] => first
-            .chars()
-            .take(1)
-            .chain(second.chars().take(1))
-            .collect(),
-        [only] => only.chars().take(2).collect(),
-        [] => "?".into(),
-    };
-    let mut chars = letters.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_uppercase().chain(chars).collect()
-    })
-}
-
 #[component]
-fn RadioButton(id: RadioId, name: String) -> impl IntoView {
+fn RadioButton(id: RadioId, name: String, badge: meshctl_api::Badge) -> impl IntoView {
     let live = expect_context::<Live>();
     let link = move || {
         live.radios.with(|radios| {
@@ -686,18 +688,26 @@ fn RadioButton(id: RadioId, name: String) -> impl IntoView {
                 .map_or(LinkState::Disconnected, |r| r.link)
         })
     };
+    let colored = if badge.color.is_some() {
+        " colored"
+    } else {
+        ""
+    };
     let class = move || {
         let active = live.selected.get() == Some(id) && !live.page.get().is_meshctl();
-        if active {
-            "rail-button radio active"
-        } else {
-            "rail-button radio"
-        }
+        let active = if active { " active" } else { "" };
+        format!("rail-button radio{colored}{active}")
     };
-    let short = initials(&name);
+    let style = badge::style(&badge);
     view! {
-        <button class=class title=name.clone() aria-label=name on:click=move |_| live.select(id)>
-            {short}
+        <button
+            class=class
+            style=style
+            title=name.clone()
+            aria-label=name.clone()
+            on:click=move |_| live.select(id)
+        >
+            <Face name=name.clone() badge=badge.clone() />
             <span class=move || format!("dot {}", link_class(link()))></span>
         </button>
     }
@@ -737,7 +747,14 @@ fn MeshctlSidebar() -> impl IntoView {
             Page::Preferences => t!(i18n, prefs_title).into_any(),
             _ => t!(i18n, radios_title).into_any(),
         };
-        view! { <button class=class on:click=move |_| live.go(page)>{label}</button> }
+        // The radios' page opens on their list, the editor closed.
+        let open = move |_| {
+            if page == Page::Radios && live.page.get_untracked() != page {
+                live.radio_editing.set(Editing::Closed);
+            }
+            live.go(page);
+        };
+        view! { <button class=class on:click=open>{label}</button> }
     };
     view! {
         <header class="sidebar-head">
@@ -1049,7 +1066,7 @@ fn Welcome() -> impl IntoView {
         <section class="card welcome">
             <h2>{t!(i18n, welcome_title)}</h2>
             <p>{t!(i18n, welcome_text)}</p>
-            <RadioForm editing=RwSignal::new(None) />
+            <RadioEditor id=None />
         </section>
     }
 }
@@ -1099,18 +1116,5 @@ fn TokenForm() -> impl IntoView {
             />
             <button type="submit">{t!(i18n, token_use)}</button>
         </form>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::initials;
-
-    #[test]
-    fn radios_go_by_two_letters() {
-        assert_eq!(initials("casa"), "Ca");
-        assert_eq!(initials("Casa de campo"), "Cd");
-        assert_eq!(initials("Ñu"), "Ñu");
-        assert_eq!(initials(""), "?");
     }
 }

@@ -1,0 +1,5 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- A hexagon in the spirit of MeshCore radios: not its logo, drawn for meshctl. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9zM12 8v8M8.5 10l7 4M15.5 10l-7 4" />
+</svg>
