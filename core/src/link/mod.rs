@@ -46,6 +46,14 @@ impl std::str::FromStr for Transport {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s, DEFAULT_TCP_PORT)
+    }
+}
+
+impl Transport {
+    /// Reads where the radio is, as [`str::parse`] does, with the port to take
+    /// for a host given without one: each kind of radio serves on its own.
+    pub fn parse(s: &str, default_port: u16) -> Result<Self, String> {
         if let Some(rest) = s.strip_prefix("serial://") {
             return serial_from(rest);
         }
@@ -62,7 +70,7 @@ impl std::str::FromStr for Transport {
                     .map_err(|_| format!("{port:?} is not a port"))?;
                 (host, port)
             }
-            _ => (rest, DEFAULT_TCP_PORT),
+            _ => (rest, default_port),
         };
         let host = host.trim_start_matches('[').trim_end_matches(']');
         if host.is_empty() {

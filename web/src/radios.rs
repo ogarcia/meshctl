@@ -155,6 +155,7 @@ pub fn RadioForm(editing: RwSignal<Option<Radio>>) -> impl IntoView {
     let live = expect_context::<Live>();
     let name = RwSignal::new(String::new());
     let address = RwSignal::new(String::new());
+    let kind = RwSignal::new(RadioKind::Meshtastic);
     let enabled = RwSignal::new(true);
     let error = RwSignal::new(None::<Failure>);
     let busy = RwSignal::new(false);
@@ -170,6 +171,7 @@ pub fn RadioForm(editing: RwSignal<Option<Radio>>) -> impl IntoView {
                 .unwrap_or_default(),
         );
         enabled.set(radio.as_ref().is_none_or(|r| r.enabled));
+        kind.set(radio.as_ref().map_or(RadioKind::Meshtastic, |r| r.kind));
         error.set(None);
     });
 
@@ -177,7 +179,7 @@ pub fn RadioForm(editing: RwSignal<Option<Radio>>) -> impl IntoView {
         ev.prevent_default();
         let settings = RadioSettings {
             name: name.get_untracked(),
-            kind: RadioKind::Meshtastic,
+            kind: kind.get_untracked(),
             address: address.get_untracked(),
             enabled: enabled.get_untracked(),
         };
@@ -225,11 +227,20 @@ pub fn RadioForm(editing: RwSignal<Option<Radio>>) -> impl IntoView {
             </label>
             <label>
                 <span>{t!(i18n, radio_kind)}</span>
-                <select>
-                    <option value="meshtastic" selected>"Meshtastic"</option>
-                    <option value="meshcore" disabled>
-                        "MeshCore (" {t!(i18n, radio_kind_soon)} ")"
-                    </option>
+                <select
+                    prop:value=move || match kind.get() {
+                        RadioKind::Meshtastic => "meshtastic",
+                        RadioKind::Meshcore => "meshcore",
+                    }
+                    on:change=move |ev| {
+                        kind.set(match event_target_value(&ev).as_str() {
+                            "meshcore" => RadioKind::Meshcore,
+                            _ => RadioKind::Meshtastic,
+                        });
+                    }
+                >
+                    <option value="meshtastic">"Meshtastic"</option>
+                    <option value="meshcore">"MeshCore"</option>
                 </select>
             </label>
             <label>

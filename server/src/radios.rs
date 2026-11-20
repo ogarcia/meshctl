@@ -15,7 +15,7 @@ use meshctl_api::{
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
-use meshctl_core::radio::{AdminError, Mesh, OutgoingText, SendError};
+use meshctl_core::radio::{AdminError, Mesh, OutgoingText, Protocol, SendError};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast::error::RecvError;
@@ -86,6 +86,8 @@ pub enum SettingsFailure {
     /// Which setting it is that the radio cannot have.
     Invalid(String),
     NoAnswer,
+    /// Not something meshctl does with this kind of radio yet.
+    Unsupported,
 }
 
 /// Why a traceroute was not sent.
@@ -93,6 +95,8 @@ pub enum SettingsFailure {
 pub enum TraceFailure {
     NoSuchRadio,
     NotConnected,
+    /// Not something meshctl does with this kind of radio yet.
+    Unsupported,
     /// Everyone, or the radio itself.
     InvalidNode,
     /// The last one was this many seconds ago; wait the rest.
@@ -172,14 +176,12 @@ pub fn validate(settings: &RadioSettings) -> Result<Transport, ErrorCode> {
     if name.is_empty() || name.chars().count() > NAME_MAX {
         return Err(ErrorCode::InvalidName);
     }
-    if settings.kind != RadioKind::Meshtastic {
-        return Err(ErrorCode::UnsupportedKind);
-    }
-    settings
-        .address
-        .trim()
-        .parse()
-        .map_err(|_| ErrorCode::InvalidAddress)
+    // Each kind serves on a port of its own, taken when none is given.
+    let port = match settings.kind {
+        RadioKind::Meshtastic => meshctl_core::link::DEFAULT_TCP_PORT,
+        RadioKind::Meshcore => meshctl_core::meshcore::DEFAULT_TCP_PORT,
+    };
+    Transport::parse(settings.address.trim(), port).map_err(|_| ErrorCode::InvalidAddress)
 }
 
 /// Settings as they are kept: trimmed.
@@ -195,8 +197,17 @@ pub fn tidy(settings: RadioSettings) -> RadioSettings {
 /// and always one that passes its events on and one that stores them.
 struct Running {
     mesh: Mesh,
+    protocol: Protocol,
     enabled: bool,
     tasks: Vec<JoinHandle<()>>,
+}
+
+/// The driver a kind of radio takes.
+fn protocol_of(kind: RadioKind) -> Protocol {
+    match kind {
+        RadioKind::Meshtastic => Protocol::Meshtastic,
+        RadioKind::Meshcore => Protocol::Meshcore,
+    }
 }
 
 impl Drop for Running {
@@ -240,6 +251,11 @@ impl Radios {
     /// What a radio knows, live if it is connected and as last stored if not.
     pub fn mesh(&self, id: RadioId) -> Option<Mesh> {
         self.lock().get(&id).map(|running| running.mesh.clone())
+    }
+
+    /// Which mesh a radio speaks, if there is such a radio.
+    fn protocol(&self, id: RadioId) -> Option<Protocol> {
+        self.lock().get(&id).map(|running| running.protocol)
     }
 
     /// How a radio's link is doing; [`LinkState::Disabled`] for one that is
@@ -294,20 +310,31 @@ impl Radios {
         if self.link(id) != LinkState::Ready {
             return Err(SendFailure::NotConnected);
         }
-        let packet_id = mesh.send_text(&outgoing).map_err(|error| match error {
-            SendError::NotConnected => SendFailure::NotConnected,
-            SendError::BadText => SendFailure::Invalid,
-        })?;
+        let sent = mesh
+            .send_text(&outgoing)
+            .await
+            .map_err(|error| match error {
+                SendError::NotConnected => SendFailure::NotConnected,
+                SendError::BadText | SendError::Refused | SendError::Unsupported => {
+                    SendFailure::Invalid
+                }
+            })?;
         let from = mesh.read(|state| state.local.as_ref().map_or(0, |l| l.num));
         let row = NewMessageRow {
-            packet_id,
+            packet_id: sent.packet_id,
             from,
+            sender_name: None,
             to,
             channel,
             text: message.text,
             at: now(),
             outgoing: true,
-            status: MessageStatus::Sending,
+            // What cannot be acknowledged is as sent as it will ever be.
+            status: if sent.acknowledged {
+                MessageStatus::Sending
+            } else {
+                MessageStatus::Sent
+            },
             reply_id: message.reply_id,
             emoji: false,
             snr: None,
@@ -382,6 +409,9 @@ impl Radios {
         if node == mesh::BROADCAST || origin == Some(node) {
             return Err(TraceFailure::InvalidNode);
         }
+        if self.protocol(id) != Some(Protocol::Meshtastic) {
+            return Err(TraceFailure::Unsupported);
+        }
         if self.link(id) != LinkState::Ready {
             return Err(TraceFailure::NotConnected);
         }
@@ -395,7 +425,10 @@ impl Radios {
             }
         }
         let packet_id = mesh.send_traceroute(node, 0).map_err(|error| match error {
-            SendError::NotConnected | SendError::BadText => TraceFailure::NotConnected,
+            SendError::Unsupported => TraceFailure::Unsupported,
+            SendError::NotConnected | SendError::BadText | SendError::Refused => {
+                TraceFailure::NotConnected
+            }
         })?;
         let traceroute = self
             .store
@@ -411,12 +444,22 @@ impl Radios {
     /// connected: they are not kept, and a radio that is not there cannot be
     /// changed anyway.
     pub fn settings(&self, id: RadioId) -> Result<NodeSettings, SettingsFailure> {
+        self.configurable(id)?
+            .read(|state| crate::settings::view(&state.settings))
+            .ok_or(SettingsFailure::NotConnected)
+    }
+
+    /// A radio whose settings can be read and changed now: there is such a
+    /// radio, meshctl knows its settings, and it is connected.
+    fn configurable(&self, id: RadioId) -> Result<Mesh, SettingsFailure> {
         let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
+        if self.protocol(id) != Some(Protocol::Meshtastic) {
+            return Err(SettingsFailure::Unsupported);
+        }
         if self.link(id) != LinkState::Ready {
             return Err(SettingsFailure::NotConnected);
         }
-        mesh.read(|state| crate::settings::view(&state.settings))
-            .ok_or(SettingsFailure::NotConnected)
+        Ok(mesh)
     }
 
     /// Changes a radio's own settings. Returns whether it reboots to apply
@@ -426,10 +469,7 @@ impl Radios {
         id: RadioId,
         wanted: &NodeSettingsChange,
     ) -> Result<SettingsApplied, SettingsFailure> {
-        let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
-        if self.link(id) != LinkState::Ready {
-            return Err(SettingsFailure::NotConnected);
-        }
+        let mesh = self.configurable(id)?;
         let (change, reboots) = mesh
             .read(|state| {
                 crate::settings::change(&state.settings, wanted, |key| {
@@ -437,12 +477,7 @@ impl Radios {
                 })
             })
             .map_err(|why| SettingsFailure::Invalid(why.0.to_owned()))?;
-        mesh.change_settings(change)
-            .await
-            .map_err(|error| match error {
-                AdminError::NotConnected => SettingsFailure::NotConnected,
-                AdminError::NoAnswer => SettingsFailure::NoAnswer,
-            })?;
+        mesh.change_settings(change).await.map_err(admin_failure)?;
         tracing::info!(radio = id, reboots, "settings changed");
         Ok(SettingsApplied { reboots })
     }
@@ -450,11 +485,9 @@ impl Radios {
     /// The rest of a radio's configuration and its modules, section by
     /// section; like its settings, only while it is connected.
     pub fn sections(&self, id: RadioId) -> Result<Vec<SettingsSection>, SettingsFailure> {
-        let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
-        if self.link(id) != LinkState::Ready {
-            return Err(SettingsFailure::NotConnected);
-        }
-        Ok(mesh.read(|state| crate::sections::sections(&state.settings)))
+        Ok(self
+            .configurable(id)?
+            .read(|state| crate::sections::sections(&state.settings)))
     }
 
     /// Changes some settings of one section. The firmware reboots for nearly
@@ -465,22 +498,14 @@ impl Radios {
         section: &str,
         values: &BTreeMap<String, serde_json::Value>,
     ) -> Result<SettingsApplied, SettingsFailure> {
-        let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
-        if self.link(id) != LinkState::Ready {
-            return Err(SettingsFailure::NotConnected);
-        }
+        let mesh = self.configurable(id)?;
         if values.is_empty() {
             return Err(SettingsFailure::Invalid(section.to_owned()));
         }
         let change = mesh
             .read(|state| crate::sections::change(&state.settings, section, values))
             .map_err(|why| SettingsFailure::Invalid(why.0))?;
-        mesh.change_settings(change)
-            .await
-            .map_err(|error| match error {
-                AdminError::NotConnected => SettingsFailure::NotConnected,
-                AdminError::NoAnswer => SettingsFailure::NoAnswer,
-            })?;
+        mesh.change_settings(change).await.map_err(admin_failure)?;
         tracing::info!(radio = id, section, "settings changed");
         Ok(SettingsApplied { reboots: true })
     }
@@ -630,7 +655,7 @@ impl Radios {
             match validate(&record.settings) {
                 Ok(transport) => {
                     tracing::info!(radio = id, name = %record.settings.name, %transport, "connecting");
-                    tasks.push(mesh.spawn(transport));
+                    tasks.push(mesh.spawn(protocol_of(record.settings.kind), transport));
                 }
                 Err(error) => {
                     tracing::warn!(radio = id, ?error, "cannot connect to this radio");
@@ -642,6 +667,7 @@ impl Radios {
             id,
             Running {
                 mesh,
+                protocol: protocol_of(record.settings.kind),
                 enabled,
                 tasks,
             },
@@ -770,10 +796,20 @@ impl Radios {
             id,
             Running {
                 mesh,
+                protocol: Protocol::Meshtastic,
                 enabled: true,
                 tasks: vec![forward],
             },
         );
+    }
+}
+
+/// What a radio refusing a change of settings means for the API.
+fn admin_failure(error: AdminError) -> SettingsFailure {
+    match error {
+        AdminError::NotConnected => SettingsFailure::NotConnected,
+        AdminError::NoAnswer => SettingsFailure::NoAnswer,
+        AdminError::Unsupported => SettingsFailure::Unsupported,
     }
 }
 
@@ -787,6 +823,7 @@ fn heard_row(heard: mesh::TextMessage, local: Option<u32>) -> NewMessageRow {
     NewMessageRow {
         packet_id: heard.packet_id,
         from: heard.from,
+        sender_name: heard.sender_name,
         to: heard.to,
         channel: heard.channel,
         text: heard.text,
@@ -885,6 +922,7 @@ mod tests {
             text: "hola".into(),
             at: 1,
             reply_id: None,
+            sender_name: None,
             emoji: false,
             snr: None,
             rssi: None,
@@ -903,6 +941,13 @@ mod tests {
     fn what_a_radio_may_be() {
         let ok = settings("Home", RadioKind::Meshtastic, "192.168.1.10");
         assert!(validate(&ok).is_ok());
+        // Each kind takes its own port when none is given.
+        let port = |kind| match validate(&settings("Home", kind, "radio.lan")) {
+            Ok(Transport::Tcp { port, .. }) => port,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(port(RadioKind::Meshtastic), 4403);
+        assert_eq!(port(RadioKind::Meshcore), 5000);
         let cases = [
             (
                 settings("  ", RadioKind::Meshtastic, "h"),
@@ -911,10 +956,6 @@ mod tests {
             (
                 settings(&"x".repeat(65), RadioKind::Meshtastic, "h"),
                 ErrorCode::InvalidName,
-            ),
-            (
-                settings("Home", RadioKind::Meshcore, "h"),
-                ErrorCode::UnsupportedKind,
             ),
             (
                 settings("Home", RadioKind::Meshtastic, "h:port"),

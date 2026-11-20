@@ -68,10 +68,11 @@ pub fn SettingsView() -> impl IntoView {
     // Still shown while the radio only syncs again, as after every change:
     // what is being edited elsewhere on the page must not vanish under it.
     let shown = move || {
-        live.status.with(|s| {
-            s.as_ref()
-                .is_some_and(|s| matches!(s.link, LinkState::Ready | LinkState::Syncing))
-        })
+        live.selected_kind() != Some(meshctl_api::RadioKind::Meshcore)
+            && live.status.with(|s| {
+                s.as_ref()
+                    .is_some_and(|s| matches!(s.link, LinkState::Ready | LinkState::Syncing))
+            })
     };
 
     // Read them whenever the radio is (again) in sync: on opening the page,
@@ -150,7 +151,13 @@ pub fn SettingsView() -> impl IntoView {
     view! {
         <Show
             when=shown
-            fallback=move || view! { <p class="card dim">{t!(i18n, settings_not_connected)}</p> }
+            fallback=move || {
+                if live.selected_kind() == Some(meshctl_api::RadioKind::Meshcore) {
+                    view! { <p class="card dim">{t!(i18n, meshcore_not_yet)}</p> }.into_any()
+                } else {
+                    view! { <p class="card dim">{t!(i18n, settings_not_connected)}</p> }.into_any()
+                }
+            }
         >
             {notice_view}
             {move || {

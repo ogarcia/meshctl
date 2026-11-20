@@ -24,10 +24,10 @@ use tokio::time::Instant;
 
 /// First delay before reconnecting; it doubles on every failure up to
 /// [`RECONNECT_MAX`].
-const RECONNECT_MIN: Duration = Duration::from_secs(5);
-const RECONNECT_MAX: Duration = Duration::from_secs(300);
+pub(crate) const RECONNECT_MIN: Duration = Duration::from_secs(5);
+pub(crate) const RECONNECT_MAX: Duration = Duration::from_secs(300);
 /// A session that stayed up this long resets the reconnection backoff.
-const STABLE_SESSION: Duration = Duration::from_secs(60);
+pub(crate) const STABLE_SESSION: Duration = Duration::from_secs(60);
 /// A healthy node answers want_config in under a second, but a struggling one
 /// has been seen to take a full minute.
 const SYNC_TIMEOUT: Duration = Duration::from_secs(120);
@@ -63,14 +63,37 @@ pub enum SendError {
     NotConnected,
     /// Empty, or longer than [`MAX_TEXT_BYTES`].
     BadText,
+    /// Not something this kind of radio does.
+    Unsupported,
+    /// The radio would not take it.
+    Refused,
+}
+
+/// Which mesh a radio speaks, and so which driver keeps it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protocol {
+    Meshtastic,
+    Meshcore,
+}
+
+/// A text handed to the radio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sent {
+    /// The id its acknowledgement, if any, comes back with.
+    pub packet_id: u32,
+    /// Whether an acknowledgement can come at all. A MeshCore channel message
+    /// has none: once the radio took it, that is all there is to know.
+    pub acknowledged: bool,
 }
 
 /// The mesh as meshctl knows it, shared between the radio task, which writes
 /// it, and whoever reads it. Cheap to clone.
 #[derive(Clone)]
 pub struct Mesh {
-    state: Arc<RwLock<MeshState>>,
-    events: broadcast::Sender<Event>,
+    pub(crate) state: Arc<RwLock<MeshState>>,
+    pub(crate) events: broadcast::Sender<Event>,
+    /// The MeshCore session, while one is open; what sending goes through.
+    pub(crate) meshcore: Arc<Mutex<Option<crate::meshcore::Session>>>,
     /// Where to write to the radio, while connected.
     outbox: Arc<Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>>,
     /// The id the next packet sent gets.
@@ -101,6 +124,8 @@ pub enum AdminError {
     NotConnected,
     /// The radio did not answer the request a change starts with.
     NoAnswer,
+    /// Not something this kind of radio does yet.
+    Unsupported,
 }
 
 /// How long the radio has to answer an admin request.
@@ -121,6 +146,7 @@ impl Mesh {
         Self {
             state: Arc::new(RwLock::new(state)),
             events: broadcast::channel(EVENT_BACKLOG).0,
+            meshcore: Arc::default(),
             outbox: Arc::default(),
             // Ids that start somewhere else every run, so that a restart does
             // not reuse the ones still being answered.
@@ -131,13 +157,24 @@ impl Mesh {
         }
     }
 
-    /// Sends a text, asking for an acknowledgement. Returns the packet's id,
-    /// which the [`Event::Ack`] that answers it carries.
-    pub fn send_text(&self, outgoing: &OutgoingText) -> Result<u32, SendError> {
+    /// Sends a text, asking for an acknowledgement where there can be one,
+    /// which comes back as an [`Event::Ack`] with the id returned.
+    pub async fn send_text(&self, outgoing: &OutgoingText) -> Result<Sent, SendError> {
         if outgoing.text.trim().is_empty() || outgoing.text.len() > MAX_TEXT_BYTES {
             return Err(SendError::BadText);
         }
-        self.send_packet(
+        if self.read(|state| state.link) != LinkState::Ready {
+            return Err(SendError::NotConnected);
+        }
+        let meshcore = self
+            .meshcore
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(session) = meshcore {
+            return session.send_text(self, outgoing).await;
+        }
+        let packet_id = self.send_packet(
             outgoing.to,
             outgoing.channel,
             true,
@@ -147,13 +184,28 @@ impl Mesh {
                 reply_id: outgoing.reply_id.unwrap_or_default(),
                 ..Default::default()
             },
-        )
+        )?;
+        Ok(Sent {
+            packet_id,
+            acknowledged: true,
+        })
+    }
+
+    /// Whether the radio is a MeshCore one, as far as its open session says.
+    fn is_meshcore(&self) -> bool {
+        self.meshcore
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
     }
 
     /// Asks a node for the route to it and back. Returns the request's id,
     /// which the [`crate::mesh::Event::Traceroute`] that answers it carries; a
     /// relay that gives up says so with an [`crate::mesh::Event::Ack`] for it.
     pub fn send_traceroute(&self, to: u32, channel: u32) -> Result<u32, SendError> {
+        if self.is_meshcore() {
+            return Err(SendError::Unsupported);
+        }
         self.send_packet(
             to,
             channel,
@@ -216,7 +268,7 @@ impl Mesh {
         self.events.subscribe()
     }
 
-    fn update(&self, f: impl FnOnce(&mut MeshState) -> Vec<Event>) {
+    pub(crate) fn update(&self, f: impl FnOnce(&mut MeshState) -> Vec<Event>) {
         let events = f(&mut self.state.write().unwrap_or_else(|e| e.into_inner()));
         for event in events {
             if let Event::AdminAnswer {
@@ -243,6 +295,9 @@ impl Mesh {
     /// and reboots if any of them needs it, once. They are read back a moment
     /// later, and arrive as a sync.
     pub async fn change_settings(&self, change: SettingsChange) -> Result<(), AdminError> {
+        if self.is_meshcore() {
+            return Err(AdminError::Unsupported);
+        }
         let me = self
             .read(|state| state.local.as_ref().map(|l| l.num))
             .ok_or(AdminError::NotConnected)?;
@@ -363,7 +418,7 @@ impl Mesh {
         (self.next_id.fetch_add(1, Ordering::Relaxed) & 0x7fff_ffff).max(1)
     }
 
-    fn set_link(&self, link: LinkState) {
+    pub(crate) fn set_link(&self, link: LinkState) {
         self.update(|state| {
             if state.link == link {
                 return Vec::new();
@@ -377,10 +432,16 @@ impl Mesh {
         });
     }
 
-    /// Connects to the radio and keeps connected, in a task of its own.
-    pub fn spawn(&self, transport: Transport) -> JoinHandle<()> {
+    /// Connects to the radio and keeps connected, in a task of its own, with
+    /// the driver for the mesh it speaks.
+    pub fn spawn(&self, protocol: Protocol, transport: Transport) -> JoinHandle<()> {
         let mesh = self.clone();
-        tokio::spawn(async move { mesh.run(transport).await })
+        match protocol {
+            Protocol::Meshtastic => tokio::spawn(async move { mesh.run(transport).await }),
+            Protocol::Meshcore => {
+                tokio::spawn(async move { crate::meshcore::run(mesh, transport).await })
+            }
+        }
     }
 
     async fn run(self, transport: Transport) {
@@ -500,7 +561,7 @@ fn nonce() -> u32 {
 }
 
 /// Seconds since the epoch, the way the radio counts them.
-fn now() -> u32 {
+pub(crate) fn now() -> u32 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| u32::try_from(d.as_secs()).unwrap_or(u32::MAX))
@@ -549,10 +610,13 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let mesh = Mesh::default();
-        let task = mesh.spawn(Transport::Tcp {
-            host: "127.0.0.1".into(),
-            port,
-        });
+        let task = mesh.spawn(
+            Protocol::Meshtastic,
+            Transport::Tcp {
+                host: "127.0.0.1".into(),
+                port,
+            },
+        );
         let (stream, _) = listener.accept().await.unwrap();
         let radio = FakeRadio {
             stream,
@@ -647,7 +711,7 @@ mod tests {
             text: "hola".into(),
             reply_id: None,
         };
-        assert_eq!(mesh.send_text(&text), Err(SendError::NotConnected));
+        assert_eq!(mesh.send_text(&text).await, Err(SendError::NotConnected));
 
         let Some(to_radio::PayloadVariant::WantConfigId(nonce)) =
             radio.receive().await.payload_variant
@@ -659,7 +723,7 @@ mod tests {
             .await;
         assert_eq!(next_event(&mut events).await, Event::Link(LinkState::Ready));
 
-        let id = mesh.send_text(&text).unwrap();
+        let id = mesh.send_text(&text).await.unwrap().packet_id;
         let Some(to_radio::PayloadVariant::Packet(packet)) = radio.receive().await.payload_variant
         else {
             panic!("a packet");
@@ -676,7 +740,7 @@ mod tests {
             text: "x".repeat(MAX_TEXT_BYTES + 1),
             ..text
         };
-        assert_eq!(mesh.send_text(&too_long), Err(SendError::BadText));
+        assert_eq!(mesh.send_text(&too_long).await, Err(SendError::BadText));
         task.abort();
     }
 

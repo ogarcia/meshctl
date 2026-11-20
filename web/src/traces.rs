@@ -31,9 +31,16 @@ fn node_title(live: Live, num: u32) -> String {
 
 #[component]
 pub fn TracesView() -> impl IntoView {
+    let i18n = use_i18n();
     let live = expect_context::<Live>();
+    let supported = move || live.selected_kind() != Some(meshctl_api::RadioKind::Meshcore);
     view! {
-        <TraceForm />
+        <Show
+            when=supported
+            fallback=move || view! { <p class="card dim">{t!(i18n, meshcore_not_yet)}</p> }
+        >
+            <TraceForm />
+        </Show>
         <section class="card traces">
             <For
                 each=move || live.traceroutes.get()

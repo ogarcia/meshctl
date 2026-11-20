@@ -104,6 +104,9 @@ async fn trace(
         Err(TraceFailure::NotConnected) => {
             error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected)
         }
+        Err(TraceFailure::Unsupported) => {
+            error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::UnsupportedKind)
+        }
         Err(TraceFailure::InvalidNode) => {
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidNode)
         }

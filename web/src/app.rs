@@ -16,7 +16,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
 use meshctl_api::{
-    Channel, Conversation, LinkState, Message, Node, Peer, Radio, RadioId, Status, Traceroute,
+    Channel, Conversation, LinkState, Message, Node, Peer, Radio, RadioId, RadioKind, Status,
+    Traceroute,
 };
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -207,6 +208,13 @@ impl Live {
     pub async fn refresh(self) -> Result<(), Failure> {
         self.refresh_radios().await?;
         self.refresh_selected().await
+    }
+
+    /// Which mesh the selected radio speaks.
+    pub fn selected_kind(self) -> Option<RadioKind> {
+        let id = self.selected.get()?;
+        self.radios
+            .with(|radios| radios.as_ref()?.iter().find(|r| r.id == id).map(|r| r.kind))
     }
 
     fn is_selected(self, radio: RadioId) -> bool {

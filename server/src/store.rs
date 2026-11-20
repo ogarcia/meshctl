@@ -380,14 +380,15 @@ impl Store {
         message: &NewMessageRow,
     ) -> Result<Option<Message>> {
         let id = sqlx::query(
-            "INSERT INTO message (radio_id, packet_id, from_num, to_num, channel, text, at,
-                outgoing, status, reply_id, emoji, snr, rssi, hops_away, via_mqtt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO message (radio_id, packet_id, from_num, sender_name, to_num, channel,
+                text, at, outgoing, status, reply_id, emoji, snr, rssi, hops_away, via_mqtt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (radio_id, from_num, packet_id) DO NOTHING",
         )
         .bind(radio)
         .bind(i64::from(message.packet_id))
         .bind(i64::from(message.from))
+        .bind(&message.sender_name)
         .bind(i64::from(message.to))
         .bind(i64::from(message.channel))
         .bind(&message.text)
@@ -715,6 +716,7 @@ pub fn peer_of(message: &Message) -> Peer {
 pub struct NewMessageRow {
     pub packet_id: u32,
     pub from: u32,
+    pub sender_name: Option<String>,
     pub to: u32,
     pub channel: u32,
     pub text: String,
@@ -734,6 +736,7 @@ struct MessageRow {
     id: i64,
     packet_id: i64,
     from_num: i64,
+    sender_name: Option<String>,
     to_num: i64,
     channel: i64,
     text: String,
@@ -755,6 +758,7 @@ impl MessageRow {
             id: self.id,
             packet_id: u32_from(self.packet_id),
             from: u32_from(self.from_num),
+            sender_name: self.sender_name,
             to: u32_from(self.to_num),
             channel: u32_from(self.channel),
             text: self.text,
@@ -939,6 +943,7 @@ mod tests {
         NewMessageRow {
             packet_id,
             from,
+            sender_name: None,
             to,
             channel: 0,
             text: format!("#{packet_id}"),

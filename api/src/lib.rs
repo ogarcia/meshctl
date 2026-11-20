@@ -275,8 +275,12 @@ pub struct Message {
     pub id: MessageId,
     /// The packet's id on the mesh, which replies and reactions refer to.
     pub packet_id: u32,
-    /// The node it came from.
+    /// The node it came from; 0 when that is not known, as for a MeshCore
+    /// channel message whose sender's name is no contact's.
     pub from: u32,
+    /// The sender's name as the message itself gives it: on MeshCore
+    /// channels, the only thing that says who wrote.
+    pub sender_name: Option<String>,
     /// [`BROADCAST`] (4294967295) for a channel message, a node for a direct
     /// one.
     pub to: u32,

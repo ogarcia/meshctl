@@ -192,8 +192,12 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
     view! {
         <tr>
             <td>
-                <span class="short">{node.short_name.clone()}</span>
-                " "
+                // MeshCore nodes have no short name.
+                {node
+                    .short_name
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| view! { <span class="short">{s}</span> " " })}
                 <a href="#" on:click=open>
                     {node.long_name.clone().unwrap_or_else(|| node.id.clone())}
                 </a>
@@ -205,9 +209,15 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
             <td class="num">{battery}</td>
             <td class="dim">{node.hw_model.clone()}</td>
             <td class="actions">
-                <button class="small" title=move || t_string!(i18n, trace_send) on:click=move |_| live.trace(num)>
-                    "⇢"
-                </button>
+                <Show when=move || live.selected_kind() != Some(meshctl_api::RadioKind::Meshcore)>
+                    <button
+                        class="small"
+                        title=move || t_string!(i18n, trace_send)
+                        on:click=move |_| live.trace(num)
+                    >
+                        "⇢"
+                    </button>
+                </Show>
             </td>
         </tr>
     }

@@ -129,7 +129,18 @@ fn ConversationItem(conversation: Conversation) -> impl IntoView {
     let last = conversation.last.clone();
     let preview = last.as_ref().map(|m| {
         if matches!(peer, Peer::Channel { .. }) && !m.outgoing {
-            format!("{}: {}", short_name(live, m.from), m.text)
+            let who = match (&m.sender_name, m.from) {
+                (Some(name), 0) => name.clone(),
+                _ => {
+                    let short = short_name(live, m.from);
+                    if short.is_empty() {
+                        node_name(live, m.from)
+                    } else {
+                        short
+                    }
+                }
+            };
+            format!("{who}: {}", m.text)
         } else {
             m.text.clone()
         }
@@ -189,11 +200,20 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
     let mine = message.outgoing;
     // In a channel, who said it; in a direct conversation it is obvious.
     let author = (!mine && matches!(peer, Peer::Channel { .. })).then(|| {
+        // A sender known only by the name the message gives, as on MeshCore
+        // channels, is shown by that name.
+        let known = message.from != 0;
+        let name = match (&message.sender_name, known) {
+            (Some(name), false) => name.clone(),
+            _ => node_name(live, message.from),
+        };
+        let short = known
+            .then(|| short_name(live, message.from))
+            .filter(|s| !s.is_empty());
         view! {
             <span class="author">
-                <span class="short">{short_name(live, message.from)}</span>
-                " "
-                {node_name(live, message.from)}
+                {short.map(|s| view! { <span class="short">{s}</span> " " })}
+                {name}
             </span>
         }
     });

@@ -418,10 +418,6 @@ mod tests {
                 ErrorCode::InvalidName,
             ),
             (
-                r#"{"name":"x","kind":"meshcore","address":"h"}"#,
-                ErrorCode::UnsupportedKind,
-            ),
-            (
                 r#"{"name":"x","kind":"meshtastic","address":"h:p"}"#,
                 ErrorCode::InvalidAddress,
             ),

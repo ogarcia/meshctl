@@ -36,6 +36,9 @@ fn refused(failure: SettingsFailure) -> Response {
             tracing::debug!(setting = %why, "invalid settings");
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidSettings)
         }
+        SettingsFailure::Unsupported => {
+            error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::UnsupportedKind)
+        }
         SettingsFailure::NoAnswer => {
             error(StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer)
         }

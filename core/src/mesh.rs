@@ -180,6 +180,10 @@ pub struct TextMessage {
     pub at: u32,
     /// The packet it answers, if any.
     pub reply_id: Option<u32>,
+    /// Who sent it, by name, when that is all there is to go on: a MeshCore
+    /// channel message carries no sender, only the name the sending client
+    /// wrote into its text.
+    pub sender_name: Option<String>,
     /// Whether it is a reaction (an emoji) to `reply_id` rather than a message.
     pub emoji: bool,
     pub snr: Option<f32>,
@@ -470,6 +474,7 @@ fn said(packet: &pb::MeshPacket, now: u32) -> Option<Event> {
                 text: String::from_utf8_lossy(&data.payload).into_owned(),
                 at: packet.rx_time.filter(|t| *t > 0).unwrap_or(now),
                 reply_id: (data.reply_id != 0).then_some(data.reply_id),
+                sender_name: None,
                 emoji: data.emoji != 0,
                 snr: reception.then_some(packet.rx_snr).filter(|s| *s != 0.0),
                 rssi: packet.rx_rssi.filter(|_| reception),
