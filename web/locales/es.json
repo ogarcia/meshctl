@@ -1,0 +1,7 @@
+{
+  "tagline": "Tu nodo, la malla que lo rodea y nada más.",
+  "connecting": "Preguntando al demonio…",
+  "served_by": "Servido por {{ name }} {{ version }}",
+  "unreachable": "El demonio no responde.",
+  "other_language": "English"
+}

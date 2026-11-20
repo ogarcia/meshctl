@@ -1,0 +1,7 @@
+{
+  "tagline": "Your node, the mesh around it, and nothing else.",
+  "connecting": "Asking the daemon…",
+  "served_by": "Served by {{ name }} {{ version }}",
+  "unreachable": "The daemon does not answer.",
+  "other_language": "Español"
+}

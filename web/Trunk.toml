@@ -1,0 +1,16 @@
+# `trunk build --release` leaves the interface in dist/, where the server
+# embeds it from. `trunk serve` is for working on the interface alone: it
+# rebuilds on every change and hands the API on to a daemon running beside it.
+
+[build]
+target = "index.html"
+dist = "dist"
+
+[serve]
+addresses = ["127.0.0.1"]
+# The one after the daemon's, rather than trunk's own 8080, which is
+# everybody's.
+port = 7435
+
+[[proxy]]
+backend = "http://127.0.0.1:7434/api/"

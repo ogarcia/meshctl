@@ -1,0 +1,47 @@
+# One crate per concern, and the lines between them are who has to compile what:
+#
+#   proto   the Meshtastic protobufs and the stream framing; pure, no I/O
+#   core    the link to a radio (TCP or serial) and, later, the domain model
+#   api     the types the daemon and every client share; compiles to WASM
+#   server  the daemon: the binary called meshctl
+#   web     the Leptos (CSR) interface, built with trunk and embedded in server
+#
+# `web` is left out of the default members: it is built for the browser by
+# trunk, and a plain `cargo build` does not need to compile it for the host.
+# `--workspace` (clippy, tests) still includes it.
+[workspace]
+members = ["proto", "core", "api", "server", "web"]
+default-members = ["proto", "core", "api", "server"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2024"
+license = "GPL-3.0-or-later"
+authors = ["Óscar García Amor <ogarcia@connectical.com>"]
+repository = "https://github.com/ogarcia/meshctl"
+
+# Only what more than one crate needs. Everything else belongs to whichever
+# crate actually uses it.
+[workspace.dependencies]
+meshctl-api = { path = "api" }
+meshctl-proto = { path = "proto" }
+prost = "0.14"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", default-features = false }
+tracing = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+strip = true
+
+# The interface, as trunk builds it for release (see web/index.html). Size
+# matters more than speed for a bundle every browser downloads, and it is not
+# stripped here: wasm-bindgen needs the `target_features` section to know what
+# the module uses, and wasm-opt strips it afterwards anyway.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+strip = false

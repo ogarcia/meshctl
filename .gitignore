@@ -1,0 +1,6 @@
+/target
+/web/dist
+/config.toml
+*.db
+*.db-shm
+*.db-wal

@@ -1,0 +1,21 @@
+[package]
+name = "meshctl-core"
+description = "Radio link and domain model for meshctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+meshctl-proto.workspace = true
+tokio = { workspace = true, features = ["io-util", "net", "rt", "sync", "time"] }
+# Without libudev: it is only for listing ports with their USB details, which
+# a path given in the configuration does not need, and it would keep a static
+# musl build from linking.
+tokio-serial = { version = "5", default-features = false }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

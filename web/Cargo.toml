@@ -1,0 +1,23 @@
+[package]
+name = "meshctl-web"
+description = "meshctl's web interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+# Built for the browser by trunk (`trunk build` in this directory), into dist/,
+# which the server embeds. It is a client of the API like any other: it speaks
+# to the daemon only through /api/v1, with the types in meshctl-api.
+[dependencies]
+console_error_panic_hook = "0.1"
+gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
+leptos = { version = "0.8", features = ["csr"] }
+# leptos_i18n follows Leptos' minor versions: 0.6 is the one for Leptos 0.8.
+leptos_i18n = { version = "0.6", features = ["csr"] }
+meshctl-api.workspace = true
+
+[build-dependencies]
+leptos_i18n_build = { version = "0.6", features = ["csr"] }
