@@ -7,85 +7,55 @@
 //!
 //!     cargo run -p meshctl-core --example meshcore_probe -- 192.168.1.10 5050
 
-use meshcore_rs::{EventPayload, EventType, MeshCore};
+use meshctl_core::link::Transport;
+use meshctl_core::meshcore::{Client, DEFAULT_TCP_PORT};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let host = args.next().ok_or("usage: meshcore_probe <host> [port]")?;
-    let port: u16 = args.next().map_or(Ok(5000), |p| p.parse())?;
-    let client = MeshCore::tcp(&host, port).await?;
+    let port: u16 = args.next().map_or(Ok(DEFAULT_TCP_PORT), |p| p.parse())?;
+    let (client, _pushes) = Client::connect(&Transport::Tcp { host, port }).await?;
 
-    // APP_START, named: the command byte, seven reserved bytes, the name.
-    let mut frame = vec![0u8; 8];
-    frame[0] = 0x01;
-    frame.extend_from_slice(b"meshctl");
-    let commands = client.commands();
-    let answer = commands
-        .lock()
-        .await
-        .send(&frame, Some(EventType::SelfInfo))
-        .await?;
-    let EventPayload::SelfInfo(me) = answer.payload else {
-        return Err(format!("APP_START answered with {:?}", answer.payload).into());
-    };
+    let me = client.start().await?;
     println!(
-        "self: {:?} type {} key {} freq {} bw {} sf {} cr {} tx {}/{} lat {} lon {}",
+        "self: {:?} type {} key {} freq {} kHz bw {} Hz sf {} cr {} tx {}/{}",
         me.name,
-        me.adv_type,
+        me.kind,
         hex(&me.public_key[..8]),
-        me.radio_freq,
-        me.radio_bw,
-        me.sf,
-        me.cr,
+        me.frequency,
+        me.bandwidth,
+        me.spreading_factor,
+        me.coding_rate,
         me.tx_power,
         me.max_tx_power,
-        me.adv_lat,
-        me.adv_lon,
     );
 
-    match commands.lock().await.send_device_query().await {
-        Ok(device) => println!(
-            "device: model {:?} version {:?} build {:?} max contacts {:?} channels {:?}",
-            device.model, device.version, device.fw_build, device.max_contacts, device.max_channels
-        ),
-        Err(error) => println!("device query failed: {error}"),
-    }
+    let device = client.device().await;
+    println!("device: {device:?}");
 
-    let contacts = commands.lock().await.get_contacts(0).await?;
-    println!("{} contacts", contacts.len());
-    let mut by_type = std::collections::BTreeMap::<u8, usize>::new();
+    let (contacts, latest) = client.contacts(0).await?;
+    println!("{} contacts, latest change {latest}", contacts.len());
+    let mut by_kind = std::collections::BTreeMap::<u8, usize>::new();
     for contact in &contacts {
-        *by_type.entry(contact.contact_type).or_default() += 1;
+        *by_kind.entry(contact.kind).or_default() += 1;
     }
-    println!("by type: {by_type:?}");
-    for contact in contacts.iter().take(6) {
+    println!("by kind: {by_kind:?}");
+    for contact in contacts.iter().take(4) {
         println!(
-            "  {} {:?} type {} path {} last advert {} lat {} lon {}",
+            "  {} {:?} kind {} path {} modified {}",
             hex(&contact.public_key[..8]),
-            contact.adv_name,
-            contact.contact_type,
+            contact.name,
+            contact.kind,
             contact.path_len,
-            contact.last_advert,
-            contact.adv_lat,
-            contact.adv_lon,
+            contact.last_modified,
         );
     }
 
-    for index in 0..16u8 {
-        match commands.lock().await.get_channel(index).await {
-            Ok(channel) if !channel.name.is_empty() => {
-                println!("channel {index}: {:?}", channel.name);
-            }
-            Ok(_) => {}
-            Err(error) => {
-                println!("channel {index}: {error}");
-                break;
-            }
-        }
+    let slots = device.and_then(|d| d.max_channels).unwrap_or(8);
+    for (index, name) in client.channels(slots).await {
+        println!("channel {index}: {name:?}");
     }
-
-    client.disconnect().await?;
     Ok(())
 }
 

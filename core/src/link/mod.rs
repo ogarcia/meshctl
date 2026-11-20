@@ -115,16 +115,57 @@ impl Drop for Link {
     }
 }
 
-/// Connects to the radio.
+/// How payloads are wrapped on the stream: each protocol has its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Framing {
+    Meshtastic,
+    Meshcore,
+}
+
+/// A frame splitter for either framing.
+enum Parser {
+    Meshtastic(frame::FrameParser),
+    Meshcore(crate::meshcore::protocol::FrameParser),
+}
+
+impl Parser {
+    fn new(framing: Framing) -> Self {
+        match framing {
+            Framing::Meshtastic => Self::Meshtastic(frame::FrameParser::new()),
+            Framing::Meshcore => Self::Meshcore(crate::meshcore::protocol::FrameParser::new()),
+        }
+    }
+
+    fn feed(&mut self, data: &[u8]) -> Vec<Vec<u8>> {
+        match self {
+            Self::Meshtastic(parser) => parser.feed(data),
+            Self::Meshcore(parser) => parser.feed(data),
+        }
+    }
+}
+
+fn encode(framing: Framing, payload: &[u8]) -> Option<Vec<u8>> {
+    match framing {
+        Framing::Meshtastic => frame::encode(payload),
+        Framing::Meshcore => crate::meshcore::protocol::encode(payload),
+    }
+}
+
+/// Connects to a Meshtastic radio.
 pub async fn connect(transport: &Transport) -> io::Result<Link> {
+    connect_framed(transport, Framing::Meshtastic).await
+}
+
+/// Connects to a radio that wraps its payloads as `framing` says.
+pub async fn connect_framed(transport: &Transport, framing: Framing) -> io::Result<Link> {
     match transport {
-        Transport::Tcp { host, port } => tcp::connect(host, *port).await,
-        Transport::Serial { path, baud } => serial::connect(path, *baud).await,
+        Transport::Tcp { host, port } => tcp::connect(host, *port, framing).await,
+        Transport::Serial { path, baud } => serial::connect(path, *baud, framing).await,
     }
 }
 
 /// Runs both halves of a byte stream until either fails.
-fn spawn<S>(stream: S, name: &'static str) -> Link
+fn spawn<S>(stream: S, name: &'static str, framing: Framing) -> Link
 where
     S: AsyncRead + AsyncWrite + Send + 'static,
 {
@@ -136,7 +177,7 @@ where
 
         let read = async move {
             let mut buf = vec![0u8; 4096];
-            let mut parser = frame::FrameParser::new();
+            let mut parser = Parser::new(framing);
             loop {
                 match reader.read(&mut buf).await {
                     Ok(0) => {
@@ -161,7 +202,7 @@ where
 
         let write = async move {
             while let Some(payload) = outgoing.recv().await {
-                let Some(framed) = frame::encode(&payload) else {
+                let Some(framed) = encode(framing, &payload) else {
                     tracing::error!(len = payload.len(), "{name}: payload too long, dropped");
                     continue;
                 };
@@ -195,7 +236,7 @@ mod tests {
     #[tokio::test]
     async fn payloads_cross_in_both_directions() {
         let (ours, mut radio) = tokio::io::duplex(1024);
-        let mut link = spawn(ours, "test");
+        let mut link = spawn(ours, "test", Framing::Meshtastic);
 
         radio
             .write_all(&frame::encode(b"from radio").unwrap())
@@ -259,7 +300,7 @@ mod tests {
     #[tokio::test]
     async fn the_link_closes_when_the_radio_goes() {
         let (ours, radio) = tokio::io::duplex(1024);
-        let mut link = spawn(ours, "test");
+        let mut link = spawn(ours, "test", Framing::Meshtastic);
         drop(radio);
         assert!(link.rx.recv().await.is_none());
     }

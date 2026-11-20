@@ -2469,22 +2469,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "meshcore-rs"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d54efb1ab62a0452c82dec34a39db419ac6a525773eae4da835cbf77a233b2ae"
-dependencies = [
- "bytes",
- "futures",
- "thiserror 2.0.21",
- "tokio",
- "tokio-serial",
- "tokio-stream",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "meshctl-api"
 version = "0.1.0-dev"
 dependencies = [
@@ -2497,7 +2481,7 @@ dependencies = [
 name = "meshctl-core"
 version = "0.1.0-dev"
 dependencies = [
- "meshcore-rs",
+ "bytes",
  "meshctl-proto",
  "prost",
  "prost-reflect",
@@ -4252,7 +4236,6 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -4265,19 +4248,6 @@ dependencies = [
  "log",
  "tokio",
  "tungstenite",
-]
-
-[[package]]
-name = "tokio-util"
-version = "0.7.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
-dependencies = [
- "bytes",
- "futures-core",
- "futures-sink",
- "pin-project-lite",
- "tokio",
 ]
 
 [[package]]
