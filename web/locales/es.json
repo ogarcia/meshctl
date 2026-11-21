@@ -290,5 +290,6 @@
   "channel_remove_question": "Se quita de la radio, con su clave, y los que van detrás suben una ranura. ¿Y sus mensajes? Conservados, no salen en el chat, pero vuelven si vuelves a añadir el mismo canal (nombre y clave).",
   "channel_remove_keep": "Quitar y conservar",
   "channel_remove_forget": "Quitar y borrar",
-  "channel_numbered": "Canal"
+  "channel_numbered": "Canal",
+  "channel_duplicate": "Ya hay un canal con ese nombre y esa clave: para la radio serían el mismo, y todo lo que se oyera iría al primero. Cambia el nombre o la clave."
 }

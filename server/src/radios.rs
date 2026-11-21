@@ -117,6 +117,8 @@ pub enum SettingsFailure {
     NotConnected,
     /// Which setting it is that the radio cannot have.
     Invalid(String),
+    /// A channel the very same as another the radio has.
+    Duplicate,
     NoAnswer,
     /// Not something meshctl does with this kind of radio yet.
     Unsupported,
@@ -805,7 +807,10 @@ impl Radios {
                     getrandom::fill(key).expect("the system has randomness to give");
                 })
             })
-            .map_err(|why| SettingsFailure::Invalid(why.0.to_owned()))?;
+            .map_err(|why| match why.0 {
+                crate::settings::DUPLICATE => SettingsFailure::Duplicate,
+                why => SettingsFailure::Invalid(why.to_owned()),
+            })?;
         mesh.change_settings(change).await.map_err(admin_failure)?;
         tracing::info!(radio = id, reboots, "settings changed");
         Ok(SettingsApplied { reboots })

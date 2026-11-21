@@ -158,6 +158,9 @@ pub fn view(settings: &Settings) -> Option<NodeSettings> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invalid(pub &'static str);
 
+/// What [`Invalid`] says of a channel the very same as another.
+pub const DUPLICATE: &str = "duplicate channel";
+
 fn check(ok: bool, what: &'static str) -> Result<(), Invalid> {
     if ok { Ok(()) } else { Err(Invalid(what)) }
 }
@@ -225,6 +228,18 @@ pub fn change(
 
     for wanted in &wanted.channels {
         change.channels.push(channel(settings, wanted, &random)?);
+    }
+    // No channel the very same as another: the radio would take all that is
+    // heard on them as the first's.
+    if !change.channels.is_empty() {
+        let mut after = settings.clone();
+        for channel in &change.channels {
+            after.channels.insert(channel.index as u32, channel.clone());
+        }
+        let changed: Vec<u32> = change.channels.iter().map(|c| c.index as u32).collect();
+        if crate::channels::duplicate(&after, &changed).is_some() {
+            return Err(Invalid(DUPLICATE));
+        }
     }
 
     Ok((change, reboots))
@@ -494,6 +509,37 @@ mod tests {
         assert_eq!(empty.kind, ChannelKey::None);
         assert_eq!(empty.key, "");
         assert_eq!(secret(&settings, 8), None);
+    }
+
+    #[test]
+    fn a_channel_the_same_as_another_is_refused() {
+        // Moire again, in another slot, with its very key.
+        let same = ChannelChange {
+            index: 6,
+            role: "SECONDARY".into(),
+            name: "Moire".into(),
+            key: KeyChange::Custom,
+            custom_key: Some("BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=".into()),
+            uplink: false,
+            downlink: false,
+        };
+        let wanted = NodeSettingsChange {
+            channels: vec![same.clone()],
+            ..Default::default()
+        };
+        assert_eq!(
+            super::change(&settings(), &wanted, no_random).err(),
+            Some(Invalid(DUPLICATE))
+        );
+        // Named, it is another channel.
+        let named = NodeSettingsChange {
+            channels: vec![ChannelChange {
+                name: "Otro".into(),
+                ..same
+            }],
+            ..Default::default()
+        };
+        assert!(super::change(&settings(), &named, no_random).is_ok());
     }
 
     #[test]

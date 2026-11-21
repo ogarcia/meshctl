@@ -11,7 +11,7 @@ use crate::channel_settings::ChannelsTab;
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
 use crate::radios::Switch;
-use crate::sections::{SaveBar, SectionEdits, SectionsTab};
+use crate::sections::{SaveBar, SectionEdits, SectionsTab, clear_when_synced};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{
@@ -110,6 +110,7 @@ pub fn SettingsView() -> impl IntoView {
     let draft = RwSignal::new(None::<NodeSettings>);
     let section_edits: SectionEdits = RwSignal::new(BTreeMap::new());
     let notice = RwSignal::new(None::<Result<bool, Failure>>);
+    clear_when_synced(live, notice);
     let busy = RwSignal::new(false);
     let tab = RwSignal::new(Tab::User);
 

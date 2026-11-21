@@ -40,6 +40,10 @@ pub(super) fn refused(failure: SettingsFailure) -> Response {
             tracing::debug!(setting = %why, "invalid settings");
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidSettings)
         }
+        SettingsFailure::Duplicate => error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::DuplicateChannel,
+        ),
         SettingsFailure::Unsupported => {
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::UnsupportedKind)
         }
@@ -101,7 +105,7 @@ async fn show(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Resp
         (status = 401, description = "The access token is missing or wrong", body = Error),
         (status = 404, description = "There is no such radio", body = Error),
         (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
-        (status = 422, description = "Not settings the radio can have: `invalid_settings`", body = Error),
+        (status = 422, description = "Not settings the radio can have: `invalid_settings`; a channel the very same as another, name and key: `duplicate_channel`", body = Error),
         (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
     )
 )]

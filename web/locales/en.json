@@ -290,5 +290,6 @@
   "channel_remove_question": "It goes off the radio, its key with it, and those after it move up a slot. And its messages? Kept, they are not in the chat, but they come back if you add the very same channel again (name and key).",
   "channel_remove_keep": "Remove and keep",
   "channel_remove_forget": "Remove and delete",
-  "channel_numbered": "Channel"
+  "channel_numbered": "Channel",
+  "channel_duplicate": "There already is a channel with that name and key: to the radio they would be the same, and all that is heard would go to the first. Change the name or the key."
 }

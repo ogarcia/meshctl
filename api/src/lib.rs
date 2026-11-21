@@ -76,6 +76,9 @@ pub enum ErrorCode {
     /// Not a place on the map: a latitude past ±90, a longitude past ±180, or
     /// a zoom past what maps have.
     InvalidMapView,
+    /// A channel with the very name and key of another the radio has: on
+    /// the air, and to the radio, it would be that same channel.
+    DuplicateChannel,
 }
 
 /// The body of every error the API answers with.

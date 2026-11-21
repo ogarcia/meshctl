@@ -37,6 +37,33 @@ fn enabled(section: &SettingsSection) -> Option<bool> {
         .and_then(|f| f.value.as_ref().and_then(Json::as_bool))
 }
 
+/// Lets a notice of something sent to the radio go once the radio has been
+/// read back with it, as the notice says it will be; or, if it rebooted to
+/// apply it, once it is back. One of something gone wrong stays, to be read,
+/// until the next try.
+pub fn clear_when_synced<T: Clone + Send + Sync + 'static>(
+    live: Live,
+    notice: RwSignal<Option<Result<T, Failure>>>,
+) {
+    // How many syncs there had been when it was given.
+    let since = StoredValue::new(None::<u32>);
+    Effect::new(move |_| {
+        let synced = live.synced.get();
+        if !notice.with(|n| matches!(n, Some(Ok(_)))) {
+            since.set_value(None);
+            return;
+        }
+        match since.get_value() {
+            None => since.set_value(Some(synced)),
+            Some(at) if synced != at => {
+                since.set_value(None);
+                notice.set(None);
+            }
+            Some(_) => {}
+        }
+    });
+}
+
 /// Undo and save, at the foot of what they act on.
 #[component]
 pub fn SaveBar(
@@ -148,6 +175,7 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let notice = RwSignal::new(None::<Result<(), Failure>>);
+    clear_when_synced(live, notice);
     let busy = RwSignal::new(false);
     let id = section.id.clone();
     let on = enabled(&section);

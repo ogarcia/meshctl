@@ -487,6 +487,9 @@ fn ChannelEditor(
     let message = move || {
         error.get().map(|failure| match failure {
             Failure::Rejected(ErrorCode::InvalidSettings) => t!(i18n, channel_invalid).into_any(),
+            Failure::Rejected(ErrorCode::DuplicateChannel) => {
+                t!(i18n, channel_duplicate).into_any()
+            }
             Failure::Rejected(ErrorCode::RadioDidNotAnswer) => {
                 t!(i18n, settings_no_answer).into_any()
             }

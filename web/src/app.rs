@@ -378,23 +378,30 @@ impl Live {
     /// With the daemon out of reach nothing is known of the radios' links:
     /// none is taken as up, so nothing is offered that needs one, until a
     /// new session reads them again.
+    /// A radio switched off stays so: that is meshctl's own setting, known
+    /// without asking.
     fn lose_links(self) {
+        let lost = |link: &mut LinkState| {
+            if *link != LinkState::Disabled {
+                *link = LinkState::Disconnected;
+            }
+        };
         self.radios.update(|radios| {
             for radio in radios.iter_mut().flatten() {
-                radio.link = LinkState::Disconnected;
+                lost(&mut radio.link);
             }
         });
         self.status.update(|status| {
             if let Some(status) = status {
-                status.link = LinkState::Disconnected;
+                lost(&mut status.link);
             }
         });
     }
 
     /// The class for a radio's link, as far as is known: with the daemon out
-    /// of reach, that.
+    /// of reach, that, but for a radio switched off.
     pub fn link_class(self, link: LinkState) -> &'static str {
-        if self.daemon.get() == Daemon::Connected {
+        if self.daemon.get() == Daemon::Connected || link == LinkState::Disabled {
             link_class(link)
         } else {
             "daemon-down"
@@ -1195,12 +1202,12 @@ pub fn LinkLabel(#[prop(into)] link: Signal<LinkState>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     move || match link.get() {
+        LinkState::Disabled => t!(i18n, link_disabled).into_any(),
         _ if live.daemon.get() != Daemon::Connected => t!(i18n, link_daemon_down).into_any(),
         LinkState::Ready => t!(i18n, link_ready).into_any(),
         LinkState::Syncing => t!(i18n, link_syncing).into_any(),
         LinkState::Connecting => t!(i18n, link_connecting).into_any(),
         LinkState::Disconnected => t!(i18n, link_radio_down).into_any(),
-        LinkState::Disabled => t!(i18n, link_disabled).into_any(),
     }
 }
 

@@ -68,11 +68,30 @@ fn effective_name(settings: &Settings, channel: &pb::ChannelSettings) -> String 
     }
 }
 
+/// The key the radio well knows: what a key of one byte, 1, stands for.
+const DEFAULT_KEY: [u8; 16] = [
+    0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01,
+];
+
+/// A key as the radio uses it: none for none or 0; the default one for 1,
+/// and the simple ones, 2 to 255, as it with its last byte moved on.
+fn key_in_use(psk: &[u8]) -> Vec<u8> {
+    match psk {
+        [] | [0] => Vec::new(),
+        [n] => {
+            let mut key = DEFAULT_KEY.to_vec();
+            key[15] = key[15].wrapping_add(n - 1);
+            key
+        }
+        key => key.to_vec(),
+    }
+}
+
 pub fn fingerprint(name: &str, psk: &[u8]) -> Fingerprint {
     let mut hash = Sha256::new();
     hash.update((name.len() as u32).to_be_bytes());
     hash.update(name.as_bytes());
-    hash.update(psk);
+    hash.update(key_in_use(psk));
     let digest = hash.finalize();
     let mut print = [0; 16];
     print.copy_from_slice(&digest[..16]);
@@ -97,6 +116,22 @@ pub fn slots(settings: &Settings) -> Vec<Slot> {
             })
         })
         .collect()
+}
+
+/// The slot of a channel the radio has that one of `changed` would be the
+/// very same as, name and key, once they are set: the radio could not tell
+/// them apart. Two that already were the same are left be.
+pub fn duplicate(after: &Settings, changed: &[u32]) -> Option<u32> {
+    let slots = slots(after);
+    slots
+        .iter()
+        .filter(|s| changed.contains(&s.index))
+        .find_map(|new| {
+            slots
+                .iter()
+                .find(|other| other.index != new.index && other.fingerprint == new.fingerprint)
+                .map(|other| other.index)
+        })
 }
 
 /// What became of the channels between two readings of them.
@@ -288,6 +323,26 @@ mod tests {
             channel(2, pb::channel::Role::Secondary, "Lab", vec![9; 16]),
         );
         settings
+    }
+
+    #[test]
+    fn keys_count_as_the_radio_uses_them() {
+        assert_eq!(fingerprint("A", &[]), fingerprint("A", &[0]));
+        assert_eq!(fingerprint("A", &[1]), fingerprint("A", &DEFAULT_KEY));
+        assert_ne!(fingerprint("A", &[1]), fingerprint("A", &[2]));
+    }
+
+    #[test]
+    fn a_channel_the_same_as_another_is_found() {
+        let mut settings = radio();
+        // Lab, renamed as the primary and with its key: the same channel.
+        let lab = settings.channels.get_mut(&2).unwrap();
+        let lab_settings = lab.settings.as_mut().unwrap();
+        lab_settings.name = String::new();
+        lab_settings.psk = DEFAULT_KEY.to_vec();
+        assert_eq!(duplicate(&settings, &[2]), Some(0));
+        // Not if it is the one left as it was.
+        assert_eq!(duplicate(&settings, &[1]), None);
     }
 
     #[test]
