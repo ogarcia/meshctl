@@ -7,6 +7,7 @@
 //! read back once it has applied them.
 
 use crate::app::Live;
+use crate::channel_settings::ChannelsTab;
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
 use crate::radios::Switch;
@@ -14,36 +15,18 @@ use crate::sections::{SaveBar, SectionEdits, SectionsTab};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{
-    ChannelChange, ChannelKey, ErrorCode, KeyChange, LinkState, NodeSettings, NodeSettingsChange,
-    RadioId, RadioKind, SettingsSection,
+    ErrorCode, LinkState, NodeSettings, NodeSettingsChange, RadioId, RadioKind, SettingsSection,
 };
 use std::collections::BTreeMap;
 
-/// What changed between the settings read and the ones in the form.
-fn changes(
-    original: &NodeSettings,
-    draft: &NodeSettings,
-    keys: &[KeyChange],
-) -> NodeSettingsChange {
+/// What changed between the settings read and the ones in the form. The
+/// channels are not in it: each is saved on its own, from its editor.
+fn changes(original: &NodeSettings, draft: &NodeSettings) -> NodeSettingsChange {
     NodeSettingsChange {
         owner: (draft.owner != original.owner).then(|| draft.owner.clone()),
         device: (draft.device != original.device).then(|| draft.device.clone()),
         lora: (draft.lora != original.lora).then(|| draft.lora.clone()),
-        channels: draft
-            .channels
-            .iter()
-            .zip(&original.channels)
-            .zip(keys)
-            .filter(|((now, before), key)| now != before || **key != KeyChange::Keep)
-            .map(|((now, _), key)| ChannelChange {
-                index: now.index,
-                role: now.role.clone(),
-                name: now.name.clone(),
-                key: *key,
-                uplink: now.uplink,
-                downlink: now.downlink,
-            })
-            .collect(),
+        channels: Vec::new(),
     }
 }
 
@@ -86,11 +69,7 @@ fn part_of(tab: Tab, change: NodeSettingsChange) -> NodeSettingsChange {
             lora: change.lora,
             ..Default::default()
         },
-        Tab::Channels => NodeSettingsChange {
-            channels: change.channels,
-            ..Default::default()
-        },
-        Tab::Device | Tab::Modules => NodeSettingsChange::default(),
+        Tab::Channels | Tab::Device | Tab::Modules => NodeSettingsChange::default(),
     }
 }
 
@@ -102,19 +81,13 @@ fn copy_part(tab: Tab, from: &NodeSettings, to: &mut NodeSettings) {
             to.device = from.device.clone();
         }
         Tab::Lora => to.lora = from.lora.clone(),
-        Tab::Channels => to.channels = from.channels.clone(),
-        Tab::Device | Tab::Modules => {}
+        Tab::Channels | Tab::Device | Tab::Modules => {}
     }
 }
 
 /// The settings read again, keeping what is being edited of them: saving a
 /// tab, which reads them all back, does not undo another.
-fn merge(
-    before: &NodeSettings,
-    draft: &NodeSettings,
-    read: &NodeSettings,
-    keys: &[KeyChange],
-) -> (NodeSettings, Vec<KeyChange>) {
+fn merge(before: &NodeSettings, draft: &NodeSettings, read: &NodeSettings) -> NodeSettings {
     let mut merged = read.clone();
     if draft.owner != before.owner {
         merged.owner = draft.owner.clone();
@@ -125,18 +98,7 @@ fn merge(
     if draft.lora != before.lora {
         merged.lora = draft.lora.clone();
     }
-    let mut kept = vec![KeyChange::Keep; read.channels.len()];
-    for (slot, channel) in merged.channels.iter_mut().enumerate() {
-        if let (Some(now), Some(then)) = (draft.channels.get(slot), before.channels.get(slot))
-            && now != then
-        {
-            *channel = now.clone();
-        }
-        if let (Some(key), Some(keep)) = (keys.get(slot), kept.get_mut(slot)) {
-            *keep = *key;
-        }
-    }
-    (merged, kept)
+    merged
 }
 
 #[component]
@@ -146,7 +108,6 @@ pub fn SettingsView() -> impl IntoView {
     let loaded = RwSignal::new(None::<NodeSettings>);
     let sections = RwSignal::new(Vec::<SettingsSection>::new());
     let draft = RwSignal::new(None::<NodeSettings>);
-    let keys = RwSignal::new(vec![KeyChange::Keep; 8]);
     let section_edits: SectionEdits = RwSignal::new(BTreeMap::new());
     let notice = RwSignal::new(None::<Result<bool, Failure>>);
     let busy = RwSignal::new(false);
@@ -189,11 +150,10 @@ pub fn SettingsView() -> impl IntoView {
             {
                 let before = loaded.get_untracked();
                 let now = draft.get_untracked();
-                let (merged, kept) = match (before, now) {
-                    (Some(before), Some(now)) => merge(&before, &now, &read, &keys.get_untracked()),
-                    _ => (read.clone(), vec![KeyChange::Keep; read.channels.len()]),
+                let merged = match (before, now) {
+                    (Some(before), Some(now)) => merge(&before, &now, &read),
+                    _ => read.clone(),
                 };
-                keys.set(kept);
                 draft.set(Some(merged));
                 loaded.set(Some(read));
             }
@@ -211,7 +171,7 @@ pub fn SettingsView() -> impl IntoView {
         let (Some(original), Some(now)) = (loaded.get(), draft.get()) else {
             return None;
         };
-        let change = part_of(tab, changes(&original, &now, &keys.get()));
+        let change = part_of(tab, changes(&original, &now));
         (!is_empty(&change)).then_some(change)
     };
     let edited = move |tab: Tab| match tab {
@@ -255,9 +215,6 @@ pub fn SettingsView() -> impl IntoView {
                         }
                     });
                 }
-                if tab == Tab::Channels {
-                    keys.update(|k| k.fill(KeyChange::Keep));
-                }
             }
             notice.set(Some(applied.map(|a| a.reboots)));
             busy.set(false);
@@ -270,9 +227,6 @@ pub fn SettingsView() -> impl IntoView {
                     copy_part(tab, &original, d);
                 }
             });
-        }
-        if tab == Tab::Channels {
-            keys.update(|k| k.fill(KeyChange::Keep));
         }
     };
 
@@ -344,7 +298,7 @@ pub fn SettingsView() -> impl IntoView {
         match this {
             Tab::User => view! { <UserTab draft /> {bar()} }.into_any(),
             Tab::Lora => view! { <LoraTab draft /> {bar()} }.into_any(),
-            Tab::Channels => view! { <Channels draft keys loaded /> {bar()} }.into_any(),
+            Tab::Channels => view! { <ChannelsTab loaded notice /> }.into_any(),
             Tab::Device => {
                 view! { <SectionsTab sections module=false edits=section_edits /> }.into_any()
             }
@@ -552,151 +506,6 @@ fn LoraTab(draft: Draft) -> impl IntoView {
                 </div>
             </Row>
         </div>
-    }
-}
-
-#[component]
-fn Channels(
-    draft: Draft,
-    keys: RwSignal<Vec<KeyChange>>,
-    loaded: RwSignal<Option<NodeSettings>>,
-) -> impl IntoView {
-    let i18n = use_i18n();
-    view! {
-        <section class="card">
-            <div class="scroll">
-                <table class="channels">
-                    <thead>
-                        <tr>
-                            <th>"#"</th>
-                            <th>{t!(i18n, settings_channel_role)}</th>
-                            <th>{t!(i18n, settings_channel_name)}</th>
-                            <th>{t!(i18n, settings_channel_key)}</th>
-                            <th>"↑ MQTT"</th>
-                            <th>"↓ MQTT"</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {(0..8usize)
-                            .map(|index| view! { <ChannelRow index draft keys loaded /> })
-                            .collect_view()}
-                    </tbody>
-                </table>
-            </div>
-        </section>
-    }
-}
-
-#[component]
-fn ChannelRow(
-    index: usize,
-    draft: Draft,
-    keys: RwSignal<Vec<KeyChange>>,
-    loaded: RwSignal<Option<NodeSettings>>,
-) -> impl IntoView {
-    // `slot` is a word of the view macro's own; called index outside it.
-    let slot = index;
-    let i18n = use_i18n();
-    let (role, set_role) = field(
-        draft,
-        move |d| d.channels[slot].role.clone(),
-        move |d, v| d.channels[slot].role = v,
-    );
-    let (name, set_name) = field(
-        draft,
-        move |d| d.channels[slot].name.clone(),
-        move |d, v| d.channels[slot].name = v,
-    );
-    let (uplink, set_uplink) = field(
-        draft,
-        move |d| d.channels[slot].uplink,
-        move |d, v| d.channels[slot].uplink = v,
-    );
-    let (downlink, set_downlink) = field(
-        draft,
-        move |d| d.channels[slot].downlink,
-        move |d, v| d.channels[slot].downlink = v,
-    );
-    let primary = slot == 0;
-    let roles = move || {
-        if primary {
-            vec!["PRIMARY".to_owned()]
-        } else {
-            vec!["SECONDARY".to_owned(), "DISABLED".to_owned()]
-        }
-    };
-    // What the key is now, as the radio has it.
-    let current = move || {
-        loaded.with(|l| {
-            l.as_ref()
-                .map_or(ChannelKey::None, |l| l.channels[slot].key)
-        })
-    };
-    let current_label = move || match current() {
-        ChannelKey::None => t_string!(i18n, key_none),
-        ChannelKey::Default => t_string!(i18n, key_default),
-        ChannelKey::Simple => t_string!(i18n, key_simple),
-        ChannelKey::Aes128 => "AES-128",
-        ChannelKey::Aes256 => "AES-256",
-    };
-    let key_value = move || match keys.with(|k| k[slot]) {
-        KeyChange::Keep => "keep",
-        KeyChange::None => "none",
-        KeyChange::Default => "default",
-        KeyChange::NewAes128 => "new_aes128",
-        KeyChange::NewAes256 => "new_aes256",
-    };
-    let set_key = move |value: String| {
-        let change = match value.as_str() {
-            "none" => KeyChange::None,
-            "default" => KeyChange::Default,
-            "new_aes128" => KeyChange::NewAes128,
-            "new_aes256" => KeyChange::NewAes256,
-            _ => KeyChange::Keep,
-        };
-        keys.update(|k| k[slot] = change);
-    };
-
-    view! {
-        <tr>
-            <td class="num">{slot}</td>
-            <td><Choice options=roles value=role set=set_role /></td>
-            <td>
-                <input
-                    maxlength="11"
-                    prop:value=name
-                    on:input=move |ev| set_name(event_target_value(&ev))
-                />
-            </td>
-            <td>
-                <select
-                    prop:value=key_value
-                    on:change=move |ev| set_key(event_target_value(&ev))
-                >
-                    <option value="keep">
-                        {t!(i18n, key_keep)} " (" {current_label} ")"
-                    </option>
-                    <option value="none">{t!(i18n, key_none)}</option>
-                    <option value="default">{t!(i18n, key_default)}</option>
-                    <option value="new_aes128">{t!(i18n, key_new)} " AES-128"</option>
-                    <option value="new_aes256">{t!(i18n, key_new)} " AES-256"</option>
-                </select>
-            </td>
-            <td>
-                <input
-                    type="checkbox"
-                    prop:checked=uplink
-                    on:change=move |ev| set_uplink(event_target_checked(&ev))
-                />
-            </td>
-            <td>
-                <input
-                    type="checkbox"
-                    prop:checked=downlink
-                    on:change=move |ev| set_downlink(event_target_checked(&ev))
-                />
-            </td>
-        </tr>
     }
 }
 

@@ -10,10 +10,10 @@ use gloo_net::websocket::Message as Frame;
 use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
-    API_V1, Channel, Conversation, Error, ErrorCode, MapView, Message, NewMessage, NewTraceroute,
-    Node, NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioOrder,
-    RadioSettings, SectionChange, SettingsApplied, SettingsSection, SightingId, Status,
-    TOKEN_HEADER, Traceroute,
+    API_V1, Channel, ChannelSecret, Conversation, Error, ErrorCode, MapView, Message, NewMessage,
+    NewTraceroute, Node, NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio,
+    RadioId, RadioOrder, RadioSettings, SectionChange, SettingsApplied, SettingsSection,
+    SightingId, Status, TOKEN_HEADER, Traceroute,
 };
 use serde::de::DeserializeOwned;
 
@@ -144,6 +144,11 @@ pub async fn change_settings(
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// A channel's key itself: asked for only to be shown, and not kept.
+pub async fn channel_secret(radio: RadioId, index: u32) -> Result<ChannelSecret, Failure> {
+    get(&format!("/radios/{radio}/secrets/channels/{index}")).await
 }
 
 pub async fn sections(radio: RadioId) -> Result<Vec<SettingsSection>, Failure> {

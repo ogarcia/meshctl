@@ -29,7 +29,7 @@ pub fn peer_of(message: &Message) -> Peer {
 }
 
 /// A preset's name as people write it: `LONG_FAST` is LongFast.
-fn preset_name(preset: &str) -> String {
+pub fn preset_name(preset: &str) -> String {
     preset
         .split('_')
         .map(|word| {

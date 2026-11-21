@@ -6,9 +6,11 @@
 //! built on what the radio has, so that whatever the API does not cover goes
 //! back exactly as it was.
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use meshctl_api::{
-    ChannelChange, ChannelKey, ChannelSettings, DeviceSettings, KeyChange, LoraSettings,
-    NodeSettings, NodeSettingsChange, OwnerSettings, SettingsChoices,
+    ChannelChange, ChannelKey, ChannelSecret, ChannelSettings, DeviceSettings, KeyChange,
+    LoraSettings, NodeSettings, NodeSettingsChange, OwnerSettings, SettingsChoices,
 };
 use meshctl_core::mesh::Settings;
 use meshctl_core::radio::SettingsChange;
@@ -70,6 +72,41 @@ fn key_kind(psk: &[u8]) -> ChannelKey {
         key if key.len() <= 16 => ChannelKey::Aes128,
         _ => ChannelKey::Aes256,
     }
+}
+
+/// A channel's key, for the one who asks for it; `None` for a slot there is
+/// not.
+pub fn secret(settings: &Settings, index: u32) -> Option<ChannelSecret> {
+    if index >= CHANNEL_SLOTS {
+        return None;
+    }
+    let psk = settings
+        .channels
+        .get(&index)
+        .and_then(|c| c.settings.as_ref())
+        .map_or(&[][..], |s| s.psk.as_slice());
+    Some(ChannelSecret {
+        index,
+        kind: key_kind(psk),
+        key: if psk.is_empty() {
+            String::new()
+        } else {
+            BASE64.encode(psk)
+        },
+    })
+}
+
+/// A key of one's own, from its base64: of a simple one's byte, or AES-128
+/// or AES-256.
+fn own_key(text: Option<&str>) -> Result<Vec<u8>, Invalid> {
+    let text: String = text
+        .ok_or(Invalid("custom_key"))?
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let key = BASE64.decode(text).map_err(|_| Invalid("custom_key"))?;
+    check(matches!(key.len(), 1 | 16 | 32), "custom_key")?;
+    Ok(key)
 }
 
 /// The settings as the API shows them; `None` until the radio has sent them.
@@ -229,6 +266,7 @@ fn channel(
         KeyChange::Default => vec![1],
         KeyChange::NewAes128 => fresh(16, &random),
         KeyChange::NewAes256 => fresh(32, &random),
+        KeyChange::Custom => own_key(wanted.custom_key.as_deref())?,
     };
     Ok(channel)
 }
@@ -363,6 +401,7 @@ mod tests {
             role: "SECONDARY".into(),
             name: "Moire".into(),
             key: KeyChange::Keep,
+            custom_key: None,
             uplink: false,
             downlink: false,
         };
@@ -402,12 +441,71 @@ mod tests {
     }
 
     #[test]
+    fn a_channel_takes_a_key_of_its_own() {
+        let own = |key: &str| ChannelChange {
+            index: 4,
+            role: "SECONDARY".into(),
+            name: "Moire".into(),
+            key: KeyChange::Custom,
+            custom_key: Some(key.into()),
+            uplink: false,
+            downlink: false,
+        };
+        let apply = |channel| {
+            super::change(
+                &settings(),
+                &NodeSettingsChange {
+                    channels: vec![channel],
+                    ..Default::default()
+                },
+                no_random,
+            )
+        };
+        // Sixteen bytes, as the apps show them, spaces and all.
+        let (change, _) = apply(own(" 1PG7OiApB1nwvP+rz05pAQ== ")).unwrap();
+        let psk = &change.channels[0].settings.as_ref().unwrap().psk;
+        assert_eq!(psk.len(), 16);
+        assert_eq!(psk[0], 0xd4);
+        assert_eq!(
+            apply(own("AQ==")).unwrap().0.channels[0]
+                .settings
+                .as_ref()
+                .unwrap()
+                .psk,
+            vec![1]
+        );
+        // Not base64, a length no cipher takes, or none at all.
+        assert!(apply(own("not a key!")).is_err());
+        assert!(apply(own("AAEC")).is_err());
+        assert!(
+            apply(ChannelChange {
+                custom_key: None,
+                ..own("")
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_key_is_handed_out_when_asked_for() {
+        let settings = settings();
+        let moire = secret(&settings, 4).unwrap();
+        assert_eq!(moire.kind, ChannelKey::Aes256);
+        assert_eq!(BASE64.decode(&moire.key).unwrap(), vec![7; 32]);
+        let empty = secret(&settings, 6).unwrap();
+        assert_eq!(empty.kind, ChannelKey::None);
+        assert_eq!(empty.key, "");
+        assert_eq!(secret(&settings, 8), None);
+    }
+
+    #[test]
     fn what_the_radio_cannot_have_is_refused() {
         let channel = |index: u32, role: &str, name: &str| ChannelChange {
             index,
             role: role.into(),
             name: name.into(),
             key: KeyChange::Keep,
+            custom_key: None,
             uplink: false,
             downlink: false,
         };

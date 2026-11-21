@@ -778,6 +778,8 @@ pub enum KeyChange {
     NewAes128,
     /// A new random key of 256 bits.
     NewAes256,
+    /// One's own, given in `custom_key`.
+    Custom,
 }
 
 /// A channel as it is to be.
@@ -789,8 +791,26 @@ pub struct ChannelChange {
     pub name: String,
     #[serde(default)]
     pub key: KeyChange,
+    /// With `key` at `custom`: the key, in base64 as the apps show it, of 16
+    /// or 32 bytes (AES-128 or AES-256), or of 1 for one of the simple ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(example = "1PG7OiApB1nwvP+rz05pAQ=="))]
+    pub custom_key: Option<String>,
     pub uplink: bool,
     pub downlink: bool,
+}
+
+/// A channel's key itself, asked for on its own: the one secret of the radio
+/// meshctl hands out, and only when asked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ChannelSecret {
+    /// Its slot, 0 to 7.
+    pub index: u32,
+    pub kind: ChannelKey,
+    /// In base64, as the apps show it; empty when it has none.
+    #[cfg_attr(feature = "openapi", schema(example = "1PG7OiApB1nwvP+rz05pAQ=="))]
+    pub key: String,
 }
 
 /// What to change of the radio's settings: each part given is set whole,

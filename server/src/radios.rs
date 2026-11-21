@@ -9,10 +9,10 @@
 use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
-    BADGE_COLORS, Badge, BadgeContent, Conversation, ErrorCode, Hop, LinkState, MapView, Message,
-    MessageId, MessageStatus, NewMessage, NewRequest, NodeSettings, NodeSettingsChange, Packet,
-    Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind,
-    SettingsApplied, SettingsSection, SightingId, Status, Traceroute,
+    BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkState,
+    MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeSettings,
+    NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
+    Request, RequestKind, SettingsApplied, SettingsSection, SightingId, Status, Traceroute,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -660,6 +660,29 @@ impl Radios {
         self.configurable(id)?
             .read(|state| crate::settings::view(&state.settings))
             .ok_or(SettingsFailure::NotConnected)
+    }
+
+    /// A channel's key, for the one who asks for it, and only then: nothing
+    /// else hands it out. Each time is logged.
+    pub fn channel_secret(
+        &self,
+        id: RadioId,
+        index: u32,
+    ) -> Result<Option<ChannelSecret>, SettingsFailure> {
+        let (sent, secret) = self.configurable(id)?.read(|state| {
+            (
+                crate::settings::view(&state.settings).is_some(),
+                crate::settings::secret(&state.settings, index),
+            )
+        });
+        // As for its settings: not before the radio has sent them.
+        if !sent {
+            return Err(SettingsFailure::NotConnected);
+        }
+        if secret.is_some() {
+            tracing::info!(radio = id, channel = index, "channel key handed out");
+        }
+        Ok(secret)
     }
 
     /// A radio whose settings can be read and changed now: there is such a

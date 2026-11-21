@@ -5,6 +5,7 @@ include!(concat!(env!("OUT_DIR"), "/i18n/mod.rs"));
 
 mod app;
 mod badge;
+mod channel_settings;
 mod chat;
 mod daemon;
 mod emoji;

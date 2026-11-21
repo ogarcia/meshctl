@@ -28,7 +28,7 @@ fn error(status: StatusCode, error: ErrorCode) -> Response {
     (status, Json(Error { error })).into_response()
 }
 
-fn refused(failure: SettingsFailure) -> Response {
+pub(super) fn refused(failure: SettingsFailure) -> Response {
     match failure {
         SettingsFailure::NoSuchRadio => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         SettingsFailure::NotConnected => error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
@@ -83,7 +83,9 @@ async fn show(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Resp
 /// - `lora.hop_limit`: 1 to 7.
 /// - `channels`: only those to change. Slot 0 is the primary and only it; a
 ///   secondary needs a name; names take up to 11 bytes. `key` is `keep`
-///   unless said otherwise.
+///   unless said otherwise; with `custom`, `custom_key` carries the key in
+///   base64, of 16 or 32 bytes, or 1 for a simple one. The keys themselves
+///   are asked for under `secrets`.
 #[utoipa::path(
     put,
     path = "/radios/{radio}/settings",
