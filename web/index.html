@@ -821,16 +821,10 @@
       .section-head { display: flex; align-items: center; gap: 10px; }
       .section-head h2 { margin: 0; font-size: 18px; }
       .section-panel form { display: flex; flex-direction: column; gap: 16px; }
-      .section-panel .fields {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 14px 16px;
-        align-items: end;
-      }
-      .section-panel label { display: grid; gap: 4px; }
-      .section-panel label span { color: var(--mc-muted); font-size: 12px; }
-      .section-panel label.check { display: flex; gap: 8px; align-items: center; padding-bottom: 8px; }
-      .section-panel label.check span { font-size: inherit; color: inherit; }
+      /* Each setting a row, as the other tabs': narrower controls beside
+         the list of sections. */
+      .section-panel .pref-control { width: 300px; }
+      .section-panel .pref-what .tag { margin-left: 6px; font-weight: 400; }
       .section-panel .note { padding: 8px 12px; }
       @media (max-width: 760px) {
         .sections-tab { grid-template-columns: minmax(0, 1fr); }

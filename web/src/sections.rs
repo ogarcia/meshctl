@@ -7,6 +7,8 @@
 use crate::app::Live;
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
+use crate::names;
+use crate::radios::Switch;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{ErrorCode, FieldKind, SettingsField, SettingsSection};
@@ -98,6 +100,7 @@ pub fn SectionsTab(
     module: bool,
     edits: SectionEdits,
 ) -> impl IntoView {
+    let i18n = use_i18n();
     let list = Memo::new(move |_| {
         sections.with(|all| {
             all.iter()
@@ -154,7 +157,9 @@ pub fn SectionsTab(
                                 on:click=move |_| picked.set(Some(id.clone()))
                             >
                                 {state}
-                                <span class="label">{words(&section.name)}</span>
+                                <span class="label">
+                                    {move || names::section(i18n.get_locale(), &section.name)}
+                                </span>
                                 <span class="edited" class:gone=move || !touched()>
                                     "✎"
                                 </span>
@@ -246,7 +251,7 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
 
     view! {
         <div class="section-head">
-            <h2>{words(&section.name)}</h2>
+            <h2>{move || names::section(i18n.get_locale(), &section.name)}</h2>
             {on.map(|on| {
                 view! {
                     <span class=if on { "badge ready" } else { "badge disabled" }>
@@ -259,7 +264,7 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
         // it refuses silently, as it does a setting at zero below a floor the
         // firmware reads as "the default".
         <form novalidate on:submit=|ev| ev.prevent_default()>
-            <div class="fields">{fields}</div>
+            <div class="preferences">{fields}</div>
             {notice_view}
             <SaveBar dirty busy=Signal::derive(move || busy.get()) save undo />
         </form>
@@ -316,13 +321,20 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
 
     let input = match field.kind {
         FieldKind::Bool => {
-            let current = current.clone();
+            let on = {
+                let current = current.clone();
+                Signal::derive(move || current().as_bool().unwrap_or(false))
+            };
+            let put = put.clone();
+            let label = label.clone();
             view! {
-                <input
-                    type="checkbox"
-                    prop:checked=move || current().as_bool().unwrap_or(false)
-                    on:change=move |ev| put(Json::Bool(event_target_checked(&ev)))
-                />
+                <div class="pref-control switch-control">
+                    <Switch
+                        on
+                        label=Signal::derive(move || label.clone())
+                        flip=move |_| put(Json::Bool(!on.get_untracked()))
+                    />
+                </div>
             }
             .into_any()
         }
@@ -331,6 +343,7 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
             let choices = field.choices.clone();
             view! {
                 <select
+                    class="pref-control"
                     prop:value=move || current().as_str().unwrap_or_default().to_owned()
                     on:change=move |ev| put(Json::String(event_target_value(&ev)))
                 >
@@ -350,6 +363,7 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
             let whole = field.kind == FieldKind::Integer;
             view! {
                 <input
+                    class="pref-control"
                     type="number"
                     step=if whole { "1" } else { "any" }
                     min=field.min.map(|m| m.to_string())
@@ -374,6 +388,7 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
             let set = field.set;
             view! {
                 <input
+                    class="pref-control"
                     type="password"
                     autocomplete="new-password"
                     placeholder=move || {
@@ -395,6 +410,7 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
             let current = current.clone();
             view! {
                 <input
+                    class="pref-control"
                     prop:value=move || current().as_str().unwrap_or_default().to_owned()
                     on:input=move |ev| put(Json::String(event_target_value(&ev)))
                 />
@@ -403,21 +419,20 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
         }
     };
 
-    let check = field.kind == FieldKind::Bool;
+    // A row, as the other tabs' settings: what it is and a word on it, and
+    // its control.
     view! {
-        <label class=if check { "check" } else { "" } title=title>
-            {(!check).then(|| view! {
-                <span>
+        <div class="pref-row">
+            <div class="pref-what">
+                <span class="pref-title">
                     {label.clone()}
                     {unit.clone().map(|u| format!(" ({u})"))}
-                    {field.diy_only.then_some(" · DIY")}
+                    {field.diy_only.then(|| view! { <span class="tag">"DIY"</span> })}
                 </span>
-            })}
+                <span class="dim">{title}</span>
+            </div>
             {input}
-            {check.then(|| view! {
-                <span>{label.clone()}{field.diy_only.then_some(" · DIY")}</span>
-            })}
-        </label>
+        </div>
     }
 }
 

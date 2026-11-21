@@ -110,6 +110,60 @@ const ROLES: &[(&str, &str, &str)] = &[
     ("LOST_AND_FOUND", "Objetos perdidos", "Lost and found"),
 ];
 
+/// The configuration's sections and the modules, by their names in the
+/// protobufs.
+const SECTIONS: &[(&str, &str, &str)] = &[
+    ("device", "Dispositivo", "Device"),
+    ("position", "Posición", "Position"),
+    ("power", "Energía", "Power"),
+    ("network", "Red", "Network"),
+    ("display", "Pantalla", "Display"),
+    ("bluetooth", "Bluetooth", "Bluetooth"),
+    ("ambient_lighting", "Luz ambiental", "Ambient lighting"),
+    ("audio", "Audio", "Audio"),
+    ("canned_message", "Mensajes predefinidos", "Canned messages"),
+    (
+        "detection_sensor",
+        "Sensor de detección",
+        "Detection sensor",
+    ),
+    (
+        "external_notification",
+        "Avisos externos",
+        "External notification",
+    ),
+    ("mesh_beacon", "Baliza de la malla", "Mesh beacon"),
+    ("mqtt", "MQTT", "MQTT"),
+    ("neighbor_info", "Vecinos", "Neighbour info"),
+    ("paxcounter", "Contador de personas", "People counter"),
+    ("range_test", "Prueba de alcance", "Range test"),
+    ("remote_hardware", "Hardware remoto", "Remote hardware"),
+    ("serial", "Puerto serie", "Serial"),
+    ("store_forward", "Guardar y reenviar", "Store and forward"),
+    ("tak", "TAK", "TAK"),
+    ("telemetry", "Telemetría", "Telemetry"),
+    (
+        "traffic_management",
+        "Gestión del tráfico",
+        "Traffic management",
+    ),
+];
+
+/// A section's name in the interface's language: one not known here, as the
+/// protobufs name it, in words.
+pub fn section(locale: Locale, name: &str) -> String {
+    SECTIONS
+        .iter()
+        .find(|(known, _, _)| *known == name)
+        .map_or_else(
+            || crate::sections::words(name),
+            |(_, es, en)| match locale {
+                Locale::es => (*es).to_owned(),
+                Locale::en => (*en).to_owned(),
+            },
+        )
+}
+
 /// A code from a table as read in a language, with the code after it.
 fn named(table: &[(&str, &str, &str)], locale: Locale, code: &str) -> String {
     table
