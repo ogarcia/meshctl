@@ -10,6 +10,7 @@ use crate::app::Live;
 use crate::channel_settings::ChannelsTab;
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
+use crate::preferences::pills;
 use crate::radios::Switch;
 use crate::sections::{SaveBar, SectionEdits, SectionsTab, clear_when_synced};
 use leptos::prelude::*;
@@ -424,20 +425,114 @@ fn UserTab(draft: Draft) -> impl IntoView {
     }
 }
 
+/// A bandwidth as the radio keeps it, in kHz: a few codes stand for a
+/// fraction.
+fn bandwidth_label(code: u32) -> String {
+    let khz = match code {
+        8 => "7.8".to_owned(),
+        10 => "10.4".to_owned(),
+        16 => "15.6".to_owned(),
+        21 => "20.8".to_owned(),
+        31 => "31.25".to_owned(),
+        42 => "41.7".to_owned(),
+        62 => "62.5".to_owned(),
+        200 => "203.125".to_owned(),
+        400 => "406.25".to_owned(),
+        800 => "812.5".to_owned(),
+        1600 => "1625".to_owned(),
+        other => other.to_string(),
+    };
+    format!("{khz} kHz")
+}
+
+/// What a preset stands for, in the radio's region: on 2.4 GHz the standard
+/// ones are wider.
+fn preset_params(settings: &NodeSettings, preset: &str) -> Option<(u32, u32, u32)> {
+    let params = settings.choices.preset_params.get(preset)?;
+    let bandwidth = match (settings.lora.region == "LORA_24", params.bandwidth) {
+        (true, 500) => 1600,
+        (true, 250) => 800,
+        (true, 125) => 400,
+        (_, bandwidth) => bandwidth,
+    };
+    Some((bandwidth, params.spread_factor, params.coding_rate))
+}
+
+/// The bandwidths that can be set by hand in the radio's region.
+fn bandwidths(settings: &NodeSettings) -> Vec<u32> {
+    if settings.lora.region == "LORA_24" {
+        settings.choices.wide_bandwidths.clone()
+    } else {
+        settings.choices.bandwidths.clone()
+    }
+}
+
+/// Without a preset, it starts from the one it had, if what it was set to by
+/// hand is nothing the region takes.
+fn settle_by_hand(settings: &mut NodeSettings) {
+    let fits = bandwidths(settings).contains(&settings.lora.bandwidth)
+        && (5..=12).contains(&settings.lora.spread_factor)
+        && (5..=8).contains(&settings.lora.coding_rate);
+    if !settings.lora.use_preset && !fits {
+        let preset = settings.lora.modem_preset.clone();
+        if let Some((bandwidth, spread_factor, coding_rate)) = preset_params(settings, &preset) {
+            settings.lora.bandwidth = bandwidth;
+            settings.lora.spread_factor = spread_factor;
+            settings.lora.coding_rate = coding_rate;
+        }
+    }
+}
+
 #[component]
 fn LoraTab(draft: Draft) -> impl IntoView {
     let i18n = use_i18n();
-    let (region, set_region) = field(draft, |d| d.lora.region.clone(), |d, v| d.lora.region = v);
+    let (region, _) = field(draft, |d| d.lora.region.clone(), |d, v| d.lora.region = v);
+    // Another region takes its own presets: the one there was, if it takes
+    // it, or its default; and, by hand, its own bandwidths.
+    let set_region = move |value: String| {
+        draft.update(|d| {
+            let Some(d) = d else { return };
+            d.lora.region = value;
+            let allowed = d
+                .choices
+                .presets_by_region
+                .get(&d.lora.region)
+                .cloned()
+                .unwrap_or_default();
+            if !allowed.contains(&d.lora.modem_preset)
+                && let Some(first) = allowed.first()
+            {
+                d.lora.modem_preset = first.clone();
+            }
+            settle_by_hand(d);
+        });
+    };
     let (preset, set_preset) = field(
         draft,
         |d| d.lora.modem_preset.clone(),
         |d, v| d.lora.modem_preset = v,
     );
-    let (use_preset, set_use_preset) =
-        field(draft, |d| d.lora.use_preset, |d, v| d.lora.use_preset = v);
+    let (use_preset, _) = field(draft, |d| d.lora.use_preset, |d, v| d.lora.use_preset = v);
+    let flip_preset = move |_| {
+        draft.update(|d| {
+            if let Some(d) = d {
+                d.lora.use_preset = !d.lora.use_preset;
+                settle_by_hand(d);
+            }
+        });
+    };
     let (hop_limit, set_hop_limit) =
         field(draft, |d| d.lora.hop_limit, |d, v| d.lora.hop_limit = v);
     let (tx, set_tx) = field(draft, |d| d.lora.tx_enabled, |d, v| d.lora.tx_enabled = v);
+    let (bandwidth, set_bandwidth) =
+        field(draft, |d| d.lora.bandwidth, |d, v| d.lora.bandwidth = v);
+    let (spread_factor, set_spread_factor) = field(
+        draft,
+        |d| d.lora.spread_factor,
+        |d, v| d.lora.spread_factor = v,
+    );
+    let (coding_rate, set_coding_rate) =
+        field(draft, |d| d.lora.coding_rate, |d, v| d.lora.coding_rate = v);
     let regions = move || {
         draft.with(|d| {
             d.as_ref()
@@ -445,13 +540,34 @@ fn LoraTab(draft: Draft) -> impl IntoView {
                 .unwrap_or_default()
         })
     };
+    // Those its region takes.
     let presets = move || {
         draft.with(|d| {
             d.as_ref()
-                .map(|d| d.choices.presets.clone())
+                .and_then(|d| d.choices.presets_by_region.get(&d.lora.region).cloned())
                 .unwrap_or_default()
         })
     };
+    let bandwidth_codes = move || draft.with(|d| d.as_ref().map(bandwidths).unwrap_or_default());
+
+    let spread_factors = (5..=12u32)
+        .map(|sf| {
+            (
+                Signal::derive(move || spread_factor.get() == sf),
+                Box::new(move || set_spread_factor(sf)) as Box<dyn Fn() + Send + Sync>,
+                sf.to_string().into_any(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let coding_rates = (5..=8u32)
+        .map(|cr| {
+            (
+                Signal::derive(move || coding_rate.get() == cr),
+                Box::new(move || set_coding_rate(cr)) as Box<dyn Fn() + Send + Sync>,
+                format!("4/{cr}").into_any(),
+            )
+        })
+        .collect::<Vec<_>>();
 
     view! {
         <p class="dim tab-hint">{t!(i18n, settings_reboot_hint)}</p>
@@ -470,16 +586,64 @@ fn LoraTab(draft: Draft) -> impl IntoView {
                     <Switch
                         on=use_preset
                         label=Signal::derive(move || t_string!(i18n, settings_use_preset).to_owned())
-                        flip=move |_| set_use_preset(!use_preset.get_untracked())
+                        flip=flip_preset
                     />
                 </div>
             </Row>
-            <Row
-                title=t!(i18n, settings_preset).into_any()
-                hint=t!(i18n, settings_preset_hint).into_any()
-            >
-                <Choice class="pref-control" options=presets value=preset set=set_preset />
-            </Row>
+            <div class:gone=move || !use_preset.get()>
+                <Row
+                    title=t!(i18n, settings_preset).into_any()
+                    hint=t!(i18n, settings_preset_hint).into_any()
+                >
+                    {move || {
+                        // Built again as the region changes what it offers.
+                        let options = presets();
+                        view! { <Choice class="pref-control" options=move || options.clone() value=preset set=set_preset /> }
+                    }}
+                </Row>
+            </div>
+            <div class:gone=move || use_preset.get()>
+                <Row
+                    title=t!(i18n, settings_bandwidth).into_any()
+                    hint=t!(i18n, settings_bandwidth_hint).into_any()
+                >
+                    <select
+                        class="pref-control"
+                        prop:value=move || bandwidth.get().to_string()
+                        on:change=move |ev| {
+                            if let Ok(code) = event_target_value(&ev).parse() {
+                                set_bandwidth(code);
+                            }
+                        }
+                    >
+                        {move || {
+                            bandwidth_codes()
+                                .into_iter()
+                                .map(|code| {
+                                    let selected = bandwidth.get_untracked() == code;
+                                    view! {
+                                        <option value=code.to_string() selected=selected>
+                                            {bandwidth_label(code)}
+                                        </option>
+                                    }
+                                })
+                                .collect_view()
+                        }}
+                    </select>
+                </Row>
+                <Row
+                    title=t!(i18n, settings_spread_factor).into_any()
+                    hint=t!(i18n, settings_spread_factor_hint).into_any()
+                >
+                    {pills(spread_factors)}
+                </Row>
+                <Row
+                    title=t!(i18n, settings_coding_rate).into_any()
+                    hint=t!(i18n, settings_coding_rate_hint).into_any()
+                >
+                    {pills(coding_rates)}
+                </Row>
+            </div>
             <Row
                 title=t!(i18n, settings_hop_limit).into_any()
                 hint=t!(i18n, settings_hop_limit_hint).into_any()

@@ -6,12 +6,13 @@
 //! built on what the radio has, so that whatever the API does not cover goes
 //! back exactly as it was.
 
+use crate::lora;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use meshctl_api::{
     ChannelChange, ChannelKey, ChannelSecret, ChannelSettings, DeviceSettings, KeyChange,
-    LoraSettings, NodeSettings, NodeSettingsChange, OwnerSettings, PUBLIC_POSITION_PRECISION,
-    SettingsChoices,
+    LoraParams, LoraSettings, NodeSettings, NodeSettingsChange, OwnerSettings,
+    PUBLIC_POSITION_PRECISION, SettingsChoices,
 };
 use meshctl_core::mesh::Settings;
 use meshctl_core::radio::SettingsChange;
@@ -57,10 +58,27 @@ fn channel_role_name(value: i32) -> Option<&'static str> {
 }
 
 pub fn choices() -> SettingsChoices {
+    let regions = names(region_name);
+    let presets = names(preset_name);
     SettingsChoices {
         roles: names(role_name),
-        regions: names(region_name),
-        presets: names(preset_name),
+        presets_by_region: lora::presets_by_region(&regions),
+        preset_params: presets
+            .iter()
+            .map(|preset| {
+                let (bandwidth, spread_factor, coding_rate) = lora::params(preset, false);
+                let params = LoraParams {
+                    bandwidth,
+                    spread_factor,
+                    coding_rate,
+                };
+                (preset.clone(), params)
+            })
+            .collect(),
+        bandwidths: lora::BANDWIDTHS.to_vec(),
+        wide_bandwidths: lora::WIDE_BANDWIDTHS.to_vec(),
+        regions,
+        presets,
     }
 }
 
@@ -162,6 +180,9 @@ pub fn view(settings: &Settings) -> Option<NodeSettings> {
                 .to_owned(),
             hop_limit: lora.hop_limit,
             tx_enabled: lora.tx_enabled,
+            bandwidth: lora.bandwidth,
+            spread_factor: lora.spread_factor,
+            coding_rate: lora.coding_rate,
         },
         channels,
         choices: choices(),
@@ -230,6 +251,11 @@ pub fn change(
         let preset = config::lo_ra_config::ModemPreset::from_str_name(&lora.modem_preset)
             .ok_or(Invalid("modem_preset"))?;
         check((1..=HOP_LIMIT_MAX).contains(&lora.hop_limit), "hop_limit")?;
+        // A preset the region does not take would not be used.
+        check(
+            !lora.use_preset || lora::presets(&lora.region).contains(&lora.modem_preset.as_str()),
+            "modem_preset",
+        )?;
         let before = settings.config.lora.clone().ok_or(Invalid("lora"))?;
         let mut current = before.clone();
         current.region = region as i32;
@@ -237,6 +263,28 @@ pub fn change(
         current.modem_preset = preset as i32;
         current.hop_limit = lora.hop_limit;
         current.tx_enabled = lora.tx_enabled;
+        // By hand, as the firmware takes them; with a preset, left be.
+        if !lora.use_preset {
+            check(
+                lora::bandwidths(&lora.region).contains(&lora.bandwidth),
+                "bandwidth",
+            )?;
+            check(
+                lora::SPREAD_FACTORS.contains(&lora.spread_factor),
+                "spread_factor",
+            )?;
+            check(
+                lora::CODING_RATES.contains(&lora.coding_rate),
+                "coding_rate",
+            )?;
+            current.bandwidth = lora.bandwidth;
+            current.spread_factor = lora.spread_factor;
+            current.coding_rate = lora.coding_rate;
+        } else if !before.use_preset {
+            // Back to a preset, the coding rate set by hand would raise the
+            // preset's (from firmware 2.7.18): 0 is the preset's own.
+            current.coding_rate = 0;
+        }
         if current != before {
             change.configs.push(pb::Config {
                 payload_variant: Some(config::PayloadVariant::Lora(current)),
@@ -424,9 +472,12 @@ mod tests {
             lora: Some(LoraSettings {
                 region: "EU_N_868".into(),
                 use_preset: true,
-                modem_preset: "LONG_FAST".into(),
+                modem_preset: "NARROW_SLOW".into(),
                 hop_limit: 3,
                 tx_enabled: true,
+                bandwidth: 0,
+                spread_factor: 0,
+                coding_rate: 0,
             }),
             ..Default::default()
         };
@@ -437,6 +488,55 @@ mod tests {
         };
         assert_eq!(lora.hop_limit, 3);
         assert!(lora.sx126x_rx_boosted_gain, "untouched by the API, kept");
+    }
+
+    #[test]
+    fn a_radio_is_set_by_hand_or_by_preset() {
+        let manual = NodeSettingsChange {
+            lora: Some(LoraSettings {
+                region: "EU_868".into(),
+                use_preset: false,
+                modem_preset: "LONG_FAST".into(),
+                hop_limit: 3,
+                tx_enabled: true,
+                bandwidth: 62,
+                spread_factor: 9,
+                coding_rate: 6,
+            }),
+            ..Default::default()
+        };
+        let (change, _) = super::change(&settings(), &manual, no_random).unwrap();
+        let Some(config::PayloadVariant::Lora(lora)) = &change.configs[0].payload_variant else {
+            panic!("a LoRa config");
+        };
+        assert!(!lora.use_preset);
+        assert_eq!(
+            (lora.bandwidth, lora.spread_factor, lora.coding_rate),
+            (62, 9, 6)
+        );
+        // With a preset, what was set by hand is left as it was.
+        let mut with_preset = manual.clone();
+        if let Some(lora) = with_preset.lora.as_mut() {
+            lora.use_preset = true;
+            lora.bandwidth = 0;
+        }
+        let (change, _) = super::change(&settings(), &with_preset, no_random).unwrap();
+        let Some(config::PayloadVariant::Lora(lora)) = &change.configs[0].payload_variant else {
+            panic!("a LoRa config");
+        };
+        assert_eq!(lora.bandwidth, 0, "the test radio's, untouched");
+
+        // Back to a preset from by hand: the coding rate is the preset's.
+        let mut by_hand = settings();
+        if let Some(lora) = by_hand.config.lora.as_mut() {
+            lora.use_preset = false;
+            lora.coding_rate = 8;
+        }
+        let (change, _) = super::change(&by_hand, &with_preset, no_random).unwrap();
+        let Some(config::PayloadVariant::Lora(lora)) = &change.configs[0].payload_variant else {
+            panic!("a LoRa config");
+        };
+        assert_eq!(lora.coding_rate, 0);
     }
 
     #[test]
@@ -701,6 +801,16 @@ mod tests {
             modem_preset: "LONG_FAST".into(),
             hop_limit,
             tx_enabled: true,
+            bandwidth: 0,
+            spread_factor: 0,
+            coding_rate: 0,
+        };
+        let by_hand = |bandwidth, spread_factor, coding_rate| LoraSettings {
+            use_preset: false,
+            bandwidth,
+            spread_factor,
+            coding_rate,
+            ..lora(3, "EU_868")
         };
         let cases = [
             NodeSettingsChange {
@@ -729,6 +839,29 @@ mod tests {
             },
             NodeSettingsChange {
                 lora: Some(lora(3, "ATLANTIS")),
+                ..Default::default()
+            },
+            // A preset its region does not take.
+            NodeSettingsChange {
+                lora: Some(lora(3, "EU_N_868")),
+                ..Default::default()
+            },
+            // By hand: a bandwidth there is not, or 2.4 GHz's below it, a
+            // spreading factor or a coding rate out of range.
+            NodeSettingsChange {
+                lora: Some(by_hand(100, 11, 5)),
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                lora: Some(by_hand(800, 11, 5)),
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                lora: Some(by_hand(250, 13, 5)),
+                ..Default::default()
+            },
+            NodeSettingsChange {
+                lora: Some(by_hand(250, 11, 4)),
                 ..Default::default()
             },
             NodeSettingsChange {

@@ -140,10 +140,10 @@ fn Row(title: AnyView, hint: AnyView, children: Children) -> impl IntoView {
 }
 
 /// One option: whether it is the one chosen, choosing it, and its name.
-type Choice = (Signal<bool>, Box<dyn Fn() + Send + Sync>, AnyView);
+pub type Choice = (Signal<bool>, Box<dyn Fn() + Send + Sync>, AnyView);
 
 /// A few options, of which one is chosen, under a pill that slides to it.
-fn pills(options: Vec<Choice>) -> impl IntoView {
+pub fn pills(options: Vec<Choice>) -> impl IntoView {
     let n = options.len();
     let ons: Vec<Signal<bool>> = options.iter().map(|(on, _, _)| *on).collect();
     let at = move || ons.iter().position(|on| on.get()).unwrap_or(0);

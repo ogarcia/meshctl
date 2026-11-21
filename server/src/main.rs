@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
 mod channels;
+mod lora;
 mod packets;
 mod radios;
 mod sections;

@@ -256,7 +256,7 @@
   "settings_short_name_hint": "Hasta cuatro letras, o un emoji: el que sale en el mapa.",
   "settings_role_hint": "Qué hace la radio en la malla. Cambiarlo la reinicia.",
   "settings_region_hint": "Fija las frecuencias en las que emite: la del sitio donde estás.",
-  "settings_use_preset_hint": "Un perfil de alcance y velocidad ya hecho. Sin él, la radio mantiene los valores que tenga puestos a mano.",
+  "settings_use_preset_hint": "Un perfil de alcance y velocidad ya hecho. Sin él, se ajustan a mano; todos los nodos que se hablen tienen que coincidir.",
   "settings_preset_hint": "Los nodos que quieran hablarse tienen que usar el mismo.",
   "settings_hop_limit_hint": "Cuántas veces se puede reenviar lo que envías, de 1 a 7.",
   "settings_tx_hint": "Apagado, la radio solo escucha.",
@@ -299,5 +299,11 @@
   "channel_public_hint": "Es un canal público: la radio no envía la posición con más precisión que esta.",
   "channel_public_precision": "Es un canal público: la radio no envía la posición con más precisión que ± 730 m. Elige menos precisión o una clave propia.",
   "channel_muted": "Silenciar",
-  "channel_muted_hint": "Sus mensajes llegan sin avisar: para canales con mucho movimiento que quieres conservar."
+  "channel_muted_hint": "Sus mensajes llegan sin avisar: para canales con mucho movimiento que quieres conservar.",
+  "settings_bandwidth": "Ancho de banda",
+  "settings_bandwidth_hint": "Más ancho, más rápido y menos alcance.",
+  "settings_spread_factor": "Factor de dispersión",
+  "settings_spread_factor_hint": "Más alto, más alcance y más lento: cada paquete ocupa más tiempo en el aire.",
+  "settings_coding_rate": "Tasa de codificación",
+  "settings_coding_rate_hint": "Más redundancia aguanta peor señal, pero alarga cada paquete."
 }

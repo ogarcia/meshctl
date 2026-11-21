@@ -698,13 +698,25 @@ pub struct LoraSettings {
     /// One of `choices.regions`.
     #[cfg_attr(feature = "openapi", schema(example = "EU_868"))]
     pub region: String,
-    /// Whether it uses `modem_preset`. A radio set up by hand with its own
-    /// bandwidth, spreading factor and coding rate keeps them, but they are
-    /// not changed here.
+    /// Whether it uses `modem_preset`, or the bandwidth, spreading factor and
+    /// coding rate set by hand.
     pub use_preset: bool,
-    /// One of `choices.presets`.
+    /// One of `choices.presets_by_region`'s for its region.
     #[cfg_attr(feature = "openapi", schema(example = "LONG_FAST"))]
     pub modem_preset: String,
+    /// Without a preset: one of `choices.bandwidths` (or
+    /// `choices.wide_bandwidths` on 2.4 GHz), as the radio keeps it: kHz, but
+    /// for a few codes that stand for a fraction (8 is 7.8, 10 is 10.4, 16 is
+    /// 15.6, 21 is 20.8, 31 is 31.25, 42 is 41.7, 62 is 62.5, 200 is 203.125,
+    /// 400 is 406.25, 800 is 812.5, 1600 is 1625). Left as it is with one.
+    #[serde(default)]
+    pub bandwidth: u32,
+    /// Without a preset: 5 to 12.
+    #[serde(default)]
+    pub spread_factor: u32,
+    /// Without a preset: the n of 4/n, 5 to 8.
+    #[serde(default)]
+    pub coding_rate: u32,
     /// How many times a packet it sends may be relayed: 1 to 7.
     pub hop_limit: u32,
     /// Whether it transmits at all.
@@ -772,6 +784,24 @@ pub struct SettingsChoices {
     pub roles: Vec<String>,
     pub regions: Vec<String>,
     pub presets: Vec<String>,
+    /// The presets each region takes, its default first: no other is used.
+    pub presets_by_region: std::collections::BTreeMap<String, Vec<String>>,
+    /// What each preset stands for, below 1 GHz: to start from when going
+    /// without one.
+    pub preset_params: std::collections::BTreeMap<String, LoraParams>,
+    /// The bandwidths that can be set by hand, as [`LoraSettings::bandwidth`]
+    /// takes them; and on 2.4 GHz (`LORA_24`).
+    pub bandwidths: Vec<u32>,
+    pub wide_bandwidths: Vec<u32>,
+}
+
+/// How a radio transmits without a preset, or what a preset stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoraParams {
+    pub bandwidth: u32,
+    pub spread_factor: u32,
+    pub coding_rate: u32,
 }
 
 /// The radio's own settings, as it last sent them.

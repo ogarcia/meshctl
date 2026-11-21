@@ -256,7 +256,7 @@
   "settings_short_name_hint": "Up to four letters, or one emoji: the one on the map.",
   "settings_role_hint": "What the radio does in the mesh. Changing it reboots it.",
   "settings_region_hint": "Sets the frequencies it transmits on: those of where you are.",
-  "settings_use_preset_hint": "A ready-made profile of range and speed. Without it, the radio keeps whatever it was set to by hand.",
+  "settings_use_preset_hint": "A ready-made profile of range and speed. Without one, they are set by hand; all nodes that talk must match.",
   "settings_preset_hint": "Nodes that are to talk to each other must use the same one.",
   "settings_hop_limit_hint": "How many times what you send may be relayed, 1 to 7.",
   "settings_tx_hint": "Off, the radio only listens.",
@@ -299,5 +299,11 @@
   "channel_public_hint": "It is a public channel: the radio sends the position no more precisely than this.",
   "channel_public_precision": "It is a public channel: the radio sends the position no more precisely than ± 730 m. Choose less precision, or a key of your own.",
   "channel_muted": "Mute",
-  "channel_muted_hint": "What comes on it comes quietly: for busy channels you keep all the same."
+  "channel_muted_hint": "What comes on it comes quietly: for busy channels you keep all the same.",
+  "settings_bandwidth": "Bandwidth",
+  "settings_bandwidth_hint": "Wider is faster, and reaches less far.",
+  "settings_spread_factor": "Spreading factor",
+  "settings_spread_factor_hint": "Higher reaches farther, and is slower: each packet takes longer on the air.",
+  "settings_coding_rate": "Coding rate",
+  "settings_coding_rate_hint": "More redundancy stands a weaker signal, but makes each packet longer."
 }
