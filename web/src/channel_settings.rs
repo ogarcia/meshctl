@@ -9,12 +9,13 @@ use crate::app::Live;
 use crate::chat::preset_name;
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
+use crate::mesh::{precision_radius, radius};
 use crate::radios::Switch;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{
     ChannelChange, ChannelHistory, ChannelKey, ChannelSecret, ChannelSettings, ErrorCode,
-    KeyChange, NodeSettings, NodeSettingsChange,
+    KeyChange, NodeSettings, NodeSettingsChange, PUBLIC_POSITION_PRECISION,
 };
 use wasm_bindgen::JsCast;
 
@@ -30,6 +31,29 @@ const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.
 const GRIP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/grip-vertical.svg");
 const UP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-up.svg");
 const DOWN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
+const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");
+const MUTED: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/bell-off.svg");
+
+/// The precision a channel starts sharing the position with, as the apps
+/// start it: some 2.9 km off, which a public channel takes too.
+const FIRST_PRECISION: u32 = 13;
+
+/// The default key's first fifteen bytes in base64: a key of one's own that
+/// starts so is the default one, as the radio tells it.
+const DEFAULT_KEY_START: &str = "1PG7OiApB1nwvP+rz05p";
+
+/// How precisely a channel shares the position, in words: exactly, or
+/// within so many metres; None when it does not.
+fn precision_label(
+    i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
+    bits: u32,
+) -> Option<String> {
+    match bits {
+        0 => None,
+        32 => Some(t_string!(i18n, channel_precision_exact).to_owned()),
+        bits => Some(precision_radius(bits).map_or_else(String::new, radius)),
+    }
+}
 
 /// What a save or a removal came to, as the settings page tells it.
 pub type Notice = RwSignal<Option<Result<bool, Failure>>>;
@@ -139,6 +163,9 @@ pub fn ChannelsTab(loaded: RwSignal<Option<NodeSettings>>, notice: Notice) -> im
                             key: ChannelKey::None,
                             uplink: false,
                             downlink: false,
+                            position_precision: 0,
+                            public: true,
+                            muted: false,
                         },
                     };
                 }
@@ -283,6 +310,30 @@ fn ChannelRow(
             <span class="channel-facts">
                 {channel.uplink.then(|| view! { <span class="tag">"↑ MQTT"</span> })}
                 {channel.downlink.then(|| view! { <span class="tag">"↓ MQTT"</span> })}
+                {channel
+                    .muted
+                    .then(|| {
+                        view! {
+                            <span class="tag position" title=move || t_string!(i18n, channel_muted)>
+                                <span class="icon" inner_html=MUTED></span>
+                            </span>
+                        }
+                    })}
+                {
+                    let bits = channel.position_precision;
+                    (bits > 0)
+                        .then(|| {
+                            view! {
+                                <span
+                                    class="tag position"
+                                    title=move || t_string!(i18n, channel_position)
+                                >
+                                    <span class="icon" inner_html=PIN></span>
+                                    {move || precision_label(i18n, bits)}
+                                </span>
+                            }
+                        })
+                }
                 <span class="key" class:open=!private(key)>
                     <span class="icon" inner_html=if private(key) { LOCK } else { LOCK_OPEN }></span>
                     {move || key_label(i18n, key)}
@@ -365,6 +416,9 @@ fn ChannelEditor(
         key: ChannelKey::None,
         uplink: false,
         downlink: false,
+        position_precision: 0,
+        public: true,
+        muted: false,
     });
     let current_key = start.key;
     let name = RwSignal::new(if adding {
@@ -374,6 +428,11 @@ fn ChannelEditor(
     });
     let uplink = RwSignal::new(!adding && start.uplink);
     let downlink = RwSignal::new(!adding && start.downlink);
+    let muted = RwSignal::new(!adding && start.muted);
+    // A new one does not share the position until told to.
+    let precision = RwSignal::new(if adding { 0 } else { start.position_precision });
+    let start_precision = start.position_precision;
+    let start_public = start.public;
     // A new one gets a key of its own, as the apps give it.
     let key = RwSignal::new(if adding {
         KeyChange::NewAes256
@@ -381,7 +440,49 @@ fn ChannelEditor(
         KeyChange::Keep
     });
     let custom = RwSignal::new(String::new());
-    // The key itself, while shown: nowhere else, and gone with the editor.
+    // Whether anyone could read it, with the key it is to have: as the radio
+    // tells it, which for one of one's own is a guess the daemon checks.
+    let public = Memo::new(move |_| match key.get() {
+        KeyChange::Keep => start_public,
+        KeyChange::None | KeyChange::Default => true,
+        KeyChange::NewAes128 | KeyChange::NewAes256 => false,
+        KeyChange::Custom => custom.with(|text| {
+            let text = text.trim();
+            text.len() <= 4 || text.starts_with(DEFAULT_KEY_START)
+        }),
+    });
+    // On a public one the radio sends the position only roughly: what it
+    // would cut down is not offered, and is brought down as it goes public.
+    Effect::new(move |_| {
+        if public.get() && precision.get_untracked() > PUBLIC_POSITION_PRECISION {
+            precision.set(PUBLIC_POSITION_PRECISION);
+        }
+    });
+    // The precisions offered, as the apps offer them, and the one it has if
+    // that is another.
+    // From the roughest to the most precise, along the slider.
+    let precisions = Memo::new(move |_| {
+        let most = if public.get() {
+            PUBLIC_POSITION_PRECISION
+        } else {
+            19
+        };
+        let exact = (!public.get()).then_some(32);
+        let mut offered: Vec<u32> = (10..=most).chain(exact).collect();
+        if start_precision != 0
+            && !offered.contains(&start_precision)
+            && (start_precision <= most || !public.get())
+        {
+            offered.push(start_precision);
+            offered.sort_unstable();
+        }
+        offered
+    });
+    // Where the precision is along it: the nearest offered, at or under it.
+    let step = move || {
+        let bits = precision.get();
+        precisions.with(|offered| offered.iter().rposition(|&p| p <= bits).unwrap_or(0))
+    }; // The key itself, while shown: nowhere else, and gone with the editor.
     let secret = RwSignal::new(None::<ChannelSecret>);
     let copied = RwSignal::new(false);
     let error = RwSignal::new(None::<Failure>);
@@ -461,6 +562,8 @@ fn ChannelEditor(
             custom_key: (key == KeyChange::Custom).then(|| custom.get_untracked()),
             uplink: uplink.get_untracked(),
             downlink: downlink.get_untracked(),
+            position_precision: Some(precision.get_untracked()),
+            muted: Some(muted.get_untracked()),
         });
     };
     // Taken off the radio, its key with it, and those after it moved up;
@@ -487,6 +590,9 @@ fn ChannelEditor(
     let message = move || {
         error.get().map(|failure| match failure {
             Failure::Rejected(ErrorCode::InvalidSettings) => t!(i18n, channel_invalid).into_any(),
+            Failure::Rejected(ErrorCode::PublicChannelPrecision) => {
+                t!(i18n, channel_public_precision).into_any()
+            }
             Failure::Rejected(ErrorCode::DuplicateChannel) => {
                 t!(i18n, channel_duplicate).into_any()
             }
@@ -674,6 +780,55 @@ fn ChannelEditor(
                         <span>
                             {t!(i18n, channel_downlink)}
                             <span class="dim">{t!(i18n, channel_downlink_hint)}</span>
+                        </span>
+                    </div>
+                    <div class="toggle">
+                        <Switch
+                            on=Signal::derive(move || precision.get() > 0)
+                            label=Signal::derive(move || t_string!(i18n, channel_position).to_owned())
+                            flip=move |_| precision.update(|p| *p = if *p == 0 { FIRST_PRECISION } else { 0 })
+                        />
+                        <span>
+                            {t!(i18n, channel_position)}
+                            <span class="dim">{t!(i18n, channel_position_hint)}</span>
+                        </span>
+                    </div>
+                    <label class="precision" class:gone=move || precision.get() == 0>
+                        <span class="dim">
+                            {t!(i18n, channel_precision)}
+                            <b>{move || precision_label(i18n, precision.get())}</b>
+                        </span>
+                        <input
+                            type="range"
+                            min="0"
+                            max=move || precisions.with(|o| o.len().saturating_sub(1)).to_string()
+                            step="1"
+                            prop:value=move || step().to_string()
+                            on:input=move |ev| {
+                                if let Ok(at) = event_target_value(&ev).parse::<usize>()
+                                    && let Some(bits) = precisions.with_untracked(|o| o.get(at).copied())
+                                {
+                                    precision.set(bits);
+                                }
+                            }
+                        />
+                        <span class="ends dim">
+                            <span>{move || precisions.with(|o| o.first().and_then(|&b| precision_label(i18n, b)))}</span>
+                            <span>{move || precisions.with(|o| o.last().and_then(|&b| precision_label(i18n, b)))}</span>
+                        </span>
+                        <span class="hint dim" class:gone=move || !public.get()>
+                            {t!(i18n, channel_public_hint)}
+                        </span>
+                    </label>
+                    <div class="toggle">
+                        <Switch
+                            on=Signal::derive(move || muted.get())
+                            label=Signal::derive(move || t_string!(i18n, channel_muted).to_owned())
+                            flip=move |_| muted.update(|m| *m = !*m)
+                        />
+                        <span>
+                            {t!(i18n, channel_muted)}
+                            <span class="dim">{t!(i18n, channel_muted_hint)}</span>
                         </span>
                     </div>
                 </div>

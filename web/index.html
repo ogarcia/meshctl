@@ -689,6 +689,9 @@
       .channel-mark.big { width: 56px; height: 56px; border-radius: 16px; }
       .channel-mark.big svg { width: 28px; height: 28px; }
       .channel-facts { flex: none; display: flex; align-items: center; gap: 8px; }
+      .tag.position { display: inline-flex; align-items: center; gap: 4px; }
+      .tag.position .icon { display: flex; }
+      .tag.position svg { width: 12px; height: 12px; }
       .key {
         display: inline-flex;
         align-items: center;
@@ -705,6 +708,17 @@
       .channel-foot .add { display: inline-flex; align-items: center; gap: 6px; }
       .channel-foot .add svg { width: 16px; height: 16px; display: block; }
       .channel-editor .removing p { margin: 0 0 12px; font-size: 13px; }
+      .channel-editor .precision b { margin-left: 6px; color: var(--mc-text); font-weight: 600; }
+      .channel-editor .precision input[type=range] {
+        width: 100%;
+        margin: 4px 0 0;
+        accent-color: var(--mc-primary);
+      }
+      .channel-editor .precision .ends {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+      }
       /* The key as it is: what kind, and itself when asked for. */
       .key-now { display: flex; align-items: center; gap: 8px; min-height: 36px; }
       .key-now .key { margin-right: auto; }

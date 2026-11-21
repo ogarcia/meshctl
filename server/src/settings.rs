@@ -10,7 +10,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use meshctl_api::{
     ChannelChange, ChannelKey, ChannelSecret, ChannelSettings, DeviceSettings, KeyChange,
-    LoraSettings, NodeSettings, NodeSettingsChange, OwnerSettings, SettingsChoices,
+    LoraSettings, NodeSettings, NodeSettingsChange, OwnerSettings, PUBLIC_POSITION_PRECISION,
+    SettingsChoices,
 };
 use meshctl_core::mesh::Settings;
 use meshctl_core::radio::SettingsChange;
@@ -114,10 +115,17 @@ pub fn view(settings: &Settings) -> Option<NodeSettings> {
     let owner = settings.owner.as_ref()?;
     let device = settings.config.device.as_ref()?;
     let lora = settings.config.lora.as_ref()?;
+    let primary_psk = settings
+        .channels
+        .get(&0)
+        .and_then(|c| c.settings.as_ref())
+        .map_or(&[][..], |s| s.psk.as_slice());
     let channels = (0..CHANNEL_SLOTS)
         .map(|index| {
             let channel = settings.channels.get(&index);
             let channel_settings = channel.and_then(|c| c.settings.as_ref());
+            let secondary = channel.is_some_and(|c| c.role == pb::channel::Role::Secondary as i32);
+            let modules = channel_settings.and_then(|s| s.module_settings.as_ref());
             ChannelSettings {
                 index,
                 role: channel
@@ -128,6 +136,13 @@ pub fn view(settings: &Settings) -> Option<NodeSettings> {
                 key: key_kind(channel_settings.map_or(&[][..], |s| s.psk.as_slice())),
                 uplink: channel_settings.is_some_and(|s| s.uplink_enabled),
                 downlink: channel_settings.is_some_and(|s| s.downlink_enabled),
+                position_precision: modules.map_or(0, |m| m.position_precision),
+                public: crate::channels::public_key(
+                    channel_settings.map_or(&[][..], |s| s.psk.as_slice()),
+                    secondary,
+                    primary_psk,
+                ),
+                muted: modules.is_some_and(|m| m.is_muted),
             }
         })
         .collect();
@@ -160,6 +175,10 @@ pub struct Invalid(pub &'static str);
 
 /// What [`Invalid`] says of a channel the very same as another.
 pub const DUPLICATE: &str = "duplicate channel";
+
+/// What [`Invalid`] says of a position more precise than a public channel
+/// takes.
+pub const PUBLIC_PRECISION: &str = "public channel precision";
 
 fn check(ok: bool, what: &'static str) -> Result<(), Invalid> {
     if ok { Ok(()) } else { Err(Invalid(what)) }
@@ -240,6 +259,36 @@ pub fn change(
         if crate::channels::duplicate(settings, &after, &changed).is_some() {
             return Err(Invalid(DUPLICATE));
         }
+        // Nor a position more precise than a public channel takes, which the
+        // radio would cut down without a word to this: on those changed, or
+        // on a secondary that takes the primary's key, if that changed.
+        let primary_psk = after
+            .channels
+            .get(&0)
+            .and_then(|c| c.settings.as_ref())
+            .map_or(Vec::new(), |s| s.psk.clone());
+        let too_precise = after.channels.values().any(|channel| {
+            let Some(channel_settings) = channel.settings.as_ref() else {
+                return false;
+            };
+            let touched = changed.contains(&(channel.index as u32))
+                || (changed.contains(&0) && channel_settings.psk.is_empty());
+            let precision = channel_settings
+                .module_settings
+                .as_ref()
+                .map_or(0, |m| m.position_precision);
+            touched
+                && channel.role != pb::channel::Role::Disabled as i32
+                && precision > PUBLIC_POSITION_PRECISION
+                && crate::channels::public_key(
+                    &channel_settings.psk,
+                    channel.role == pb::channel::Role::Secondary as i32,
+                    &primary_psk,
+                )
+        });
+        if too_precise {
+            return Err(Invalid(PUBLIC_PRECISION));
+        }
     }
 
     Ok((change, reboots))
@@ -273,6 +322,19 @@ fn channel(
     channel_settings.name = name.to_owned();
     channel_settings.uplink_enabled = wanted.uplink;
     channel_settings.downlink_enabled = wanted.downlink;
+    if let Some(precision) = wanted.position_precision {
+        check(precision <= 32, "position_precision")?;
+        channel_settings
+            .module_settings
+            .get_or_insert_with(Default::default)
+            .position_precision = precision;
+    }
+    if let Some(muted) = wanted.muted {
+        channel_settings
+            .module_settings
+            .get_or_insert_with(Default::default)
+            .is_muted = muted;
+    }
     channel_settings.psk = match wanted.key {
         KeyChange::Keep => std::mem::take(&mut channel_settings.psk),
         KeyChange::None => vec![0],
@@ -417,6 +479,8 @@ mod tests {
             custom_key: None,
             uplink: false,
             downlink: false,
+            position_precision: None,
+            muted: None,
         };
         let (change, _) = super::change(
             &settings(),
@@ -454,6 +518,78 @@ mod tests {
     }
 
     #[test]
+    fn a_channel_shares_its_position_as_told() {
+        let moire = |precision| ChannelChange {
+            index: 4,
+            role: "SECONDARY".into(),
+            name: "Moire".into(),
+            key: KeyChange::Keep,
+            custom_key: None,
+            uplink: false,
+            downlink: false,
+            position_precision: precision,
+            muted: None,
+        };
+        let precision_of = |channel: ChannelChange| {
+            let wanted = NodeSettingsChange {
+                channels: vec![channel],
+                ..Default::default()
+            };
+            super::change(&settings(), &wanted, no_random).map(|(change, _)| {
+                change.channels[0]
+                    .settings
+                    .as_ref()
+                    .unwrap()
+                    .module_settings
+                    .map(|m| m.position_precision)
+            })
+        };
+        assert_eq!(precision_of(moire(Some(13))), Ok(Some(13)));
+        // Not said, as it was: the test radio's Moire has none.
+        assert_eq!(precision_of(moire(None)), Ok(None));
+        assert!(precision_of(moire(Some(33))).is_err());
+    }
+
+    #[test]
+    fn a_public_channel_takes_no_precise_position() {
+        let moire = |key, precision| ChannelChange {
+            index: 4,
+            role: "SECONDARY".into(),
+            name: "Moire".into(),
+            key,
+            custom_key: None,
+            uplink: false,
+            downlink: false,
+            position_precision: Some(precision),
+            muted: None,
+        };
+        let apply = |channel| {
+            super::change(
+                &settings(),
+                &NodeSettingsChange {
+                    channels: vec![channel],
+                    ..Default::default()
+                },
+                no_random,
+            )
+            .map(|_| ())
+        };
+        // Its own key: exactly, if so.
+        assert_eq!(apply(moire(KeyChange::Keep, 32)), Ok(()));
+        // The default key: some 730 m off at most.
+        assert_eq!(
+            apply(moire(KeyChange::Default, 32)),
+            Err(Invalid(PUBLIC_PRECISION))
+        );
+        assert_eq!(
+            apply(moire(KeyChange::Default, 16)),
+            Err(Invalid(PUBLIC_PRECISION))
+        );
+        assert_eq!(apply(moire(KeyChange::Default, 15)), Ok(()));
+        assert_eq!(apply(moire(KeyChange::None, 0)), Ok(()));
+    }
+
+    #[test]
     fn a_channel_takes_a_key_of_its_own() {
         let own = |key: &str| ChannelChange {
             index: 4,
@@ -463,6 +599,8 @@ mod tests {
             custom_key: Some(key.into()),
             uplink: false,
             downlink: false,
+            position_precision: None,
+            muted: None,
         };
         let apply = |channel| {
             super::change(
@@ -522,6 +660,8 @@ mod tests {
             custom_key: Some("BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=".into()),
             uplink: false,
             downlink: false,
+            position_precision: None,
+            muted: None,
         };
         let wanted = NodeSettingsChange {
             channels: vec![same.clone()],
@@ -552,6 +692,8 @@ mod tests {
             custom_key: None,
             uplink: false,
             downlink: false,
+            position_precision: None,
+            muted: None,
         };
         let lora = |hop_limit, region: &str| LoraSettings {
             region: region.into(),

@@ -267,6 +267,19 @@ pub fn power(level: Option<u32>, voltage: Option<f32>, external: &str) -> Option
     }
 }
 
+/// How far, in metres, a position sent with so many bits of precision may
+/// be from where the node is: half the side of the cell it rounds to, as the
+/// apps tell it. None when exact (32) or not sent (0).
+pub fn precision_radius(bits: u32) -> Option<u32> {
+    if !(1..32).contains(&bits) {
+        return None;
+    }
+    // A degree of latitude is about 111 320 m; coordinates go by 1e-7 degrees.
+    let side = f64::from(1_u32 << (32 - bits)) * 1e-7 * 111_320.0;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    Some((side / 2.0).round() as u32)
+}
+
 /// How far off a rounded position may be: in metres up to a kilometre, in
 /// kilometres beyond.
 pub fn radius(metres: u32) -> String {
@@ -306,5 +319,7 @@ mod tests {
     fn a_radius_reads_in_the_unit_that_fits() {
         assert_eq!(super::radius(365), "± 365 m");
         assert_eq!(super::radius(2918), "± 2.9 km");
+        assert_eq!(super::precision_radius(13), Some(2918));
+        assert_eq!(super::precision_radius(32), None);
     }
 }

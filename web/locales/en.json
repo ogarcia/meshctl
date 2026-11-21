@@ -291,5 +291,13 @@
   "channel_remove_keep": "Remove and keep",
   "channel_remove_forget": "Remove and delete",
   "channel_numbered": "Channel",
-  "channel_duplicate": "There already is a channel with that name and key: to the radio they would be the same, and all that is heard would go to the first. Change the name or the key."
+  "channel_duplicate": "There already is a channel with that name and key: to the radio they would be the same, and all that is heard would go to the first. Change the name or the key.",
+  "channel_position": "Share the position",
+  "channel_position_hint": "The radio sends its position on this channel, as precisely as you choose.",
+  "channel_precision": "Precision",
+  "channel_precision_exact": "Exact",
+  "channel_public_hint": "It is a public channel: the radio sends the position no more precisely than this.",
+  "channel_public_precision": "It is a public channel: the radio sends the position no more precisely than ± 730 m. Choose less precision, or a key of your own.",
+  "channel_muted": "Mute",
+  "channel_muted_hint": "What comes on it comes quietly: for busy channels you keep all the same."
 }

@@ -291,5 +291,13 @@
   "channel_remove_keep": "Quitar y conservar",
   "channel_remove_forget": "Quitar y borrar",
   "channel_numbered": "Canal",
-  "channel_duplicate": "Ya hay un canal con ese nombre y esa clave: para la radio serían el mismo, y todo lo que se oyera iría al primero. Cambia el nombre o la clave."
+  "channel_duplicate": "Ya hay un canal con ese nombre y esa clave: para la radio serían el mismo, y todo lo que se oyera iría al primero. Cambia el nombre o la clave.",
+  "channel_position": "Compartir la posición",
+  "channel_position_hint": "La radio envía su posición por este canal, con la precisión que elijas.",
+  "channel_precision": "Precisión",
+  "channel_precision_exact": "Exacta",
+  "channel_public_hint": "Es un canal público: la radio no envía la posición con más precisión que esta.",
+  "channel_public_precision": "Es un canal público: la radio no envía la posición con más precisión que ± 730 m. Elige menos precisión o una clave propia.",
+  "channel_muted": "Silenciar",
+  "channel_muted_hint": "Sus mensajes llegan sin avisar: para canales con mucho movimiento que quieres conservar."
 }

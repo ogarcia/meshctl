@@ -119,6 +119,8 @@ pub enum SettingsFailure {
     Invalid(String),
     /// A channel the very same as another the radio has.
     Duplicate,
+    /// A position more precise than a public channel takes.
+    PublicPrecision,
     NoAnswer,
     /// Not something meshctl does with this kind of radio yet.
     Unsupported,
@@ -805,6 +807,7 @@ impl Radios {
             })
             .map_err(|why| match why.0 {
                 crate::settings::DUPLICATE => SettingsFailure::Duplicate,
+                crate::settings::PUBLIC_PRECISION => SettingsFailure::PublicPrecision,
                 why => SettingsFailure::Invalid(why.to_owned()),
             })?;
         mesh.change_settings(change).await.map_err(admin_failure)?;

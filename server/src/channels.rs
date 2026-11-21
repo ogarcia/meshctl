@@ -72,6 +72,17 @@ const DEFAULT_KEY: [u8; 16] = [
     0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59, 0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01,
 ];
 
+/// Whether a channel's key is one anyone can read with, as the firmware
+/// tells it: none, any of one byte (the default and the simple ones), or the
+/// default spelled out. A secondary without a key uses the primary's.
+pub fn public_key(psk: &[u8], secondary: bool, primary_psk: &[u8]) -> bool {
+    match psk {
+        [] if secondary => public_key(primary_psk, false, &[]),
+        [] | [_] => true,
+        key => key.len() == DEFAULT_KEY.len() && key[..15] == DEFAULT_KEY[..15],
+    }
+}
+
 /// A key as the radio uses it: none for none or 0; the default one for 1,
 /// and the simple ones, 2 to 255, as it with its last byte moved on.
 fn key_in_use(psk: &[u8]) -> Vec<u8> {
@@ -352,6 +363,19 @@ mod tests {
             channel(2, pb::channel::Role::Secondary, "Lab", vec![9; 16]),
         );
         settings
+    }
+
+    #[test]
+    fn public_keys_are_told_as_the_radio_tells_them() {
+        assert!(public_key(&[], false, &[]));
+        assert!(public_key(&[1], false, &[]));
+        assert!(public_key(&[5], false, &[]));
+        assert!(public_key(&DEFAULT_KEY, false, &[]));
+        assert!(!public_key(&[9; 16], false, &[]));
+        assert!(!public_key(&[9; 32], false, &[]));
+        // A secondary without a key, as its primary.
+        assert!(public_key(&[], true, &[1]));
+        assert!(!public_key(&[], true, &[9; 32]));
     }
 
     #[test]

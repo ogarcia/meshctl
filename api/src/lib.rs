@@ -79,6 +79,9 @@ pub enum ErrorCode {
     /// A channel with the very name and key of another the radio has: on
     /// the air, and to the radio, it would be that same channel.
     DuplicateChannel,
+    /// A position more precise than a public channel takes: the radio would
+    /// cut it down.
+    PublicChannelPrecision,
 }
 
 /// The body of every error the API answers with.
@@ -741,7 +744,25 @@ pub struct ChannelSettings {
     pub uplink: bool,
     /// Whether what MQTT has comes down to it.
     pub downlink: bool,
+    /// How precisely the radio sends its position on it, in bits of each
+    /// coordinate: 0 not at all, 32 exactly, fewer for a place only roughly
+    /// where it is; the apps offer 10 (some 23 km off) to 19 (some 46 m). On
+    /// a public channel, at most [`PUBLIC_POSITION_PRECISION`].
+    #[serde(default)]
+    pub position_precision: u32,
+    /// Whether anyone can read it: no key, the default one or a simple one,
+    /// or, for a secondary without a key of its own, a public primary's.
+    #[serde(default)]
+    pub public: bool,
+    /// Whether what comes on it is to be told of quietly, as for a busy
+    /// public channel one keeps all the same.
+    #[serde(default)]
+    pub muted: bool,
 }
+
+/// The most bits of precision the radio sends its position with on a public
+/// channel, from firmware 2.8: some 730 m off. It cuts more down to this.
+pub const PUBLIC_POSITION_PRECISION: u32 = 15;
 
 /// The codes each setting with a fixed set of values takes, as the
 /// protobufs this daemon was built with name them.
@@ -801,6 +822,14 @@ pub struct ChannelChange {
     pub custom_key: Option<String>,
     pub uplink: bool,
     pub downlink: bool,
+    /// As [`ChannelSettings::position_precision`]: 0 to 32, and at most
+    /// [`PUBLIC_POSITION_PRECISION`] on a public channel. Left out, it stays
+    /// as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position_precision: Option<u32>,
+    /// As [`ChannelSettings::muted`]. Left out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
 }
 
 /// The order of a radio's channels: every slot it has a channel in, each
