@@ -11,12 +11,14 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{ChannelSecret, Error, ErrorCode, RadioId};
+use meshctl_api::{ChannelSecret, Error, ErrorCode, RadioId, SectionSecret};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(channel_key))
+    OpenApiRouter::new()
+        .routes(routes!(channel_key))
+        .routes(routes!(section_secret))
 }
 
 /// Channel key
@@ -54,6 +56,50 @@ async fn channel_key(
             }),
         )
             .into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+fn not_found() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(Error {
+            error: ErrorCode::NotFound,
+        }),
+    )
+        .into_response()
+}
+
+/// Setting's secret
+///
+/// A secret of one of the sections of the radio's settings, as a Wi-Fi or
+/// an MQTT password: one the sections say is a secret, and only show as
+/// set or not. Asked for on its own, by the section's id and the field's
+/// dotted name; not to be kept by whoever asks, nor by anything in between;
+/// logged each time. Only while the radio is connected.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/secrets/sections/{section}/{field}",
+    tag = "secrets",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("section" = String, Path, description = "The section's id, as `config.network`"),
+        ("field" = String, Path, description = "The field's dotted name, as `wifi_psk`"),
+    ),
+    responses(
+        (status = 200, description = "The secret", body = SectionSecret),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio, or no such secret", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+    )
+)]
+async fn section_secret(
+    State(state): State<AppState>,
+    Path((radio, section, field)): Path<(RadioId, String, String)>,
+) -> Response {
+    match state.radios.section_secret(radio, &section, &field) {
+        Ok(Some(secret)) => ([(header::CACHE_CONTROL, "no-store")], Json(secret)).into_response(),
+        Ok(None) => not_found(),
         Err(failure) => refused(failure),
     }
 }

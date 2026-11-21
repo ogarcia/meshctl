@@ -959,6 +959,18 @@ pub enum ChannelHistory {
     Forget,
 }
 
+/// A secret of a section of the radio's settings, as a Wi-Fi password, asked
+/// for on its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SectionSecret {
+    #[cfg_attr(feature = "openapi", schema(example = "config.network"))]
+    pub section: String,
+    #[cfg_attr(feature = "openapi", schema(example = "wifi_psk"))]
+    pub field: String,
+    pub value: String,
+}
+
 /// A channel's key itself, asked for on its own: the one secret of the radio
 /// meshctl hands out, and only when asked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

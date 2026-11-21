@@ -177,9 +177,13 @@ impl Radio {
                 my_node_num: ME,
                 ..Default::default()
             }),
+            // As a Heltec V3 says it: Wi-Fi and Bluetooth, no Ethernet.
             V::Metadata(pb::DeviceMetadata {
                 firmware_version: "0.0.0.fake".into(),
                 hw_model: pb::HardwareModel::HeltecV3 as i32,
+                has_wifi: true,
+                has_bluetooth: true,
+                has_ethernet: false,
                 ..Default::default()
             }),
             V::NodeInfo(pb::NodeInfo {

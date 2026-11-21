@@ -260,14 +260,71 @@ fn module_part(module: &pb::ModuleConfig, name: &str) -> Option<DynamicMessage> 
     }
 }
 
+/// The bit each module has in what the radio says it was built without.
+fn excluded_bit(module: &str) -> Option<u32> {
+    use pb::ExcludedModules as E;
+    Some(match module {
+        "mqtt" => E::MqttConfig,
+        "serial" => E::SerialConfig,
+        "external_notification" => E::ExtnotifConfig,
+        "store_forward" => E::StoreforwardConfig,
+        "range_test" => E::RangetestConfig,
+        "telemetry" => E::TelemetryConfig,
+        "canned_message" => E::CannedmsgConfig,
+        "audio" => E::AudioConfig,
+        "remote_hardware" => E::RemotehardwareConfig,
+        "neighbor_info" => E::NeighborinfoConfig,
+        "ambient_lighting" => E::AmbientlightingConfig,
+        "detection_sensor" => E::DetectionsensorConfig,
+        "paxcounter" => E::PaxcounterConfig,
+        "bluetooth" => E::BluetoothConfig,
+        "network" => E::NetworkConfig,
+        "statusmessage" => E::StatusmessageConfig,
+        "traffic_management" => E::TrafficmanagementConfig,
+        "tak" => E::TakConfig,
+        "mesh_beacon" => E::MeshbeaconConfig,
+        _ => return None,
+    } as u32)
+}
+
+/// Whether the radio has a section at all, as it says: the modules it was
+/// built with, Bluetooth if it has it, the network if Wi-Fi or Ethernet.
+/// Everything, for one that does not say.
+pub fn has(settings: &Settings, name: &str) -> bool {
+    let Some(metadata) = &settings.metadata else {
+        return true;
+    };
+    if excluded_bit(name).is_some_and(|bit| metadata.excluded_modules & bit != 0) {
+        return false;
+    }
+    match name {
+        "bluetooth" => metadata.has_bluetooth,
+        "network" => metadata.has_wifi || metadata.has_ethernet,
+        _ => true,
+    }
+}
+
+/// Whether the radio has what a field is for: Wi-Fi's and Ethernet's own,
+/// in the network, only if it has them.
+fn has_field(settings: &Settings, section: &str, field: &str) -> bool {
+    let Some(metadata) = &settings.metadata else {
+        return true;
+    };
+    match (section, field) {
+        ("config.network", "wifi_enabled" | "wifi_ssid" | "wifi_psk") => metadata.has_wifi,
+        ("config.network", "eth_enabled") => metadata.has_ethernet,
+        _ => true,
+    }
+}
+
 /// Every section offered: the configuration's, then the modules', each as
-/// the radio sent it.
+/// the radio sent it, and only those the radio has.
 pub fn sections(settings: &Settings) -> Vec<SettingsSection> {
     let config = local_config(settings);
     let mut sections: Vec<SettingsSection> = config
         .descriptor()
         .fields()
-        .filter(|f| !LEFT_OUT.contains(&f.name()) && config.has_field(f))
+        .filter(|f| !LEFT_OUT.contains(&f.name()) && config.has_field(f) && has(settings, f.name()))
         .filter_map(|f| match config.get_field(&f).into_owned() {
             Value::Message(part) => Some(section(
                 format!("config.{}", f.name()),
@@ -278,14 +335,53 @@ pub fn sections(settings: &Settings) -> Vec<SettingsSection> {
             _ => None,
         })
         .collect();
+    for section in &mut sections {
+        let id = section.id.clone();
+        section.fields.retain(|f| has_field(settings, &id, &f.name));
+    }
     sections.extend(settings.modules.iter().filter_map(|(name, module)| {
-        if MODULES_LEFT_OUT.contains(&name.as_str()) {
+        if MODULES_LEFT_OUT.contains(&name.as_str()) || !has(settings, name) {
             return None;
         }
         let part = module_part(module, name)?;
         Some(section(format!("module.{name}"), name, true, &part))
     }));
     sections
+}
+
+/// A secret of a section offered, for the one who asks for it: a text field
+/// the protobufs mark sensitive, by its dotted path. `None` for any other.
+pub fn secret(settings: &Settings, section: &str, path: &str) -> Option<String> {
+    let part = match section.split_once('.')? {
+        ("config", name) if !LEFT_OUT.contains(&name) => {
+            match local_config(settings).get_field_by_name(name)?.into_owned() {
+                Value::Message(part) => part,
+                _ => return None,
+            }
+        }
+        ("module", name) if !MODULES_LEFT_OUT.contains(&name) => {
+            module_part(settings.modules.get(name)?, name)?
+        }
+        _ => return None,
+    };
+    let mut message = part;
+    let mut steps = path.split('.').peekable();
+    while let Some(step) = steps.next() {
+        let field = message.descriptor().get_field_by_name(step)?;
+        let value = message.get_field(&field).into_owned();
+        if steps.peek().is_some() {
+            let Value::Message(nested) = value else {
+                return None;
+            };
+            message = nested;
+            continue;
+        }
+        return match (said(&field).secret, value) {
+            (true, Value::String(text)) => Some(text),
+            _ => None,
+        };
+    }
+    None
 }
 
 /// A JSON value as a protobuf value of a field's kind, checked against what
@@ -563,6 +659,36 @@ mod tests {
         );
         assert_eq!(mqtt.password, "large4cats", "a secret not given is kept");
         assert_eq!(mqtt.address, "mqtt.lan");
+    }
+
+    #[test]
+    fn only_what_the_radio_has_is_offered() {
+        let mut settings = settings();
+        settings.metadata = Some(pb::DeviceMetadata {
+            has_wifi: true,
+            has_bluetooth: false,
+            has_ethernet: false,
+            excluded_modules: pb::ExcludedModules::MqttConfig as u32,
+            ..Default::default()
+        });
+        let all = sections(&settings);
+        let network = all.iter().find(|s| s.id == "config.network").unwrap();
+        assert!(network.fields.iter().any(|f| f.name == "wifi_ssid"));
+        assert!(!network.fields.iter().any(|f| f.name == "eth_enabled"));
+        assert!(!all.iter().any(|s| s.id == "config.bluetooth"));
+        assert!(!all.iter().any(|s| s.id == "module.mqtt"));
+    }
+
+    #[test]
+    fn a_secret_is_handed_out_only_if_it_is_one() {
+        let settings = settings();
+        assert_eq!(
+            secret(&settings, "config.network", "wifi_psk").as_deref(),
+            Some("s3cret")
+        );
+        assert_eq!(secret(&settings, "config.network", "wifi_ssid"), None);
+        assert_eq!(secret(&settings, "config.security", "private_key"), None);
+        assert_eq!(secret(&settings, "config.network", "nothing"), None);
     }
 
     #[test]

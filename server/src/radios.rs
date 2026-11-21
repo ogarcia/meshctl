@@ -12,7 +12,8 @@ use meshctl_api::{
     BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkState,
     MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeSettings,
     NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
-    Request, RequestKind, SettingsApplied, SettingsSection, SightingId, Status, Traceroute,
+    Request, RequestKind, SectionSecret, SettingsApplied, SettingsSection, SightingId, Status,
+    Traceroute,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -776,6 +777,27 @@ impl Radios {
         }
         let order: Vec<u32> = have.into_iter().filter(|&i| i != index).collect();
         self.rearrange_channels(id, &order, forget).await
+    }
+
+    /// A secret of one of a radio's sections, for the one who asks for it, and
+    /// only then. Each time is logged.
+    pub fn section_secret(
+        &self,
+        id: RadioId,
+        section: &str,
+        field: &str,
+    ) -> Result<Option<SectionSecret>, SettingsFailure> {
+        let value = self
+            .configurable(id)?
+            .read(|state| crate::sections::secret(&state.settings, section, field));
+        if value.is_some() {
+            tracing::info!(radio = id, section, field, "setting's secret handed out");
+        }
+        Ok(value.map(|value| SectionSecret {
+            section: section.to_owned(),
+            field: field.to_owned(),
+            value,
+        }))
     }
 
     /// A radio whose settings can be read and changed now: there is such a

@@ -9,6 +9,9 @@ use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
 use crate::names;
 use crate::radios::Switch;
+
+const EYE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye.svg");
+const EYE_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye-off.svg");
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{ErrorCode, FieldKind, SettingsField, SettingsSection};
@@ -30,13 +33,20 @@ pub fn words(name: &str) -> String {
     })
 }
 
-/// Whether a section is on, as the radio has it, for those that say.
+/// Whether a section is on, as the radio has it, for those that say: by
+/// their `enabled`, or, for the network, by Wi-Fi or Ethernet being so.
 fn enabled(section: &SettingsSection) -> Option<bool> {
-    section
+    let switches: &[&str] = match section.id.as_str() {
+        "config.network" => &["wifi_enabled", "eth_enabled"],
+        _ => &["enabled"],
+    };
+    let states: Vec<bool> = section
         .fields
         .iter()
-        .find(|f| f.name == "enabled")
-        .and_then(|f| f.value.as_ref().and_then(Json::as_bool))
+        .filter(|f| switches.contains(&f.name.as_str()))
+        .filter_map(|f| f.value.as_ref().and_then(Json::as_bool))
+        .collect();
+    (!states.is_empty()).then(|| states.contains(&true))
 }
 
 /// Lets a notice of something sent to the radio go once the radio has been
@@ -290,6 +300,7 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
     // Sets or drops the edit; a section left without any has none.
     let store = {
         let name = name.clone();
+        let section = section.clone();
         move |value: Option<Json>| {
             edits.update(|e| {
                 let fields = e.entry(section.clone()).or_default();
@@ -386,23 +397,63 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
         }
         FieldKind::Text if field.secret => {
             let set = field.set;
+            let live = expect_context::<Live>();
+            // The secret itself, while shown: asked for then, and nowhere
+            // else; gone as it is hidden, or the page goes.
+            let shown = RwSignal::new(None::<String>);
+            let reveal = {
+                let section = section.clone();
+                let name = name.clone();
+                move |_| {
+                    if shown.with_untracked(Option::is_some) {
+                        shown.set(None);
+                        return;
+                    }
+                    let Some(radio) = live.selected.get_untracked() else {
+                        return;
+                    };
+                    let (section, name) = (section.clone(), name.clone());
+                    spawn_local(async move {
+                        if let Ok(secret) = daemon::section_secret(radio, &section, &name).await {
+                            shown.set(Some(secret.value));
+                        }
+                    });
+                }
+            };
             view! {
-                <input
-                    class="pref-control"
-                    type="password"
-                    autocomplete="new-password"
-                    placeholder=move || {
-                        if set { t_string!(i18n, secret_set) } else { t_string!(i18n, secret_unset) }
-                    }
-                    prop:value=move || {
-                        edit().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
-                    }
-                    on:input=move |ev| {
-                        let text = event_target_value(&ev);
-                        // Left empty, the secret stays as it is.
-                        store((!text.is_empty()).then_some(Json::String(text)));
-                    }
-                />
+                <div class="pref-control secret-field">
+                    <input
+                        type=move || if shown.with(Option::is_some) { "text" } else { "password" }
+                        autocomplete="new-password"
+                        placeholder=move || {
+                            if set { t_string!(i18n, secret_set) } else { t_string!(i18n, secret_unset) }
+                        }
+                        prop:value=move || {
+                            edit()
+                                .and_then(|v| v.as_str().map(str::to_owned))
+                                .or_else(|| shown.get())
+                                .unwrap_or_default()
+                        }
+                        on:input=move |ev| {
+                            let text = event_target_value(&ev);
+                            // Left empty, the secret stays as it is; as it
+                            // was shown, too.
+                            let same = shown.with_untracked(|s| s.as_deref() == Some(text.as_str()));
+                            store((!text.is_empty() && !same).then_some(Json::String(text)));
+                        }
+                    />
+                    {set.then(|| view! {
+                        <button
+                            type="button"
+                            class="icon-button"
+                            class:on=move || shown.with(Option::is_some)
+                            title=move || t_string!(i18n, secret_show)
+                            aria-label=move || t_string!(i18n, secret_show)
+                            on:click=reveal.clone()
+                            inner_html=move || if shown.with(Option::is_some) { EYE_OFF } else { EYE }
+                        ></button>
+                    })}
+                </div>
             }
             .into_any()
         }

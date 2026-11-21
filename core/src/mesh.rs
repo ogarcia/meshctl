@@ -327,6 +327,9 @@ pub struct Settings {
     /// radio's firmware has, these protobufs knowing them or not.
     pub modules: BTreeMap<String, pb::ModuleConfig>,
     pub channels: BTreeMap<u32, pb::Channel>,
+    /// What the radio says it has: Wi-Fi, Bluetooth, Ethernet, the modules
+    /// built in. `None` until it says.
+    pub metadata: Option<pb::DeviceMetadata>,
 }
 
 impl std::fmt::Debug for Settings {
@@ -405,8 +408,9 @@ impl MeshState {
             }
             Some(V::Metadata(metadata)) => {
                 let local = self.local.get_or_insert_with(LocalNode::default);
-                local.firmware_version = Some(metadata.firmware_version);
+                local.firmware_version = Some(metadata.firmware_version.clone());
                 local.hw_model = Some(hw_model_name(metadata.hw_model));
+                self.settings.metadata = Some(metadata);
                 None
             }
             Some(V::Config(config)) => {

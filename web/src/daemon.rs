@@ -12,8 +12,8 @@ use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
     API_V1, Channel, ChannelHistory, ChannelOrder, ChannelSecret, Conversation, Error, ErrorCode,
     MapView, Message, NewMessage, NewTraceroute, Node, NodeSettings, NodeSettingsChange, Packet,
-    Peer, Preferences, Radio, RadioId, RadioOrder, RadioSettings, SectionChange, SettingsApplied,
-    SettingsSection, SightingId, Status, TOKEN_HEADER, Traceroute,
+    Peer, Preferences, Radio, RadioId, RadioOrder, RadioSettings, SectionChange, SectionSecret,
+    SettingsApplied, SettingsSection, SightingId, Status, TOKEN_HEADER, Traceroute,
 };
 use serde::de::DeserializeOwned;
 
@@ -144,6 +144,19 @@ pub async fn change_settings(
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// A secret of a section of the settings: asked for only to be shown, and
+/// not kept.
+pub async fn section_secret(
+    radio: RadioId,
+    section: &str,
+    field: &str,
+) -> Result<SectionSecret, Failure> {
+    get(&format!(
+        "/radios/{radio}/secrets/sections/{section}/{field}"
+    ))
+    .await
 }
 
 /// A channel's key itself: asked for only to be shown, and not kept.
