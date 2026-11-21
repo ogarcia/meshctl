@@ -9,7 +9,7 @@ use crate::chat::title;
 use crate::daemon::Failure;
 use crate::empty::EmptyState;
 use crate::i18n::{t, t_string, use_i18n};
-use crate::mesh::{ago, model, power, radius};
+use crate::mesh::{ago, radius, reach_words};
 use crate::packets::summary;
 use crate::traces::TraceCard;
 use leptos::prelude::*;
@@ -23,7 +23,8 @@ pub fn NodeView() -> impl IntoView {
     move || {
         live.node.get().map(|num| {
             view! {
-                <Details num />
+                <Tiles num />
+                <Position num />
                 <Ask num />
                 <Requests />
                 <Traces num />
@@ -32,87 +33,132 @@ pub fn NodeView() -> impl IntoView {
     }
 }
 
-/// What is known of the node.
+/// How the node is doing, at a glance: when it was last heard, how it is
+/// reached, what it runs on and how busy it hears the channel. Only what is
+/// known shows.
 #[component]
-fn Details(num: u32) -> impl IntoView {
+fn Tiles(num: u32) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let node = move || live.nodes.with(|nodes| nodes.get(&num).cloned());
+    let local = move || {
+        live.status
+            .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num))
+            == Some(num)
+    };
+    move || {
+        let node = node()?;
+        let local = local();
+        let heard = node.last_heard.map(|at| {
+            view! {
+                <Tile label=t!(i18n, nodes_heard).into_any() value=ago(live.now.get(), at) />
+            }
+        });
+        // Heard through others, the signal is the last relay's: only said
+        // when it is the node's own.
+        let reach = reach_words(i18n, &node, local).map(|words| {
+            let signal = node
+                .snr
+                .filter(|_| !local && !node.via_mqtt && node.hops_away == Some(0))
+                .map(|snr| match node.rssi {
+                    Some(rssi) => format!("SNR {snr:.1} dB · RSSI {rssi} dBm"),
+                    None => format!("SNR {snr:.1} dB"),
+                });
+            view! { <Tile label=t!(i18n, nodes_reach).into_any() value=words sub=signal /> }
+        });
+        let voltage = node.voltage.map(|v| format!("{v:.2} V"));
+        let power = match node.battery_level {
+            Some(level) if level > 100 => Some(view! {
+                <Tile
+                    label=t!(i18n, nodes_battery).into_any()
+                    value=t_string!(i18n, power_external).to_owned()
+                    sub=voltage
+                />
+            }),
+            Some(level) => Some(view! {
+                <Tile
+                    label=t!(i18n, nodes_battery).into_any()
+                    value=format!("{level} %")
+                    sub=voltage
+                    bar=Some(f64::from(level))
+                    low={level < 20}
+                />
+            }),
+            None => voltage.map(|voltage| {
+                view! { <Tile label=t!(i18n, nodes_battery).into_any() value=voltage /> }
+            }),
+        };
+        let busy = node.channel_utilization.map(|busy| {
+            view! {
+                <Tile
+                    label=t!(i18n, node_channel_use).into_any()
+                    value=format!("{busy:.1} %")
+                    bar=Some(f64::from(busy))
+                    low={busy > 25.0}
+                />
+            }
+        });
+        Some(view! { <div class="node-tiles">{heard} {reach} {power} {busy}</div> })
+    }
+}
+
+/// One of the node's figures: what it is, its value, a word more if any, and
+/// a bar for a percentage, marked when it is not good.
+#[component]
+fn Tile(
+    label: AnyView,
+    value: String,
+    #[prop(default = None)] sub: Option<String>,
+    #[prop(default = None)] bar: Option<f64>,
+    #[prop(optional)] low: bool,
+) -> impl IntoView {
+    view! {
+        <section class="card tile" class:low=low>
+            <span class="label">{label}</span>
+            <span class="value">{value}</span>
+            {bar.map(|bar| {
+                let width = format!("width: {:.0}%", bar.clamp(0.0, 100.0));
+                view! { <span class="bar"><i style=width></i></span> }
+            })}
+            {sub.map(|sub| view! { <span class="sub">{sub}</span> })}
+        </section>
+    }
+}
+
+/// Where the node is, and how well that is known.
+#[component]
+fn Position(num: u32) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
     let row = |label: AnyView, value: Option<String>| {
         value.map(|value| view! { <div><dt>{label}</dt><dd>{value}</dd></div> })
     };
     move || {
-        let node = node();
-        let hops = node.as_ref().and_then(|n| {
-            if n.via_mqtt {
-                Some("MQTT".to_owned())
-            } else {
-                n.hops_away.map(|h| {
-                    if h == 0 {
-                        t_string!(i18n, map_direct).to_owned()
-                    } else {
-                        h.to_string()
-                    }
-                })
+        let position = live.nodes.with(|nodes| nodes.get(&num)?.position)?;
+        let altitude = position
+            .altitude
+            .map_or_else(String::new, |a| format!(" · {a} m"));
+        let place = format!(
+            "{:.5}, {:.5}{altitude}",
+            position.latitude, position.longitude
+        );
+        let source = position.source.map(|source| {
+            match source {
+                PositionSource::Manual => t_string!(i18n, position_manual),
+                PositionSource::Internal => t_string!(i18n, position_internal),
+                PositionSource::External => t_string!(i18n, position_external),
             }
+            .to_owned()
         });
-        let signal = node.as_ref().and_then(|n| {
-            let snr = n.snr.filter(|_| n.hops_away == Some(0) && !n.via_mqtt)?;
-            Some(match n.rssi {
-                Some(rssi) => format!("SNR {snr:.1} dB · RSSI {rssi} dBm"),
-                None => format!("SNR {snr:.1} dB"),
-            })
-        });
-        let heard = node
-            .as_ref()
-            .and_then(|n| n.last_heard)
-            .map(|at| ago(live.now.get(), at));
-        let battery = node
-            .as_ref()
-            .and_then(|n| power(n.battery_level, n.voltage, t_string!(i18n, power_external)));
-        let position = node.as_ref().and_then(|n| {
-            let p = n.position.as_ref()?;
-            let altitude = p.altitude.map_or_else(String::new, |a| format!(" · {a} m"));
-            Some(format!("{:.5}, {:.5}{altitude}", p.latitude, p.longitude))
-        });
-        let precision = node
-            .as_ref()
-            .and_then(|n| n.position.as_ref()?.radius)
-            .map(radius);
-        let source = node
-            .as_ref()
-            .and_then(|n| n.position.as_ref()?.source)
-            .map(|source| {
-                match source {
-                    PositionSource::Manual => t_string!(i18n, position_manual),
-                    PositionSource::Internal => t_string!(i18n, position_internal),
-                    PositionSource::External => t_string!(i18n, position_external),
-                }
-                .to_owned()
-            });
-        view! {
+        Some(view! {
             <section class="card node-details">
                 <dl>
-                    {row(t!(i18n, nodes_id).into_any(), Some(format!("!{num:08x}")))}
-                    {row(
-                        t!(i18n, local_hardware).into_any(),
-                        node.as_ref().and_then(|n| n.hw_model.as_deref().map(model)),
-                    )}
-                    {row(t!(i18n, local_role).into_any(), node.as_ref().and_then(|n| n.role.clone()))}
-                    {row(t!(i18n, nodes_heard).into_any(), heard)}
-                    {row(t!(i18n, nodes_hops).into_any(), hops)}
-                    {row(t!(i18n, node_signal).into_any(), signal)}
-                    {row(t!(i18n, nodes_battery).into_any(), battery)}
-                    {row(
-                        t!(i18n, node_channel_use).into_any(),
-                        node.as_ref().and_then(|n| n.channel_utilization).map(|busy| format!("{busy:.1} %")),
-                    )}
-                    {row(t!(i18n, node_position).into_any(), position)}
-                    {row(t!(i18n, node_precision).into_any(), precision)}
+                    {row(t!(i18n, node_position).into_any(), Some(place))}
+                    {row(t!(i18n, node_precision).into_any(), position.radius.map(radius))}
                     {row(t!(i18n, node_source).into_any(), source)}
                 </dl>
             </section>
-        }
+        })
     }
 }
 

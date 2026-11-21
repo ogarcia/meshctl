@@ -211,10 +211,16 @@ pub fn fit(text: &str) -> String {
     fitted
 }
 
+/// Whether a short text is an emoji, or emojis, and no letters: shown
+/// larger than letters are.
+pub fn is_emoji(text: &str) -> bool {
+    !text.is_empty() && !text.chars().any(char::is_alphanumeric)
+}
+
 /// A button's text: an emoji alone at an emoji's size, three or four
 /// letters smaller, to fit.
 fn text(text: String) -> AnyView {
-    let class = if !text.chars().any(char::is_alphanumeric) {
+    let class = if is_emoji(&text) {
         "emoji"
     } else if text.chars().count() > 2 {
         "glyph long"

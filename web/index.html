@@ -498,6 +498,10 @@
       .topbar .heading { display: flex; flex-direction: column; min-width: 0; }
       .topbar .heading span { font-size: 12px; }
       .topbar .avatar { width: 32px; height: 32px; font-size: 11px; background: var(--mc-near); color: var(--mc-text); }
+      .topbar .node-avatar { width: 36px; height: 36px; font-size: 10px; }
+      .topbar h1 { display: flex; align-items: center; gap: 6px; }
+      .topbar h1 .mark { display: flex; color: var(--mc-primary); }
+      .topbar h1 .mark svg { width: 15px; height: 15px; fill: currentColor; }
       .topbar .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
       .topbar .actions button { min-height: 34px; font-weight: 600; white-space: nowrap; }
       .menu-toggle { display: none; }
@@ -912,6 +916,8 @@
       .node-avatar.mid { background: var(--mc-node-mid); }
       .node-avatar.mqtt { background: var(--mc-raised); color: var(--mc-muted); }
       .node-avatar.local { background: var(--mc-pin-local); }
+      .node-avatar.emoji { font-size: 20px; }
+      .topbar .node-avatar.emoji { font-size: 18px; }
       .nodes-table .names { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
       .nodes-table .name { display: flex; align-items: center; gap: 6px; font-weight: 600; }
       .nodes-table .mono.dim, .nodes-table .small { font-size: 12px; }
@@ -936,6 +942,30 @@
         .sections-tab { grid-template-columns: minmax(0, 1fr); }
       }
 
+      .node-tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 16px;
+      }
+      .tile { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+      .tile .label { font-size: 12px; color: var(--mc-muted); }
+      .tile .value {
+        font-size: 22px;
+        font-weight: 650;
+        line-height: 1.2;
+        font-variant-numeric: tabular-nums;
+      }
+      .tile .sub { font-size: 12px; color: var(--mc-muted); font-variant-numeric: tabular-nums; }
+      .tile .bar {
+        display: block;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--mc-raised);
+        overflow: hidden;
+      }
+      .tile .bar i { display: block; height: 100%; border-radius: 3px; background: var(--mc-ok); }
+      .tile.low .value { color: var(--mc-danger); }
+      .tile.low .bar i { background: var(--mc-danger); }
       .node-details dl {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

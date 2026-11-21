@@ -16,7 +16,7 @@ use crate::daemon::{self, Events, Failure};
 use crate::empty::EmptyState;
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
 use crate::map::{MapView, placed};
-use crate::mesh::{MeshView, ago, model};
+use crate::mesh::{MeshView, STAR, ago, avatar_class, model, reach_words};
 use crate::node::NodeView;
 use crate::packets::{KEPT, PacketsView};
 use crate::preferences::PreferencesView;
@@ -1194,24 +1194,44 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
         .into_any(),
         Peer::Node { node } => {
             let known = move || live.nodes.with(|nodes| nodes.get(&node).cloned());
+            let local = move || {
+                live.status
+                    .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num))
+                    == Some(node)
+            };
+            // On its page, what it is: how it is doing is in the page below.
+            // Elsewhere, how it is reached and when it was last heard.
             let detail = move || {
-                let node = known()?;
-                let mut parts = vec![node.id.clone()];
-                match node.hops_away {
-                    _ if node.via_mqtt => parts.push("MQTT".into()),
-                    Some(0) => {
-                        if let Some(snr) = node.snr {
-                            parts.push(format!("SNR {snr:.1}"));
-                        }
+                let known = known()?;
+                let mut parts = vec![known.id.clone()];
+                if live.page.get() == Page::Node {
+                    if let Some(role) = &known.role {
+                        parts.push(crate::names::role(i18n.get_locale(), role));
                     }
-                    Some(hops) => parts.push(format!("{hops} ⇢")),
-                    None => {}
-                }
-                if let Some(heard) = node.last_heard {
-                    parts.push(ago(live.now.get(), heard));
+                    if let Some(hardware) = &known.hw_model {
+                        parts.push(model(hardware));
+                    }
+                } else {
+                    if let Some(reach) = reach_words(i18n, &known, local()) {
+                        parts.push(reach);
+                    }
+                    if let Some(heard) = known.last_heard {
+                        parts.push(ago(live.now.get(), heard));
+                    }
                 }
                 Some(parts.join(" · "))
             };
+            let class = move || {
+                let mut class = known().map_or_else(
+                    || "node-avatar".to_owned(),
+                    |known| avatar_class(&known, local()),
+                );
+                if badge::is_emoji(&short_name(live, node)) {
+                    class.push_str(" emoji");
+                }
+                class
+            };
+            let favorite = move || known().is_some_and(|n| n.favorite);
             // Where else there is to go with the node: from the chat, its page;
             // from its page, the chat. On the map its card has both already.
             let action = move || {
@@ -1231,10 +1251,13 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 view! { {profile} {chat} }
             };
             view! {
-                <span class="avatar">{move || short_name(live, node)}</span>
+                <span class=class>{move || badge::fit(&short_name(live, node))}</span>
                 <div class="heading">
-                    <h1>{move || title(live, peer)}</h1>
-                    <span class="mono dim">{detail}</span>
+                    <h1>
+                        {move || title(live, peer)}
+                        {move || favorite().then(|| view! { <span class="mark star" inner_html=STAR></span> })}
+                    </h1>
+                    <span class="dim">{detail}</span>
                 </div>
                 <div class="actions">{action}</div>
             }

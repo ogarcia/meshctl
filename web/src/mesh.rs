@@ -4,8 +4,9 @@
 //! What the selected radio knows: itself, and the nodes it hears.
 
 use crate::app::{Daemon, Live};
-use crate::i18n::{t, t_string, use_i18n};
+use crate::i18n::{Locale, t, t_string, use_i18n};
 use leptos::prelude::*;
+use leptos_i18n::I18nContext;
 use meshctl_api::{LinkState, Node, NodesColumn as Column, NodesSort, Peer};
 
 #[component]
@@ -120,6 +121,31 @@ fn unknown(column: Column, node: &Node, local: Option<u32>) -> bool {
         Column::Power => node.battery_level.is_none(),
         Column::Hardware => node.hw_model.is_none(),
     }
+}
+
+/// The class of a node's avatar: the colours of the map's legend, or its
+/// radio's own.
+pub fn avatar_class(node: &Node, local: bool) -> String {
+    format!(
+        "node-avatar {}",
+        if local { "local" } else { distance(node) }
+    )
+}
+
+/// How a node is reached, in words: its own radio, directly, through so many
+/// hops, or through MQTT; none when it is not known.
+pub fn reach_words(i18n: I18nContext<Locale>, node: &Node, local: bool) -> Option<String> {
+    if local {
+        return Some(t_string!(i18n, map_local).to_owned());
+    }
+    if node.via_mqtt {
+        return Some("MQTT".to_owned());
+    }
+    Some(match node.hops_away? {
+        0 => t_string!(i18n, map_direct).to_owned(),
+        1 => t_string!(i18n, map_one_hop).to_owned(),
+        hops => t_string!(i18n, map_hops).replace("{n}", &hops.to_string()),
+    })
 }
 
 /// How far a node is, by the classes the map's legend has.
@@ -286,10 +312,10 @@ const SORTED: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/c
 const SORTED_BACK: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-up.svg");
 const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
-const STAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/star.svg");
-const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");
-const PLUG: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plug.svg");
-const BATTERY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-2.svg");
+pub const STAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/star.svg");
+pub const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");
+pub const PLUG: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plug.svg");
+pub const BATTERY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-2.svg");
 
 #[component]
 fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
@@ -309,28 +335,20 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
         .status
         .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num))
         == Some(num);
-    let class = format!(
-        "node-avatar {}",
-        if local { "local" } else { distance(&node) }
-    );
+    let mut class = avatar_class(&node, local);
+    if crate::badge::is_emoji(&short) {
+        class.push_str(" emoji");
+    }
     // Heard through others, the SNR is the last relay's, not this node's.
     let reach = {
-        let (hops, mqtt, snr) = (node.hops_away, node.via_mqtt, node.snr);
+        let node = node.clone();
         move || {
-            if local {
-                return t_string!(i18n, map_local).to_owned();
-            }
-            if mqtt {
-                return "MQTT".to_owned();
-            }
-            match hops {
-                Some(0) => match snr {
-                    Some(snr) => format!("{} · {snr:.1} dB", t_string!(i18n, map_direct)),
-                    None => t_string!(i18n, map_direct).to_owned(),
-                },
-                Some(1) => t_string!(i18n, map_one_hop).to_owned(),
-                Some(hops) => t_string!(i18n, map_hops).replace("{n}", &hops.to_string()),
-                None => String::new(),
+            let words = reach_words(i18n, &node, local).unwrap_or_default();
+            match node.snr {
+                Some(snr) if !local && !node.via_mqtt && node.hops_away == Some(0) => {
+                    format!("{words} · {snr:.1} dB")
+                }
+                _ => words,
             }
         }
     };
