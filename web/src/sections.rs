@@ -6,7 +6,7 @@
 
 use crate::app::Live;
 use crate::daemon::{self, Failure};
-use crate::i18n::{t, t_string, use_i18n};
+use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::names;
 use crate::radios::Switch;
 
@@ -286,8 +286,21 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
 fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> impl IntoView {
     let i18n = use_i18n();
     let name = field.name.clone();
-    let label = field.label.clone().unwrap_or_else(|| words(&field.name));
-    let title = field.description.clone().unwrap_or_default();
+    // In the interface's language: Spanish from our own words for it, any
+    // other the protobufs'.
+    let english = (
+        field.label.clone().unwrap_or_else(|| words(&field.name)),
+        field.description.clone().unwrap_or_default(),
+    );
+    let id = format!("{section}.{name}");
+    let said = Signal::derive(
+        move || match (i18n.get_locale(), crate::fields::spanish(&id)) {
+            (Locale::es, Some((label, description))) => (label.to_owned(), description.to_owned()),
+            _ => english.clone(),
+        },
+    );
+    let label = Signal::derive(move || said.with(|s| s.0.clone()));
+    let title = Signal::derive(move || said.with(|s| s.1.clone()));
     let unit = field.unit.clone();
     let original = field.value.clone().unwrap_or(Json::Null);
 
@@ -337,12 +350,11 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
                 Signal::derive(move || current().as_bool().unwrap_or(false))
             };
             let put = put.clone();
-            let label = label.clone();
             view! {
                 <div class="pref-control switch-control">
                     <Switch
                         on
-                        label=Signal::derive(move || label.clone())
+                        label
                         flip=move |_| put(Json::Bool(!on.get_untracked()))
                     />
                 </div>
@@ -476,7 +488,7 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
         <div class="pref-row">
             <div class="pref-what">
                 <span class="pref-title">
-                    {label.clone()}
+                    {label}
                     {unit.clone().map(|u| format!(" ({u})"))}
                     {field.diy_only.then(|| view! { <span class="tag">"DIY"</span> })}
                 </span>

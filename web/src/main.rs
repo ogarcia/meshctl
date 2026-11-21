@@ -9,6 +9,7 @@ mod channel_settings;
 mod chat;
 mod daemon;
 mod emoji;
+mod fields;
 mod map;
 mod mesh;
 mod names;
