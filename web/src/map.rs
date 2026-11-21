@@ -46,6 +46,9 @@ extern "C" {
 struct Drawing {
     labels: Labels,
     nodes: Vec<Marker>,
+    /// Whether the nodes are all of the selected radio's, not some of them
+    /// while they are read: only then is the map placed by them.
+    ready: bool,
 }
 
 /// The words the map shows, in the interface's language.
@@ -195,6 +198,9 @@ pub fn MapView() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let element = NodeRef::<html::Div>::new();
+    // The radio whose nodes the map was placed for, which is not yet the
+    // selected one while it changes.
+    let on_map = StoredValue::new(None::<RadioId>);
 
     // Opened once the element is there, closed when the page goes.
     Effect::new(move |opened: Option<bool>| {
@@ -226,7 +232,7 @@ pub fn MapView() -> impl IntoView {
         });
         // Where the person leaves the map, kept for the radio it shows.
         let moved = Closure::<dyn Fn(f64, f64, f64)>::new(move |latitude, longitude, zoom| {
-            let Some(radio) = live.selected.get_untracked() else {
+            let Some(radio) = on_map.get_value() else {
                 return;
             };
             let view = MapView {
@@ -256,8 +262,10 @@ pub fn MapView() -> impl IntoView {
         // Not before the map is there; then, as if for the first time.
         element.get()?;
         if previous.is_some_and(|previous| previous != selected) {
+            // Where the last radio was left is kept for it first.
             map_reset();
         }
+        on_map.set_value(selected);
         if let Some(radio) = selected {
             spawn_local(async move {
                 let view = daemon::map_view(radio).await.ok().flatten();
@@ -281,6 +289,7 @@ pub fn MapView() -> impl IntoView {
             .status
             .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
         let picked = live.map_pick.get();
+        let ready = live.selected.get().is_some() && live.loaded.get() == live.selected.get();
         let shown_route = live.map_route.get();
         let traceable = live.selected_kind() != Some(RadioKind::Meshcore);
         let route_button = |num: u32| -> Option<&'static str> {
@@ -360,6 +369,7 @@ pub fn MapView() -> impl IntoView {
                 tracing: t_string!(i18n, map_route_tracing).to_owned(),
             },
             nodes: markers,
+            ready,
         };
         if let Ok(json) = serde_json::to_string(&drawing) {
             map_nodes(&json);

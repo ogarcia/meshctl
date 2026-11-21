@@ -24,7 +24,7 @@ window.meshctlMap = (() => {
   let map = null;
   let markers = null;
   // What the Rust side gave last: the nodes, and the words to show them with.
-  let shown = { labels: {}, nodes: [] };
+  let shown = { labels: {}, nodes: [], ready: false };
   // Told when a node is picked (its number) or let go (null), and when one of
   // the node's buttons is pressed (its number and what for).
   let pick = null;
@@ -94,11 +94,7 @@ window.meshctlMap = (() => {
     map.on("moveend", () => {
       if (!touched) return;
       clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => {
-        if (!map || !moved) return;
-        const centre = map.getCenter().wrap();
-        moved(centre.lat, centre.lng, map.getZoom());
-      }, SAVE_AFTER);
+      saveTimer = setTimeout(save, SAVE_AFTER);
     });
     map.attributionControl.setPrefix(false);
     L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(map);
@@ -391,16 +387,7 @@ window.meshctlMap = (() => {
     const list = shown.nodes;
     drawMarkers();
     labelAll();
-    // The first time: where it was left, if that is known already; else to
-    // the nodes, until it is.
-    if (!placed && list.length > 0) {
-      if (savedView) {
-        placed = true;
-        map.setView([savedView.latitude, savedView.longitude], savedView.zoom);
-      } else {
-        placeAll();
-      }
-    }
+    place();
     showCard();
   }
 
@@ -556,23 +543,45 @@ window.meshctlMap = (() => {
     }
   }
 
+  // Tells where the map is left, now.
+  function save() {
+    saveTimer = null;
+    if (!map || !moved) return;
+    const centre = map.getCenter().wrap();
+    moved(centre.lat, centre.lng, map.getZoom());
+  }
+
   // Other nodes, of another radio: the view goes to them, as the first time.
+  // Where the last one was left, if not kept yet, is kept now, for it.
   function reset() {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      save();
+    }
     placed = false;
     savedView = undefined;
     touched = false;
   }
 
   // Where the map was left for the radio, as JSON {latitude, longitude,
-  // zoom}, or null if it never was: the map goes there, or to the nodes,
-  // unless the person has moved it already.
+  // zoom}, or null if it never was.
   function view(json) {
     savedView = json ? JSON.parse(json) : null;
-    if (!map || touched) return;
+    place();
+  }
+
+  // The first view of a radio, once, with both where it was left read and
+  // all of its nodes there: where it was left, or else its nodes. Not if the
+  // person has moved the map meanwhile. It jumps there: an animation from
+  // the last radio's place says nothing.
+  function place() {
+    if (!map || placed || touched || savedView === undefined || !shown.ready) return;
     if (savedView) {
-      map.setView([savedView.latitude, savedView.longitude], savedView.zoom);
       placed = true;
-    } else if (!placed) {
+      map.setView([savedView.latitude, savedView.longitude], savedView.zoom, {
+        animate: false,
+      });
+    } else {
       placeAll();
     }
   }
@@ -591,9 +600,13 @@ window.meshctlMap = (() => {
     placed = true;
     const local = list.find((n) => n.kind === "local");
     if (local) {
-      map.setView([local.lat, local.lon], 11);
+      map.setView([local.lat, local.lon], 11, { animate: false });
     } else {
-      map.fitBounds(list.map((n) => [n.lat, n.lon]), { maxZoom: 13, padding: [32, 32] });
+      map.fitBounds(list.map((n) => [n.lat, n.lon]), {
+        maxZoom: 13,
+        padding: [32, 32],
+        animate: false,
+      });
     }
   }
 

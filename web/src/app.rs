@@ -93,6 +93,9 @@ pub struct Live {
     pub status: RwSignal<Option<Status>>,
     /// Of the selected radio.
     pub nodes: RwSignal<BTreeMap<u32, Node>>,
+    /// The radio whose nodes are all read: until it is the selected one,
+    /// what there is of it may be partial.
+    pub loaded: RwSignal<Option<RadioId>>,
     /// Of the selected radio.
     pub channels: RwSignal<Vec<Channel>>,
     /// Of the selected radio.
@@ -133,6 +136,7 @@ impl Live {
             radio_editing: RwSignal::new(Editing::Closed),
             status: RwSignal::new(None),
             nodes: RwSignal::new(BTreeMap::new()),
+            loaded: RwSignal::new(None),
             channels: RwSignal::new(Vec::new()),
             conversations: RwSignal::new(Vec::new()),
             open: RwSignal::new(None),
@@ -157,6 +161,11 @@ impl Live {
 
     pub fn select(self, radio: RadioId) {
         daemon::set_last_radio(radio);
+        // What there is of the last one goes: nothing of it is shown as the
+        // new one's while that is read.
+        self.loaded.set(None);
+        self.status.set(None);
+        self.nodes.set(BTreeMap::new());
         self.selected.set(Some(radio));
         self.open.set(None);
         self.thread.set(Vec::new());
@@ -240,6 +249,7 @@ impl Live {
     /// Reads what the selected radio knows again.
     pub async fn refresh_selected(self) -> Result<(), Failure> {
         let Some(radio) = self.selected.get_untracked() else {
+            self.loaded.set(None);
             self.status.set(None);
             self.nodes.set(BTreeMap::new());
             self.channels.set(Vec::new());
@@ -261,6 +271,7 @@ impl Live {
             self.conversations.set(conversations);
             self.traceroutes.set(traceroutes);
             self.packets.set(packets);
+            self.loaded.set(Some(radio));
         }
         self.refresh_thread().await
     }
