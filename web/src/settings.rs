@@ -17,7 +17,8 @@ use crate::sections::{SaveBar, SectionEdits, SectionsTab, clear_when_synced};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{
-    ErrorCode, LinkState, NodeSettings, NodeSettingsChange, RadioId, RadioKind, SettingsSection,
+    ErrorCode, LinkState, LoraAdvanced, NodeSettings, NodeSettingsChange, RadioId, RadioKind,
+    RegionLimits, SettingsSection,
 };
 use std::collections::BTreeMap;
 
@@ -694,6 +695,359 @@ fn LoraTab(draft: Draft) -> impl IntoView {
                 </div>
             </Row>
         </div>
+        <LoraAdvancedRows draft />
+    }
+}
+
+const CHEVRON: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
+
+/// A bandwidth's code in kHz.
+fn khz(code: u32) -> f64 {
+    match code {
+        8 => 7.8,
+        10 => 10.4,
+        16 => 15.6,
+        21 => 20.8,
+        31 => 31.25,
+        42 => 41.7,
+        62 => 62.5,
+        200 => 203.125,
+        400 => 406.25,
+        800 => 812.5,
+        1600 => 1625.0,
+        other => f64::from(other),
+    }
+}
+
+/// What the radio's region and bandwidth make of its frequency: how many
+/// slots there are, and the frequency of each, in MHz, from slot 1.
+struct Band {
+    limits: RegionLimits,
+    width: f64,
+    half: f64,
+    slots: u32,
+    /// The slot it uses when none is set, from 1.
+    auto_slot: u32,
+}
+
+/// The firmware's hash for picking a frequency slot by a channel's name.
+fn djb2(text: &str) -> u32 {
+    text.bytes().fold(5381_u32, |hash, byte| {
+        hash.wrapping_shl(5)
+            .wrapping_add(hash)
+            .wrapping_add(u32::from(byte))
+    })
+}
+
+impl Band {
+    fn of(settings: &NodeSettings) -> Option<Self> {
+        let limits = *settings.choices.region_limits.get(&settings.lora.region)?;
+        let bandwidth = if settings.lora.use_preset {
+            preset_params(settings, &settings.lora.modem_preset)?.0
+        } else {
+            settings.lora.bandwidth
+        };
+        let width = limits.spacing + limits.padding * 2.0 + khz(bandwidth) / 1000.0;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let slots = if settings.lora.region == "UNSET" {
+            0
+        } else {
+            ((limits.frequency_end - limits.frequency_start + limits.spacing) / width).round()
+                as u32
+        };
+        // As the firmware picks it: its region's own, or by the primary
+        // channel's name, which for an unnamed one is its preset's.
+        let auto_slot = if limits.default_slot > 0 && limits.default_slot <= slots {
+            limits.default_slot
+        } else if slots > 0 {
+            let primary = settings
+                .channels
+                .first()
+                .map(|c| c.name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| {
+                    if settings.lora.use_preset {
+                        crate::chat::preset_name(&settings.lora.modem_preset)
+                    } else {
+                        "Custom".to_owned()
+                    }
+                });
+            djb2(&primary) % slots + 1
+        } else {
+            1
+        };
+        Some(Self {
+            limits,
+            width,
+            half: khz(bandwidth) / 2000.0,
+            slots,
+            auto_slot,
+        })
+    }
+
+    fn frequency(&self, slot: u32) -> f64 {
+        self.limits.frequency_start
+            + self.half
+            + self.limits.padding
+            + f64::from(slot.saturating_sub(1)) * self.width
+    }
+}
+
+/// A field of the advanced part of the draft's LoRa, read and written.
+fn advanced<T: Clone + Default + Send + Sync + 'static>(
+    draft: Draft,
+    get: impl Fn(&LoraAdvanced) -> T + Copy + Send + Sync + 'static,
+    set: impl Fn(&mut LoraAdvanced, T) + Copy + Send + Sync + 'static,
+) -> (Signal<T>, impl Fn(T) + Copy) {
+    field(
+        draft,
+        move |d| d.lora.advanced.as_ref().map(get).unwrap_or_default(),
+        move |d, v| {
+            if let Some(advanced) = d.lora.advanced.as_mut() {
+                set(advanced, v);
+            }
+        },
+    )
+}
+
+/// What few need to touch of how the radio transmits: folded until asked
+/// for, held to what its region allows.
+#[component]
+fn LoraAdvancedRows(draft: Draft) -> impl IntoView {
+    let i18n = use_i18n();
+    let open = RwSignal::new(false);
+    let band = Memo::new(move |_| {
+        draft.with(|d| d.as_ref().and_then(Band::of).map(|b| (b.limits, b.slots)))
+    });
+    let (power, set_power) = advanced(draft, |a| a.tx_power, |a, v| a.tx_power = v);
+    let (slot, set_slot) = advanced(draft, |a| a.frequency_slot, |a, v| a.frequency_slot = v);
+    let (frequency, set_frequency) = advanced(
+        draft,
+        |a| a.override_frequency,
+        |a, v| a.override_frequency = v,
+    );
+    let (offset, set_offset) =
+        advanced(draft, |a| a.frequency_offset, |a, v| a.frequency_offset = v);
+    let (duty, set_duty) = advanced(
+        draft,
+        |a| a.override_duty_cycle,
+        |a, v| a.override_duty_cycle = v,
+    );
+    let (boosted, set_boosted) =
+        advanced(draft, |a| a.rx_boosted_gain, |a, v| a.rx_boosted_gain = v);
+    let (ok_mqtt, set_ok_mqtt) = advanced(draft, |a| a.ok_to_mqtt, |a, v| a.ok_to_mqtt = v);
+    let (ignore_mqtt, set_ignore_mqtt) =
+        advanced(draft, |a| a.ignore_mqtt, |a, v| a.ignore_mqtt = v);
+    let (fan_off, set_fan_off) =
+        advanced(draft, |a| a.pa_fan_disabled, |a, v| a.pa_fan_disabled = v);
+
+    // Another region or bandwidth may have fewer slots, or allow less power:
+    // what it would not take is brought within.
+    Effect::new(move |_| {
+        let Some((limits, slots)) = band.get() else {
+            return;
+        };
+        if slot.get_untracked() > slots {
+            set_slot(0);
+        }
+        if power.get_untracked() > limits.power_limit as i32 {
+            set_power(limits.power_limit as i32);
+        }
+    });
+
+    let power_limit = move || band.get().map_or(0, |(l, _)| l.power_limit);
+    let slots = move || band.get().map_or(0, |(_, s)| s);
+    let slot_hint = move || format!("{} {}.", t_string!(i18n, settings_slot_hint), slots());
+    // What the radio will use when left to it: the slot it picks, and that
+    // slot's frequency, or the one set's.
+    let auto_slot = move || {
+        draft
+            .with(|d| d.as_ref().and_then(Band::of))
+            .map_or(1, |b| b.auto_slot)
+    };
+    let auto_frequency = move || {
+        let at = slot.get();
+        draft
+            .with(|d| d.as_ref().and_then(Band::of))
+            .map(|band| {
+                let at = if at > 0 { at } else { band.auto_slot };
+                format!("{:.3}", band.frequency(at))
+            })
+            .unwrap_or_default()
+    };
+    let band_hint = move || {
+        band.get().map_or_else(String::new, |(l, _)| {
+            format!(
+                "{} {:.3}–{:.3} MHz.",
+                t_string!(i18n, settings_frequency_hint),
+                l.frequency_start,
+                l.frequency_end
+            )
+        })
+    };
+    let limited = move || band.get().is_some_and(|(l, _)| l.duty_cycle < 100.0);
+    let duty_hint = move || {
+        let duty = band.get().map_or(100.0, |(l, _)| l.duty_cycle);
+        format!("{} {duty} %.", t_string!(i18n, settings_duty_hint))
+    };
+    let number = |text: String| text.trim().replace(',', ".");
+    let switch_row = move |title: AnyView,
+                           hint: AnyView,
+                           on: Signal<bool>,
+                           set: Box<dyn Fn(bool) + Send + Sync>,
+                           label: Signal<String>| {
+        let set = std::sync::Arc::new(set);
+        view! {
+            <Row title hint>
+                <div class="pref-control switch-control">
+                    <Switch
+                        on
+                        label
+                        flip=move |_| set(!on.get_untracked())
+                    />
+                </div>
+            </Row>
+        }
+    };
+
+    view! {
+        <button
+            type="button"
+            class="advanced-toggle"
+            class:open=move || open.get()
+            aria-expanded=move || open.get().to_string()
+            on:click=move |_| open.update(|o| *o = !*o)
+        >
+            <span class="pref-what">
+                <span class="pref-title">{t!(i18n, settings_advanced)}</span>
+                <span class="dim">{t!(i18n, settings_advanced_hint)}</span>
+            </span>
+            <span class="chevron" inner_html=CHEVRON></span>
+        </button>
+        <div class="preferences" class:gone=move || !open.get()>
+            <Row
+                title=t!(i18n, settings_tx_power).into_any()
+                hint=view! { {t!(i18n, settings_tx_power_hint)} " " {move || power_limit()} " dBm." }.into_any()
+            >
+                <input
+                    class="pref-control"
+                    type="number"
+                    min="0"
+                    max=move || power_limit().to_string()
+                    prop:value=move || power.get().to_string()
+                    on:input=move |ev| {
+                        // Not past what the region allows, so as not to send
+                        // what the radio would cut down.
+                        if let Ok(dbm) = number(event_target_value(&ev)).parse::<i32>() {
+                            set_power(dbm.clamp(0, power_limit() as i32));
+                        }
+                    }
+                />
+            </Row>
+            <Row title=t!(i18n, settings_slot).into_any() hint=view! { {slot_hint} }.into_any()>
+                // Left empty, the radio's own, which it shows greyed, as "auto".
+                <div class="pref-control auto-field" class:auto=move || slot.get() == 0>
+                    <input
+                        type="number"
+                        min="1"
+                        max=move || slots().to_string()
+                        disabled=move || frequency.get() != 0.0
+                        placeholder=move || auto_slot().to_string()
+                        prop:value=move || {
+                            let at = slot.get();
+                            if at == 0 { String::new() } else { at.to_string() }
+                        }
+                        on:input=move |ev| {
+                            let text = number(event_target_value(&ev));
+                            if text.is_empty() {
+                                set_slot(0);
+                            } else if let Ok(slot) = text.parse::<u32>() {
+                                set_slot(slot.min(slots()));
+                            }
+                        }
+                    />
+                    <span class="auto-tag">"auto"</span>
+                </div>
+            </Row>
+            <Row title=t!(i18n, settings_frequency).into_any() hint=view! { {band_hint} }.into_any()>
+                <div class="pref-control auto-field" class:auto=move || frequency.get() == 0.0>
+                    <input
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        placeholder=auto_frequency
+                        prop:value=move || {
+                            let mhz = frequency.get();
+                            if mhz == 0.0 { String::new() } else { mhz.to_string() }
+                        }
+                        on:change=move |ev| {
+                            let text = number(event_target_value(&ev));
+                            if text.is_empty() {
+                                set_frequency(0.0);
+                            } else if let Ok(mhz) = text.parse() {
+                                set_frequency(mhz);
+                            }
+                        }
+                    />
+                    <span class="auto-tag">"auto"</span>
+                </div>
+            </Row>
+            <Row
+                title=t!(i18n, settings_offset).into_any()
+                hint=t!(i18n, settings_offset_hint).into_any()
+            >
+                <input
+                    class="pref-control"
+                    type="number"
+                    step="0.001"
+                    min="-1"
+                    max="1"
+                    prop:value=move || offset.get().to_string()
+                    on:change=move |ev| {
+                        if let Ok(mhz) = number(event_target_value(&ev)).parse() {
+                            set_offset(mhz);
+                        }
+                    }
+                />
+            </Row>
+            <div class:gone=move || !limited()>
+                {switch_row(
+                    t!(i18n, settings_duty).into_any(),
+                    view! { {duty_hint} }.into_any(),
+                    duty,
+                    Box::new(set_duty),
+                    Signal::derive(move || t_string!(i18n, settings_duty).to_owned()),
+                )}
+            </div>
+            {switch_row(
+                t!(i18n, settings_boosted).into_any(),
+                t!(i18n, settings_boosted_hint).into_any(),
+                boosted,
+                Box::new(set_boosted),
+                Signal::derive(move || t_string!(i18n, settings_boosted).to_owned()),
+            )}
+            {switch_row(
+                t!(i18n, settings_ok_mqtt).into_any(),
+                t!(i18n, settings_ok_mqtt_hint).into_any(),
+                ok_mqtt,
+                Box::new(set_ok_mqtt),
+                Signal::derive(move || t_string!(i18n, settings_ok_mqtt).to_owned()),
+            )}
+            {switch_row(
+                t!(i18n, settings_ignore_mqtt).into_any(),
+                t!(i18n, settings_ignore_mqtt_hint).into_any(),
+                ignore_mqtt,
+                Box::new(set_ignore_mqtt),
+                Signal::derive(move || t_string!(i18n, settings_ignore_mqtt).to_owned()),
+            )}
+            {switch_row(
+                t!(i18n, settings_fan).into_any(),
+                t!(i18n, settings_fan_hint).into_any(),
+                fan_off,
+                Box::new(set_fan_off),
+                Signal::derive(move || t_string!(i18n, settings_fan).to_owned()),
+            )}
+        </div>
     }
 }
 
@@ -733,5 +1087,16 @@ fn Choice(
                     .collect_view()
             }}
         </select>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::djb2;
+
+    #[test]
+    fn longfast_in_the_us_is_slot_20() {
+        // 906.875 MHz, as the apps say for LongFast in the US.
+        assert_eq!(djb2("LongFast") % 104 + 1, 20);
     }
 }

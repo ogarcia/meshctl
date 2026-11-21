@@ -11,8 +11,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use meshctl_api::{
     ChannelChange, ChannelKey, ChannelSecret, ChannelSettings, DeviceSettings, KeyChange,
-    LoraParams, LoraSettings, NodeSettings, NodeSettingsChange, OwnerSettings,
-    PUBLIC_POSITION_PRECISION, SettingsChoices,
+    LoraAdvanced, LoraParams, LoraSettings, NodeSettings, NodeSettingsChange, OwnerSettings,
+    PUBLIC_POSITION_PRECISION, RegionLimits, SettingsChoices,
 };
 use meshctl_core::mesh::Settings;
 use meshctl_core::radio::SettingsChange;
@@ -62,7 +62,11 @@ fn channel_role_name(value: i32) -> Option<&'static str> {
 }
 
 pub fn choices() -> SettingsChoices {
-    let regions = names(region_name);
+    // Only those the firmware has.
+    let regions: Vec<String> = names(region_name)
+        .into_iter()
+        .filter(|region| lora::known(region))
+        .collect();
     let presets = names(preset_name);
     SettingsChoices {
         roles: names(role_name)
@@ -84,6 +88,22 @@ pub fn choices() -> SettingsChoices {
             .collect(),
         bandwidths: lora::BANDWIDTHS.to_vec(),
         wide_bandwidths: lora::WIDE_BANDWIDTHS.to_vec(),
+        region_limits: regions
+            .iter()
+            .map(|code| {
+                let region = lora::region(code);
+                let limits = RegionLimits {
+                    frequency_start: region.start,
+                    frequency_end: region.end,
+                    duty_cycle: region.duty_cycle,
+                    power_limit: region.power_limit,
+                    spacing: region.spacing,
+                    padding: region.padding,
+                    default_slot: region.default_slot,
+                };
+                (code.clone(), limits)
+            })
+            .collect(),
         regions,
         presets,
     }
@@ -190,6 +210,17 @@ pub fn view(settings: &Settings) -> Option<NodeSettings> {
             bandwidth: lora.bandwidth,
             spread_factor: lora.spread_factor,
             coding_rate: lora.coding_rate,
+            advanced: Some(LoraAdvanced {
+                tx_power: lora.tx_power,
+                frequency_slot: lora.channel_num,
+                override_frequency: lora.override_frequency,
+                frequency_offset: lora.frequency_offset,
+                override_duty_cycle: lora.override_duty_cycle,
+                rx_boosted_gain: lora.sx126x_rx_boosted_gain,
+                ok_to_mqtt: lora.config_ok_to_mqtt,
+                ignore_mqtt: lora.ignore_mqtt,
+                pa_fan_disabled: lora.pa_fan_disabled,
+            }),
         },
         channels,
         choices: choices(),
@@ -258,6 +289,7 @@ pub fn change(
         let preset = config::lo_ra_config::ModemPreset::from_str_name(&lora.modem_preset)
             .ok_or(Invalid("modem_preset"))?;
         check((1..=HOP_LIMIT_MAX).contains(&lora.hop_limit), "hop_limit")?;
+        check(lora::known(&lora.region), "region")?;
         // A preset the region does not take would not be used.
         check(
             !lora.use_preset || lora::presets(&lora.region).contains(&lora.modem_preset.as_str()),
@@ -291,6 +323,45 @@ pub fn change(
             // Back to a preset, the coding rate set by hand would raise the
             // preset's (from firmware 2.7.18): 0 is the preset's own.
             current.coding_rate = 0;
+        }
+        if let Some(advanced) = &lora.advanced {
+            // Held to what the radio would keep: past its region's power or
+            // band only for a licensed owner, as the firmware lets one.
+            let licensed = settings.owner.as_ref().is_some_and(|o| o.is_licensed);
+            let region = lora::region(&lora.region);
+            check(
+                advanced.tx_power >= 0
+                    && (licensed || advanced.tx_power <= region.power_limit as i32),
+                "tx_power",
+            )?;
+            let bandwidth = if lora.use_preset {
+                lora::params(&lora.modem_preset, lora::wide(&lora.region)).0
+            } else {
+                lora.bandwidth
+            };
+            check(
+                advanced.override_frequency != 0.0
+                    || advanced.frequency_slot <= lora::slots(&lora.region, bandwidth),
+                "frequency_slot",
+            )?;
+            let frequency = f64::from(advanced.override_frequency);
+            check(
+                frequency == 0.0 || licensed || (region.start..=region.end).contains(&frequency),
+                "override_frequency",
+            )?;
+            check(
+                advanced.frequency_offset.is_finite() && advanced.frequency_offset.abs() <= 1.0,
+                "frequency_offset",
+            )?;
+            current.tx_power = advanced.tx_power;
+            current.channel_num = advanced.frequency_slot;
+            current.override_frequency = advanced.override_frequency;
+            current.frequency_offset = advanced.frequency_offset;
+            current.override_duty_cycle = advanced.override_duty_cycle;
+            current.sx126x_rx_boosted_gain = advanced.rx_boosted_gain;
+            current.config_ok_to_mqtt = advanced.ok_to_mqtt;
+            current.ignore_mqtt = advanced.ignore_mqtt;
+            current.pa_fan_disabled = advanced.pa_fan_disabled;
         }
         if current != before {
             change.configs.push(pb::Config {
@@ -485,6 +556,7 @@ mod tests {
                 bandwidth: 0,
                 spread_factor: 0,
                 coding_rate: 0,
+                advanced: None,
             }),
             ..Default::default()
         };
@@ -509,6 +581,7 @@ mod tests {
                 bandwidth: 62,
                 spread_factor: 9,
                 coding_rate: 6,
+                advanced: None,
             }),
             ..Default::default()
         };
@@ -544,6 +617,52 @@ mod tests {
             panic!("a LoRa config");
         };
         assert_eq!(lora.coding_rate, 0);
+    }
+
+    #[test]
+    fn what_few_touch_is_held_to_what_the_radio_keeps() {
+        let with = |tx_power, frequency_slot, override_frequency| NodeSettingsChange {
+            lora: Some(LoraSettings {
+                region: "EU_868".into(),
+                use_preset: true,
+                modem_preset: "LONG_FAST".into(),
+                hop_limit: 3,
+                tx_enabled: true,
+                bandwidth: 0,
+                spread_factor: 0,
+                coding_rate: 0,
+                advanced: Some(LoraAdvanced {
+                    tx_power,
+                    frequency_slot,
+                    override_frequency,
+                    frequency_offset: 0.0,
+                    override_duty_cycle: false,
+                    rx_boosted_gain: true,
+                    ok_to_mqtt: true,
+                    ignore_mqtt: false,
+                    pa_fan_disabled: false,
+                }),
+            }),
+            ..Default::default()
+        };
+        let apply = |wanted| super::change(&settings(), &wanted, no_random).map(|_| ());
+        // EU_868: 27 dBm at most, and one slot at LongFast's 250 kHz.
+        assert_eq!(apply(with(27, 1, 0.0)), Ok(()));
+        assert_eq!(apply(with(0, 0, 0.0)), Ok(()));
+        assert_eq!(apply(with(28, 0, 0.0)), Err(Invalid("tx_power")));
+        assert_eq!(apply(with(10, 2, 0.0)), Err(Invalid("frequency_slot")));
+        // A frequency of its own: within the band, and the slot then matters not.
+        assert_eq!(apply(with(10, 2, 869.5)), Ok(()));
+        assert_eq!(
+            apply(with(10, 0, 915.0)),
+            Err(Invalid("override_frequency"))
+        );
+        let (change, _) = super::change(&settings(), &with(14, 1, 0.0), no_random).unwrap();
+        let Some(config::PayloadVariant::Lora(lora)) = &change.configs[0].payload_variant else {
+            panic!("a LoRa config");
+        };
+        assert_eq!((lora.tx_power, lora.channel_num), (14, 1));
+        assert!(lora.config_ok_to_mqtt);
     }
 
     #[test]
@@ -811,6 +930,7 @@ mod tests {
             bandwidth: 0,
             spread_factor: 0,
             coding_rate: 0,
+            advanced: None,
         };
         let by_hand = |bandwidth, spread_factor, coding_rate| LoraSettings {
             use_preset: false,

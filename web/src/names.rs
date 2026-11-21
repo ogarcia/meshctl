@@ -136,9 +136,15 @@ pub fn role(locale: Locale, code: &str) -> String {
 }
 
 /// A modem preset by the name it goes by everywhere, in no language of its
-/// own, the one the firmware gives an unnamed channel: LongFast (LONG_FAST).
+/// own, the one the firmware gives an unnamed channel: LongFast. The code
+/// after it only where the name does not say it: LongMod (LONG_MODERATE).
 pub fn preset(_: Locale, code: &str) -> String {
-    format!("{} ({code})", crate::chat::preset_name(code))
+    let name = crate::chat::preset_name(code);
+    if name.to_lowercase() == code.replace('_', "").to_lowercase() {
+        name
+    } else {
+        format!("{name} ({code})")
+    }
 }
 
 /// Codes in the order they come, the most used first, but for one apart,
@@ -172,7 +178,7 @@ mod tests {
             role(Locale::es, "CLIENT_MUTE"),
             "Cliente silencioso (CLIENT_MUTE)"
         );
-        assert_eq!(preset(Locale::es, "LONG_FAST"), "LongFast (LONG_FAST)");
+        assert_eq!(preset(Locale::es, "LONG_FAST"), "LongFast");
         assert_eq!(
             preset(Locale::en, "LONG_MODERATE"),
             "LongMod (LONG_MODERATE)"

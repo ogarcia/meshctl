@@ -692,7 +692,7 @@ pub struct DeviceSettings {
 }
 
 /// How the radio transmits.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct LoraSettings {
     /// One of `choices.regions`.
@@ -721,6 +721,62 @@ pub struct LoraSettings {
     pub hop_limit: u32,
     /// Whether it transmits at all.
     pub tx_enabled: bool,
+    /// What few need to touch. Left out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advanced: Option<LoraAdvanced>,
+}
+
+/// How the radio transmits, beyond what most need.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LoraAdvanced {
+    /// In dBm, 0 for the most its region allows, which is at most that
+    /// (`choices.region_limits`), unless the owner is licensed. The radio
+    /// says back what it uses.
+    pub tx_power: i32,
+    /// Which of its region's frequency slots, from 1; 0 for the one the
+    /// primary channel's name picks. As many as its region and bandwidth
+    /// make room for.
+    pub frequency_slot: u32,
+    /// A frequency of its own, in MHz, over the slot: 0 for none. Within its
+    /// region's band, unless the owner is licensed.
+    pub override_frequency: f32,
+    /// Added to the frequency, in MHz, to make up for an off crystal: up to
+    /// ±1.
+    pub frequency_offset: f32,
+    /// Whether it transmits past its region's duty cycle: only where the law
+    /// lets it.
+    pub override_duty_cycle: bool,
+    /// Whether an SX126x chip receives with more gain, for more power.
+    pub rx_boosted_gain: bool,
+    /// Whether it lets others' gateways put what it sends on MQTT.
+    pub ok_to_mqtt: bool,
+    /// Whether it leaves aside what reaches it through MQTT.
+    pub ignore_mqtt: bool,
+    /// Whether its amplifier's fan, on boards with one, is off.
+    pub pa_fan_disabled: bool,
+}
+
+/// What a region allows, as the firmware has it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RegionLimits {
+    /// Its band, in MHz.
+    pub frequency_start: f64,
+    pub frequency_end: f64,
+    /// The share of the time it may transmit, in %: 100 for no limit.
+    pub duty_cycle: f64,
+    /// The most power it may transmit with, in dBm.
+    pub power_limit: u32,
+    /// How its frequency slots are laid out, in MHz: between them, and at
+    /// each side of one. Each takes these and its bandwidth; it has as many
+    /// as fit, rounded.
+    pub spacing: f64,
+    pub padding: f64,
+    /// The slot it uses when none is set, from 1; 0 when the primary
+    /// channel's name picks it: the djb2 hash of that name (its preset's, if
+    /// unnamed), modulo how many slots there are, plus one.
+    pub default_slot: u32,
 }
 
 /// What a channel's key is. The key itself never leaves the daemon.
@@ -778,7 +834,7 @@ pub const PUBLIC_POSITION_PRECISION: u32 = 15;
 
 /// The codes each setting with a fixed set of values takes, as the
 /// protobufs this daemon was built with name them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SettingsChoices {
     pub roles: Vec<String>,
@@ -793,6 +849,8 @@ pub struct SettingsChoices {
     /// takes them; and on 2.4 GHz (`LORA_24`).
     pub bandwidths: Vec<u32>,
     pub wide_bandwidths: Vec<u32>,
+    /// What each region allows.
+    pub region_limits: std::collections::BTreeMap<String, RegionLimits>,
 }
 
 /// How a radio transmits without a preset, or what a preset stands for.
@@ -805,7 +863,7 @@ pub struct LoraParams {
 }
 
 /// The radio's own settings, as it last sent them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NodeSettings {
     pub owner: OwnerSettings,
@@ -899,7 +957,7 @@ pub struct ChannelSecret {
 
 /// What to change of the radio's settings: each part given is set whole,
 /// each part left out stays as it is.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NodeSettingsChange {
     #[serde(default)]
