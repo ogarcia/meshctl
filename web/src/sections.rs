@@ -253,10 +253,31 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
         })
     };
 
+    // What each field is now, edited or as the radio has it: some are only
+    // shown as another is so.
+    let originals: std::collections::HashMap<String, Json> = section
+        .fields
+        .iter()
+        .filter_map(|f| Some((f.name.clone(), f.value.clone()?)))
+        .collect();
+    let value_of = {
+        let id = id.clone();
+        move |name: &str| {
+            edits
+                .with(|e| e.get(&id).and_then(|fields| fields.get(name).cloned()))
+                .or_else(|| originals.get(name).cloned())
+        }
+    };
     let fields = section
         .fields
         .into_iter()
-        .map(|field| view! { <FieldInput section=id.clone() field edits /> })
+        .map(|field| {
+            let visible = {
+                let (id, name, value_of) = (id.clone(), field.name.clone(), value_of.clone());
+                Signal::derive(move || crate::fields::shown(&id, &name, &value_of))
+            };
+            view! { <FieldInput section=id.clone() field edits visible /> }
+        })
         .collect_view();
 
     view! {
@@ -283,7 +304,12 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
 
 /// One field, with the input its kind takes.
 #[component]
-fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> impl IntoView {
+fn FieldInput(
+    section: String,
+    field: SettingsField,
+    edits: SectionEdits,
+    visible: Signal<bool>,
+) -> impl IntoView {
     let i18n = use_i18n();
     let name = field.name.clone();
     // In the interface's language: Spanish from our own words for it, any
@@ -361,6 +387,104 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
                 </div>
             }
             .into_any()
+        }
+        FieldKind::Flags => {
+            let codes = field.choices.clone();
+            let set_of = {
+                let current = current.clone();
+                move || -> Vec<String> {
+                    current()
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|c| c.as_str().map(str::to_owned))
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                }
+            };
+            // Each flag on or off, the rest as they are.
+            let flip = {
+                let set_of = set_of.clone();
+                let put = put.clone();
+                std::sync::Arc::new(move |code: String| {
+                    let mut set = set_of();
+                    if let Some(at) = set.iter().position(|c| *c == code) {
+                        set.remove(at);
+                    } else {
+                        set.push(code);
+                    }
+                    put(Json::from(set));
+                })
+            };
+            if let [only] = codes.as_slice() {
+                // One flag: a switch.
+                let only = only.clone();
+                let on = {
+                    let only = only.clone();
+                    Signal::derive(move || set_of().contains(&only))
+                };
+                view! {
+                    <div class="pref-control switch-control">
+                        <Switch on label flip=move |_| flip(only.clone()) />
+                    </div>
+                }
+                .into_any()
+            } else {
+                // Several: chips, each on or off.
+                let field_id = field_id.clone();
+                view! {
+                    <div class="pref-control flag-chips">
+                        {codes
+                            .into_iter()
+                            .map(|code| {
+                                let on = {
+                                    let (code, set_of) = (code.clone(), set_of.clone());
+                                    move || set_of().contains(&code)
+                                };
+                                let flip = flip.clone();
+                                let (shown, field_id) = (code.clone(), field_id.clone());
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="choice"
+                                        class:on=on
+                                        on:click=move |_| flip(code.clone())
+                                    >
+                                        {move || crate::fields::choice(i18n.get_locale(), &field_id, &shown)}
+                                    </button>
+                                }
+                            })
+                            .collect_view()}
+                    </div>
+                }
+                .into_any()
+            }
+        }
+        // Two or three: a pill that slides to the one chosen.
+        FieldKind::Choice if field.choices.len() <= 3 => {
+            let options = field
+                .choices
+                .iter()
+                .map(|code| {
+                    let on = {
+                        let (code, current) = (code.clone(), current.clone());
+                        Signal::derive(move || current().as_str() == Some(code.as_str()))
+                    };
+                    let pick = {
+                        let (code, put) = (code.clone(), put.clone());
+                        Box::new(move || put(Json::String(code.clone())))
+                            as Box<dyn Fn() + Send + Sync>
+                    };
+                    let (code, field_id) = (code.clone(), field_id.clone());
+                    let label = view! {
+                        {move || crate::fields::choice(i18n.get_locale(), &field_id, &code)}
+                    }
+                    .into_any();
+                    (on, pick, label)
+                })
+                .collect();
+            crate::preferences::pills(options).into_any()
         }
         FieldKind::Choice => {
             let current = current.clone();
@@ -497,7 +621,7 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
     // A row, as the other tabs' settings: what it is and a word on it, and
     // its control.
     view! {
-        <div class="pref-row">
+        <div class="pref-row" class:gone=move || !visible.get()>
             <div class="pref-what">
                 <span class="pref-title">
                     {label}

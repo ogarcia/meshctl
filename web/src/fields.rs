@@ -958,6 +958,47 @@ const CHOICES: &[(&str, &str, &str, &str)] = &[
         "Cualquier flanco, activo en alto",
         "Either edge, active high",
     ),
+    (
+        "enabled_protocols",
+        "UDP_BROADCAST",
+        "Emitir por UDP",
+        "UDP broadcast",
+    ),
+    ("position_flags", "ALTITUDE", "Altitud", "Altitude"),
+    (
+        "position_flags",
+        "ALTITUDE_MSL",
+        "Altitud sobre el nivel del mar",
+        "Altitude above mean sea level",
+    ),
+    (
+        "position_flags",
+        "GEOIDAL_SEPARATION",
+        "Separación geoidal",
+        "Geoidal separation",
+    ),
+    ("position_flags", "DOP", "DOP", "DOP"),
+    ("position_flags", "HVDOP", "HDOP y VDOP", "HDOP and VDOP"),
+    (
+        "position_flags",
+        "SATINVIEW",
+        "Satélites a la vista",
+        "Satellites in view",
+    ),
+    (
+        "position_flags",
+        "SEQ_NO",
+        "Número de secuencia",
+        "Sequence number",
+    ),
+    (
+        "position_flags",
+        "TIMESTAMP",
+        "Marca de tiempo",
+        "Timestamp",
+    ),
+    ("position_flags", "HEADING", "Rumbo", "Heading"),
+    ("position_flags", "SPEED", "Velocidad", "Speed"),
     ("team", "Unspecifed_Color", "Sin especificar", "Unspecified"),
     ("team", "White", "Blanco", "White"),
     ("team", "Yellow", "Amarillo", "Yellow"),
@@ -988,6 +1029,21 @@ const CHOICES: &[(&str, &str, &str, &str)] = &[
     ("role", "RTO", "Radiooperador", "Radio operator"),
     ("role", "K9", "Unidad canina", "K9"),
 ];
+
+/// Whether a field is shown, as others are now: the static addresses only
+/// with a static address mode.
+pub fn shown(
+    section: &str,
+    field: &str,
+    value_of: impl Fn(&str) -> Option<serde_json::Value>,
+) -> bool {
+    match (section, field) {
+        ("config.network", name) if name.starts_with("ipv4_config.") => {
+            value_of("address_mode").as_ref().and_then(|v| v.as_str()) == Some("STATIC")
+        }
+        _ => true,
+    }
+}
 
 /// How a choice of a field reads, in the interface's language.
 pub fn choice(locale: Locale, field: &str, code: &str) -> String {

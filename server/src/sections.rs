@@ -184,6 +184,58 @@ const ADDRESSES: &[&str] = &[
     "config.network.ipv4_config.dns",
 ];
 
+/// The settings that are flags kept as bits of a number, and the enum that
+/// names each bit.
+const FLAGS: &[(&str, &str)] = &[
+    (
+        "config.network.enabled_protocols",
+        "meshtastic.Config.NetworkConfig.ProtocolFlags",
+    ),
+    (
+        "config.position.position_flags",
+        "meshtastic.Config.PositionConfig.PositionFlags",
+    ),
+];
+
+/// The flags a field's bits are, by the enum that names them: each one's
+/// code and bit, but the none.
+fn flags_of(id: &str) -> Option<Vec<(String, u32)>> {
+    let (_, name) = FLAGS.iter().find(|(field, _)| *field == id)?;
+    let flags = descriptors().get_enum_by_name(name)?;
+    Some(
+        flags
+            .values()
+            .filter(|v| v.number() > 0)
+            .map(|v| (v.name().to_owned(), v.number() as u32))
+            .collect(),
+    )
+}
+
+/// The bits a list of flags' codes makes, with those of the number before
+/// that are no flag known here kept.
+fn flags_number(
+    json: &Json,
+    flags: &[(String, u32)],
+    before: u32,
+    name: &str,
+) -> Result<Json, Invalid> {
+    let codes = json.as_array().ok_or_else(|| invalid(name))?;
+    let known: u32 = flags
+        .iter()
+        .map(|(_, bit)| bit)
+        .fold(0, |all, bit| all | bit);
+    let mut number = before & !known;
+    for code in codes {
+        let code = code.as_str().ok_or_else(|| invalid(name))?;
+        let (_, bit) = flags
+            .iter()
+            .find(|(c, _)| c == code)
+            .ok_or_else(|| invalid(name))?;
+        number |= bit;
+    }
+    Ok(Json::from(number))
+}
+
 /// An address as it is written, from the number it is kept as; empty for
 /// none.
 fn address(number: u32) -> String {
@@ -239,6 +291,33 @@ fn fields(message: &DynamicMessage, prefix: &str, section: &str, out: &mut Vec<S
             Kind::Bytes => continue,
             integer => (FieldKind::Integer, Vec::new(), integer_range(integer)),
         };
+        // Flags, as the list of those set.
+        if let Some(flags) = flags_of(&format!("{section}.{name}")) {
+            let number = match value.as_ref() {
+                Value::U32(n) => *n,
+                _ => 0,
+            };
+            let set: Vec<Json> = flags
+                .iter()
+                .filter(|(_, bit)| number & bit != 0)
+                .map(|(code, _)| Json::from(code.clone()))
+                .collect();
+            out.push(SettingsField {
+                name,
+                label: said.label,
+                description: said.description,
+                unit: None,
+                kind: FieldKind::Flags,
+                min: None,
+                max: None,
+                choices: flags.into_iter().map(|(code, _)| code).collect(),
+                secret: false,
+                diy_only: said.diy_only,
+                value: Some(Json::Array(set)),
+                set: number != 0,
+            });
+            continue;
+        }
         // An address, as it is written.
         if ADDRESSES.contains(&format!("{section}.{name}").as_str()) {
             let number = match value.as_ref() {
@@ -549,8 +628,15 @@ pub fn change(
                 return Err(invalid(id));
             };
             for (path, json) in values {
-                let json = if ADDRESSES.contains(&format!("{id}.{path}").as_str()) {
+                let field_id = format!("{id}.{path}");
+                let json = if ADDRESSES.contains(&field_id.as_str()) {
                     address_number(json, path)?
+                } else if let Some(flags) = flags_of(&field_id) {
+                    let before = match part.get_field_by_name(path).map(|v| v.into_owned()) {
+                        Some(Value::U32(n)) => n,
+                        _ => 0,
+                    };
+                    flags_number(json, &flags, before, path)?
                 } else {
                     json.clone()
                 };
@@ -756,6 +842,40 @@ mod tests {
         assert_eq!(ipv4.ip, u32::from_le_bytes([192, 168, 1, 10]), "kept");
         let bad = BTreeMap::from([("ipv4_config.dns".to_owned(), Json::from("1.2.3"))]);
         assert!(super::change(&settings, "config.network", &bad).is_err());
+    }
+
+    #[test]
+    fn flags_read_and_are_taken_as_a_list() {
+        let mut settings = settings();
+        settings.config.position = Some(pb::config::PositionConfig {
+            position_flags: 0x0001 | 0x0100 | 0x8000,
+            ..Default::default()
+        });
+        let all = sections(&settings);
+        let position = all.iter().find(|s| s.id == "config.position").unwrap();
+        let flags = position
+            .fields
+            .iter()
+            .find(|f| f.name == "position_flags")
+            .unwrap();
+        assert_eq!(flags.kind, FieldKind::Flags);
+        assert_eq!(flags.value, Some(Json::from(vec!["ALTITUDE", "HEADING"])));
+        assert!(flags.choices.contains(&"SPEED".to_owned()));
+
+        let values = BTreeMap::from([("position_flags".to_owned(), Json::from(vec!["SPEED"]))]);
+        let change = change(&settings, "config.position", &values).unwrap();
+        let Some(pb::config::PayloadVariant::Position(position)) =
+            &change.configs[0].payload_variant
+        else {
+            panic!("a position config");
+        };
+        assert_eq!(
+            position.position_flags,
+            0x0200 | 0x8000,
+            "a bit not known here, kept"
+        );
+        let bad = BTreeMap::from([("position_flags".to_owned(), Json::from(vec!["NOPE"]))]);
+        assert!(super::change(&settings, "config.position", &bad).is_err());
     }
 
     #[test]

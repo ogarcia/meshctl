@@ -1014,6 +1014,9 @@ pub enum FieldKind {
     Text,
     /// One of `choices`, by its code.
     Choice,
+    /// Any of `choices`, each a flag the radio keeps as a bit: as a list of
+    /// their codes.
+    Flags,
 }
 
 /// One setting of a section, as the protobufs describe it.
