@@ -60,7 +60,7 @@ fn kind_name(kind: RadioKind) -> &'static str {
 }
 
 /// Changes one thing of a radio at once, from its row.
-fn quick(live: Live, radio: &Radio, change: impl FnOnce(&mut RadioSettings)) {
+pub fn quick(live: Live, radio: &Radio, change: impl FnOnce(&mut RadioSettings)) {
     let id = radio.id;
     let mut settings = settings_of(radio);
     change(&mut settings);

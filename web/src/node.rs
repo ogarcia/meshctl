@@ -7,6 +7,7 @@
 use crate::app::Live;
 use crate::chat::title;
 use crate::daemon::Failure;
+use crate::empty::EmptyState;
 use crate::i18n::{t, t_string, use_i18n};
 use crate::mesh::{ago, model, power, radius};
 use crate::packets::summary;
@@ -185,7 +186,16 @@ fn Ask(num: u32) -> impl IntoView {
     view! {
         <Show
             when=supported
-            fallback=move || view! { <p class="card dim">{t!(i18n, meshcore_not_yet)}</p> }
+            fallback=move || {
+                view! {
+                    <EmptyState
+                        icon=crate::empty::SETTINGS_OFF
+                        title=t!(i18n, empty_meshcore_title).into_any()
+                        text=t!(i18n, meshcore_not_yet).into_any()
+                        compact=true
+                    />
+                }
+            }
         >
             <section class="card node-ask">
                 <h2>{t!(i18n, node_ask)}</h2>

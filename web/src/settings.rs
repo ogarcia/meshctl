@@ -6,9 +6,10 @@
 //! modules. Read from it while it is connected, changed a tab at a time, and
 //! read back once it has applied them.
 
-use crate::app::Live;
+use crate::app::{LinkLabel, Live};
 use crate::channel_settings::ChannelsTab;
 use crate::daemon::{self, Failure};
+use crate::empty::{self, EmptyState};
 use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::names;
 use crate::preferences::pills;
@@ -143,7 +144,8 @@ pub fn SettingsView() -> impl IntoView {
             section_edits.set(BTreeMap::new());
             notice.set(None);
         }
-        if !ready() {
+        // Not of a radio that has none of these, as MeshCore's yet.
+        if !ready() || live.selected_kind() == Some(RadioKind::Meshcore) {
             return radio;
         }
         live.synced.track();
@@ -324,10 +326,50 @@ pub fn SettingsView() -> impl IntoView {
         <Show
             when=shown
             fallback=move || {
-                if live.selected_kind() == Some(RadioKind::Meshcore) {
-                    view! { <p class="card dim">{t!(i18n, meshcore_not_yet)}</p> }.into_any()
-                } else {
-                    view! { <p class="card dim">{t!(i18n, settings_not_connected)}</p> }.into_any()
+                let radio = live.selected_radio();
+                let name = radio.as_ref().map(|r| r.name.clone()).unwrap_or_default();
+                match radio {
+                    Some(radio) if radio.kind == RadioKind::Meshcore => view! {
+                        <EmptyState
+                            icon=empty::SETTINGS_OFF
+                            title=t!(i18n, empty_meshcore_title).into_any()
+                            text=t!(i18n, meshcore_not_yet).into_any()
+                        />
+                    }
+                    .into_any(),
+                    // Switched off: it can be switched on from here.
+                    Some(radio) if radio.link == LinkState::Disabled => view! {
+                        <EmptyState
+                            icon=empty::POWER
+                            title=t!(i18n, empty_disabled_title, name = name.clone()).into_any()
+                            text=t!(i18n, empty_disabled_text).into_any()
+                        >
+                            <button
+                                type="button"
+                                class="primary"
+                                on:click=move |_| crate::radios::quick(live, &radio, |s| s.enabled = true)
+                            >
+                                {t!(i18n, empty_enable)}
+                            </button>
+                        </EmptyState>
+                    }
+                    .into_any(),
+                    Some(radio) => {
+                        let link = Signal::stored(radio.link);
+                        view! {
+                            <EmptyState
+                                icon=empty::PLUG_OFF
+                                title=t!(i18n, empty_offline_title, name = name.clone()).into_any()
+                                text=t!(i18n, empty_offline_text).into_any()
+                            >
+                                <span class=move || format!("badge {}", live.link_class(link.get()))>
+                                    <LinkLabel link />
+                                </span>
+                            </EmptyState>
+                        }
+                        .into_any()
+                    }
+                    None => ().into_any(),
                 }
             }
         >

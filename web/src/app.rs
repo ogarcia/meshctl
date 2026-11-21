@@ -13,6 +13,7 @@
 use crate::badge::{self, Face};
 use crate::chat::{ChatView, peer_of, short_name, title};
 use crate::daemon::{self, Events, Failure};
+use crate::empty::EmptyState;
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
 use crate::map::{MapView, placed};
 use crate::mesh::{MeshView, ago, model};
@@ -717,7 +718,14 @@ fn Content() -> impl IntoView {
     });
     move || match shown.get() {
         Shown::Token => view! { <TokenForm /> }.into_any(),
-        Shown::Down => view! { <p class="card dim">{t!(i18n, link_daemon_down)}</p> }.into_any(),
+        Shown::Down => view! {
+            <EmptyState
+                icon=crate::empty::SERVER_OFF
+                title=t!(i18n, empty_daemon_title).into_any()
+                text=t!(i18n, empty_daemon_text).into_any()
+            />
+        }
+        .into_any(),
         Shown::Nothing => ().into_any(),
         Shown::Welcome => view! { <Welcome /> }.into_any(),
         Shown::Page(Page::Preferences) => view! { <PreferencesView /> }.into_any(),
@@ -1046,7 +1054,18 @@ fn LocalFoot() -> impl IntoView {
         let num = num()?;
         live.nodes.with(|nodes| nodes.get(&num)?.long_name.clone())
     };
-    let short = move || num().map(|num| short_name(live, num)).unwrap_or_default();
+    // Its node's short name, or, with none known yet, what its button on the
+    // rail shows.
+    let short = move || {
+        num()
+            .map(|num| short_name(live, num))
+            .filter(|short| !short.is_empty())
+            .or_else(|| {
+                live.selected_radio()
+                    .map(|r| r.short_name.unwrap_or_else(|| badge::initials(&r.name)))
+            })
+            .unwrap_or_default()
+    };
     let detail = move || {
         local().map(|l| match l.hw_model.as_deref().map(model) {
             Some(hw) => format!("{} · {hw}", l.id),

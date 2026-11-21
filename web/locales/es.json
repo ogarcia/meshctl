@@ -333,5 +333,13 @@
   "settings_licensed": "Radioaficionado con licencia",
   "settings_licensed_hint": "Deja pasar de la potencia y la banda de la región, pero la radio deja de cifrar lo que envía, como manda la licencia. El nombre largo debería ser tu indicativo.",
   "secret_show": "Mostrar u ocultar",
-  "interval_own": "Personalizado"
+  "interval_own": "Personalizado",
+  "empty_meshcore_title": "Aún no para MeshCore",
+  "empty_disabled_title": "{{ name }} está desactivada",
+  "empty_disabled_text": "meshctl no se conecta a ella, y sus ajustes se leen de la propia radio. Actívala para verlos.",
+  "empty_enable": "Activar",
+  "empty_offline_title": "{{ name }} no está conectada",
+  "empty_offline_text": "Sus ajustes se leen de la radio y se cambian en ella, solo mientras está conectada. meshctl sigue intentándolo.",
+  "empty_daemon_title": "meshctl no responde",
+  "empty_daemon_text": "No se llega al servicio de meshctl. La página lo vuelve a intentar sola cada pocos segundos."
 }

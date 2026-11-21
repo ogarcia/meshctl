@@ -333,5 +333,13 @@
   "settings_licensed": "Licensed radio amateur",
   "settings_licensed_hint": "Lets it past its region's power and band, but the radio sends nothing encrypted, as the licence has it. The long name should be your call sign.",
   "secret_show": "Show or hide",
-  "interval_own": "Custom"
+  "interval_own": "Custom",
+  "empty_meshcore_title": "Not for MeshCore yet",
+  "empty_disabled_title": "{{ name }} is switched off",
+  "empty_disabled_text": "meshctl does not connect to it, and its settings are read from the radio itself. Switch it on to see them.",
+  "empty_enable": "Switch on",
+  "empty_offline_title": "{{ name }} is not connected",
+  "empty_offline_text": "Its settings are read from the radio and changed on it, only while it is connected. meshctl keeps trying.",
+  "empty_daemon_title": "meshctl does not answer",
+  "empty_daemon_text": "meshctl's service cannot be reached. The page tries again by itself every few seconds."
 }
