@@ -332,5 +332,6 @@
   "settings_unmessagable_hint": "Tells others nobody reads messages here: for nodes of the mesh's own.",
   "settings_licensed": "Licensed radio amateur",
   "settings_licensed_hint": "Lets it past its region's power and band, but the radio sends nothing encrypted, as the licence has it. The long name should be your call sign.",
-  "secret_show": "Show or hide"
+  "secret_show": "Show or hide",
+  "interval_own": "Custom"
 }

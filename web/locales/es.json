@@ -332,5 +332,6 @@
   "settings_unmessagable_hint": "Avisa a los demás de que aquí nadie lee los mensajes: para nodos de la propia red.",
   "settings_licensed": "Radioaficionado con licencia",
   "settings_licensed_hint": "Deja pasar de la potencia y la banda de la región, pero la radio deja de cifrar lo que envía, como manda la licencia. El nombre largo debería ser tu indicativo.",
-  "secret_show": "Mostrar u ocultar"
+  "secret_show": "Mostrar u ocultar",
+  "interval_own": "Personalizado"
 }

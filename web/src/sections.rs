@@ -10,6 +10,22 @@ use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::names;
 use crate::radios::Switch;
 
+/// Intervals common enough to offer, in seconds.
+const INTERVALS: &[i64] = &[
+    30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 14400, 21600, 43200, 86400, 129600,
+    172800, 259200,
+];
+
+/// An interval in the largest unit that fits it whole.
+fn interval_label(secs: i64) -> String {
+    match secs {
+        0 => "0".to_owned(),
+        s if s % 3600 == 0 => format!("{} h", s / 3600),
+        s if s % 60 == 0 => format!("{} min", s / 60),
+        s => format!("{s} s"),
+    }
+}
+
 const EYE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye.svg");
 const EYE_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye-off.svg");
 use leptos::prelude::*;
@@ -514,6 +530,94 @@ fn FieldInput(
                         }
                     }
                 </select>
+            }
+            .into_any()
+        }
+        // An interval in seconds: common ones to pick, or one's own.
+        FieldKind::Integer
+            if field.unit.as_deref() == Some("s")
+                || crate::fields::intervals(&field_id).is_some() =>
+        {
+            let floor = field.min.unwrap_or(0.0);
+            // Its own, for the few that are short waits or have a value that
+            // means more; the common ones otherwise.
+            let own_steps = crate::fields::intervals(&field_id);
+            let steps: Vec<i64> = std::iter::once(0)
+                .chain(
+                    own_steps
+                        .map_or(INTERVALS, |(steps, _)| steps)
+                        .iter()
+                        .copied()
+                        .filter(|&s| s as f64 >= floor),
+                )
+                .chain(
+                    own_steps
+                        .and_then(|(_, special)| special)
+                        .map(|(secs, _, _)| secs),
+                )
+                .collect();
+            let special = own_steps.and_then(|(_, special)| special);
+            let seconds = {
+                let current = current.clone();
+                Signal::derive(move || current().as_i64().unwrap_or(0))
+            };
+            // One's own while it is not one of those, or while one is being
+            // written.
+            let own = RwSignal::new(!steps.contains(&seconds.get()));
+            let choice = {
+                let steps = steps.clone();
+                move || {
+                    if own.get() || !steps.contains(&seconds.get()) {
+                        "own".to_owned()
+                    } else {
+                        seconds.get().to_string()
+                    }
+                }
+            };
+            let pick = {
+                let put = put.clone();
+                move |ev: leptos::ev::Event| {
+                    let value = event_target_value(&ev);
+                    if value == "own" {
+                        own.set(true);
+                    } else if let Ok(secs) = value.parse::<i64>() {
+                        own.set(false);
+                        put(Json::from(secs));
+                    }
+                }
+            };
+            let options = steps
+                .iter()
+                .map(|&secs| {
+                    let label = move || match special {
+                        Some((value, es, en)) if value == secs => match i18n.get_locale() {
+                            Locale::es => es.to_owned(),
+                            Locale::en => en.to_owned(),
+                        },
+                        _ => interval_label(secs),
+                    };
+                    view! { <option value=secs.to_string()>{label}</option> }
+                })
+                .collect_view();
+            view! {
+                <div class="pref-control interval-field">
+                    <select prop:value=choice on:change=pick>
+                        {options}
+                        <option value="own">{t!(i18n, interval_own)}</option>
+                    </select>
+                    <input
+                        type="number"
+                        step="1"
+                        min="0"
+                        class:gone=move || !(own.get() || !steps.contains(&seconds.get()))
+                        prop:value=move || seconds.get().to_string()
+                        on:input=move |ev| {
+                            if let Ok(secs) = event_target_value(&ev).parse::<i64>() {
+                                put(Json::from(secs));
+                            }
+                        }
+                    />
+                </div>
             }
             .into_any()
         }

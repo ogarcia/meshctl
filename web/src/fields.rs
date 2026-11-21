@@ -999,6 +999,76 @@ const CHOICES: &[(&str, &str, &str, &str)] = &[
     ),
     ("position_flags", "HEADING", "Rumbo", "Heading"),
     ("position_flags", "SPEED", "Velocidad", "Speed"),
+    ("flags", "FLAG_LISTEN_ENABLED", "Escuchar balizas", "Listen"),
+    (
+        "flags",
+        "FLAG_BROADCAST_ENABLED",
+        "Emitir balizas",
+        "Broadcast",
+    ),
+    (
+        "flags",
+        "FLAG_LEGACY_SPLIT",
+        "Dividir para firmware antiguo",
+        "Legacy split",
+    ),
+    (
+        "powermon_enables",
+        "CPU_DeepSleep",
+        "CPU en sueño profundo",
+        "CPU deep sleep",
+    ),
+    (
+        "powermon_enables",
+        "CPU_LightSleep",
+        "CPU en sueño ligero",
+        "CPU light sleep",
+    ),
+    (
+        "powermon_enables",
+        "Vext1_On",
+        "Vext1 encendida",
+        "Vext1 on",
+    ),
+    (
+        "powermon_enables",
+        "Lora_RXOn",
+        "LoRa recibiendo",
+        "LoRa RX on",
+    ),
+    (
+        "powermon_enables",
+        "Lora_TXOn",
+        "LoRa transmitiendo",
+        "LoRa TX on",
+    ),
+    (
+        "powermon_enables",
+        "Lora_RXActive",
+        "LoRa recepción activa",
+        "LoRa RX active",
+    ),
+    (
+        "powermon_enables",
+        "BT_On",
+        "Bluetooth encendido",
+        "Bluetooth on",
+    ),
+    ("powermon_enables", "LED_On", "LED encendido", "LED on"),
+    (
+        "powermon_enables",
+        "Screen_On",
+        "Pantalla encendida",
+        "Screen on",
+    ),
+    (
+        "powermon_enables",
+        "Screen_Drawing",
+        "Pantalla dibujando",
+        "Screen drawing",
+    ),
+    ("powermon_enables", "Wifi_On", "Wi-Fi encendido", "Wi-Fi on"),
+    ("powermon_enables", "GPS_Active", "GPS activo", "GPS active"),
     ("team", "Unspecifed_Color", "Sin especificar", "Unspecified"),
     ("team", "White", "Blanco", "White"),
     ("team", "Yellow", "Amarillo", "Yellow"),
@@ -1029,6 +1099,26 @@ const CHOICES: &[(&str, &str, &str, &str)] = &[
     ("role", "RTO", "Radiooperador", "Radio operator"),
     ("role", "K9", "Unidad canina", "K9"),
 ];
+
+/// A value of an interval that means more than its seconds, and its words
+/// in Spanish and in English.
+pub type Special = (i64, &'static str, &'static str);
+
+/// The intervals a field offers when they are not the common ones: short
+/// waits, a screen on for an hour at most or for ever.
+pub fn intervals(id: &str) -> Option<(&'static [i64], Option<Special>)> {
+    const WAITS: &[i64] = &[1, 5, 10, 15, 30, 60];
+    const SCREEN: &[i64] = &[15, 30, 60, 300, 600, 900, 1800, 3600];
+    match id {
+        "config.power.wait_bluetooth_secs" | "config.power.min_wake_secs" => Some((WAITS, None)),
+        // MAXUINT, as the protobufs say, keeps it on.
+        "config.display.screen_on_secs" => Some((
+            SCREEN,
+            Some((i64::from(u32::MAX), "Siempre encendida", "Always on")),
+        )),
+        _ => None,
+    }
+}
 
 /// Whether a field is shown, as others are now: the static addresses only
 /// with a static address mode.

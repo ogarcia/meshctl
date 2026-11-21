@@ -195,18 +195,23 @@ const FLAGS: &[(&str, &str)] = &[
         "config.position.position_flags",
         "meshtastic.Config.PositionConfig.PositionFlags",
     ),
+    ("config.power.powermon_enables", "meshtastic.PowerMon.State"),
+    (
+        "module.mesh_beacon.flags",
+        "meshtastic.ModuleConfig.MeshBeaconConfig.Flags",
+    ),
 ];
 
 /// The flags a field's bits are, by the enum that names them: each one's
 /// code and bit, but the none.
-fn flags_of(id: &str) -> Option<Vec<(String, u32)>> {
+fn flags_of(id: &str) -> Option<Vec<(String, u64)>> {
     let (_, name) = FLAGS.iter().find(|(field, _)| *field == id)?;
     let flags = descriptors().get_enum_by_name(name)?;
     Some(
         flags
             .values()
             .filter(|v| v.number() > 0)
-            .map(|v| (v.name().to_owned(), v.number() as u32))
+            .map(|v| (v.name().to_owned(), v.number() as u64))
             .collect(),
     )
 }
@@ -215,12 +220,12 @@ fn flags_of(id: &str) -> Option<Vec<(String, u32)>> {
 /// that are no flag known here kept.
 fn flags_number(
     json: &Json,
-    flags: &[(String, u32)],
-    before: u32,
+    flags: &[(String, u64)],
+    before: u64,
     name: &str,
 ) -> Result<Json, Invalid> {
     let codes = json.as_array().ok_or_else(|| invalid(name))?;
-    let known: u32 = flags
+    let known: u64 = flags
         .iter()
         .map(|(_, bit)| bit)
         .fold(0, |all, bit| all | bit);
@@ -234,6 +239,31 @@ fn flags_number(
         number |= bit;
     }
     Ok(Json::from(number))
+}
+
+/// A number of bits, of whichever size the field keeps it in.
+fn bits(value: &Value) -> u64 {
+    match value {
+        Value::U32(n) => u64::from(*n),
+        Value::U64(n) => *n,
+        _ => 0,
+    }
+}
+
+/// A value given for a field as the field takes it: an address as its
+/// number, flags as their bits; any other as it is.
+fn prepared(id: &str, path: &str, json: &Json, part: &DynamicMessage) -> Result<Json, Invalid> {
+    let field_id = format!("{id}.{path}");
+    if ADDRESSES.contains(&field_id.as_str()) {
+        address_number(json, path)
+    } else if let Some(flags) = flags_of(&field_id) {
+        let before = part
+            .get_field_by_name(path)
+            .map_or(0, |value| bits(value.as_ref()));
+        flags_number(json, &flags, before, path)
+    } else {
+        Ok(json.clone())
+    }
 }
 
 /// An address as it is written, from the number it is kept as; empty for
@@ -293,10 +323,7 @@ fn fields(message: &DynamicMessage, prefix: &str, section: &str, out: &mut Vec<S
         };
         // Flags, as the list of those set.
         if let Some(flags) = flags_of(&format!("{section}.{name}")) {
-            let number = match value.as_ref() {
-                Value::U32(n) => *n,
-                _ => 0,
-            };
+            let number = bits(value.as_ref());
             let set: Vec<Json> = flags
                 .iter()
                 .filter(|(_, bit)| number & bit != 0)
@@ -628,18 +655,7 @@ pub fn change(
                 return Err(invalid(id));
             };
             for (path, json) in values {
-                let field_id = format!("{id}.{path}");
-                let json = if ADDRESSES.contains(&field_id.as_str()) {
-                    address_number(json, path)?
-                } else if let Some(flags) = flags_of(&field_id) {
-                    let before = match part.get_field_by_name(path).map(|v| v.into_owned()) {
-                        Some(Value::U32(n)) => n,
-                        _ => 0,
-                    };
-                    flags_number(json, &flags, before, path)?
-                } else {
-                    json.clone()
-                };
+                let json = prepared(id, path, json, &part)?;
                 set(&mut part, path, &json, path)?;
             }
             change.configs.push(wrap("meshtastic.Config", name, part)?);
@@ -648,7 +664,8 @@ pub fn change(
             let module = settings.modules.get(name).ok_or_else(|| invalid(id))?;
             let mut part = module_part(module, name).ok_or_else(|| invalid(id))?;
             for (path, json) in values {
-                set(&mut part, path, json, path)?;
+                let json = prepared(id, path, json, &part)?;
+                set(&mut part, path, &json, path)?;
             }
             change
                 .module_configs
