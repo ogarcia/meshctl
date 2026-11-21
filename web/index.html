@@ -635,45 +635,87 @@
       .choice { min-height: 40px; padding: 0 16px; border-radius: 10px; }
       .choice.on { border-color: var(--mc-primary); background: var(--mc-soft); font-weight: 600; }
 
-      .settings { display: grid; gap: 16px; }
-      .settings .fields {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 12px 16px;
-        align-items: end;
-      }
-      .settings label { display: grid; gap: 4px; }
-      .settings label span { color: var(--mc-muted); font-size: 12px; }
-      .settings label.check { display: flex; gap: 8px; align-items: center; padding-bottom: 8px; }
-      .settings label.check span { font-size: inherit; color: inherit; }
-      .settings .hint { font-size: 12px; margin: 10px 0 0; }
-      .settings .channels input:not([type=checkbox]) { width: 9em; }
-      .settings .save { display: flex; gap: 8px; }
-      .sections { display: grid; gap: 0; }
-      .sections h2 { margin-bottom: 6px; }
-      details.section { border-top: 1px solid var(--mc-border); }
-      details.section summary {
+      /*
+       * The radio's own settings: tabs over them, centred as the preferences
+       * are, and for the configuration and the modules a list aside.
+       */
+      .node-settings {
+        width: 100%;
+        max-width: 960px;
+        margin: 0 auto;
         display: flex;
-        gap: 10px;
-        align-items: center;
-        padding: 10px 2px;
-        cursor: pointer;
-        font-weight: 500;
+        flex-direction: column;
+        gap: 16px;
       }
-      details.section summary .count { font-weight: normal; font-size: 12px; }
-      details.section form { padding: 4px 2px 14px; display: grid; gap: 12px; }
-      details.section .fields {
+      .settings-tabs { align-self: center; width: 100%; max-width: 640px; }
+      .settings-tabs button { padding: 0 8px; white-space: nowrap; }
+      /* A tab with changes not saved yet. */
+      .settings-tabs button.edited::after {
+        content: "";
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        margin-left: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        vertical-align: middle;
+      }
+      .settings { display: flex; flex-direction: column; gap: 12px; }
+      .settings .preferences { max-width: none; }
+      .settings .tab-hint { margin: 0; font-size: 13px; }
+      .switch-control { display: flex; }
+      .settings .channels input:not([type=checkbox]) { width: 9em; }
+      .save-bar { display: flex; justify-content: flex-end; gap: 8px; }
+      .save-bar button { min-width: 110px; }
+      .sections-tab {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+      }
+      .section-list { display: flex; flex-direction: column; gap: 2px; }
+      .section-list button {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--mc-muted);
+        text-align: left;
+      }
+      .section-list button:hover { background: var(--mc-raised); color: var(--mc-text); }
+      .section-list button.on { background: var(--mc-soft); color: var(--mc-text); font-weight: 600; }
+      .section-list .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .section-list .state {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--mc-far);
+      }
+      .section-list .state.on { background: var(--mc-ok); }
+      .section-list .state.none { visibility: hidden; }
+      .section-list .edited { margin-left: auto; font-weight: 400; }
+      .section-panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+      .section-head { display: flex; align-items: center; gap: 10px; }
+      .section-head h2 { margin: 0; font-size: 18px; }
+      .section-panel form { display: flex; flex-direction: column; gap: 16px; }
+      .section-panel .fields {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 12px 16px;
+        gap: 14px 16px;
         align-items: end;
       }
-      details.section label { display: grid; gap: 4px; }
-      details.section label span { color: var(--mc-muted); font-size: 12px; }
-      details.section label.check { display: flex; gap: 8px; align-items: center; padding-bottom: 8px; }
-      details.section label.check span { font-size: inherit; color: inherit; }
-      details.section .note { padding: 8px 12px; }
-      details.section .buttons { display: flex; gap: 8px; }
+      .section-panel label { display: grid; gap: 4px; }
+      .section-panel label span { color: var(--mc-muted); font-size: 12px; }
+      .section-panel label.check { display: flex; gap: 8px; align-items: center; padding-bottom: 8px; }
+      .section-panel label.check span { font-size: inherit; color: inherit; }
+      .section-panel .note { padding: 8px 12px; }
+      @media (max-width: 760px) {
+        .sections-tab { grid-template-columns: minmax(0, 1fr); }
+      }
 
       .node-details dl {
         display: grid;

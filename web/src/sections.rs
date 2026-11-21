@@ -13,6 +13,11 @@ use meshctl_api::{ErrorCode, FieldKind, SettingsField, SettingsSection};
 use serde_json::Value as Json;
 use std::collections::BTreeMap;
 
+/// What is being changed of each section, by its id and then its fields'
+/// names: kept by the page, so that going to another section or tab and
+/// back loses nothing.
+pub type SectionEdits = RwSignal<BTreeMap<String, BTreeMap<String, Json>>>;
+
 /// A name from the protobufs as words: `external_notification` reads as
 /// "External notification".
 pub fn words(name: &str) -> String {
@@ -23,81 +28,173 @@ pub fn words(name: &str) -> String {
     })
 }
 
-/// The sections, as read from the radio: the configuration's, then the
-/// modules'.
+/// Whether a section is on, as the radio has it, for those that say.
+fn enabled(section: &SettingsSection) -> Option<bool> {
+    section
+        .fields
+        .iter()
+        .find(|f| f.name == "enabled")
+        .and_then(|f| f.value.as_ref().and_then(Json::as_bool))
+}
+
+/// Undo and save, at the foot of what they act on.
 #[component]
-pub fn Sections(sections: RwSignal<Vec<SettingsSection>>) -> impl IntoView {
+pub fn SaveBar(
+    dirty: Signal<bool>,
+    busy: Signal<bool>,
+    save: impl Fn() + Send + Sync + 'static,
+    undo: impl Fn() + Send + Sync + 'static,
+) -> impl IntoView {
     let i18n = use_i18n();
-    let of = move |module: bool| {
-        move || {
-            sections.with(|all| {
-                all.iter()
-                    .filter(|s| s.module == module)
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-        }
-    };
     view! {
-        <section class="card sections">
-            <h2>{t!(i18n, sections_device)}</h2>
-            <For each=of(false) key=|s| format!("{s:?}") let:section>
-                <SectionForm section />
-            </For>
-        </section>
-        <section class="card sections">
-            <h2>{t!(i18n, sections_modules)}</h2>
-            <For each=of(true) key=|s| format!("{s:?}") let:section>
-                <SectionForm section />
-            </For>
-        </section>
+        <div class="save-bar">
+            <button type="button" disabled=move || !dirty.get() on:click=move |_| undo()>
+                {t!(i18n, settings_undo)}
+            </button>
+            <button
+                type="button"
+                class="primary"
+                disabled=move || busy.get() || !dirty.get()
+                on:click=move |_| save()
+            >
+                {t!(i18n, settings_save)}
+            </button>
+        </div>
+    }
+}
+
+/// The configuration's sections, or the modules: a list of them aside, and
+/// the one picked.
+#[component]
+pub fn SectionsTab(
+    sections: RwSignal<Vec<SettingsSection>>,
+    module: bool,
+    edits: SectionEdits,
+) -> impl IntoView {
+    let list = Memo::new(move |_| {
+        sections.with(|all| {
+            all.iter()
+                .filter(|s| s.module == module)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    });
+    let picked = RwSignal::new(None::<String>);
+    // The one picked, or else the first.
+    let current = Memo::new(move |_| {
+        let picked = picked.get();
+        list.with(|l| {
+            picked
+                .and_then(|id| l.iter().find(|s| s.id == id))
+                .or(l.first())
+                .cloned()
+        })
+    });
+    let current_id = move || current.with(|c| c.as_ref().map(|c| c.id.clone()));
+
+    view! {
+        <div class="sections-tab">
+            <nav class="section-list">
+                <For
+                    each=move || list.get()
+                    key=|s| (s.id.clone(), enabled(s))
+                    let:section
+                >
+                    {
+                        let id = section.id.clone();
+                        let on = {
+                            let id = id.clone();
+                            move || current_id().as_deref() == Some(id.as_str())
+                        };
+                        let touched = {
+                            let id = id.clone();
+                            move || edits.with(|e| e.contains_key(&id))
+                        };
+                        // Room for it kept by those without one, so that the
+                        // names line up.
+                        let state = enabled(&section);
+                        let state = view! {
+                            <span
+                                class="state"
+                                class:on=state == Some(true)
+                                class:none=state.is_none()
+                            ></span>
+                        };
+                        view! {
+                            <button
+                                type="button"
+                                class:on=on
+                                on:click=move |_| picked.set(Some(id.clone()))
+                            >
+                                {state}
+                                <span class="label">{words(&section.name)}</span>
+                                <span class="edited" class:gone=move || !touched()>
+                                    "✎"
+                                </span>
+                            </button>
+                        }
+                    }
+                </For>
+            </nav>
+            <div class="section-panel">
+                {move || current.get().map(|section| view! { <SectionForm section edits /> })}
+            </div>
+        </div>
     }
 }
 
 #[component]
-fn SectionForm(section: SettingsSection) -> impl IntoView {
+fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    // Only what was touched: the rest goes back as the radio has it.
-    let edits = RwSignal::new(BTreeMap::<String, Json>::new());
     let notice = RwSignal::new(None::<Result<(), Failure>>);
     let busy = RwSignal::new(false);
     let id = section.id.clone();
-    // Off or on, as the radio has it: what most modules start with.
-    let enabled = section
-        .fields
-        .iter()
-        .find(|f| f.name == "enabled")
-        .and_then(|f| f.value.as_ref().and_then(Json::as_bool));
-
-    let save = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
-        let Some(radio) = live.selected.get_untracked() else {
-            return;
-        };
-        let values = edits.get_untracked();
-        if values.is_empty() {
-            return;
-        }
-        let sure = web_sys::window()
-            .and_then(|w| {
-                w.confirm_with_message(t_string!(i18n, settings_reboot_confirm))
-                    .ok()
-            })
-            .unwrap_or(false);
-        if !sure {
-            return;
-        }
+    let on = enabled(&section);
+    let dirty = {
         let id = id.clone();
-        busy.set(true);
-        spawn_local(async move {
-            let outcome = daemon::change_section(radio, &id, values).await;
-            if outcome.is_ok() {
-                edits.set(BTreeMap::new());
+        Signal::derive(move || edits.with(|e| e.contains_key(&id)))
+    };
+
+    let save = {
+        let id = id.clone();
+        move || {
+            let Some(radio) = live.selected.get_untracked() else {
+                return;
+            };
+            let Some(values) = edits.with_untracked(|e| e.get(&id).cloned()) else {
+                return;
+            };
+            let sure = web_sys::window()
+                .and_then(|w| {
+                    w.confirm_with_message(t_string!(i18n, settings_reboot_confirm))
+                        .ok()
+                })
+                .unwrap_or(false);
+            if !sure {
+                return;
             }
-            notice.set(Some(outcome.map(|_| ())));
-            busy.set(false);
-        });
+            let id = id.clone();
+            busy.set(true);
+            spawn_local(async move {
+                let outcome = daemon::change_section(radio, &id, values).await;
+                if outcome.is_ok() {
+                    edits.update(|e| {
+                        e.remove(&id);
+                    });
+                }
+                notice.set(Some(outcome.map(|_| ())));
+                busy.set(false);
+            });
+        }
+    };
+    let undo = {
+        let id = id.clone();
+        move || {
+            edits.update(|e| {
+                e.remove(&id);
+            });
+        }
     };
 
     let notice_view = move || {
@@ -116,48 +213,34 @@ fn SectionForm(section: SettingsSection) -> impl IntoView {
     let fields = section
         .fields
         .into_iter()
-        .map(|field| view! { <FieldInput field edits /> })
+        .map(|field| view! { <FieldInput section=id.clone() field edits /> })
         .collect_view();
 
     view! {
-        <details class="section">
-            <summary>
-                <span>{words(&section.name)}</span>
-                {enabled.map(|on| {
-                    view! {
-                        <span class=if on { "badge ready" } else { "badge disabled" }>
-                            {if on { t!(i18n, section_on).into_any() } else { t!(i18n, section_off).into_any() }}
-                        </span>
-                    }
-                })}
-                <span class="dim count">{move || {
-                    let n = edits.with(BTreeMap::len);
-                    (n > 0).then(|| format!("· {n} ✎"))
-                }}</span>
-            </summary>
-            // Checked by the daemon, which says what is wrong: a browser left
-            // to it refuses silently, as it does a setting at zero below a
-            // floor the firmware reads as "the default".
-            <form novalidate on:submit=save>
-                <div class="fields">{fields}</div>
-                {notice_view}
-                <div class="buttons">
-                    <button
-                        type="submit"
-                        class="primary"
-                        disabled=move || busy.get() || edits.with(BTreeMap::is_empty)
-                    >
-                        {t!(i18n, settings_save)}
-                    </button>
-                </div>
-            </form>
-        </details>
+        <div class="section-head">
+            <h2>{words(&section.name)}</h2>
+            {on.map(|on| {
+                view! {
+                    <span class=if on { "badge ready" } else { "badge disabled" }>
+                        {if on { t!(i18n, section_on).into_any() } else { t!(i18n, section_off).into_any() }}
+                    </span>
+                }
+            })}
+        </div>
+        // Checked by the daemon, which says what is wrong: a browser left to
+        // it refuses silently, as it does a setting at zero below a floor the
+        // firmware reads as "the default".
+        <form novalidate on:submit=|ev| ev.prevent_default()>
+            <div class="fields">{fields}</div>
+            {notice_view}
+            <SaveBar dirty busy=Signal::derive(move || busy.get()) save undo />
+        </form>
     }
 }
 
 /// One field, with the input its kind takes.
 #[component]
-fn FieldInput(field: SettingsField, edits: RwSignal<BTreeMap<String, Json>>) -> impl IntoView {
+fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> impl IntoView {
     let i18n = use_i18n();
     let name = field.name.clone();
     let label = field.label.clone().unwrap_or_else(|| words(&field.name));
@@ -165,28 +248,42 @@ fn FieldInput(field: SettingsField, edits: RwSignal<BTreeMap<String, Json>>) -> 
     let unit = field.unit.clone();
     let original = field.value.clone().unwrap_or(Json::Null);
 
-    // What it shows: the edit if there is one, what the radio has otherwise.
-    let current = {
+    // The edit of it, if any.
+    let edit = {
+        let section = section.clone();
         let name = name.clone();
-        let original = original.clone();
-        move || {
-            edits
-                .with(|e| e.get(&name).cloned())
-                .unwrap_or_else(|| original.clone())
-        }
+        move || edits.with(|e| e.get(&section)?.get(&name).cloned())
     };
-    // An edit back to what the radio has is no edit.
-    let put = {
+    // Sets or drops the edit; a section left without any has none.
+    let store = {
         let name = name.clone();
-        move |value: Json| {
+        move |value: Option<Json>| {
             edits.update(|e| {
-                if value == original {
-                    e.remove(&name);
-                } else {
-                    e.insert(name.clone(), value);
+                let fields = e.entry(section.clone()).or_default();
+                match value {
+                    Some(value) => {
+                        fields.insert(name.clone(), value);
+                    }
+                    None => {
+                        fields.remove(&name);
+                    }
+                }
+                if fields.is_empty() {
+                    e.remove(&section);
                 }
             });
         }
+    };
+    // What it shows: the edit if there is one, what the radio has otherwise.
+    let current = {
+        let edit = edit.clone();
+        let original = original.clone();
+        move || edit().unwrap_or_else(|| original.clone())
+    };
+    // An edit back to what the radio has is no edit.
+    let put = {
+        let store = store.clone();
+        move |value: Json| store((value != original).then_some(value))
     };
 
     let input = match field.kind {
@@ -254,16 +351,13 @@ fn FieldInput(field: SettingsField, edits: RwSignal<BTreeMap<String, Json>>) -> 
                     placeholder=move || {
                         if set { t_string!(i18n, secret_set) } else { t_string!(i18n, secret_unset) }
                     }
+                    prop:value=move || {
+                        edit().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+                    }
                     on:input=move |ev| {
                         let text = event_target_value(&ev);
                         // Left empty, the secret stays as it is.
-                        edits.update(|e| {
-                            if text.is_empty() {
-                                e.remove(&name);
-                            } else {
-                                e.insert(name.clone(), Json::String(text));
-                            }
-                        });
+                        store((!text.is_empty()).then_some(Json::String(text)));
                     }
                 />
             }

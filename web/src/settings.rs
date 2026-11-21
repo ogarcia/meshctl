@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
-//! The radio's own settings: read from it while it is connected, changed all
-//! at once, and read back once it has applied them.
+//! The radio's own settings, in tabs as the phone apps have them: who it is,
+//! how it transmits, its channels, the rest of its configuration and its
+//! modules. Read from it while it is connected, changed a tab at a time, and
+//! read back once it has applied them.
 
 use crate::app::Live;
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
-use crate::sections::Sections;
+use crate::radios::Switch;
+use crate::sections::{SaveBar, SectionEdits, SectionsTab};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{
     ChannelChange, ChannelKey, ErrorCode, KeyChange, LinkState, NodeSettings, NodeSettingsChange,
-    SettingsSection,
+    RadioId, RadioKind, SettingsSection,
 };
+use std::collections::BTreeMap;
 
 /// What changed between the settings read and the ones in the form.
 fn changes(
@@ -50,6 +54,91 @@ fn is_empty(change: &NodeSettingsChange) -> bool {
         && change.channels.is_empty()
 }
 
+/// The page's tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    /// Its names, and what it does in the mesh.
+    User,
+    Lora,
+    Channels,
+    /// The rest of its configuration.
+    Device,
+    Modules,
+}
+
+const TABS: [Tab; 5] = [
+    Tab::User,
+    Tab::Lora,
+    Tab::Channels,
+    Tab::Device,
+    Tab::Modules,
+];
+
+/// What of a change a tab holds: a tab saves only its own.
+fn part_of(tab: Tab, change: NodeSettingsChange) -> NodeSettingsChange {
+    match tab {
+        Tab::User => NodeSettingsChange {
+            owner: change.owner,
+            device: change.device,
+            ..Default::default()
+        },
+        Tab::Lora => NodeSettingsChange {
+            lora: change.lora,
+            ..Default::default()
+        },
+        Tab::Channels => NodeSettingsChange {
+            channels: change.channels,
+            ..Default::default()
+        },
+        Tab::Device | Tab::Modules => NodeSettingsChange::default(),
+    }
+}
+
+/// A tab's part of `from`, put in `to`: to undo it, or to take it as saved.
+fn copy_part(tab: Tab, from: &NodeSettings, to: &mut NodeSettings) {
+    match tab {
+        Tab::User => {
+            to.owner = from.owner.clone();
+            to.device = from.device.clone();
+        }
+        Tab::Lora => to.lora = from.lora.clone(),
+        Tab::Channels => to.channels = from.channels.clone(),
+        Tab::Device | Tab::Modules => {}
+    }
+}
+
+/// The settings read again, keeping what is being edited of them: saving a
+/// tab, which reads them all back, does not undo another.
+fn merge(
+    before: &NodeSettings,
+    draft: &NodeSettings,
+    read: &NodeSettings,
+    keys: &[KeyChange],
+) -> (NodeSettings, Vec<KeyChange>) {
+    let mut merged = read.clone();
+    if draft.owner != before.owner {
+        merged.owner = draft.owner.clone();
+    }
+    if draft.device != before.device {
+        merged.device = draft.device.clone();
+    }
+    if draft.lora != before.lora {
+        merged.lora = draft.lora.clone();
+    }
+    let mut kept = vec![KeyChange::Keep; read.channels.len()];
+    for (slot, channel) in merged.channels.iter_mut().enumerate() {
+        if let (Some(now), Some(then)) = (draft.channels.get(slot), before.channels.get(slot))
+            && now != then
+        {
+            *channel = now.clone();
+        }
+        if let (Some(key), Some(keep)) = (keys.get(slot), kept.get_mut(slot)) {
+            *keep = *key;
+        }
+    }
+    (merged, kept)
+}
+
 #[component]
 pub fn SettingsView() -> impl IntoView {
     let i18n = use_i18n();
@@ -58,8 +147,10 @@ pub fn SettingsView() -> impl IntoView {
     let sections = RwSignal::new(Vec::<SettingsSection>::new());
     let draft = RwSignal::new(None::<NodeSettings>);
     let keys = RwSignal::new(vec![KeyChange::Keep; 8]);
+    let section_edits: SectionEdits = RwSignal::new(BTreeMap::new());
     let notice = RwSignal::new(None::<Result<bool, Failure>>);
     let busy = RwSignal::new(false);
+    let tab = RwSignal::new(Tab::User);
 
     let ready = move || {
         live.status
@@ -68,7 +159,7 @@ pub fn SettingsView() -> impl IntoView {
     // Still shown while the radio only syncs again, as after every change:
     // what is being edited elsewhere on the page must not vanish under it.
     let shown = move || {
-        live.selected_kind() != Some(meshctl_api::RadioKind::Meshcore)
+        live.selected_kind() != Some(RadioKind::Meshcore)
             && live.status.with(|s| {
                 s.as_ref()
                     .is_some_and(|s| matches!(s.link, LinkState::Ready | LinkState::Syncing))
@@ -76,37 +167,67 @@ pub fn SettingsView() -> impl IntoView {
     };
 
     // Read them whenever the radio is (again) in sync: on opening the page,
-    // and once a change has been applied and read back.
-    Effect::new(move |_| {
+    // and once a change has been applied and read back. What another radio
+    // was being given goes.
+    Effect::new(move |last: Option<Option<RadioId>>| {
         let radio = live.selected.get();
+        if last.is_some_and(|last| last != radio) {
+            loaded.set(None);
+            draft.set(None);
+            sections.set(Vec::new());
+            section_edits.set(BTreeMap::new());
+            notice.set(None);
+        }
         if !ready() {
-            return;
+            return radio;
         }
         live.synced.track();
-        let Some(radio) = radio else { return };
+        let Some(id) = radio else { return radio };
         spawn_local(async move {
-            if let Ok(settings) = daemon::settings(radio).await {
-                keys.set(vec![KeyChange::Keep; settings.channels.len()]);
-                draft.set(Some(settings.clone()));
-                loaded.set(Some(settings));
+            if let Ok(read) = daemon::settings(id).await
+                && live.selected.get_untracked() == Some(id)
+            {
+                let before = loaded.get_untracked();
+                let now = draft.get_untracked();
+                let (merged, kept) = match (before, now) {
+                    (Some(before), Some(now)) => merge(&before, &now, &read, &keys.get_untracked()),
+                    _ => (read.clone(), vec![KeyChange::Keep; read.channels.len()]),
+                };
+                keys.set(kept);
+                draft.set(Some(merged));
+                loaded.set(Some(read));
             }
-            if let Ok(read) = daemon::sections(radio).await {
+            if let Ok(read) = daemon::sections(id).await
+                && live.selected.get_untracked() == Some(id)
+            {
                 sections.set(read);
             }
         });
+        radio
     });
 
-    let pending = move || {
+    // What a tab would change, if anything.
+    let pending = move |tab: Tab| {
         let (Some(original), Some(now)) = (loaded.get(), draft.get()) else {
             return None;
         };
-        let change = changes(&original, &now, &keys.get());
+        let change = part_of(tab, changes(&original, &now, &keys.get()));
         (!is_empty(&change)).then_some(change)
     };
+    let edited = move |tab: Tab| match tab {
+        Tab::Device | Tab::Modules => {
+            let prefix = if tab == Tab::Modules {
+                "module."
+            } else {
+                "config."
+            };
+            section_edits.with(|e| e.keys().any(|id| id.starts_with(prefix)))
+        }
+        _ => pending(tab).is_some(),
+    };
 
-    let save = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
-        let (Some(radio), Some(change)) = (live.selected.get_untracked(), pending()) else {
+    let save = move |tab: Tab| {
+        let (Some(radio), Some(change)) = (live.selected.get_untracked(), pending(tab)) else {
             return;
         };
         // Role and LoRa changes reboot the radio: say so before, not after.
@@ -125,9 +246,34 @@ pub fn SettingsView() -> impl IntoView {
         notice.set(None);
         spawn_local(async move {
             let applied = daemon::change_settings(radio, &change).await;
+            if applied.is_ok() {
+                // Taken as the radio's until it is read back.
+                if let Some(now) = draft.get_untracked() {
+                    loaded.update(|l| {
+                        if let Some(l) = l {
+                            copy_part(tab, &now, l);
+                        }
+                    });
+                }
+                if tab == Tab::Channels {
+                    keys.update(|k| k.fill(KeyChange::Keep));
+                }
+            }
             notice.set(Some(applied.map(|a| a.reboots)));
             busy.set(false);
         });
+    };
+    let undo = move |tab: Tab| {
+        if let Some(original) = loaded.get_untracked() {
+            draft.update(|d| {
+                if let Some(d) = d {
+                    copy_part(tab, &original, d);
+                }
+            });
+        }
+        if tab == Tab::Channels {
+            keys.update(|k| k.fill(KeyChange::Keep));
+        }
     };
 
     let notice_view = move || {
@@ -148,52 +294,88 @@ pub fn SettingsView() -> impl IntoView {
         })
     };
 
+    let tabs = TABS
+        .into_iter()
+        .map(|this| {
+            let label = move || match this {
+                Tab::User => t!(i18n, settings_tab_user).into_any(),
+                Tab::Lora => t!(i18n, settings_tab_lora).into_any(),
+                Tab::Channels => t!(i18n, settings_tab_channels).into_any(),
+                Tab::Device => t!(i18n, settings_tab_device).into_any(),
+                Tab::Modules => t!(i18n, settings_tab_modules).into_any(),
+            };
+            view! {
+                <button
+                    type="button"
+                    role="tab"
+                    class:on=move || tab.get() == this
+                    class:edited=move || edited(this)
+                    aria-selected=move || (tab.get() == this).to_string()
+                    on:click=move |_| {
+                        tab.set(this);
+                        notice.set(None);
+                    }
+                >
+                    {label}
+                </button>
+            }
+        })
+        .collect_view();
+    let at = move || TABS.iter().position(|t| *t == tab.get()).unwrap_or(0);
+
+    // Built again only as the tab changes, not as anything in it is typed.
+    let has_draft = Memo::new(move |_| draft.with(Option::is_some));
+    let body = move || {
+        let this = tab.get();
+        if !has_draft.get() {
+            return ().into_any();
+        }
+        let dirty = Signal::derive(move || pending(this).is_some());
+        let bar = move || {
+            view! {
+                <SaveBar
+                    dirty
+                    busy=Signal::derive(move || busy.get())
+                    save=move || save(this)
+                    undo=move || undo(this)
+                />
+            }
+        };
+        match this {
+            Tab::User => view! { <UserTab draft /> {bar()} }.into_any(),
+            Tab::Lora => view! { <LoraTab draft /> {bar()} }.into_any(),
+            Tab::Channels => view! { <Channels draft keys loaded /> {bar()} }.into_any(),
+            Tab::Device => {
+                view! { <SectionsTab sections module=false edits=section_edits /> }.into_any()
+            }
+            Tab::Modules => {
+                view! { <SectionsTab sections module=true edits=section_edits /> }.into_any()
+            }
+        }
+    };
+
     view! {
         <Show
             when=shown
             fallback=move || {
-                if live.selected_kind() == Some(meshctl_api::RadioKind::Meshcore) {
+                if live.selected_kind() == Some(RadioKind::Meshcore) {
                     view! { <p class="card dim">{t!(i18n, meshcore_not_yet)}</p> }.into_any()
                 } else {
                     view! { <p class="card dim">{t!(i18n, settings_not_connected)}</p> }.into_any()
                 }
             }
         >
-            {notice_view}
-            {move || {
-                draft
-                    .get()
-                    .is_some()
-                    .then(|| {
-                        view! {
-                            <form class="settings" on:submit=save>
-                                <Identity draft />
-                                <Radio draft />
-                                <Channels draft keys loaded />
-                                <div class="card save">
-                                    <button
-                                        type="submit"
-                                        class="primary"
-                                        disabled=move || busy.get() || pending().is_none()
-                                    >
-                                        {t!(i18n, settings_save)}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        disabled=move || pending().is_none()
-                                        on:click=move |_| {
-                                            draft.set(loaded.get_untracked());
-                                            keys.update(|k| k.fill(KeyChange::Keep));
-                                        }
-                                    >
-                                        {t!(i18n, settings_undo)}
-                                    </button>
-                                </div>
-                            </form>
-                        }
-                    })
-            }}
-            <Sections sections />
+            <div class="node-settings">
+                <div
+                    class="segmented settings-tabs"
+                    role="tablist"
+                    style=move || format!("--n: {}; --at: {}", TABS.len(), at())
+                >
+                    {tabs.clone()}
+                </div>
+                {notice_view}
+                <div class="settings">{body}</div>
+            </div>
         </Show>
     }
 }
@@ -201,12 +383,13 @@ pub fn SettingsView() -> impl IntoView {
 type Draft = RwSignal<Option<NodeSettings>>;
 
 /// A field of the draft, read and written.
-fn field<T: Clone + Send + Sync + 'static>(
+fn field<T: Clone + Default + Send + Sync + 'static>(
     draft: Draft,
     get: impl Fn(&NodeSettings) -> T + Copy + Send + Sync + 'static,
     set: impl Fn(&mut NodeSettings, T) + Copy + Send + Sync + 'static,
 ) -> (Signal<T>, impl Fn(T) + Copy) {
-    let read = Signal::derive(move || draft.with(|d| get(d.as_ref().expect("loaded"))));
+    // Nothing while there is no draft, as for a moment on leaving the radio.
+    let read = Signal::derive(move || draft.with(|d| d.as_ref().map(get).unwrap_or_default()));
     let write = move |value: T| {
         draft.update(|d| {
             if let Some(d) = d {
@@ -217,8 +400,22 @@ fn field<T: Clone + Send + Sync + 'static>(
     (read, write)
 }
 
+/// A setting in a row: what it is and a word on it, and its control.
 #[component]
-fn Identity(draft: Draft) -> impl IntoView {
+fn Row(title: AnyView, hint: AnyView, children: Children) -> impl IntoView {
+    view! {
+        <div class="pref-row">
+            <div class="pref-what">
+                <span class="pref-title">{title}</span>
+                <span class="dim">{hint}</span>
+            </div>
+            {children()}
+        </div>
+    }
+}
+
+#[component]
+fn UserTab(draft: Draft) -> impl IntoView {
     let i18n = use_i18n();
     let (long_name, set_long) = field(
         draft,
@@ -240,36 +437,40 @@ fn Identity(draft: Draft) -> impl IntoView {
     };
 
     view! {
-        <section class="card">
-            <h2>{t!(i18n, settings_identity)}</h2>
-            <div class="fields">
-                <label>
-                    <span>{t!(i18n, settings_long_name)}</span>
-                    <input
-                        maxlength="39"
-                        prop:value=long_name
-                        on:input=move |ev| set_long(event_target_value(&ev))
-                    />
-                </label>
-                <label>
-                    <span>{t!(i18n, settings_short_name)}</span>
-                    <input
-                        class="mono"
-                        prop:value=short_name
-                        on:input=move |ev| set_short(event_target_value(&ev))
-                    />
-                </label>
-                <label>
-                    <span>{t!(i18n, settings_role)}</span>
-                    <Choice options=roles value=role set=set_role />
-                </label>
-            </div>
-        </section>
+        <div class="preferences">
+            <Row
+                title=t!(i18n, settings_long_name).into_any()
+                hint=t!(i18n, settings_long_name_hint).into_any()
+            >
+                <input
+                    class="pref-control"
+                    maxlength="39"
+                    prop:value=long_name
+                    on:input=move |ev| set_long(event_target_value(&ev))
+                />
+            </Row>
+            <Row
+                title=t!(i18n, settings_short_name).into_any()
+                hint=t!(i18n, settings_short_name_hint).into_any()
+            >
+                <input
+                    class="pref-control mono"
+                    prop:value=short_name
+                    on:input=move |ev| set_short(event_target_value(&ev))
+                />
+            </Row>
+            <Row
+                title=t!(i18n, settings_role).into_any()
+                hint=t!(i18n, settings_role_hint).into_any()
+            >
+                <Choice class="pref-control" options=roles value=role set=set_role />
+            </Row>
+        </div>
     }
 }
 
 #[component]
-fn Radio(draft: Draft) -> impl IntoView {
+fn LoraTab(draft: Draft) -> impl IntoView {
     let i18n = use_i18n();
     let (region, set_region) = field(draft, |d| d.lora.region.clone(), |d, v| d.lora.region = v);
     let (preset, set_preset) = field(
@@ -298,50 +499,59 @@ fn Radio(draft: Draft) -> impl IntoView {
     };
 
     view! {
-        <section class="card">
-            <h2>{t!(i18n, settings_radio)}</h2>
-            <div class="fields">
-                <label>
-                    <span>{t!(i18n, settings_region)}</span>
-                    <Choice options=regions value=region set=set_region />
-                </label>
-                <label>
-                    <span>{t!(i18n, settings_preset)}</span>
-                    <Choice options=presets value=preset set=set_preset />
-                </label>
-                <label>
-                    <span>{t!(i18n, settings_hop_limit)}</span>
-                    <input
-                        type="number"
-                        min="1"
-                        max="7"
-                        prop:value=move || hop_limit.get().to_string()
-                        on:input=move |ev| {
-                            if let Ok(hops) = event_target_value(&ev).parse() {
-                                set_hop_limit(hops);
-                            }
+        <p class="dim tab-hint">{t!(i18n, settings_reboot_hint)}</p>
+        <div class="preferences">
+            <Row
+                title=t!(i18n, settings_region).into_any()
+                hint=t!(i18n, settings_region_hint).into_any()
+            >
+                <Choice class="pref-control" options=regions value=region set=set_region />
+            </Row>
+            <Row
+                title=t!(i18n, settings_use_preset).into_any()
+                hint=t!(i18n, settings_use_preset_hint).into_any()
+            >
+                <div class="pref-control switch-control">
+                    <Switch
+                        on=use_preset
+                        label=Signal::derive(move || t_string!(i18n, settings_use_preset).to_owned())
+                        flip=move |_| set_use_preset(!use_preset.get_untracked())
+                    />
+                </div>
+            </Row>
+            <Row
+                title=t!(i18n, settings_preset).into_any()
+                hint=t!(i18n, settings_preset_hint).into_any()
+            >
+                <Choice class="pref-control" options=presets value=preset set=set_preset />
+            </Row>
+            <Row
+                title=t!(i18n, settings_hop_limit).into_any()
+                hint=t!(i18n, settings_hop_limit_hint).into_any()
+            >
+                <input
+                    class="pref-control"
+                    type="number"
+                    min="1"
+                    max="7"
+                    prop:value=move || hop_limit.get().to_string()
+                    on:input=move |ev| {
+                        if let Ok(hops) = event_target_value(&ev).parse() {
+                            set_hop_limit(hops);
                         }
+                    }
+                />
+            </Row>
+            <Row title=t!(i18n, settings_tx).into_any() hint=t!(i18n, settings_tx_hint).into_any()>
+                <div class="pref-control switch-control">
+                    <Switch
+                        on=tx
+                        label=Signal::derive(move || t_string!(i18n, settings_tx).to_owned())
+                        flip=move |_| set_tx(!tx.get_untracked())
                     />
-                </label>
-                <label class="check">
-                    <input
-                        type="checkbox"
-                        prop:checked=use_preset
-                        on:change=move |ev| set_use_preset(event_target_checked(&ev))
-                    />
-                    <span>{t!(i18n, settings_use_preset)}</span>
-                </label>
-                <label class="check">
-                    <input
-                        type="checkbox"
-                        prop:checked=tx
-                        on:change=move |ev| set_tx(event_target_checked(&ev))
-                    />
-                    <span>{t!(i18n, settings_tx)}</span>
-                </label>
-            </div>
-            <p class="hint dim">{t!(i18n, settings_reboot_hint)}</p>
-        </section>
+                </div>
+            </Row>
+        </div>
     }
 }
 
@@ -354,7 +564,6 @@ fn Channels(
     let i18n = use_i18n();
     view! {
         <section class="card">
-            <h2>{t!(i18n, settings_channels)}</h2>
             <div class="scroll">
                 <table class="channels">
                     <thead>
@@ -495,12 +704,13 @@ fn ChannelRow(
 /// own names for its roles, regions and presets.
 #[component]
 fn Choice(
+    #[prop(optional)] class: &'static str,
     options: impl Fn() -> Vec<String> + Send + Sync + 'static,
     value: Signal<String>,
     set: impl Fn(String) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     view! {
-        <select prop:value=value on:change=move |ev| set(event_target_value(&ev))>
+        <select class=class prop:value=value on:change=move |ev| set(event_target_value(&ev))>
             {move || {
                 options()
                     .into_iter()

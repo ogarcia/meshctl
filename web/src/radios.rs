@@ -263,7 +263,7 @@ fn RadioRow(
 
 /// On or off, for one thing.
 #[component]
-fn Switch(
+pub fn Switch(
     on: Signal<bool>,
     label: Signal<String>,
     flip: impl Fn(leptos::ev::MouseEvent) + 'static,
