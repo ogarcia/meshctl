@@ -1143,6 +1143,32 @@ pub struct Preferences {
     pub map_legend_folded: bool,
     /// The interface's language; none for the browser's.
     pub language: Option<Language>,
+    /// How the nodes list is sorted; none for favourites first, then the
+    /// most recently heard.
+    pub nodes_sort: Option<NodesSort>,
+}
+
+/// A column of the nodes list to sort by, and which way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodesSort {
+    pub column: NodesColumn,
+    /// The other way from its most useful one: names from Z, the least
+    /// recently heard first, the farthest first, the emptiest battery first.
+    #[serde(default)]
+    pub reversed: bool,
+}
+
+/// A column the nodes list can be sorted by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum NodesColumn {
+    Name,
+    Heard,
+    Reach,
+    Power,
+    Hardware,
 }
 
 /// Light or dark.
@@ -1226,7 +1252,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null}"#
         );
     }
 

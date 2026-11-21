@@ -6,7 +6,7 @@
 use crate::app::{Daemon, Live};
 use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
-use meshctl_api::{LinkState, Node, Peer};
+use meshctl_api::{LinkState, Node, NodesColumn as Column, NodesSort, Peer};
 
 #[component]
 pub fn MeshView() -> impl IntoView {
@@ -66,6 +66,62 @@ enum Reach {
     Mqtt,
 }
 
+/// How a node sorts by a column, in its most useful order: names and
+/// hardware alphabetically, the most recently heard first, the nearest
+/// first, the best powered first. Those that do not say, last.
+fn order(column: Column, a: &Node, b: &Node, local: Option<u32>) -> std::cmp::Ordering {
+    use std::cmp::Reverse;
+    let name = |n: &Node| {
+        n.long_name
+            .clone()
+            .unwrap_or_else(|| n.id.clone())
+            .to_lowercase()
+    };
+    // Nearest first: its own radio, the directly heard by signal, then by
+    // hops, MQTT and the unknown last.
+    let reach = |n: &Node| {
+        let rank = if Some(n.num) == local {
+            0
+        } else if n.via_mqtt {
+            100
+        } else {
+            n.hops_away.map_or(200, |h| h + 1)
+        };
+        let signal = if rank == 1 {
+            n.snr.unwrap_or(f32::MIN)
+        } else {
+            0.0
+        };
+        (rank, Reverse((signal * 100.0) as i64))
+    };
+    // External first, then the fullest battery, the unknown last.
+    let power = |n: &Node| match n.battery_level {
+        Some(level) if level > 100 => (0, 0),
+        Some(level) => (1, 100 - level),
+        None => (2, 0),
+    };
+    let hardware = |n: &Node| n.hw_model.clone().unwrap_or_default().to_lowercase();
+    match column {
+        Column::Name => name(a).cmp(&name(b)),
+        Column::Heard => b.last_heard.cmp(&a.last_heard),
+        Column::Reach => reach(a).cmp(&reach(b)),
+        Column::Power => power(a).cmp(&power(b)),
+        Column::Hardware => hardware(a).cmp(&hardware(b)),
+    }
+}
+
+/// Whether a node has nothing to sort by in a column: those go last both
+/// ways.
+fn unknown(column: Column, node: &Node, local: Option<u32>) -> bool {
+    match column {
+        Column::Name => false,
+        Column::Heard => node.last_heard.is_none(),
+        Column::Reach => Some(node.num) != local && !node.via_mqtt && node.hops_away.is_none(),
+        Column::Power => node.battery_level.is_none(),
+        Column::Hardware => node.hw_model.is_none(),
+    }
+}
+
 /// How far a node is, by the classes the map's legend has.
 fn distance(node: &Node) -> &'static str {
     if node.via_mqtt {
@@ -85,6 +141,13 @@ fn NodeList() -> impl IntoView {
     let live = expect_context::<Live>();
     let filter = RwSignal::new(String::new());
     let reach = RwSignal::new(Reach::All);
+    // By a column, the right way up or not; or, with none, favourites first
+    // and then the most recently heard. Kept in the preferences, so that it
+    // is the same after a reload and in every browser.
+    let sort = Memo::new(move |_| {
+        live.preferences
+            .with(|p| p.nodes_sort.map(|s| (s.column, !s.reversed)))
+    });
 
     let shown = move || {
         let needle = filter.get().to_lowercase();
@@ -102,13 +165,24 @@ fn NodeList() -> impl IntoView {
                 .cloned()
                 .collect()
         });
-        // Favourites first, then the most recently heard.
-        nodes.sort_by(|a, b| {
-            b.favorite
-                .cmp(&a.favorite)
-                .then(b.last_heard.cmp(&a.last_heard))
-                .then(a.num.cmp(&b.num))
-        });
+        let local = live
+            .status
+            .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+        match sort.get() {
+            Some((column, upright)) => nodes.sort_by(|a, b| {
+                let by = order(column, a, b, local);
+                unknown(column, a, local)
+                    .cmp(&unknown(column, b, local))
+                    .then(if upright { by } else { by.reverse() })
+                    .then(a.num.cmp(&b.num))
+            }),
+            None => nodes.sort_by(|a, b| {
+                b.favorite
+                    .cmp(&a.favorite)
+                    .then(b.last_heard.cmp(&a.last_heard))
+                    .then(a.num.cmp(&b.num))
+            }),
+        }
         nodes
     };
     let reaches = [Reach::All, Reach::Direct, Reach::Mesh, Reach::Mqtt]
@@ -128,6 +202,43 @@ fn NodeList() -> impl IntoView {
         })
         .collect::<Vec<_>>();
 
+    // A heading that sorts by its column: its most useful way, then the
+    // other, then as by default.
+    let header = move |column: Column, label: AnyView| {
+        let next = move || {
+            let mut preferences = live.preferences.get_untracked();
+            preferences.nodes_sort = match sort.get_untracked() {
+                Some((c, true)) if c == column => Some(NodesSort {
+                    column,
+                    reversed: true,
+                }),
+                Some((c, false)) if c == column => None,
+                _ => Some(NodesSort {
+                    column,
+                    reversed: false,
+                }),
+            };
+            live.prefer(preferences);
+        };
+        let arrow = move || match sort.get() {
+            Some((c, true)) if c == column => Some(SORTED),
+            Some((c, false)) if c == column => Some(SORTED_BACK),
+            _ => None,
+        };
+        view! {
+            <th aria-sort=move || match sort.get() {
+                Some((c, true)) if c == column => "ascending",
+                Some((c, false)) if c == column => "descending",
+                _ => "none",
+            }>
+                <button type="button" class="sort" class:on=move || arrow().is_some() on:click=move |_| next()>
+                    {label}
+                    <span class="arrow" inner_html=move || arrow().unwrap_or_default()></span>
+                </button>
+            </th>
+        }
+    };
+
     view! {
         <section class="node-list">
             <div class="node-tools">
@@ -142,11 +253,11 @@ fn NodeList() -> impl IntoView {
             <table class="nodes-table">
                 <thead>
                     <tr>
-                        <th>{t!(i18n, nodes_name)}</th>
-                        <th>{t!(i18n, nodes_heard)}</th>
-                        <th>{t!(i18n, nodes_reach)}</th>
-                        <th>{t!(i18n, nodes_battery)}</th>
-                        <th>{t!(i18n, nodes_hardware)}</th>
+                        {header(Column::Name, t!(i18n, nodes_name).into_any())}
+                        {header(Column::Heard, t!(i18n, nodes_heard).into_any())}
+                        {header(Column::Reach, t!(i18n, nodes_reach).into_any())}
+                        {header(Column::Power, t!(i18n, nodes_battery).into_any())}
+                        {header(Column::Hardware, t!(i18n, nodes_hardware).into_any())}
                         <th></th>
                     </tr>
                 </thead>
@@ -171,6 +282,9 @@ fn matches(node: &Node, needle: &str) -> bool {
     .any(|text| text.to_lowercase().contains(needle))
 }
 
+const SORTED: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
+const SORTED_BACK: &str =
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-up.svg");
 const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
 const STAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/star.svg");
 const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");

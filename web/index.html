@@ -876,6 +876,20 @@
         text-align: left;
       }
       .nodes-table td { padding: 8px 10px; border-bottom: 1px solid var(--mc-border); vertical-align: middle; }
+      .nodes-table th .sort {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+      }
+      .nodes-table th .sort:hover,
+      .nodes-table th .sort.on { color: var(--mc-text); }
+      .nodes-table th .arrow { display: flex; }
+      .nodes-table th .arrow svg { width: 14px; height: 14px; }
       .node-row { cursor: pointer; }
       .node-row:hover { background: var(--mc-raised); }
       .node-row .who { display: flex; align-items: center; gap: 12px; }
