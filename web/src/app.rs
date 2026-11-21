@@ -375,6 +375,16 @@ impl Live {
         self.selected.get_untracked() == Some(radio)
     }
 
+    /// A channel's name, as the radio has it, if it has the channel.
+    fn channel_name(self, channel: u32) -> Option<String> {
+        self.channels.with_untracked(|channels| {
+            channels
+                .iter()
+                .find(|c| c.index == channel)
+                .map(|c| c.name.clone())
+        })
+    }
+
     /// With the daemon out of reach nothing is known of the radios' links:
     /// none is taken as up, so nothing is offered that needs one, until a
     /// new session reads them again.
@@ -456,12 +466,27 @@ impl Live {
                     self.refresh_selected().await
                 }
                 ServerMessage::Message { radio, message } if self.is_selected(radio) => {
-                    if self.open.get_untracked() == Some(peer_of(&message)) {
+                    let peer = peer_of(&message);
+                    let open = self.open.get_untracked();
+                    if open == Some(peer) {
                         self.thread.update(|thread| {
                             if !thread.iter().any(|m| m.id == message.id) {
                                 thread.push(message);
                             }
                         });
+                    } else if let (
+                        Some(Peer::Channel { channel: open }),
+                        Peer::Channel { channel: heard },
+                    ) = (open, peer)
+                        && self.channel_name(open) == self.channel_name(heard)
+                    {
+                        // The very same channel in two slots is one
+                        // conversation, which says the first slot: the one
+                        // open may be the other. The very same is named the
+                        // same; two only named the same cost a reading more.
+                        if let Err(failure) = self.refresh_thread().await {
+                            return failure;
+                        }
                     }
                     self.refresh_conversations().await
                 }
