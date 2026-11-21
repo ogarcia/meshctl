@@ -97,7 +97,6 @@
   "nav_channels": "Channels",
   "nav_directs": "Direct",
   "nav_no_directs": "No direct conversations yet.",
-  "nav_node_count": "{{ n }} nodes",
   "nav_my_node": "My node",
   "nav_menu": "Menu",
   "nav_channel_slot": "Channel {{ index }}",
@@ -256,5 +255,6 @@
   "color_teal": "Teal",
   "color_lime": "Lime",
   "color_gray": "Grey",
-  "map_all": "Show every node"
+  "map_all": "Show every node",
+  "daemon_down_note": "meshctl is out of reach: what you see is the last known and may be out of date."
 }

@@ -97,7 +97,6 @@
   "nav_channels": "Canales",
   "nav_directs": "Directos",
   "nav_no_directs": "Aún no hay conversaciones directas.",
-  "nav_node_count": "{{ n }} nodos",
   "nav_my_node": "Mi nodo",
   "nav_menu": "Menú",
   "nav_channel_slot": "Canal {{ index }}",
@@ -256,5 +255,6 @@
   "color_teal": "Turquesa",
   "color_lime": "Lima",
   "color_gray": "Gris",
-  "map_all": "Ver todos los nodos"
+  "map_all": "Ver todos los nodos",
+  "daemon_down_note": "No se llega a meshctl: lo que ves es lo último que se supo y puede estar desactualizado."
 }

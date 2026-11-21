@@ -364,6 +364,32 @@ impl Live {
         self.selected.get_untracked() == Some(radio)
     }
 
+    /// With the daemon out of reach nothing is known of the radios' links:
+    /// none is taken as up, so nothing is offered that needs one, until a
+    /// new session reads them again.
+    fn lose_links(self) {
+        self.radios.update(|radios| {
+            for radio in radios.iter_mut().flatten() {
+                radio.link = LinkState::Disconnected;
+            }
+        });
+        self.status.update(|status| {
+            if let Some(status) = status {
+                status.link = LinkState::Disconnected;
+            }
+        });
+    }
+
+    /// The class for a radio's link, as far as is known: with the daemon out
+    /// of reach, that.
+    pub fn link_class(self, link: LinkState) -> &'static str {
+        if self.daemon.get() == Daemon::Connected {
+            link_class(link)
+        } else {
+            "daemon-down"
+        }
+    }
+
     /// One connection to the event stream, until it drops.
     async fn session(self) -> Failure {
         let mut events = match Events::open().await {
@@ -479,6 +505,7 @@ fn follow(live: Live) {
                 }
                 Failure::Unreachable | Failure::Rejected(_) => {
                     live.daemon.set(Daemon::Unreachable);
+                    live.lose_links();
                     sleep(RETRY).await;
                 }
             }
@@ -600,26 +627,48 @@ fn Shell() -> impl IntoView {
 fn Content() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    move || match (
-        live.daemon.get(),
-        live.radios.with(|r| r.as_ref().map(Vec::len)),
-        live.page.get(),
-    ) {
-        (Daemon::NeedsToken, _, _) => view! { <TokenForm /> }.into_any(),
-        (Daemon::Unreachable, None, _) => {
-            view! { <p class="card dim">{t!(i18n, link_daemon_down)}</p> }.into_any()
+    // What to show, worked out apart: the daemon going up and down, or the
+    // radios being read again, leave the page as it is unless it changes.
+    // Otherwise the map would be built anew on every retry.
+    let shown = Memo::new(move |_| {
+        match (
+            live.daemon.get(),
+            live.radios.with(|r| r.as_ref().map(Vec::len)),
+            live.page.get(),
+        ) {
+            (Daemon::NeedsToken, _, _) => Shown::Token,
+            (Daemon::Unreachable, None, _) => Shown::Down,
+            (_, None, _) => Shown::Nothing,
+            (_, _, Page::Preferences) => Shown::Page(Page::Preferences),
+            (_, _, Page::Radios) => Shown::Page(Page::Radios),
+            (_, Some(0), _) => Shown::Welcome,
+            (_, Some(_), page) => Shown::Page(page),
         }
-        (_, None, _) => ().into_any(),
-        (_, _, Page::Preferences) => view! { <PreferencesView /> }.into_any(),
-        (_, _, Page::Radios) => view! { <RadiosView /> }.into_any(),
-        (_, Some(0), _) => view! { <Welcome /> }.into_any(),
-        (_, Some(_), Page::Map) => view! { <MapView /> }.into_any(),
-        (_, Some(_), Page::Nodes) => view! { <MeshView /> }.into_any(),
-        (_, Some(_), Page::Chat) => view! { <ChatView /> }.into_any(),
-        (_, Some(_), Page::Node) => view! { <NodeView /> }.into_any(),
-        (_, Some(_), Page::Packets) => view! { <PacketsView /> }.into_any(),
-        (_, Some(_), Page::RadioSettings) => view! { <SettingsView /> }.into_any(),
+    });
+    move || match shown.get() {
+        Shown::Token => view! { <TokenForm /> }.into_any(),
+        Shown::Down => view! { <p class="card dim">{t!(i18n, link_daemon_down)}</p> }.into_any(),
+        Shown::Nothing => ().into_any(),
+        Shown::Welcome => view! { <Welcome /> }.into_any(),
+        Shown::Page(Page::Preferences) => view! { <PreferencesView /> }.into_any(),
+        Shown::Page(Page::Radios) => view! { <RadiosView /> }.into_any(),
+        Shown::Page(Page::Map) => view! { <MapView /> }.into_any(),
+        Shown::Page(Page::Nodes) => view! { <MeshView /> }.into_any(),
+        Shown::Page(Page::Chat) => view! { <ChatView /> }.into_any(),
+        Shown::Page(Page::Node) => view! { <NodeView /> }.into_any(),
+        Shown::Page(Page::Packets) => view! { <PacketsView /> }.into_any(),
+        Shown::Page(Page::RadioSettings) => view! { <SettingsView /> }.into_any(),
     }
+}
+
+/// What [`Content`] shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shown {
+    Token,
+    Down,
+    Nothing,
+    Welcome,
+    Page(Page),
 }
 
 const GEAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/settings.svg");
@@ -719,7 +768,7 @@ fn RadioButton(
             on:click=move |_| live.select(id)
         >
             <Face name=name.clone() badge=badge.clone() short=short.clone() />
-            <span class=move || format!("dot {}", link_class(link()))></span>
+            <span class=move || format!("dot {}", live.link_class(link()))></span>
         </button>
     }
 }
@@ -852,7 +901,6 @@ fn RadioSidebar() -> impl IntoView {
 /// The selected radio's name, and how it is.
 #[component]
 fn RadioHead() -> impl IntoView {
-    let i18n = use_i18n();
     let live = expect_context::<Live>();
     let radio = move || live.selected_radio();
     let link = Signal::derive(move || radio().map_or(LinkState::Connecting, |r| r.link));
@@ -864,9 +912,13 @@ fn RadioHead() -> impl IntoView {
     view! {
         <header class="sidebar-head">
             <h1>{move || radio().map(|r| r.name)}</h1>
-            <span class="dim">
-                {kind} " · " <LinkLabel link /> " · "
-                {move || t!(i18n, nav_node_count, n = move || live.nodes.with(BTreeMap::len))}
+            // In one line: if it does not fit, the link gives way. How many
+            // nodes there are is said by the list below.
+            <span class="dim facts">
+                <span>{kind}</span>
+                <span class="link">
+                    <LinkLabel link />
+                </span>
             </span>
         </header>
     }
@@ -1118,7 +1170,9 @@ pub fn link_class(link: LinkState) -> &'static str {
 #[component]
 pub fn LinkLabel(#[prop(into)] link: Signal<LinkState>) -> impl IntoView {
     let i18n = use_i18n();
+    let live = expect_context::<Live>();
     move || match link.get() {
+        _ if live.daemon.get() != Daemon::Connected => t!(i18n, link_daemon_down).into_any(),
         LinkState::Ready => t!(i18n, link_ready).into_any(),
         LinkState::Syncing => t!(i18n, link_syncing).into_any(),
         LinkState::Connecting => t!(i18n, link_connecting).into_any(),

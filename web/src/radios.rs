@@ -4,7 +4,7 @@
 //! The radios: their list, in the rail's order, and the editor of each one,
 //! its button included.
 
-use crate::app::{LinkLabel, Live, link_class};
+use crate::app::{LinkLabel, Live};
 use crate::badge::{self, Face, PALETTE, initials};
 use crate::daemon::{self, Failure};
 use crate::emoji::EmojiPicker;
@@ -235,7 +235,7 @@ fn RadioRow(
                         <b>{name.clone()}</b>
                         {(!radio.shown)
                             .then(|| view! { <span class="tag">{t!(i18n, radio_hidden)}</span> })}
-                        <span class=format!("badge {}", link_class(link))>
+                        <span class=move || format!("badge {}", live.link_class(link))>
                             <LinkLabel link=Signal::stored(link) />
                         </span>
                     </span>

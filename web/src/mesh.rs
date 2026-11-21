@@ -3,7 +3,7 @@
 
 //! What the selected radio knows: itself, and the nodes it hears.
 
-use crate::app::Live;
+use crate::app::{Daemon, Live};
 use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
 use meshctl_api::{LinkState, Node, Peer};
@@ -30,6 +30,12 @@ fn OfflineNote() -> impl IntoView {
     };
     move || {
         let radio = radio()?;
+        if live.daemon.get() != Daemon::Connected {
+            // Not the radio: meshctl itself is out of reach.
+            return Some(
+                view! { <p class="card note">{t!(i18n, daemon_down_note)}</p> }.into_any(),
+            );
+        }
         let why = match radio.link {
             LinkState::Ready | LinkState::Syncing => return None,
             LinkState::Disabled => t!(i18n, radio_disabled_note).into_any(),
@@ -46,7 +52,7 @@ fn OfflineNote() -> impl IntoView {
                 {t!(i18n, radio_last_connected, ago = move || ago(live.now.get(), at))}
             }
         });
-        Some(view! { <p class="card note">{why} {since}</p> })
+        Some(view! { <p class="card note">{why} {since}</p> }.into_any())
     }
 }
 
