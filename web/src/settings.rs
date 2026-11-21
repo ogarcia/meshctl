@@ -194,8 +194,16 @@ pub fn SettingsView() -> impl IntoView {
         let (Some(radio), Some(change)) = (live.selected.get_untracked(), pending(tab)) else {
             return;
         };
-        // Role and LoRa changes reboot the radio: say so before, not after.
-        if change.device.is_some() || change.lora.is_some() {
+        // Role and LoRa changes reboot the radio, and so do being licensed
+        // and the status message: say so before, not after.
+        let owner_reboots = change.owner.as_ref().is_some_and(|owner| {
+            loaded.with_untracked(|l| {
+                l.as_ref().is_some_and(|l| {
+                    owner.licensed != l.owner.licensed || owner.status != l.owner.status
+                })
+            })
+        });
+        if change.device.is_some() || change.lora.is_some() || owner_reboots {
             let sure = web_sys::window()
                 .and_then(|w| {
                     w.confirm_with_message(t_string!(i18n, settings_reboot_confirm))
@@ -386,6 +394,27 @@ fn UserTab(draft: Draft) -> impl IntoView {
         |d, v| d.owner.short_name = v,
     );
     let (role, set_role) = field(draft, |d| d.device.role.clone(), |d, v| d.device.role = v);
+    let has_status =
+        Memo::new(move |_| draft.with(|d| d.as_ref().is_some_and(|d| d.owner.status.is_some())));
+    let (status, set_status) = field(
+        draft,
+        |d| d.owner.status.clone().unwrap_or_default(),
+        |d, v| {
+            if d.owner.status.is_some() {
+                d.owner.status = Some(v);
+            }
+        },
+    );
+    let (unmessagable, set_unmessagable) = field(
+        draft,
+        |d| d.owner.unmessagable.unwrap_or(false),
+        |d, v| d.owner.unmessagable = Some(v),
+    );
+    let (licensed, set_licensed) = field(
+        draft,
+        |d| d.owner.licensed.unwrap_or(false),
+        |d, v| d.owner.licensed = Some(v),
+    );
     let roles = move || {
         draft.with(|d| {
             d.as_ref()
@@ -428,6 +457,44 @@ fn UserTab(draft: Draft) -> impl IntoView {
                     set=set_role
                     label=names::role
                 />
+            </Row>
+            // Only where the firmware has them.
+            <div class:gone=move || !has_status.get()>
+                <Row
+                    title=t!(i18n, settings_status).into_any()
+                    hint=t!(i18n, settings_status_hint).into_any()
+                >
+                    <input
+                        class="pref-control"
+                        maxlength="79"
+                        prop:value=move || status.get()
+                        on:input=move |ev| set_status(event_target_value(&ev))
+                    />
+                </Row>
+            </div>
+            <Row
+                title=t!(i18n, settings_unmessagable).into_any()
+                hint=t!(i18n, settings_unmessagable_hint).into_any()
+            >
+                <div class="pref-control switch-control">
+                    <Switch
+                        on=unmessagable
+                        label=Signal::derive(move || t_string!(i18n, settings_unmessagable).to_owned())
+                        flip=move |_| set_unmessagable(!unmessagable.get_untracked())
+                    />
+                </div>
+            </Row>
+            <Row
+                title=t!(i18n, settings_licensed).into_any()
+                hint=t!(i18n, settings_licensed_hint).into_any()
+            >
+                <div class="pref-control switch-control">
+                    <Switch
+                        on=licensed
+                        label=Signal::derive(move || t_string!(i18n, settings_licensed).to_owned())
+                        flip=move |_| set_licensed(!licensed.get_untracked())
+                    />
+                </div>
             </Row>
         </div>
     }
@@ -816,6 +883,8 @@ fn advanced<T: Clone + Default + Send + Sync + 'static>(
 fn LoraAdvancedRows(draft: Draft) -> impl IntoView {
     let i18n = use_i18n();
     let open = RwSignal::new(false);
+    let licensed =
+        move || draft.with(|d| d.as_ref().is_some_and(|d| d.owner.licensed == Some(true)));
     let band = Memo::new(move |_| {
         draft.with(|d| d.as_ref().and_then(Band::of).map(|b| (b.limits, b.slots)))
     });
@@ -850,12 +919,15 @@ fn LoraAdvancedRows(draft: Draft) -> impl IntoView {
         if slot.get_untracked() > slots {
             set_slot(0);
         }
-        if power.get_untracked() > limits.power_limit as i32 {
+        if !licensed() && power.get_untracked() > limits.power_limit as i32 {
             set_power(limits.power_limit as i32);
         }
     });
 
     let power_limit = move || band.get().map_or(0, |(l, _)| l.power_limit);
+    // A licensed owner's radio is not held to its region's power: as far as
+    // its hardware goes, which the radio itself keeps to.
+    let power_most = move || if licensed() { 30 } else { power_limit() };
     let slots = move || band.get().map_or(0, |(_, s)| s);
     let slot_hint = move || format!("{} {}.", t_string!(i18n, settings_slot_hint), slots());
     // What the radio will use when left to it: the slot it picks, and that
@@ -939,7 +1011,7 @@ fn LoraAdvancedRows(draft: Draft) -> impl IntoView {
                         // Not past what the region allows, so as not to send
                         // what the radio would cut down.
                         if let Ok(dbm) = number(event_target_value(&ev)).parse::<i32>() {
-                            set_power(dbm.clamp(0, power_limit() as i32));
+                            set_power(dbm.clamp(0, power_most() as i32));
                         }
                     }
                 />

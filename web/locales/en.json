@@ -325,5 +325,11 @@
   "settings_ignore_mqtt_hint": "Leaves aside what other nodes relay from the internet.",
   "settings_fan": "Amplifier fan off",
   "settings_fan_hint": "Only on boards that have one.",
-  "settings_advanced_hint": "Power, frequency, duty cycle and MQTT: what few need to touch."
+  "settings_advanced_hint": "Power, frequency, duty cycle and MQTT: what few need to touch.",
+  "settings_status": "Status message",
+  "settings_status_hint": "What the radio tells of how it is, now and then. Empty, nothing.",
+  "settings_unmessagable": "Takes no messages",
+  "settings_unmessagable_hint": "Tells others nobody reads messages here: for nodes of the mesh's own.",
+  "settings_licensed": "Licensed radio amateur",
+  "settings_licensed_hint": "Lets it past its region's power and band, but the radio sends nothing encrypted, as the licence has it. The long name should be your call sign."
 }

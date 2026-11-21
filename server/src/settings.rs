@@ -12,11 +12,11 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use meshctl_api::{
     ChannelChange, ChannelKey, ChannelSecret, ChannelSettings, DeviceSettings, KeyChange,
     LoraAdvanced, LoraParams, LoraSettings, NodeSettings, NodeSettingsChange, OwnerSettings,
-    PUBLIC_POSITION_PRECISION, RegionLimits, SettingsChoices,
+    PUBLIC_POSITION_PRECISION, RegionLimits, STATUS_MAX, SettingsChoices,
 };
 use meshctl_core::mesh::Settings;
 use meshctl_core::radio::SettingsChange;
-use meshctl_proto::meshtastic::{self as pb, config};
+use meshctl_proto::meshtastic::{self as pb, config, module_config};
 
 /// The most bytes each name takes, as the firmware keeps them.
 const LONG_NAME_MAX: usize = 39;
@@ -155,6 +155,19 @@ fn own_key(text: Option<&str>) -> Result<Vec<u8>, Invalid> {
     Ok(key)
 }
 
+/// The status message the radio sends, if its firmware has them.
+fn status_of(settings: &Settings) -> Option<String> {
+    match settings
+        .modules
+        .get("statusmessage")?
+        .payload_variant
+        .as_ref()?
+    {
+        module_config::PayloadVariant::Statusmessage(status) => Some(status.node_status.clone()),
+        _ => None,
+    }
+}
+
 /// The settings as the API shows them; `None` until the radio has sent them.
 pub fn view(settings: &Settings) -> Option<NodeSettings> {
     let owner = settings.owner.as_ref()?;
@@ -195,6 +208,9 @@ pub fn view(settings: &Settings) -> Option<NodeSettings> {
         owner: OwnerSettings {
             long_name: owner.long_name.clone(),
             short_name: owner.short_name.clone(),
+            licensed: Some(owner.is_licensed),
+            unmessagable: Some(owner.is_unmessagable.unwrap_or(false)),
+            status: status_of(settings),
         },
         device: DeviceSettings {
             role: role_name(device.role).unwrap_or_default().to_owned(),
@@ -264,10 +280,37 @@ pub fn change(
             !short_name.is_empty() && short_name.len() <= SHORT_NAME_MAX,
             "short_name",
         )?;
-        let mut user = settings.owner.clone().ok_or(Invalid("owner"))?;
+        let before = settings.owner.clone().ok_or(Invalid("owner"))?;
+        let mut user = before.clone();
         user.long_name = long_name.to_owned();
         user.short_name = short_name.to_owned();
+        if let Some(licensed) = owner.licensed {
+            user.is_licensed = licensed;
+        }
+        if let Some(unmessagable) = owner.unmessagable {
+            user.is_unmessagable = Some(unmessagable);
+        }
+        // Being licensed or not changes what the radio may do: it reboots.
+        reboots |= user.is_licensed != before.is_licensed;
         change.owner = Some(user);
+
+        if let Some(status) = &owner.status {
+            let status = status.trim();
+            check(status.len() <= STATUS_MAX, "status")?;
+            let Some(current) = status_of(settings) else {
+                return Err(Invalid("status"));
+            };
+            if current != status {
+                change.module_configs.push(pb::ModuleConfig {
+                    payload_variant: Some(module_config::PayloadVariant::Statusmessage(
+                        module_config::StatusMessageConfig {
+                            node_status: status.to_owned(),
+                        },
+                    )),
+                });
+                reboots = true;
+            }
+        }
     }
 
     if let Some(device) = &wanted.device {
@@ -680,11 +723,60 @@ mod tests {
     }
 
     #[test]
+    fn the_owner_says_more_of_itself() {
+        let owner = |licensed, status: Option<&str>| NodeSettingsChange {
+            owner: Some(OwnerSettings {
+                long_name: "Casa".into(),
+                short_name: "CASA".into(),
+                licensed,
+                unmessagable: Some(true),
+                status: status.map(str::to_owned),
+            }),
+            ..Default::default()
+        };
+        let (change, reboots) = super::change(&settings(), &owner(None, None), no_random).unwrap();
+        assert_eq!(change.owner.unwrap().is_unmessagable, Some(true));
+        assert!(!reboots);
+        // Licensed or no longer: it reboots.
+        let (change, reboots) =
+            super::change(&settings(), &owner(Some(true), None), no_random).unwrap();
+        assert!(change.owner.unwrap().is_licensed);
+        assert!(reboots);
+        // A status only where the firmware has them.
+        assert_eq!(
+            super::change(&settings(), &owner(None, Some("en casa")), no_random).err(),
+            Some(Invalid("status"))
+        );
+        let mut with_status = settings();
+        with_status.modules.insert(
+            "statusmessage".into(),
+            pb::ModuleConfig {
+                payload_variant: Some(module_config::PayloadVariant::Statusmessage(
+                    Default::default(),
+                )),
+            },
+        );
+        let (change, _) =
+            super::change(&with_status, &owner(None, Some(" en casa ")), no_random).unwrap();
+        let Some(module_config::PayloadVariant::Statusmessage(status)) =
+            &change.module_configs[0].payload_variant
+        else {
+            panic!("a status message");
+        };
+        assert_eq!(status.node_status, "en casa");
+        let long = "x".repeat(80);
+        assert!(super::change(&with_status, &owner(None, Some(&long)), no_random).is_err());
+    }
+
+    #[test]
     fn the_owner_keeps_its_key() {
         let wanted = NodeSettingsChange {
             owner: Some(OwnerSettings {
                 long_name: " Faro ".into(),
                 short_name: "🗼".into(),
+                licensed: None,
+                unmessagable: None,
+                status: None,
             }),
             ..Default::default()
         };
@@ -944,6 +1036,9 @@ mod tests {
                 owner: Some(OwnerSettings {
                     long_name: "x".repeat(40),
                     short_name: "X".into(),
+                    licensed: None,
+                    unmessagable: None,
+                    status: None,
                 }),
                 ..Default::default()
             },
@@ -951,6 +1046,9 @@ mod tests {
                 owner: Some(OwnerSettings {
                     long_name: "Faro".into(),
                     short_name: "FAROS".into(),
+                    licensed: None,
+                    unmessagable: None,
+                    status: None,
                 }),
                 ..Default::default()
             },

@@ -325,5 +325,11 @@
   "settings_ignore_mqtt_hint": "Deja de lado lo que otros nodos reenvían desde internet.",
   "settings_fan": "Ventilador del amplificador apagado",
   "settings_fan_hint": "Solo en placas que lo tienen.",
-  "settings_advanced_hint": "Potencia, frecuencia, ciclo de trabajo y MQTT: lo que pocos necesitan tocar."
+  "settings_advanced_hint": "Potencia, frecuencia, ciclo de trabajo y MQTT: lo que pocos necesitan tocar.",
+  "settings_status": "Mensaje de estado",
+  "settings_status_hint": "Lo que la radio cuenta de cómo está, cada cierto tiempo. Vacío, nada.",
+  "settings_unmessagable": "No acepta mensajes",
+  "settings_unmessagable_hint": "Avisa a los demás de que aquí nadie lee los mensajes: para nodos de la propia red.",
+  "settings_licensed": "Radioaficionado con licencia",
+  "settings_licensed_hint": "Deja pasar de la potencia y la banda de la región, pero la radio deja de cifrar lo que envía, como manda la licencia. El nombre largo debería ser tu indicativo."
 }

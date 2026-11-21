@@ -619,8 +619,10 @@
         padding: 18px 4px;
         border-bottom: 1px solid var(--mc-border);
       }
-      .pref-row:first-child { padding-top: 6px; }
-      .pref-row:last-child { border-bottom: 0; }
+      /* First and last of the list, not of a group of rows that may hide. */
+      .preferences > .pref-row:first-child { padding-top: 6px; }
+      .preferences > .pref-row:last-child,
+      .preferences > div:last-child > .pref-row:last-child { border-bottom: 0; }
       /* What it is takes what its control leaves: they keep to one line. */
       .pref-what { flex: 1 1 0; min-width: 200px; display: flex; flex-direction: column; gap: 2px; }
       .pref-title { font-weight: 600; }

@@ -35,6 +35,10 @@ const LEFT_OUT: &[&str] = &[
     "device_ui",
 ];
 
+/// Modules not offered here, being elsewhere: the status message, with the
+/// owner.
+const MODULES_LEFT_OUT: &[&str] = &["statusmessage"];
+
 /// Single settings not offered here, as `section.field`.
 const FIELDS_LEFT_OUT: &[&str] = &[
     // On the page of its own, with the LoRa settings.
@@ -275,6 +279,9 @@ pub fn sections(settings: &Settings) -> Vec<SettingsSection> {
         })
         .collect();
     sections.extend(settings.modules.iter().filter_map(|(name, module)| {
+        if MODULES_LEFT_OUT.contains(&name.as_str()) {
+            return None;
+        }
         let part = module_part(module, name)?;
         Some(section(format!("module.{name}"), name, true, &part))
     }));

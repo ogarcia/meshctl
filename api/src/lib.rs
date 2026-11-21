@@ -680,7 +680,24 @@ pub struct OwnerSettings {
     /// Up to 4 bytes: four letters, or one emoji.
     #[cfg_attr(feature = "openapi", schema(example = "FARO"))]
     pub short_name: String,
+    /// Whether the owner is a licensed radio amateur: the radio may then go
+    /// past its region's power and band, and sends nothing encrypted, as
+    /// their licence has it. Left out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub licensed: Option<bool>,
+    /// Whether it tells others nobody reads messages sent to it, as for a
+    /// node of the mesh's own. Left out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unmessagable: Option<bool>,
+    /// A word on how it is, up to 79 bytes, which the radio sends now and
+    /// then; empty for none. Only from firmware 2.7.20, which shows it; left
+    /// out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
 }
+
+/// The most bytes a status message takes.
+pub const STATUS_MAX: usize = 79;
 
 /// What the radio does in the mesh.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
