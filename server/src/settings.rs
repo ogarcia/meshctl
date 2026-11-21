@@ -33,6 +33,10 @@ fn names(name: impl Fn(i32) -> Option<&'static str>) -> Vec<String> {
     (0..=255).filter_map(name).map(str::to_owned).collect()
 }
 
+/// Roles the protobufs mark as deprecated: not offered, though a radio that
+/// has one still says so.
+const DEPRECATED_ROLES: &[&str] = &["ROUTER_CLIENT", "REPEATER"];
+
 fn role_name(value: i32) -> Option<&'static str> {
     config::device_config::Role::try_from(value)
         .ok()
@@ -61,7 +65,10 @@ pub fn choices() -> SettingsChoices {
     let regions = names(region_name);
     let presets = names(preset_name);
     SettingsChoices {
-        roles: names(role_name),
+        roles: names(role_name)
+            .into_iter()
+            .filter(|role| !DEPRECATED_ROLES.contains(&role.as_str()))
+            .collect(),
         presets_by_region: lora::presets_by_region(&regions),
         preset_params: presets
             .iter()

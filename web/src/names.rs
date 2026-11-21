@@ -93,6 +93,23 @@ const REGIONS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// A role's name, in Spanish and in English, by its code.
+const ROLES: &[(&str, &str, &str)] = &[
+    ("CLIENT", "Cliente", "Client"),
+    ("CLIENT_MUTE", "Cliente silencioso", "Client, muted"),
+    ("CLIENT_HIDDEN", "Cliente oculto", "Client, hidden"),
+    ("CLIENT_BASE", "Cliente base", "Client base"),
+    ("ROUTER", "Router", "Router"),
+    ("ROUTER_LATE", "Router tardío", "Router, late"),
+    ("ROUTER_CLIENT", "Router y cliente", "Router and client"),
+    ("REPEATER", "Repetidor", "Repeater"),
+    ("TRACKER", "Rastreador", "Tracker"),
+    ("SENSOR", "Sensor", "Sensor"),
+    ("TAK", "TAK", "TAK"),
+    ("TAK_TRACKER", "Rastreador TAK", "TAK tracker"),
+    ("LOST_AND_FOUND", "Objetos perdidos", "Lost and found"),
+];
+
 /// A code from a table as read in a language, with the code after it.
 fn named(table: &[(&str, &str, &str)], locale: Locale, code: &str) -> String {
     table
@@ -112,6 +129,16 @@ fn named(table: &[(&str, &str, &str)], locale: Locale, code: &str) -> String {
 
 pub fn region(locale: Locale, code: &str) -> String {
     named(REGIONS, locale, code)
+}
+
+pub fn role(locale: Locale, code: &str) -> String {
+    named(ROLES, locale, code)
+}
+
+/// A modem preset by the name it goes by everywhere, in no language of its
+/// own, the one the firmware gives an unnamed channel: LongFast (LONG_FAST).
+pub fn preset(_: Locale, code: &str) -> String {
+    format!("{} ({code})", crate::chat::preset_name(code))
 }
 
 /// Codes in the order they come, the most used first, but for one apart,
@@ -141,6 +168,15 @@ mod tests {
         );
         assert_eq!(region(Locale::en, "US"), "United States (US)");
         assert_eq!(region(Locale::es, "MARS_1"), "MARS_1");
+        assert_eq!(
+            role(Locale::es, "CLIENT_MUTE"),
+            "Cliente silencioso (CLIENT_MUTE)"
+        );
+        assert_eq!(preset(Locale::es, "LONG_FAST"), "LongFast (LONG_FAST)");
+        assert_eq!(
+            preset(Locale::en, "LONG_MODERATE"),
+            "LongMod (LONG_MODERATE)"
+        );
     }
 
     #[test]

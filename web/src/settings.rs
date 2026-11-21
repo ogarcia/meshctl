@@ -420,7 +420,13 @@ fn UserTab(draft: Draft) -> impl IntoView {
                 title=t!(i18n, settings_role).into_any()
                 hint=t!(i18n, settings_role_hint).into_any()
             >
-                <Choice class="pref-control" options=roles value=role set=set_role />
+                <Choice
+                    class="pref-control"
+                    options=roles
+                    value=role
+                    set=set_role
+                    label=names::role
+                />
             </Row>
         </div>
     }
@@ -607,7 +613,15 @@ fn LoraTab(draft: Draft) -> impl IntoView {
                     {move || {
                         // Built again as the region changes what it offers.
                         let options = presets();
-                        view! { <Choice class="pref-control" options=move || options.clone() value=preset set=set_preset /> }
+                        view! {
+                            <Choice
+                                class="pref-control"
+                                options=move || options.clone()
+                                value=preset
+                                set=set_preset
+                                label=names::preset
+                            />
+                        }
                     }}
                 </Row>
             </div>
@@ -684,7 +698,9 @@ fn LoraTab(draft: Draft) -> impl IntoView {
 }
 
 /// A select over a list of codes: the radio's own names for its roles,
-/// regions and presets, as they are, or as `label` reads them.
+/// regions and presets, as they are, or as `label` reads them. The one the
+/// radio has is there even if it is not one offered, as a role deprecated:
+/// it is not lost, only not offered again once left.
 #[component]
 fn Choice(
     #[prop(optional)] class: &'static str,
@@ -698,7 +714,12 @@ fn Choice(
         <select class=class prop:value=value on:change=move |ev| set(event_target_value(&ev))>
             {move || {
                 let locale = i18n.get_locale();
-                options()
+                let mut codes = options();
+                let current = value.get_untracked();
+                if !current.is_empty() && !codes.contains(&current) {
+                    codes.push(current);
+                }
+                codes
                     .into_iter()
                     .map(|code| {
                         let selected = value.get_untracked() == code;
