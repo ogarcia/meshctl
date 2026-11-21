@@ -800,6 +800,28 @@ pub struct ChannelChange {
     pub downlink: bool,
 }
 
+/// The order of a radio's channels: every slot it has a channel in, each
+/// once, in the order they are to be. The first becomes the primary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ChannelOrder {
+    #[cfg_attr(feature = "openapi", schema(example = json!([0, 2, 1])))]
+    pub order: Vec<u32>,
+}
+
+/// What becomes of the messages of a channel taken off its radio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelHistory {
+    /// Kept aside, in no conversation: given back if the very same channel
+    /// comes back, name and key.
+    #[default]
+    Keep,
+    /// Gone with it.
+    Forget,
+}
+
 /// A channel's key itself, asked for on its own: the one secret of the radio
 /// meshctl hands out, and only when asked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

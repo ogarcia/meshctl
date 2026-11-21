@@ -13,8 +13,8 @@ use crate::radios::Switch;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{
-    ChannelChange, ChannelKey, ChannelSecret, ChannelSettings, ErrorCode, KeyChange, NodeSettings,
-    NodeSettingsChange,
+    ChannelChange, ChannelHistory, ChannelKey, ChannelSecret, ChannelSettings, ErrorCode,
+    KeyChange, NodeSettings, NodeSettingsChange,
 };
 use wasm_bindgen::JsCast;
 
@@ -27,6 +27,9 @@ const PLUS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plu
 const EYE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye.svg");
 const EYE_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye-off.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
+const GRIP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/grip-vertical.svg");
+const UP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-up.svg");
+const DOWN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 
 /// What a save or a removal came to, as the settings page tells it.
 pub type Notice = RwSignal<Option<Result<bool, Failure>>>;
@@ -39,10 +42,20 @@ enum Editing {
     New(u32),
 }
 
-/// A channel's name, or, for an unnamed primary, its modem preset's.
-fn shown_name(settings: &NodeSettings, channel: &ChannelSettings) -> String {
-    if channel.name.is_empty() && channel.index == 0 {
+/// What the radio names an unnamed channel, in any slot: its modem
+/// preset, or Custom without one.
+fn preset_of(settings: &NodeSettings) -> String {
+    if settings.lora.use_preset {
         preset_name(&settings.lora.modem_preset)
+    } else {
+        "Custom".to_owned()
+    }
+}
+
+/// A channel's name, or, for an unnamed one, the one the radio gives it.
+fn shown_name(settings: &NodeSettings, channel: &ChannelSettings) -> String {
+    if channel.name.is_empty() {
+        preset_of(settings)
     } else {
         channel.name.clone()
     }
@@ -56,20 +69,85 @@ fn private(key: ChannelKey) -> bool {
 #[component]
 pub fn ChannelsTab(loaded: RwSignal<Option<NodeSettings>>, notice: Notice) -> impl IntoView {
     let i18n = use_i18n();
+    let live = expect_context::<Live>();
     let editing = RwSignal::new(Editing::Closed);
-    // Those it has, in their slots' order.
+    // Those it has, in their slots' order, with how many there are.
     let channels = move || {
         loaded.with(|l| {
             l.as_ref()
                 .map(|l| {
-                    l.channels
-                        .iter()
-                        .filter(|c| c.role != "DISABLED")
-                        .map(|c| (shown_name(l, c), c.clone()))
+                    let have: Vec<_> = l.channels.iter().filter(|c| c.role != "DISABLED").collect();
+                    let count = have.len();
+                    have.into_iter()
+                        .enumerate()
+                        .map(|(at, c)| (at, count, shown_name(l, c), c.clone()))
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default()
         })
+    };
+    // The row being dragged, by its place.
+    let dragging = RwSignal::new(None::<usize>);
+    // Moves the channel at one place of the list to another: shown so at
+    // once, sent to the radio, and read back from it.
+    let reorder = move |from: usize, to: usize| {
+        let (Some(radio), Some(settings)) = (live.selected.get_untracked(), loaded.get_untracked())
+        else {
+            return;
+        };
+        let mut order: Vec<u32> = settings
+            .channels
+            .iter()
+            .filter(|c| c.role != "DISABLED")
+            .map(|c| c.index)
+            .collect();
+        if from == to || from >= order.len() || to >= order.len() {
+            return;
+        }
+        let moved = order.remove(from);
+        order.insert(to, moved);
+        // Another primary: what that means, before.
+        if order[0] != 0 {
+            let name = shown_name(&settings, &settings.channels[order[0] as usize]);
+            let sure = web_sys::window()
+                .and_then(|w| {
+                    w.confirm_with_message(&format!(
+                        "«{name}» {}",
+                        t_string!(i18n, channel_primary_confirm)
+                    ))
+                    .ok()
+                })
+                .unwrap_or(false);
+            if !sure {
+                return;
+            }
+        }
+        loaded.update(|l| {
+            if let Some(l) = l {
+                let before = l.channels.clone();
+                for (at, channel) in l.channels.iter_mut().enumerate() {
+                    *channel = match order.get(at) {
+                        Some(&from) => ChannelSettings {
+                            index: at as u32,
+                            role: if at == 0 { "PRIMARY" } else { "SECONDARY" }.to_owned(),
+                            ..before[from as usize].clone()
+                        },
+                        None => ChannelSettings {
+                            index: at as u32,
+                            role: "DISABLED".to_owned(),
+                            name: String::new(),
+                            key: ChannelKey::None,
+                            uplink: false,
+                            downlink: false,
+                        },
+                    };
+                }
+            }
+        });
+        spawn_local(async move {
+            let applied = daemon::reorder_channels(radio, &order).await;
+            notice.set(Some(applied.map(|a| a.reboots)));
+        });
     };
     // The first slot free, for a new one.
     let free = move || {
@@ -84,8 +162,12 @@ pub fn ChannelsTab(loaded: RwSignal<Option<NodeSettings>>, notice: Notice) -> im
 
     view! {
         <section class="channel-list">
-            <For each=channels key=|(name, c)| format!("{name} {c:?}") let:((name, channel))>
-                <ChannelRow name channel editing />
+            <For
+                each=channels
+                key=|(at, count, name, c)| format!("{at} {count} {name} {c:?}")
+                let:((at, count, name, channel))
+            >
+                <ChannelRow name channel at count dragging editing reorder />
             </For>
             <div class="channel-foot">
                 <p class="hint dim">{t!(i18n, channels_hint)}</p>
@@ -128,12 +210,68 @@ fn key_label(i18n: leptos_i18n::I18nContext<crate::i18n::Locale>, key: ChannelKe
 }
 
 #[component]
-fn ChannelRow(name: String, channel: ChannelSettings, editing: RwSignal<Editing>) -> impl IntoView {
+fn ChannelRow(
+    name: String,
+    channel: ChannelSettings,
+    at: usize,
+    count: usize,
+    dragging: RwSignal<Option<usize>>,
+    editing: RwSignal<Editing>,
+    reorder: impl Fn(usize, usize) + Copy + Send + Sync + 'static,
+) -> impl IntoView {
     let i18n = use_i18n();
     let slot = channel.index;
     let key = channel.key;
+    let over = RwSignal::new(false);
     view! {
-        <button type="button" class="channel-row" on:click=move |_| editing.set(Editing::Slot(slot))>
+        <div
+            class="radio-row channel-row"
+            class:dragging=move || dragging.get() == Some(at)
+            class:over=move || over.get()
+            draggable="true"
+            on:dragstart=move |ev| {
+                if let Some(data) = ev.data_transfer() {
+                    data.set_effect_allowed("move");
+                    // Firefox starts no drag without data.
+                    let _ = data.set_data("text/plain", &at.to_string());
+                }
+                dragging.set(Some(at));
+            }
+            on:dragover=move |ev| {
+                ev.prevent_default();
+                over.set(dragging.get_untracked().is_some_and(|from| from != at));
+            }
+            on:dragleave=move |_| over.set(false)
+            on:drop=move |ev| {
+                ev.prevent_default();
+                over.set(false);
+                if let Some(from) = dragging.get_untracked() {
+                    reorder(from, at);
+                }
+                dragging.set(None);
+            }
+            on:dragend=move |_| dragging.set(None)
+        >
+            <span class="grip" title=move || t_string!(i18n, channel_drag) inner_html=GRIP></span>
+            <span class="moves">
+                <button
+                    type="button"
+                    disabled={at == 0}
+                    title=move || t_string!(i18n, radio_up)
+                    aria-label=move || t_string!(i18n, radio_up)
+                    on:click=move |_| reorder(at, at.saturating_sub(1))
+                    inner_html=UP
+                ></button>
+                <button
+                    type="button"
+                    disabled={at + 1 >= count}
+                    title=move || t_string!(i18n, radio_down)
+                    aria-label=move || t_string!(i18n, radio_down)
+                    on:click=move |_| reorder(at, at + 1)
+                    inner_html=DOWN
+                ></button>
+            </span>
+            <button type="button" class="pick" on:click=move |_| editing.set(Editing::Slot(slot))>
             <span class="channel-mark" inner_html=HASH></span>
             <span class="who">
                 <span class="name">
@@ -150,7 +288,8 @@ fn ChannelRow(name: String, channel: ChannelSettings, editing: RwSignal<Editing>
                     {move || key_label(i18n, key)}
                 </span>
             </span>
-        </button>
+            </button>
+        </div>
     }
 }
 
@@ -216,8 +355,7 @@ fn ChannelEditor(
         let l = l.as_ref();
         (
             l.and_then(|l| l.channels.get(slot as usize).cloned()),
-            l.map(|l| preset_name(&l.lora.modem_preset))
-                .unwrap_or_default(),
+            l.map(preset_of).unwrap_or_default(),
         )
     });
     let start = start.unwrap_or(ChannelSettings {
@@ -325,25 +463,25 @@ fn ChannelEditor(
             downlink: downlink.get_untracked(),
         });
     };
-    // Taken off the radio: its slot freed, and its key with it.
-    let remove = move |_| {
-        let sure = web_sys::window()
-            .and_then(|w| {
-                w.confirm_with_message(t_string!(i18n, channel_remove_confirm))
-                    .ok()
-            })
-            .unwrap_or(false);
-        if sure {
-            send(ChannelChange {
-                index: slot,
-                role: "DISABLED".to_owned(),
-                name: String::new(),
-                key: KeyChange::None,
-                custom_key: None,
-                uplink: false,
-                downlink: false,
-            });
-        }
+    // Taken off the radio, its key with it, and those after it moved up;
+    // its messages kept aside or forgotten, as chosen.
+    let removing = RwSignal::new(false);
+    let remove = move |history: ChannelHistory| {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        busy.set(true);
+        error.set(None);
+        spawn_local(async move {
+            match daemon::remove_channel(radio, slot, history).await {
+                Ok(applied) => {
+                    notice.set(Some(Ok(applied.reboots)));
+                    editing.set(Editing::Closed);
+                }
+                Err(failure) => error.set(Some(failure)),
+            }
+            busy.set(false);
+        });
     };
 
     let message = move || {
@@ -359,7 +497,7 @@ fn ChannelEditor(
         })
     };
     let title = {
-        let shown = if start.name.is_empty() && primary {
+        let shown = if start.name.is_empty() {
             preset.clone()
         } else {
             start.name.clone()
@@ -409,13 +547,8 @@ fn ChannelEditor(
                         <input
                             node_ref=name_input
                             maxlength="11"
-                            required=!primary
                             placeholder=move || {
-                                if primary {
-                                    format!("{}: {preset}", t_string!(i18n, channel_name_preset))
-                                } else {
-                                    t_string!(i18n, channel_name_hint).to_owned()
-                                }
+                                format!("{}: {preset}", t_string!(i18n, channel_name_preset))
                             }
                             prop:value=move || name.get()
                             on:input=move |ev| name.set(event_target_value(&ev))
@@ -542,11 +675,36 @@ fn ChannelEditor(
                     </div>
                 </div>
                 <p class="error">{message}</p>
-                <div class="buttons">
+                // Taking it off asks first what becomes of its messages.
+                <div class="removing" class:gone=move || !removing.get()>
+                    <p>{t!(i18n, channel_remove_question)}</p>
+                    <div class="buttons">
+                        <button type="button" on:click=move |_| removing.set(false)>
+                            {t!(i18n, radio_cancel)}
+                        </button>
+                        <button
+                            type="button"
+                            class="danger"
+                            disabled=move || busy.get()
+                            on:click=move |_| remove(ChannelHistory::Forget)
+                        >
+                            {t!(i18n, channel_remove_forget)}
+                        </button>
+                        <button
+                            type="button"
+                            class="primary"
+                            disabled=move || busy.get()
+                            on:click=move |_| remove(ChannelHistory::Keep)
+                        >
+                            {t!(i18n, channel_remove_keep)}
+                        </button>
+                    </div>
+                </div>
+                <div class="buttons" class:gone=move || removing.get()>
                     {(!adding && !primary)
                         .then(|| {
                             view! {
-                                <button type="button" class="danger" on:click=remove>
+                                <button type="button" class="danger" on:click=move |_| removing.set(true)>
                                     {t!(i18n, channel_remove)}
                                 </button>
                             }

@@ -267,7 +267,6 @@
   "channel_slot": "Slot {{ slot }}",
   "channel_slot_primary": "Slot 0 · the primary",
   "channel_name": "Name",
-  "channel_name_hint": "Up to 11 letters",
   "channel_name_preset": "Empty, the preset's",
   "channel_key": "Key",
   "channel_key_show": "Show the key",
@@ -285,6 +284,11 @@
   "channel_downlink": "Down from MQTT",
   "channel_downlink_hint": "What comes from the MQTT server is sent out on this channel.",
   "channel_remove": "Remove",
-  "channel_remove_confirm": "Remove this channel from the radio? Its key goes with it.",
-  "channel_invalid": "The radio does not take that channel: check its name and, if your own, its key."
+  "channel_invalid": "The radio does not take that channel: check its name and, if your own, its key.",
+  "channel_drag": "Drag to change its slot",
+  "channel_primary_confirm": "will become the primary channel: the radio sends its position and its node's info on it. Go on?",
+  "channel_remove_question": "It goes off the radio, its key with it, and those after it move up a slot. And its messages? Kept, they are not in the chat, but they come back if you add the very same channel again (name and key).",
+  "channel_remove_keep": "Remove and keep",
+  "channel_remove_forget": "Remove and delete",
+  "channel_numbered": "Channel"
 }

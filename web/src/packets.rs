@@ -5,12 +5,12 @@
 //! newest on top, older ones a page at a time below.
 
 use crate::app::Live;
-use crate::chat::{node_name, short_name};
+use crate::chat::{node_name, short_name, title};
 use crate::daemon;
 use crate::i18n::{t, use_i18n};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{BROADCAST, Packet};
+use meshctl_api::{BROADCAST, Packet, Peer};
 use serde_json::Value;
 
 /// The most packets kept in the page: older ones go as new ones come.
@@ -114,7 +114,7 @@ fn PacketRow(packet: Packet) -> impl IntoView {
                     <span class="to">
                         {move || {
                             if to == BROADCAST {
-                                format!("#{}", packet.channel)
+                                title(live, Peer::Channel { channel: packet.channel })
                             } else {
                                 who(to)
                             }

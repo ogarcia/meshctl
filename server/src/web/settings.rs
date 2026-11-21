@@ -7,13 +7,15 @@
 use super::AppState;
 use crate::radios::SettingsFailure;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Error, ErrorCode, NodeSettings, NodeSettingsChange, RadioId, SectionChange, SettingsApplied,
-    SettingsSection,
+    ChannelHistory, ChannelOrder, Error, ErrorCode, NodeSettings, NodeSettingsChange, RadioId,
+    SectionChange, SettingsApplied, SettingsSection,
 };
+use serde::Deserialize;
+use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -22,6 +24,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(show, change))
         .routes(routes!(sections))
         .routes(routes!(change_section))
+        .routes(routes!(reorder_channels))
+        .routes(routes!(remove_channel))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -171,6 +175,85 @@ async fn change_section(
         .change_section(radio, &section, &change.values)
         .await
     {
+        Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Reorder channels
+///
+/// Puts the radio's channels in another order, given as the slots they have
+/// now, every one once. The first becomes the primary, which the radio sends
+/// its position and its node's info on; the rest follow it with no gap. Keys
+/// and all go with each channel, and so does its history in meshctl. An
+/// unnamed channel stays unnamed in any slot: the radio names it after its
+/// modem preset, on the air too.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/channels/order",
+    tag = "settings",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = ChannelOrder,
+    responses(
+        (status = 202, description = "Sent to the radio", body = SettingsApplied),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not every channel the radio has, once each: `invalid_settings`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn reorder_channels(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(order): Json<ChannelOrder>,
+) -> Response {
+    match state.radios.reorder_channels(radio, &order.order).await {
+        Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// What becomes of a channel's messages.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct Removal {
+    /// `keep`, if not said, or `forget`.
+    #[serde(default)]
+    history: ChannelHistory,
+}
+
+/// Remove a channel
+///
+/// Takes a channel off the radio, but the primary; those after it move up a
+/// slot, their history with them. Its own messages are kept aside, in no
+/// conversation, and given back should the very same channel come back; or,
+/// with `history=forget`, forgotten.
+#[utoipa::path(
+    delete,
+    path = "/radios/{radio}/channels/{index}",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("index" = u32, Path, description = "The channel's slot, 1 to 7"),
+        Removal,
+    ),
+    responses(
+        (status = 202, description = "Sent to the radio", body = SettingsApplied),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "The primary, or a slot without a channel: `invalid_settings`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn remove_channel(
+    State(state): State<AppState>,
+    Path((radio, index)): Path<(RadioId, u32)>,
+    Query(removal): Query<Removal>,
+) -> Response {
+    let forget = removal.history == ChannelHistory::Forget;
+    match state.radios.remove_channel(radio, index, forget).await {
         Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
         Err(failure) => refused(failure),
     }

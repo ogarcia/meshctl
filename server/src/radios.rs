@@ -685,6 +685,99 @@ impl Radios {
         Ok(secret)
     }
 
+    /// Puts a radio's channels in `order`, by the slots they have now: the
+    /// first becomes the primary, the rest follow it with no gap, and any
+    /// left out is taken off the radio. Their history goes with them at once,
+    /// not only once the radio is read back; that of one left out is kept
+    /// aside, unless `forget`.
+    async fn rearrange_channels(
+        &self,
+        id: RadioId,
+        order: &[u32],
+        forget: bool,
+    ) -> Result<SettingsApplied, SettingsFailure> {
+        use crate::channels::{rearranged, slots};
+        let mesh = self.configurable(id)?;
+        let (sent, before, after) = mesh
+            .read(|state| {
+                let sent = rearranged(&state.settings, order)?;
+                let mut settings = state.settings.clone();
+                for channel in &sent {
+                    settings
+                        .channels
+                        .insert(channel.index as u32, channel.clone());
+                }
+                Ok((sent, slots(&state.settings), slots(&settings)))
+            })
+            .map_err(|why: crate::settings::Invalid| SettingsFailure::Invalid(why.0.to_owned()))?;
+        if !sent.is_empty() {
+            mesh.change_settings(meshctl_core::radio::SettingsChange {
+                channels: sent,
+                ..Default::default()
+            })
+            .await
+            .map_err(admin_failure)?;
+        }
+        // Should the radio not take it, reading it back moves the history
+        // back where it was.
+        let followed = async {
+            self.store.follow_channels(id, &after, now()).await?;
+            if forget {
+                for gone in before
+                    .iter()
+                    .filter(|b| !after.iter().any(|a| a.fingerprint == b.fingerprint))
+                {
+                    self.store
+                        .forget_former_channel(id, &gone.fingerprint)
+                        .await?;
+                }
+            }
+            anyhow::Ok(())
+        };
+        if let Err(err) = followed.await {
+            tracing::warn!(radio = id, error = format_args!("{err:#}"), "cannot store");
+        }
+        tracing::info!(radio = id, ?order, forget, "channels rearranged");
+        Ok(SettingsApplied { reboots: false })
+    }
+
+    /// Puts a radio's channels in another order: every one it has, by its
+    /// slot now.
+    pub async fn reorder_channels(
+        &self,
+        id: RadioId,
+        order: &[u32],
+    ) -> Result<SettingsApplied, SettingsFailure> {
+        let have = self
+            .configurable(id)?
+            .read(|state| crate::channels::slots(&state.settings).len());
+        if order.len() != have {
+            return Err(SettingsFailure::Invalid("order".to_owned()));
+        }
+        self.rearrange_channels(id, order, false).await
+    }
+
+    /// Takes a channel off a radio, but its primary: those after it move up
+    /// a slot. Its history is kept aside, unless `forget`.
+    pub async fn remove_channel(
+        &self,
+        id: RadioId,
+        index: u32,
+        forget: bool,
+    ) -> Result<SettingsApplied, SettingsFailure> {
+        let have: Vec<u32> = self
+            .configurable(id)?
+            .read(|state| crate::channels::slots(&state.settings))
+            .iter()
+            .map(|s| s.index)
+            .collect();
+        if index == 0 || !have.contains(&index) {
+            return Err(SettingsFailure::Invalid("channel".to_owned()));
+        }
+        let order: Vec<u32> = have.into_iter().filter(|&i| i != index).collect();
+        self.rearrange_channels(id, &order, forget).await
+    }
+
     /// A radio whose settings can be read and changed now: there is such a
     /// radio, meshctl knows its settings, and it is connected.
     fn configurable(&self, id: RadioId) -> Result<Mesh, SettingsFailure> {
@@ -972,7 +1065,10 @@ impl Radios {
             link: mesh::LinkState::Disconnected,
             ..state
         });
-        let mut tasks = vec![self.forward(id, &mesh), self.persist(id, &mesh)];
+        let mut tasks = vec![
+            self.forward(id, &mesh),
+            self.persist(id, &mesh, protocol_of(record.settings.kind)),
+        ];
         let mut enabled = record.settings.enabled;
         if enabled {
             match validate(&record.settings) {
@@ -1024,7 +1120,7 @@ impl Radios {
     /// Stores what a radio learns as it learns it: each node as it changes,
     /// everything at once when the radio syncs, and when it was last connected
     /// as it drops.
-    fn persist(&self, id: RadioId, mesh: &Mesh) -> JoinHandle<()> {
+    fn persist(&self, id: RadioId, mesh: &Mesh, protocol: Protocol) -> JoinHandle<()> {
         let mut events = mesh.subscribe();
         let mesh = mesh.clone();
         let store = self.store.clone();
@@ -1102,7 +1198,12 @@ impl Radios {
                     }
                     Ok(mesh::Event::Synced) => {
                         connected = true;
-                        save_all(&store, id, &mesh).await
+                        match save_all(&store, id, &mesh).await {
+                            Ok(()) if protocol == Protocol::Meshtastic => {
+                                follow_channels(&store, &changes, id, &mesh).await
+                            }
+                            other => other,
+                        }
                     }
                     // Something was missed: store it all again, if it is current.
                     Err(RecvError::Lagged(_)) if connected => save_all(&store, id, &mesh).await,
@@ -1179,6 +1280,28 @@ fn heard_row(heard: mesh::TextMessage, local: Option<u32>) -> NewMessageRow {
         hops_away: heard.hops_away,
         via_mqtt: heard.via_mqtt,
     }
+}
+
+/// Follows the channels a radio was just read with: the history of each
+/// goes where it went. If any did, the radio is said to be in sync again,
+/// for whoever shows it to read it anew.
+async fn follow_channels(
+    store: &Store,
+    changes: &broadcast::Sender<Change>,
+    id: RadioId,
+    mesh: &Mesh,
+) -> Result<()> {
+    let now = mesh.read(|state| crate::channels::slots(&state.settings));
+    // A radio always has its primary: none read is nothing read, not every
+    // channel gone.
+    if now.is_empty() {
+        return Ok(());
+    }
+    if store.follow_channels(id, &now, crate::store::now()).await? {
+        tracing::info!(radio = id, "channel history moved");
+        let _ = changes.send(Change::Mesh(id, mesh::Event::Synced));
+    }
+    Ok(())
 }
 
 async fn save_all(store: &Store, id: RadioId, mesh: &Mesh) -> Result<()> {

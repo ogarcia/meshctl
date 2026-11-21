@@ -10,10 +10,10 @@ use gloo_net::websocket::Message as Frame;
 use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
-    API_V1, Channel, ChannelSecret, Conversation, Error, ErrorCode, MapView, Message, NewMessage,
-    NewTraceroute, Node, NodeSettings, NodeSettingsChange, Packet, Peer, Preferences, Radio,
-    RadioId, RadioOrder, RadioSettings, SectionChange, SettingsApplied, SettingsSection,
-    SightingId, Status, TOKEN_HEADER, Traceroute,
+    API_V1, Channel, ChannelHistory, ChannelOrder, ChannelSecret, Conversation, Error, ErrorCode,
+    MapView, Message, NewMessage, NewTraceroute, Node, NodeSettings, NodeSettingsChange, Packet,
+    Peer, Preferences, Radio, RadioId, RadioOrder, RadioSettings, SectionChange, SettingsApplied,
+    SettingsSection, SightingId, Status, TOKEN_HEADER, Traceroute,
 };
 use serde::de::DeserializeOwned;
 
@@ -258,6 +258,37 @@ pub async fn order_radios(radios: &[RadioId]) -> Result<(), Failure> {
 pub async fn remove_radio(radio: RadioId) -> Result<(), Failure> {
     let request = with_token(Request::delete(&url(&format!("/radios/{radio}"))));
     answer(request.send().await).await.map(|_| ())
+}
+
+/// Puts a radio's channels in another order, by the slots they have now.
+pub async fn reorder_channels(radio: RadioId, order: &[u32]) -> Result<SettingsApplied, Failure> {
+    let order = ChannelOrder {
+        order: order.to_vec(),
+    };
+    let request = with_token(Request::put(&url(&format!(
+        "/radios/{radio}/channels/order"
+    ))))
+    .json(&order)
+    .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// Takes a channel off a radio, its messages kept aside or forgotten.
+pub async fn remove_channel(
+    radio: RadioId,
+    index: u32,
+    history: ChannelHistory,
+) -> Result<SettingsApplied, Failure> {
+    let history = match history {
+        ChannelHistory::Keep => "keep",
+        ChannelHistory::Forget => "forget",
+    };
+    let request = with_token(Request::delete(&url(&format!(
+        "/radios/{radio}/channels/{index}?history={history}"
+    ))));
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
 }
 
 /// The event stream, already past hello and ready.

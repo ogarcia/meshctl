@@ -267,7 +267,6 @@
   "channel_slot": "Ranura {{ slot }}",
   "channel_slot_primary": "Ranura 0 · el principal",
   "channel_name": "Nombre",
-  "channel_name_hint": "Hasta 11 letras",
   "channel_name_preset": "Vacío, el del preset",
   "channel_key": "Clave",
   "channel_key_show": "Mostrar la clave",
@@ -285,6 +284,11 @@
   "channel_downlink": "Bajar de MQTT",
   "channel_downlink_hint": "Lo que llega del servidor MQTT se emite por este canal.",
   "channel_remove": "Quitar",
-  "channel_remove_confirm": "¿Quitar este canal de la radio? Su clave se pierde con él.",
-  "channel_invalid": "La radio no admite ese canal: revisa el nombre y, si es propia, la clave."
+  "channel_invalid": "La radio no admite ese canal: revisa el nombre y, si es propia, la clave.",
+  "channel_drag": "Arrastra para cambiar su ranura",
+  "channel_primary_confirm": "pasará a ser el canal principal: la radio emite por él su posición y la información del nodo. ¿Seguimos?",
+  "channel_remove_question": "Se quita de la radio, con su clave, y los que van detrás suben una ranura. ¿Y sus mensajes? Conservados, no salen en el chat, pero vuelven si vuelves a añadir el mismo canal (nombre y clave).",
+  "channel_remove_keep": "Quitar y conservar",
+  "channel_remove_forget": "Quitar y borrar",
+  "channel_numbered": "Canal"
 }

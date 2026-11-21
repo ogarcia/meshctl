@@ -10,7 +10,9 @@ use crate::mesh::ago;
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{BROADCAST, ErrorCode, LinkState, Message, MessageStatus, NewMessage, Peer};
+use meshctl_api::{
+    BROADCAST, ErrorCode, LinkState, Message, MessageStatus, NewMessage, Peer, RadioKind,
+};
 
 /// The longest text the daemon takes, in bytes.
 const MAX_TEXT_BYTES: usize = 200;
@@ -28,8 +30,15 @@ pub fn peer_of(message: &Message) -> Peer {
     }
 }
 
-/// A preset's name as people write it: `LONG_FAST` is LongFast.
+/// A modem preset's name as the firmware gives it to an unnamed channel, in
+/// any slot: `LONG_FAST` is LongFast.
 pub fn preset_name(preset: &str) -> String {
+    match preset {
+        "LONG_MODERATE" => return "LongMod".to_owned(),
+        // One the firmware has no name for.
+        "VERY_LONG_SLOW" => return "Invalid".to_owned(),
+        _ => {}
+    }
     preset
         .split('_')
         .map(|word| {
@@ -55,18 +64,29 @@ pub fn title(live: Live, peer: Peer) -> String {
                     .map(|c| c.name.clone())
                     .filter(|name| !name.is_empty())
             });
-            // An unnamed primary channel goes by its modem preset.
-            named
+            // An unnamed one, in any slot, goes by its modem preset, as the
+            // radio names it, or by Custom with none; by its slot while
+            // neither is known.
+            let name = named
                 .or_else(|| {
-                    (channel == 0)
-                        .then(|| {
-                            live.status
-                                .with(|s| s.as_ref()?.local.as_ref()?.modem_preset.clone())
-                        })
-                        .flatten()
-                        .map(|preset| preset_name(&preset))
+                    if live.selected_kind() != Some(RadioKind::Meshtastic) {
+                        return None;
+                    }
+                    live.status.with(|s| {
+                        let local = s.as_ref()?.local.as_ref()?;
+                        Some(
+                            local
+                                .modem_preset
+                                .as_deref()
+                                .map_or_else(|| "Custom".to_owned(), preset_name),
+                        )
+                    })
                 })
-                .map_or_else(|| format!("#{channel}"), |name| format!("# {name}"))
+                .unwrap_or_else(|| {
+                    let i18n = use_i18n();
+                    format!("{} {channel}", t_string!(i18n, channel_numbered))
+                });
+            format!("# {name}")
         }
         Peer::Node { node } => node_name(live, node),
     }
@@ -281,5 +301,6 @@ mod tests {
     fn presets_read_as_people_write_them() {
         assert_eq!(preset_name("LONG_FAST"), "LongFast");
         assert_eq!(preset_name("NARROW_FAST"), "NarrowFast");
+        assert_eq!(preset_name("LONG_MODERATE"), "LongMod");
     }
 }

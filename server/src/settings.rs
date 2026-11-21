@@ -242,12 +242,10 @@ fn channel(
         (wanted.index == 0) == (role == pb::channel::Role::Primary),
         "channel role",
     )?;
+    // Unnamed, the radio names it after its modem preset, as it does the
+    // primary: a channel moved off slot 0 keeps that name only so.
     let name = wanted.name.trim();
     check(name.len() <= CHANNEL_NAME_MAX, "channel name")?;
-    check(
-        !name.is_empty() || role != pb::channel::Role::Secondary,
-        "channel name",
-    )?;
 
     let mut channel = settings
         .channels
@@ -554,7 +552,7 @@ mod tests {
                 ..Default::default()
             },
             NodeSettingsChange {
-                channels: vec![channel(3, "SECONDARY", "")],
+                channels: vec![channel(3, "SECONDARY", "Más de once")],
                 ..Default::default()
             },
             NodeSettingsChange {
