@@ -7,13 +7,11 @@ use crate::app::{Daemon, Live};
 use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
 use meshctl_api::{LinkState, Node, Peer};
-use std::collections::BTreeMap;
 
 #[component]
 pub fn MeshView() -> impl IntoView {
     view! {
         <OfflineNote />
-        <LocalCard />
         <NodeList />
     }
 }
@@ -57,46 +55,27 @@ fn OfflineNote() -> impl IntoView {
 }
 
 /// The radio itself.
-#[component]
-fn LocalCard() -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let local = move || live.status.get().and_then(|s| s.local);
-    let name = move || {
-        let local = local()?;
-        let me = live.nodes.with(|nodes| nodes.get(&local.num).cloned());
-        Some(me.and_then(|n| n.long_name).unwrap_or(local.id))
-    };
+/// Which nodes the list shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    All,
+    /// Heard directly.
+    Direct,
+    /// Heard through other nodes.
+    Mesh,
+    Mqtt,
+}
 
-    view! {
-        <Show when=move || local().is_some()>
-            <section class="card local">
-                <h2>{name}</h2>
-                <dl>
-                    <dt>{t!(i18n, local_id)}</dt>
-                    <dd class="mono">{move || local().map(|l| l.id)}</dd>
-                    <dt>{t!(i18n, local_hardware)}</dt>
-                    <dd>{move || local().and_then(|l| l.hw_model).map(|m| model(&m))}</dd>
-                    <dt>{t!(i18n, local_firmware)}</dt>
-                    <dd class="mono">{move || local().and_then(|l| l.firmware_version)}</dd>
-                    <dt>{t!(i18n, local_role)}</dt>
-                    <dd>{move || local().and_then(|l| l.role)}</dd>
-                    <dt>{t!(i18n, local_radio)}</dt>
-                    <dd>
-                        {move || {
-                            local()
-                                .map(|l| {
-                                    [l.region, l.modem_preset]
-                                        .into_iter()
-                                        .flatten()
-                                        .collect::<Vec<_>>()
-                                        .join(" · ")
-                                })
-                        }}
-                    </dd>
-                </dl>
-            </section>
-        </Show>
+/// How far a node is, by the classes the map's legend has.
+fn distance(node: &Node) -> &'static str {
+    if node.via_mqtt {
+        return "mqtt";
+    }
+    match node.hops_away {
+        Some(0) => "direct",
+        Some(1..=2) => "near",
+        Some(3..=4) => "mid",
+        _ => "far",
     }
 }
 
@@ -105,25 +84,54 @@ fn NodeList() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let filter = RwSignal::new(String::new());
+    let reach = RwSignal::new(Reach::All);
 
     let shown = move || {
         let needle = filter.get().to_lowercase();
+        let reach = reach.get();
         let mut nodes: Vec<Node> = live.nodes.with(|nodes| {
             nodes
                 .values()
                 .filter(|node| needle.is_empty() || matches(node, &needle))
+                .filter(|node| match reach {
+                    Reach::All => true,
+                    Reach::Direct => !node.via_mqtt && node.hops_away == Some(0),
+                    Reach::Mesh => !node.via_mqtt && node.hops_away.is_some_and(|h| h > 0),
+                    Reach::Mqtt => node.via_mqtt,
+                })
                 .cloned()
                 .collect()
         });
-        nodes.sort_by(|a, b| b.last_heard.cmp(&a.last_heard).then(a.num.cmp(&b.num)));
+        // Favourites first, then the most recently heard.
+        nodes.sort_by(|a, b| {
+            b.favorite
+                .cmp(&a.favorite)
+                .then(b.last_heard.cmp(&a.last_heard))
+                .then(a.num.cmp(&b.num))
+        });
         nodes
     };
-    let total = move || live.nodes.with(BTreeMap::len);
+    let reaches = [Reach::All, Reach::Direct, Reach::Mesh, Reach::Mqtt]
+        .into_iter()
+        .map(|this| {
+            let label = move || match this {
+                Reach::All => t!(i18n, nodes_all).into_any(),
+                Reach::Direct => t!(i18n, nodes_direct).into_any(),
+                Reach::Mesh => t!(i18n, nodes_mesh).into_any(),
+                Reach::Mqtt => "MQTT".into_any(),
+            };
+            (
+                Signal::derive(move || reach.get() == this),
+                Box::new(move || reach.set(this)) as Box<dyn Fn() + Send + Sync>,
+                label.into_any(),
+            )
+        })
+        .collect::<Vec<_>>();
 
     view! {
-        <section class="card nodes">
-            <div class="toolbar">
-                <h2>{t!(i18n, nodes_title)} " " <span class="count">{total}</span></h2>
+        <section class="node-list">
+            <div class="node-tools">
+                {crate::preferences::pills(reaches)}
                 <input
                     type="search"
                     placeholder=move || t_string!(i18n, search)
@@ -131,27 +139,23 @@ fn NodeList() -> impl IntoView {
                     on:input=move |ev| filter.set(event_target_value(&ev))
                 />
             </div>
-            <div class="scroll">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>{t!(i18n, nodes_name)}</th>
-                            <th>{t!(i18n, nodes_id)}</th>
-                            <th class="num">{t!(i18n, nodes_heard)}</th>
-                            <th class="num">{t!(i18n, nodes_hops)}</th>
-                            <th class="num">"SNR"</th>
-                            <th class="num">{t!(i18n, nodes_battery)}</th>
-                            <th>{t!(i18n, nodes_hardware)}</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <For each=shown key=|node| (node.num, node.last_heard) let:node>
-                            <NodeRow node now=live.now />
-                        </For>
-                    </tbody>
-                </table>
-            </div>
+            <table class="nodes-table">
+                <thead>
+                    <tr>
+                        <th>{t!(i18n, nodes_name)}</th>
+                        <th>{t!(i18n, nodes_heard)}</th>
+                        <th>{t!(i18n, nodes_reach)}</th>
+                        <th>{t!(i18n, nodes_battery)}</th>
+                        <th>{t!(i18n, nodes_hardware)}</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <For each=shown key=|node| format!("{node:?}") let:node>
+                        <NodeRow node now=live.now />
+                    </For>
+                </tbody>
+            </table>
         </section>
     }
 }
@@ -167,59 +171,116 @@ fn matches(node: &Node, needle: &str) -> bool {
     .any(|text| text.to_lowercase().contains(needle))
 }
 
+const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
+const STAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/star.svg");
+const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");
+const PLUG: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plug.svg");
+const BATTERY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-2.svg");
+
 #[component]
 fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
     let i18n = use_i18n();
-    let heard = node.last_heard;
-    let hops = if node.via_mqtt {
-        "MQTT".to_owned()
-    } else {
-        node.hops_away.map(|h| h.to_string()).unwrap_or_default()
-    };
-    // Heard through others, the SNR is the last relay's, not this node's.
-    let snr = node
-        .snr
-        .filter(|_| node.hops_away == Some(0) && !node.via_mqtt)
-        .map(|s| format!("{s:.1} dB"))
-        .unwrap_or_default();
-    // The table has room for the level only; the voltage is on the node's page.
-    let battery =
-        power(node.battery_level, None, t_string!(i18n, power_external)).unwrap_or_default();
-
     let live = expect_context::<Live>();
     let num = node.num;
-    let open = move |ev: leptos::ev::MouseEvent| {
-        ev.prevent_default();
-        live.open_node(num);
+    let heard = node.last_heard;
+    let name = node.long_name.clone().unwrap_or_else(|| node.id.clone());
+    // MeshCore nodes have no short name: their name's first letters.
+    let short = node
+        .short_name
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| crate::badge::initials(&name));
+    // The radio's own node, as on the map.
+    let local = live
+        .status
+        .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num))
+        == Some(num);
+    let class = format!(
+        "node-avatar {}",
+        if local { "local" } else { distance(&node) }
+    );
+    // Heard through others, the SNR is the last relay's, not this node's.
+    let reach = {
+        let (hops, mqtt, snr) = (node.hops_away, node.via_mqtt, node.snr);
+        move || {
+            if local {
+                return t_string!(i18n, map_local).to_owned();
+            }
+            if mqtt {
+                return "MQTT".to_owned();
+            }
+            match hops {
+                Some(0) => match snr {
+                    Some(snr) => format!("{} · {snr:.1} dB", t_string!(i18n, map_direct)),
+                    None => t_string!(i18n, map_direct).to_owned(),
+                },
+                Some(1) => t_string!(i18n, map_one_hop).to_owned(),
+                Some(hops) => t_string!(i18n, map_hops).replace("{n}", &hops.to_string()),
+                None => String::new(),
+            }
+        }
     };
+    let power = node.battery_level.map(|level| {
+        if level > 100 {
+            view! {
+                <span class="power external" title=move || t_string!(i18n, power_external)>
+                    <span class="icon" inner_html=PLUG></span>
+                    {t!(i18n, power_external)}
+                </span>
+            }
+            .into_any()
+        } else {
+            view! {
+                <span class="power" class:low=level < 20>
+                    <span class="icon" inner_html=BATTERY></span>
+                    {format!("{level} %")}
+                </span>
+            }
+            .into_any()
+        }
+    });
+    let role = node.role.clone();
+    let favorite = node.favorite;
+    let placed = node.position.is_some();
 
     view! {
-        <tr>
+        <tr class="node-row" on:click=move |_| live.open_node(num)>
             <td>
-                // MeshCore nodes have no short name.
-                {node
-                    .short_name
-                    .clone()
-                    .filter(|s| !s.is_empty())
-                    .map(|s| view! { <span class="short">{s}</span> " " })}
-                <a href="#" on:click=open>
-                    {node.long_name.clone().unwrap_or_else(|| node.id.clone())}
-                </a>
+                <span class="who">
+                    <span class=class>{crate::badge::fit(&short)}</span>
+                    <span class="names">
+                        <span class="name">
+                            {name}
+                            {favorite.then(|| view! { <span class="mark star" inner_html=STAR></span> })}
+                            {placed.then(|| view! { <span class="mark" inner_html=PIN></span> })}
+                        </span>
+                        <span class="mono dim">{node.id.clone()}</span>
+                    </span>
+                </span>
             </td>
-            <td class="mono">{node.id.clone()}</td>
-            <td class="num">{move || heard.map(|t| ago(now.get(), t)).unwrap_or_default()}</td>
-            <td class="num">{hops}</td>
-            <td class="num">{snr}</td>
-            <td class="num">{battery}</td>
-            <td class="dim">{node.hw_model.as_deref().map(model)}</td>
+            <td class="dim">{move || heard.map(|t| ago(now.get(), t)).unwrap_or_default()}</td>
+            <td>{reach}</td>
+            <td>{power}</td>
+            <td>
+                <span class="names">
+                    <span>{node.hw_model.as_deref().map(model)}</span>
+                    <span class="dim small">
+                        {move || role.as_deref().map(|r| crate::names::role(i18n.get_locale(), r))}
+                    </span>
+                </span>
+            </td>
             <td class="actions">
                 <button
-                    class="small"
+                    type="button"
+                    class="icon-button"
                     title=move || t_string!(i18n, node_message)
-                    on:click=move |_| live.open_chat(Peer::Node { node: num })
-                >
-                    "✉"
-                </button>
+                    aria-label=move || t_string!(i18n, node_message)
+                    on:click=move |ev| {
+                        ev.stop_propagation();
+                        live.open_chat(Peer::Node { node: num });
+                    }
+                    inner_html=MESSAGE
+                ></button>
             </td>
         </tr>
     }

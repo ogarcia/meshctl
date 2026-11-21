@@ -341,5 +341,9 @@
   "empty_offline_title": "{{ name }} no está conectada",
   "empty_offline_text": "Sus ajustes se leen de la radio y se cambian en ella, solo mientras está conectada. meshctl sigue intentándolo.",
   "empty_daemon_title": "meshctl no responde",
-  "empty_daemon_text": "No se llega al servicio de meshctl. La página lo vuelve a intentar sola cada pocos segundos."
+  "empty_daemon_text": "No se llega al servicio de meshctl. La página lo vuelve a intentar sola cada pocos segundos.",
+  "nodes_all": "Todos",
+  "nodes_direct": "Directos",
+  "nodes_mesh": "Por la malla",
+  "nodes_reach": "Alcance"
 }

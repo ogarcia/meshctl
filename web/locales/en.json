@@ -341,5 +341,9 @@
   "empty_offline_title": "{{ name }} is not connected",
   "empty_offline_text": "Its settings are read from the radio and changed on it, only while it is connected. meshctl keeps trying.",
   "empty_daemon_title": "meshctl does not answer",
-  "empty_daemon_text": "meshctl's service cannot be reached. The page tries again by itself every few seconds."
+  "empty_daemon_text": "meshctl's service cannot be reached. The page tries again by itself every few seconds.",
+  "nodes_all": "All",
+  "nodes_direct": "Direct",
+  "nodes_mesh": "Through the mesh",
+  "nodes_reach": "Reach"
 }

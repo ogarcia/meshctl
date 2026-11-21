@@ -857,6 +857,62 @@
       .interval-field { display: flex; gap: 6px; }
       .interval-field select { flex: 1; min-width: 0; }
       .interval-field input { width: 110px; }
+      /*
+       * The nodes a radio hears: each with its short name in a circle the
+       * colour of how far it is, as on the map; the whole row opens it.
+       */
+      .node-list { width: 100%; max-width: 1200px; margin: 0 auto; }
+      .node-tools { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+      .node-tools .segmented { width: 420px; max-width: 100%; }
+      .node-tools .segmented button { padding: 0 8px; white-space: nowrap; }
+      .node-tools input { margin-left: auto; width: min(280px, 100%); }
+      .nodes-table { width: 100%; border-collapse: collapse; }
+      .nodes-table th {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--mc-border);
+        color: var(--mc-muted);
+        font-size: 12px;
+        font-weight: 600;
+        text-align: left;
+      }
+      .nodes-table td { padding: 8px 10px; border-bottom: 1px solid var(--mc-border); vertical-align: middle; }
+      .node-row { cursor: pointer; }
+      .node-row:hover { background: var(--mc-raised); }
+      .node-row .who { display: flex; align-items: center; gap: 12px; }
+      .node-avatar {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--mc-node-far);
+        color: #ffffff;
+        font-size: 11px;
+        font-weight: 700;
+        overflow: hidden;
+      }
+      .node-avatar.direct { background: var(--mc-node-direct); }
+      .node-avatar.near { background: var(--mc-node-near); }
+      .node-avatar.mid { background: var(--mc-node-mid); }
+      .node-avatar.mqtt { background: var(--mc-raised); color: var(--mc-muted); }
+      .node-avatar.local { background: var(--mc-pin-local); }
+      .nodes-table .names { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .nodes-table .name { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+      .nodes-table .mono.dim, .nodes-table .small { font-size: 12px; }
+      .nodes-table .mark { display: flex; color: var(--mc-muted); }
+      .nodes-table .mark svg { width: 14px; height: 14px; }
+      .nodes-table .mark.star { color: var(--mc-primary); }
+      .nodes-table .mark.star svg { fill: currentColor; }
+      .power { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+      .power .icon { display: flex; color: var(--mc-muted); }
+      .power svg { width: 16px; height: 16px; }
+      .power.low { color: var(--mc-danger); }
+      .nodes-table .actions { width: 1%; text-align: right; }
+      .nodes-table .actions .icon-button { opacity: 0; }
+      .node-row:hover .actions .icon-button,
+      .nodes-table .actions .icon-button:focus-visible { opacity: 1; }
       .flag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
       .flag-chips .choice { min-height: 32px; padding: 0 12px; font-size: 13px; }
       .secret-field { display: flex; align-items: center; gap: 6px; }
