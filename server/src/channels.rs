@@ -2,15 +2,14 @@
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
 //! A radio's channels as they move from slot to slot. Each is told apart by
-//! a fingerprint of its name and key, never the key itself: a channel found
-//! in another slot has moved, and its history goes with it; one gone has its
-//! history kept aside, to give back if it comes back.
+//! a fingerprint of its name and key, never the key itself, and is one
+//! conversation wherever it is.
 
 use crate::settings::Invalid;
 use meshctl_core::mesh::Settings;
 use meshctl_proto::meshtastic::{self as pb, config};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// What tells one channel from another: its name and its key, hashed.
 pub type Fingerprint = [u8; 16];
@@ -145,69 +144,60 @@ pub fn duplicate(before: &Settings, after: &Settings, changed: &[u32]) -> Option
         })
 }
 
-/// What became of the channels between two readings of them.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Plan {
-    /// Moved: from one slot, to another.
-    pub moves: Vec<(u32, u32)>,
-    /// Gone, from the slot they had: their history is kept aside.
-    pub removed: Vec<Slot>,
-    /// Back, after they had gone, in the slot they now have.
-    pub restored: Vec<(Fingerprint, u32)>,
+/// A fingerprint for a slot whose channel is not known yet, as on a radio
+/// before it is first read, or on one that does not say: its conversation
+/// takes the channel's own fingerprint once that is known.
+pub fn provisional(slot: u32) -> Fingerprint {
+    fingerprint(&format!("slot {slot}"), b"provisional")
 }
 
-impl Plan {
-    #[cfg(test)]
-    pub fn is_empty(&self) -> bool {
-        self.moves.is_empty() && self.removed.is_empty() && self.restored.is_empty()
-    }
+/// Which conversation a slot read is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chat {
+    /// The one with its fingerprint.
+    Known(i64),
+    /// The one the slot had, whose channel was changed where it is: it takes
+    /// the new fingerprint.
+    Rekeyed(i64),
+    /// The same as the one of an earlier slot, by its place in the list: the
+    /// very same channel twice.
+    SameAs(usize),
+    /// A new one.
+    New,
 }
 
-/// What became of the channels, from those there were to those there are,
-/// knowing those gone before. A channel found elsewhere moved; one that
-/// came back is given its history back; one in the same slot with another
-/// fingerprint, found nowhere else, was edited where it is, and keeps its
-/// history; the rest are gone.
-pub fn plan(old: &[Slot], new: &[Slot], former: &HashSet<Fingerprint>) -> Plan {
-    let mut plan = Plan::default();
-    let mut old_matched = vec![false; old.len()];
-    let mut new_matched = vec![false; new.len()];
-    for (n, now) in new.iter().enumerate() {
-        if let Some(o) = old
+/// The conversation of each slot read, from the slots there were (each with
+/// its conversation and that one's fingerprint) and the conversations known
+/// by fingerprint. A slot takes the conversation with its fingerprint; else
+/// the one it had, if that one's fingerprint is nowhere now, as when the
+/// channel was renamed or given another key where it is; else a new one.
+pub fn assign(
+    had: &[(u32, i64, Fingerprint)],
+    now: &[Slot],
+    known: &HashMap<Fingerprint, i64>,
+) -> Vec<Chat> {
+    let mut chats = Vec::with_capacity(now.len());
+    for (at, slot) in now.iter().enumerate() {
+        let chat = if let Some(earlier) = now[..at]
             .iter()
-            .enumerate()
-            .position(|(o, then)| !old_matched[o] && then.fingerprint == now.fingerprint)
+            .position(|s| s.fingerprint == slot.fingerprint)
         {
-            old_matched[o] = true;
-            new_matched[n] = true;
-            if old[o].index != now.index {
-                plan.moves.push((old[o].index, now.index));
-            }
-        }
-    }
-    for (n, now) in new.iter().enumerate() {
-        if !new_matched[n] && former.contains(&now.fingerprint) {
-            new_matched[n] = true;
-            plan.restored.push((now.fingerprint, now.index));
-        }
-    }
-    for (o, then) in old.iter().enumerate() {
-        if old_matched[o] {
-            continue;
-        }
-        let edited_here = new
-            .iter()
-            .enumerate()
-            .any(|(n, now)| !new_matched[n] && now.index == then.index);
-        if edited_here {
-            if let Some(n) = new.iter().position(|now| now.index == then.index) {
-                new_matched[n] = true;
-            }
+            Chat::SameAs(earlier)
+        } else if let Some(&id) = known.get(&slot.fingerprint) {
+            Chat::Known(id)
+        } else if let Some(&(_, id, _)) = had.iter().find(|(index, id, print)| {
+            *index == slot.index
+                && !now.iter().any(|s| s.fingerprint == *print)
+                // Not one already taken, by a slot it had moved to.
+                && !chats.iter().any(|c| matches!(c, Chat::Rekeyed(taken) if taken == id))
+        }) {
+            Chat::Rekeyed(id)
         } else {
-            plan.removed.push(then.clone());
-        }
+            Chat::New
+        };
+        chats.push(chat);
     }
-    plan
+    chats
 }
 
 /// The channels a radio is to be sent for those it has to be in `order`,
@@ -274,36 +264,64 @@ mod tests {
         }
     }
 
+    fn had(slots: &[Slot], ids: &[i64]) -> Vec<(u32, i64, Fingerprint)> {
+        slots
+            .iter()
+            .zip(ids)
+            .map(|(s, id)| (s.index, *id, s.fingerprint))
+            .collect()
+    }
+
+    fn known(slots: &[Slot], ids: &[i64]) -> HashMap<Fingerprint, i64> {
+        slots
+            .iter()
+            .zip(ids)
+            .map(|(s, id)| (s.fingerprint, *id))
+            .collect()
+    }
+
     #[test]
-    fn channels_that_swap_take_their_history() {
+    fn channels_that_swap_keep_their_conversations() {
         let old = [slot(0, "A"), slot(1, "B"), slot(2, "C")];
         let new = [old[0].clone(), moved(&old[2], 1), moved(&old[1], 2)];
-        let plan = plan(&old, &new, &HashSet::new());
-        assert_eq!(plan.moves, vec![(2, 1), (1, 2)]);
-        assert!(plan.removed.is_empty() && plan.restored.is_empty());
+        let chats = assign(&had(&old, &[10, 11, 12]), &new, &known(&old, &[10, 11, 12]));
+        assert_eq!(chats, [Chat::Known(10), Chat::Known(12), Chat::Known(11)]);
     }
 
     #[test]
-    fn a_channel_edited_where_it_is_keeps_its_history() {
+    fn a_channel_edited_where_it_is_keeps_its_conversation() {
         let old = [slot(0, "A"), slot(1, "B")];
         let new = [old[0].clone(), slot(1, "B2")];
-        assert!(plan(&old, &new, &HashSet::new()).is_empty());
+        let chats = assign(&had(&old, &[10, 11]), &new, &known(&old, &[10, 11]));
+        assert_eq!(chats, [Chat::Known(10), Chat::Rekeyed(11)]);
     }
 
     #[test]
-    fn a_channel_gone_has_its_history_kept_and_given_back() {
-        let old = [slot(0, "A"), slot(1, "B"), slot(2, "C")];
-        // B goes, and C takes its slot.
-        let new = [old[0].clone(), moved(&old[2], 1)];
-        let gone = plan(&old, &new, &HashSet::new());
-        assert_eq!(gone.moves, vec![(2, 1)]);
-        assert_eq!(gone.removed, vec![old[1].clone()]);
-        // And B comes back, in another slot.
-        let back = [new[0].clone(), new[1].clone(), moved(&old[1], 2)];
-        let former = HashSet::from([old[1].fingerprint]);
-        let plan = plan(&new, &back, &former);
-        assert_eq!(plan.restored, vec![(old[1].fingerprint, 2)]);
-        assert!(plan.moves.is_empty() && plan.removed.is_empty());
+    fn a_channel_back_finds_its_conversation() {
+        let old = [slot(0, "A")];
+        let gone = slot(1, "B");
+        // B, gone before, is still known; C is new.
+        let mut all = known(&old, &[10]);
+        all.insert(gone.fingerprint, 11);
+        let new = [old[0].clone(), moved(&gone, 2), slot(3, "C")];
+        let chats = assign(&had(&old, &[10]), &new, &all);
+        assert_eq!(chats, [Chat::Known(10), Chat::Known(11), Chat::New]);
+    }
+
+    #[test]
+    fn the_very_same_channel_twice_is_one_conversation() {
+        let a = slot(0, "A");
+        let new = [a.clone(), slot(1, "B"), moved(&a, 3)];
+        let chats = assign(&[], &new, &HashMap::new());
+        assert_eq!(chats, [Chat::New, Chat::New, Chat::SameAs(0)]);
+    }
+
+    #[test]
+    fn a_slot_first_known_by_its_place_takes_its_channel() {
+        let new = [slot(0, "A")];
+        let had = [(0, 10, provisional(0))];
+        let known = HashMap::from([(provisional(0), 10)]);
+        assert_eq!(assign(&had, &new, &known), [Chat::Rekeyed(10)]);
     }
 
     fn radio() -> Settings {
@@ -388,13 +406,6 @@ mod tests {
         assert_eq!(sent[1].role, pb::channel::Role::Secondary as i32);
         assert_eq!(sent[1].settings.as_ref().unwrap().name, "");
         assert_eq!(sent[1].settings.as_ref().unwrap().psk, vec![1]);
-        // And the fingerprints follow them.
-        let mut after = settings.clone();
-        for channel in sent {
-            after.channels.insert(channel.index as u32, channel);
-        }
-        let plan = plan(&slots(&settings), &slots(&after), &HashSet::new());
-        assert_eq!(plan.moves, vec![(2, 0), (0, 1), (1, 2)]);
     }
 
     #[test]

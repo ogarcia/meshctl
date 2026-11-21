@@ -230,9 +230,10 @@ struct Removal {
 /// Remove a channel
 ///
 /// Takes a channel off the radio, but the primary; those after it move up a
-/// slot, their history with them. Its own messages are kept aside, in no
-/// conversation, and given back should the very same channel come back; or,
-/// with `history=forget`, forgotten.
+/// slot, their conversations with them. Its own conversation waits for it,
+/// in no slot, and is back should the very same channel come back; or, with
+/// `history=forget`, is forgotten, unless another slot has the very same
+/// channel too.
 #[utoipa::path(
     delete,
     path = "/radios/{radio}/channels/{index}",

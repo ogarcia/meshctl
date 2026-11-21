@@ -689,9 +689,9 @@ impl Radios {
 
     /// Puts a radio's channels in `order`, by the slots they have now: the
     /// first becomes the primary, the rest follow it with no gap, and any
-    /// left out is taken off the radio. Their history goes with them at once,
-    /// not only once the radio is read back; that of one left out is kept
-    /// aside, unless `forget`.
+    /// left out is taken off the radio. Each slot is given its conversation at
+    /// once, not only once the radio is read back; that of one left out
+    /// waits for it, in no slot, unless `forget`.
     async fn rearrange_channels(
         &self,
         id: RadioId,
@@ -720,20 +720,16 @@ impl Radios {
             .await
             .map_err(admin_failure)?;
         }
-        // Should the radio not take it, reading it back moves the history
-        // back where it was.
+        // Should the radio not take it, reading it back puts each
+        // conversation back where it was.
         let followed = async {
-            self.store.follow_channels(id, &after, now()).await?;
+            // Before the slots are taken anew: it goes by the one it has.
             if forget {
-                for gone in before
-                    .iter()
-                    .filter(|b| !after.iter().any(|a| a.fingerprint == b.fingerprint))
-                {
-                    self.store
-                        .forget_former_channel(id, &gone.fingerprint)
-                        .await?;
+                for gone in before.iter().filter(|b| !order.contains(&b.index)) {
+                    self.store.forget_channel(id, gone.index).await?;
                 }
             }
+            self.store.follow_channels(id, &after, now()).await?;
             anyhow::Ok(())
         };
         if let Err(err) = followed.await {
@@ -760,7 +756,7 @@ impl Radios {
     }
 
     /// Takes a channel off a radio, but its primary: those after it move up
-    /// a slot. Its history is kept aside, unless `forget`.
+    /// a slot. Its conversation waits for it, in no slot, unless `forget`.
     pub async fn remove_channel(
         &self,
         id: RadioId,
@@ -1287,9 +1283,9 @@ fn heard_row(heard: mesh::TextMessage, local: Option<u32>) -> NewMessageRow {
     }
 }
 
-/// Follows the channels a radio was just read with: the history of each
-/// goes where it went. If any did, the radio is said to be in sync again,
-/// for whoever shows it to read it anew.
+/// Takes the channels a radio was just read with: each slot's conversation
+/// is its channel's. If any slot has another, the radio is said to be in
+/// sync again, for whoever shows it to read it anew.
 async fn follow_channels(
     store: &Store,
     changes: &broadcast::Sender<Change>,
@@ -1303,7 +1299,7 @@ async fn follow_channels(
         return Ok(());
     }
     if store.follow_channels(id, &now, crate::store::now()).await? {
-        tracing::info!(radio = id, "channel history moved");
+        tracing::info!(radio = id, "channels moved");
         let _ = changes.send(Change::Mesh(id, mesh::Event::Synced));
     }
     Ok(())

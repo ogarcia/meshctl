@@ -4,7 +4,7 @@
 //! What meshctl keeps between runs, in SQLite: the radios, and what each one
 //! last knew of itself and of the mesh.
 
-use crate::channels::{Fingerprint, Slot, plan};
+use crate::channels::{Chat, Fingerprint, Slot, assign, provisional};
 use anyhow::{Context, Result};
 use meshctl_api::{
     BROADCAST, Badge, Conversation, Hop, MapView, Message, MessageId, MessageStatus, Peer,
@@ -12,8 +12,9 @@ use meshctl_api::{
     TracerouteStatus,
 };
 use meshctl_core::mesh::{Heard, LocalNode, Node, Position, PositionSource, User};
+use sqlx::SqliteConnection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -537,15 +538,17 @@ impl Store {
                 .bind(i64::from(heard.packet_id))
                 .fetch_one(&mut *tx)
                 .await?;
+        let channel = chat_of_slot(&mut tx, radio, heard.channel, i64::from(heard.at)).await?;
         let seen = sqlx::query(
-            "INSERT INTO packet_seen (packet, radio_id, channel, at, snr, rssi, hop_limit,
-                hop_start, relay_node, via_mqtt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO packet_seen (packet, radio_id, channel, channel_id, at, snr, rssi,
+                hop_limit, hop_start, relay_node, via_mqtt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (packet, radio_id) DO NOTHING",
         )
         .bind(packet)
         .bind(radio)
         .bind(i64::from(heard.channel))
+        .bind(channel)
         .bind(i64::from(heard.at))
         .bind(heard.snr)
         .bind(heard.rssi)
@@ -565,7 +568,12 @@ impl Store {
     /// A radio's hearing of a packet, with the packet.
     pub async fn sighting(&self, id: SightingId) -> Result<Option<PacketRow>> {
         let row = sqlx::query_as(
-            "SELECT s.id, p.packet_id, p.from_num, p.to_num, s.channel, p.portnum, p.payload,
+            "SELECT s.id, p.packet_id, p.from_num, p.to_num,
+                coalesce(
+                    (SELECT min(c.slot) FROM channel_slot c WHERE c.channel_id = s.channel_id),
+                    s.channel
+                ) AS channel,
+                p.portnum, p.payload,
                 p.request_id, p.reply_id, p.want_response, p.pki, s.at, s.snr, s.rssi,
                 s.hop_limit, s.hop_start, s.relay_node, s.via_mqtt
             FROM packet_seen s JOIN packet p ON p.id = s.packet
@@ -588,7 +596,12 @@ impl Store {
     ) -> Result<Vec<PacketRow>> {
         let node = node.map(i64::from);
         let rows = sqlx::query_as(
-            "SELECT s.id, p.packet_id, p.from_num, p.to_num, s.channel, p.portnum, p.payload,
+            "SELECT s.id, p.packet_id, p.from_num, p.to_num,
+                coalesce(
+                    (SELECT min(c.slot) FROM channel_slot c WHERE c.channel_id = s.channel_id),
+                    s.channel
+                ) AS channel,
+                p.portnum, p.payload,
                 p.request_id, p.reply_id, p.want_response, p.pki, s.at, s.snr, s.rssi,
                 s.hop_limit, s.hop_start, s.relay_node, s.via_mqtt
             FROM packet_seen s JOIN packet p ON p.id = s.packet
@@ -610,15 +623,24 @@ impl Store {
         Ok(rows)
     }
 
+    /// Keeps a message: a channel message in the conversation of the
+    /// channel in its slot now.
     pub async fn add_message(
         &self,
         radio: RadioId,
         message: &NewMessageRow,
     ) -> Result<Option<Message>> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let channel = if message.to == BROADCAST {
+            Some(chat_of_slot(&mut tx, radio, message.channel, message.at).await?)
+        } else {
+            None
+        };
         let id = sqlx::query(
             "INSERT INTO message (radio_id, packet_id, from_num, sender_name, to_num, channel,
-                text, at, outgoing, status, reply_id, emoji, snr, rssi, hops_away, via_mqtt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                channel_id, text, at, outgoing, status, reply_id, emoji, snr, rssi, hops_away,
+                via_mqtt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (radio_id, from_num, packet_id) DO NOTHING",
         )
         .bind(radio)
@@ -627,6 +649,7 @@ impl Store {
         .bind(&message.sender_name)
         .bind(i64::from(message.to))
         .bind(i64::from(message.channel))
+        .bind(channel)
         .bind(&message.text)
         .bind(message.at)
         .bind(message.outgoing)
@@ -637,8 +660,9 @@ impl Store {
         .bind(message.rssi)
         .bind(message.hops_away.map(i64::from))
         .bind(message.via_mqtt)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         if id.rows_affected() == 0 {
             return Ok(None);
         }
@@ -646,7 +670,7 @@ impl Store {
     }
 
     async fn message(&self, id: MessageId) -> Result<Option<Message>> {
-        let row: Option<MessageRow> = sqlx::query_as("SELECT * FROM message WHERE id = ?")
+        let row: Option<MessageRow> = sqlx::query_as("SELECT * FROM message_view WHERE id = ?")
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
@@ -706,13 +730,13 @@ impl Store {
         let rows: Vec<MessageRow> = match peer {
             Peer::Channel { channel } => {
                 sqlx::query_as(
-                    "SELECT * FROM message
-                    WHERE radio_id = ? AND to_num = ? AND channel = ? AND former IS NULL
-                        AND id < ?
+                    "SELECT * FROM message_view
+                    WHERE channel_id = (
+                        SELECT channel_id FROM channel_slot WHERE radio_id = ? AND slot = ?
+                    ) AND id < ?
                     ORDER BY id DESC LIMIT ?",
                 )
                 .bind(radio)
-                .bind(i64::from(BROADCAST))
                 .bind(i64::from(channel))
                 .bind(before)
                 .bind(limit)
@@ -721,7 +745,7 @@ impl Store {
             }
             Peer::Node { node } => {
                 sqlx::query_as(
-                    "SELECT * FROM message
+                    "SELECT * FROM message_view
                     WHERE radio_id = ? AND to_num != ? AND id < ?
                         AND ((outgoing = 1 AND to_num = ?) OR (outgoing = 0 AND from_num = ?))
                     ORDER BY id DESC LIMIT ?",
@@ -739,169 +763,128 @@ impl Store {
         Ok(rows.into_iter().rev().map(MessageRow::message).collect())
     }
 
-    /// Follows a radio's channels as just read: each one's history goes to
-    /// the slot it went to; that of one gone is kept aside, under its
-    /// fingerprint, and given back if it comes back. Whether any moved.
+    /// Takes a radio's channels as just read: each slot's conversation is
+    /// the channel's, wherever it was before, and through its name or key
+    /// being changed where it is. Whether any slot has another now.
     pub async fn follow_channels(&self, radio: RadioId, now: &[Slot], at: i64) -> Result<bool> {
         // Taken for writing from the start: it reads, then writes, and a
         // transaction that only then asks to write fails at once if another
         // is writing, instead of waiting its turn.
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let old: Vec<(i64, Vec<u8>, String)> =
-            sqlx::query_as("SELECT slot, fingerprint, name FROM channel_slot WHERE radio_id = ?")
-                .bind(radio)
-                .fetch_all(&mut *tx)
-                .await?;
-        let old: Vec<Slot> = old
+        let had: Vec<(i64, i64, Vec<u8>)> = sqlx::query_as(
+            "SELECT s.slot, s.channel_id, c.fingerprint
+            FROM channel_slot s JOIN channel c ON c.id = s.channel_id
+            WHERE s.radio_id = ?",
+        )
+        .bind(radio)
+        .fetch_all(&mut *tx)
+        .await?;
+        let had: Vec<(u32, i64, Fingerprint)> = had
             .into_iter()
-            .filter_map(|(slot, print, name)| {
-                Some(Slot {
-                    index: u32::try_from(slot).ok()?,
-                    fingerprint: print.try_into().ok()?,
-                    name,
-                })
+            .filter_map(|(slot, id, print)| {
+                Some((u32::try_from(slot).ok()?, id, print.try_into().ok()?))
             })
             .collect();
-        let former: Vec<Vec<u8>> =
-            sqlx::query_scalar("SELECT fingerprint FROM former_channel WHERE radio_id = ?")
+        let known: Vec<(Vec<u8>, i64)> =
+            sqlx::query_as("SELECT fingerprint, id FROM channel WHERE radio_id = ?")
                 .bind(radio)
                 .fetch_all(&mut *tx)
                 .await?;
-        let former: HashSet<Fingerprint> = former
+        let known: HashMap<Fingerprint, i64> = known
             .into_iter()
-            .filter_map(|print| print.try_into().ok())
+            .filter_map(|(print, id)| Some((print.try_into().ok()?, id)))
             .collect();
-        let plan = plan(&old, now, &former);
-        let mut moved = false;
 
-        // Those gone first, so that what moves into their slots is not
-        // taken for theirs. Only channel messages: a direct one belongs to
-        // its node, whatever channel it came on.
-        for gone in &plan.removed {
-            let kept = sqlx::query(
-                "UPDATE message SET former = ?
-                WHERE radio_id = ? AND to_num = ? AND channel = ? AND former IS NULL",
-            )
-            .bind(&gone.fingerprint[..])
-            .bind(radio)
-            .bind(i64::from(BROADCAST))
-            .bind(i64::from(gone.index))
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
-            if kept > 0 {
-                sqlx::query(
-                    "INSERT INTO former_channel (radio_id, fingerprint, name, removed_at)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT (radio_id, fingerprint)
-                    DO UPDATE SET name = excluded.name, removed_at = excluded.removed_at",
-                )
-                .bind(radio)
-                .bind(&gone.fingerprint[..])
-                .bind(&gone.name)
-                .bind(at)
-                .execute(&mut *tx)
-                .await?;
-                moved = true;
-            }
-        }
-        // All at once, so that two channels that swap do not end up in one.
-        // The slots are numbers of ours, not anything given.
-        if !plan.moves.is_empty() {
-            let cases: Vec<String> = plan
-                .moves
-                .iter()
-                .map(|(from, to)| format!("WHEN {from} THEN {to}"))
-                .collect();
-            let froms: Vec<String> = plan
-                .moves
-                .iter()
-                .map(|(from, _)| from.to_string())
-                .collect();
-            let (cases, froms) = (cases.join(" "), froms.join(", "));
-            for (table, current) in [
-                ("message", " AND former IS NULL"),
-                ("packet_seen", ""),
-                ("request", ""),
-            ] {
-                // Audited: fixed table names, and slots that are our numbers.
-                sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "UPDATE {table} SET channel = CASE channel {cases} END
-                    WHERE radio_id = ? AND channel IN ({froms}){current}"
-                )))
-                .bind(radio)
-                .execute(&mut *tx)
-                .await?;
-            }
-            moved = true;
-        }
-        for (print, slot) in &plan.restored {
-            sqlx::query(
-                "UPDATE message SET channel = ?, former = NULL WHERE radio_id = ? AND former = ?",
-            )
-            .bind(i64::from(*slot))
-            .bind(radio)
-            .bind(&print[..])
-            .execute(&mut *tx)
-            .await?;
-            sqlx::query("DELETE FROM former_channel WHERE radio_id = ? AND fingerprint = ?")
-                .bind(radio)
-                .bind(&print[..])
-                .execute(&mut *tx)
-                .await?;
-            moved = true;
+        let mut ids: Vec<i64> = Vec::with_capacity(now.len());
+        for (slot, chat) in now.iter().zip(assign(&had, now, &known)) {
+            let id = match chat {
+                Chat::Known(id) => {
+                    sqlx::query("UPDATE channel SET name = ?, seen_at = ? WHERE id = ?")
+                        .bind(&slot.name)
+                        .bind(at)
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await?;
+                    id
+                }
+                Chat::Rekeyed(id) => {
+                    sqlx::query(
+                        "UPDATE channel SET fingerprint = ?, name = ?, seen_at = ? WHERE id = ?",
+                    )
+                    .bind(&slot.fingerprint[..])
+                    .bind(&slot.name)
+                    .bind(at)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+                    id
+                }
+                Chat::SameAs(earlier) => ids[earlier],
+                Chat::New => {
+                    sqlx::query_scalar(
+                        "INSERT INTO channel (radio_id, fingerprint, name, seen_at)
+                    VALUES (?, ?, ?, ?) RETURNING id",
+                    )
+                    .bind(radio)
+                    .bind(&slot.fingerprint[..])
+                    .bind(&slot.name)
+                    .bind(at)
+                    .fetch_one(&mut *tx)
+                    .await?
+                }
+            };
+            ids.push(id);
         }
 
         sqlx::query("DELETE FROM channel_slot WHERE radio_id = ?")
             .bind(radio)
             .execute(&mut *tx)
             .await?;
-        for slot in now {
-            sqlx::query(
-                "INSERT INTO channel_slot (radio_id, slot, fingerprint, name) VALUES (?, ?, ?, ?)",
-            )
-            .bind(radio)
-            .bind(i64::from(slot.index))
-            .bind(&slot.fingerprint[..])
-            .bind(&slot.name)
-            .execute(&mut *tx)
-            .await?;
+        for (slot, id) in now.iter().zip(&ids) {
+            sqlx::query("INSERT INTO channel_slot (radio_id, slot, channel_id) VALUES (?, ?, ?)")
+                .bind(radio)
+                .bind(i64::from(slot.index))
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
-        Ok(moved)
+        let mut before: Vec<(u32, i64)> = had.iter().map(|(slot, id, _)| (*slot, *id)).collect();
+        let mut after: Vec<(u32, i64)> = now.iter().map(|s| s.index).zip(ids).collect();
+        before.sort_unstable();
+        after.sort_unstable();
+        Ok(before != after)
     }
 
-    /// Forgets the history kept of a channel gone.
-    pub async fn forget_former_channel(&self, radio: RadioId, print: &Fingerprint) -> Result<()> {
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        sqlx::query("DELETE FROM message WHERE radio_id = ? AND former = ?")
-            .bind(radio)
-            .bind(&print[..])
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM former_channel WHERE radio_id = ? AND fingerprint = ?")
-            .bind(radio)
-            .bind(&print[..])
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
+    /// Forgets the conversation of the channel in a slot, with its messages;
+    /// not one another slot has too, the very same channel twice.
+    pub async fn forget_channel(&self, radio: RadioId, slot: u32) -> Result<()> {
+        sqlx::query(
+            "DELETE FROM channel WHERE id = (
+                SELECT channel_id FROM channel_slot WHERE radio_id = ? AND slot = ?
+            ) AND (SELECT count(*) FROM channel_slot WHERE channel_id = channel.id) = 1",
+        )
+        .bind(radio)
+        .bind(i64::from(slot))
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
     /// Every conversation that has messages, with the newest one in it.
     pub async fn conversations(&self, radio: RadioId) -> Result<Vec<Conversation>> {
         let rows: Vec<MessageRow> = sqlx::query_as(
-            "SELECT * FROM message WHERE id IN (
-                SELECT max(id) FROM message
-                WHERE radio_id = ? AND to_num = ? AND former IS NULL
-                GROUP BY channel
+            "SELECT * FROM message_view WHERE id IN (
+                SELECT max(m.id) FROM message m
+                JOIN channel_slot s ON s.channel_id = m.channel_id
+                WHERE s.radio_id = ?
+                GROUP BY m.channel_id
                 UNION ALL
                 SELECT max(id) FROM message WHERE radio_id = ? AND to_num != ?
                 GROUP BY CASE WHEN outgoing = 1 THEN to_num ELSE from_num END
             ) ORDER BY id DESC",
         )
         .bind(radio)
-        .bind(i64::from(BROADCAST))
         .bind(radio)
         .bind(i64::from(BROADCAST))
         .fetch_all(&self.pool)
@@ -1205,6 +1188,43 @@ fn status_from(name: &str) -> MessageStatus {
         "failed" => MessageStatus::Failed,
         _ => MessageStatus::Received,
     }
+}
+
+/// The conversation of the channel in a slot: if the slot is not known yet,
+/// one of its own, known by the slot alone until the radio says which
+/// channel it has.
+async fn chat_of_slot(
+    tx: &mut SqliteConnection,
+    radio: RadioId,
+    slot: u32,
+    at: i64,
+) -> Result<i64> {
+    let known: Option<i64> =
+        sqlx::query_scalar("SELECT channel_id FROM channel_slot WHERE radio_id = ? AND slot = ?")
+            .bind(radio)
+            .bind(i64::from(slot))
+            .fetch_optional(&mut *tx)
+            .await?;
+    if let Some(id) = known {
+        return Ok(id);
+    }
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO channel (radio_id, fingerprint, name, seen_at) VALUES (?, ?, '', ?)
+        ON CONFLICT (radio_id, fingerprint) DO UPDATE SET seen_at = excluded.seen_at
+        RETURNING id",
+    )
+    .bind(radio)
+    .bind(&provisional(slot)[..])
+    .bind(at)
+    .fetch_one(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO channel_slot (radio_id, slot, channel_id) VALUES (?, ?, ?)")
+        .bind(radio)
+        .bind(i64::from(slot))
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    Ok(id)
 }
 
 pub fn now() -> i64 {
@@ -1528,7 +1548,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_channel_history_follows_it_and_waits_for_it() {
+    async fn a_channel_is_one_conversation_wherever_it_is() {
         use crate::channels::fingerprint;
         let store = Store::in_memory().await;
         let radio = store.add_radio(&home()).await.unwrap().id;
@@ -1541,9 +1561,6 @@ mod tests {
             channel,
             ..text(packet_id, 9, BROADCAST, false)
         };
-        for row in [on(1, 0), on(2, 1), on(3, 2)] {
-            store.add_message(radio, &row).await.unwrap();
-        }
         let in_channel = |channel: u32| {
             let store = store.clone();
             async move {
@@ -1552,36 +1569,48 @@ mod tests {
                     .await
                     .unwrap()
                     .iter()
-                    .map(|m| m.packet_id)
+                    .map(|m| (m.packet_id, m.channel))
                     .collect::<Vec<_>>()
             }
         };
+        // Heard before the radio says which channels it has: known by slot.
+        store.add_message(radio, &on(1, 1)).await.unwrap();
         let first = [slot(0, "A"), slot(1, "B"), slot(2, "C")];
-        assert!(!store.follow_channels(radio, &first, 10).await.unwrap());
+        assert!(store.follow_channels(radio, &first, 10).await.unwrap());
+        for row in [on(2, 0), on(3, 2)] {
+            store.add_message(radio, &row).await.unwrap();
+        }
+        assert_eq!(in_channel(1).await, [(1, 1)]);
 
-        // B and C swap.
+        // B and C swap: each conversation goes with its channel, and its
+        // messages say the slot it has now.
         let swapped = [slot(0, "A"), slot(1, "C"), slot(2, "B")];
         assert!(store.follow_channels(radio, &swapped, 20).await.unwrap());
-        assert_eq!(in_channel(1).await, [3]);
-        assert_eq!(in_channel(2).await, [2]);
+        assert_eq!(in_channel(1).await, [(3, 1)]);
+        assert_eq!(in_channel(2).await, [(1, 2)]);
 
-        // B goes: its history waits, in no conversation.
+        // B renamed where it is: still its conversation.
+        let renamed = [slot(0, "A"), slot(1, "C"), slot(2, "Be")];
+        store.follow_channels(radio, &renamed, 30).await.unwrap();
+        assert_eq!(in_channel(2).await, [(1, 2)]);
+
+        // Gone: in no conversation; and back elsewhere, with its messages.
         let without = [slot(0, "A"), slot(1, "C")];
-        assert!(store.follow_channels(radio, &without, 30).await.unwrap());
-        assert_eq!(in_channel(2).await, Vec::<u32>::new());
+        store.follow_channels(radio, &without, 40).await.unwrap();
         assert_eq!(store.conversations(radio).await.unwrap().len(), 2);
+        let back = [slot(0, "A"), slot(1, "C"), slot(5, "Be")];
+        store.follow_channels(radio, &back, 50).await.unwrap();
+        assert_eq!(in_channel(5).await, [(1, 5)]);
 
-        // And comes back elsewhere, with it.
-        let back = [slot(0, "A"), slot(1, "C"), slot(3, "B")];
-        assert!(store.follow_channels(radio, &back, 40).await.unwrap());
-        assert_eq!(in_channel(3).await, [2]);
-
-        // Gone again, and forgotten.
-        store.follow_channels(radio, &without, 50).await.unwrap();
-        store
-            .forget_former_channel(radio, &fingerprint("B", &[1]))
-            .await
-            .unwrap();
+        // Twice the very same: one conversation, in both slots.
+        let twice = [slot(0, "A"), slot(1, "C"), slot(5, "Be"), slot(6, "A")];
+        store.follow_channels(radio, &twice, 60).await.unwrap();
+        assert_eq!(in_channel(6).await, in_channel(0).await);
+        // Forgetting one of them forgets nothing; the other, all of it.
+        store.forget_channel(radio, 6).await.unwrap();
+        store.follow_channels(radio, &back, 70).await.unwrap();
+        assert_eq!(in_channel(0).await, [(2, 0)]);
+        store.forget_channel(radio, 5).await.unwrap();
         let left: i64 = sqlx::query_scalar("SELECT count(*) FROM message")
             .fetch_one(&store.pool)
             .await
