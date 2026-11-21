@@ -610,10 +610,37 @@ fn show(preferences: Preferences) {
 #[component]
 pub fn App() -> impl IntoView {
     view! {
-        <I18nContextProvider>
+        // The language is a preference meshctl keeps, for every browser: not a
+        // cookie of this one's, which would outlive it being changed.
+        <I18nContextProvider enable_cookie=false>
             <Shell />
         </I18nContextProvider>
     }
+}
+
+/// The first of the browser's languages the interface speaks, or English.
+fn browser_locale() -> Locale {
+    let languages = web_sys::window()
+        .map(|w| w.navigator().languages())
+        .map(|list| {
+            list.iter()
+                .filter_map(|l| l.as_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    languages
+        .iter()
+        .find_map(|language| {
+            let language = language.to_lowercase();
+            if language.starts_with("es") {
+                Some(Locale::es)
+            } else if language.starts_with("en") {
+                Some(Locale::en)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(Locale::en)
 }
 
 #[component]
@@ -626,11 +653,11 @@ fn Shell() -> impl IntoView {
     Effect::new(move |_| {
         let preferences = live.preferences.get();
         show(preferences);
-        match preferences.language {
-            Some(Language::En) => i18n.set_locale(Locale::en),
-            Some(Language::Es) => i18n.set_locale(Locale::es),
-            None => {}
-        }
+        i18n.set_locale(match preferences.language {
+            Some(Language::En) => Locale::en,
+            Some(Language::Es) => Locale::es,
+            None => browser_locale(),
+        });
     });
 
     let class = move || {

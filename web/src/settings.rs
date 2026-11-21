@@ -9,7 +9,8 @@
 use crate::app::Live;
 use crate::channel_settings::ChannelsTab;
 use crate::daemon::{self, Failure};
-use crate::i18n::{t, t_string, use_i18n};
+use crate::i18n::{Locale, t, t_string, use_i18n};
+use crate::names;
 use crate::preferences::pills;
 use crate::radios::Switch;
 use crate::sections::{SaveBar, SectionEdits, SectionsTab, clear_when_synced};
@@ -533,12 +534,14 @@ fn LoraTab(draft: Draft) -> impl IntoView {
     );
     let (coding_rate, set_coding_rate) =
         field(draft, |d| d.lora.coding_rate, |d, v| d.lora.coding_rate = v);
+    // In the firmware's order, the most used first.
     let regions = move || {
-        draft.with(|d| {
+        let codes = draft.with(|d| {
             d.as_ref()
                 .map(|d| d.choices.regions.clone())
                 .unwrap_or_default()
-        })
+        });
+        names::placed(codes, "UNSET", &region.get())
     };
     // Those its region takes.
     let presets = move || {
@@ -576,7 +579,13 @@ fn LoraTab(draft: Draft) -> impl IntoView {
                 title=t!(i18n, settings_region).into_any()
                 hint=t!(i18n, settings_region_hint).into_any()
             >
-                <Choice class="pref-control" options=regions value=region set=set_region />
+                <Choice
+                    class="pref-control"
+                    options=regions
+                    value=region
+                    set=set_region
+                    label=names::region
+                />
             </Row>
             <Row
                 title=t!(i18n, settings_use_preset).into_any()
@@ -674,25 +683,29 @@ fn LoraTab(draft: Draft) -> impl IntoView {
     }
 }
 
-/// A select over a list of codes, which shows them as they are: the radio's
-/// own names for its roles, regions and presets.
+/// A select over a list of codes: the radio's own names for its roles,
+/// regions and presets, as they are, or as `label` reads them.
 #[component]
 fn Choice(
     #[prop(optional)] class: &'static str,
     options: impl Fn() -> Vec<String> + Send + Sync + 'static,
     value: Signal<String>,
     set: impl Fn(String) + Copy + Send + Sync + 'static,
+    #[prop(optional)] label: Option<fn(Locale, &str) -> String>,
 ) -> impl IntoView {
+    let i18n = use_i18n();
     view! {
         <select class=class prop:value=value on:change=move |ev| set(event_target_value(&ev))>
             {move || {
+                let locale = i18n.get_locale();
                 options()
                     .into_iter()
                     .map(|code| {
                         let selected = value.get_untracked() == code;
+                        let shown = label.map_or_else(|| code.clone(), |label| label(locale, &code));
                         view! {
                             <option value=code.clone() selected=selected>
-                                {code.clone()}
+                                {shown}
                             </option>
                         }
                     })

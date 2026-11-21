@@ -11,6 +11,7 @@ mod daemon;
 mod emoji;
 mod map;
 mod mesh;
+mod names;
 mod node;
 mod packets;
 mod preferences;
