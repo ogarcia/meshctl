@@ -1001,9 +1001,21 @@ fn LocalFoot() -> impl IntoView {
             "settings"
         }
     };
+    // In the radio's own colour, if it was given one, as its button on the
+    // rail is when selected.
+    let badge = move || live.selected_radio().map(|r| r.badge).unwrap_or_default();
+    let avatar_class = move || {
+        if badge().color.is_some() {
+            "avatar colored"
+        } else {
+            "avatar"
+        }
+    };
     view! {
         <footer class="local-foot">
-            <span class="avatar">{short}</span>
+            <span class=avatar_class style=move || badge::style(&badge())>
+                {short}
+            </span>
             <span class="who">
                 <b>{move || name().unwrap_or_else(|| t_string!(i18n, nav_my_node).to_owned())}</b>
                 <span class="mono dim">{detail}</span>
