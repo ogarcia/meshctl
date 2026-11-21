@@ -42,6 +42,9 @@ window.meshctlMap = (() => {
   // The route drawn, as the Rust side gave it, to draw again at each zoom.
   let shownRoute = null;
   let cardAway = false;
+  // Where the map was before it went to a route, and the zoom it went to:
+  // the route closed with that zoom untouched, the map goes back.
+  let beforeRoute = null;
 
   // Picks a node: its popup shows again, even when it was put away for a
   // route and the node is the one picked already.
@@ -144,6 +147,7 @@ window.meshctlMap = (() => {
     preview = null;
     routeLayer = null;
     shownRoute = null;
+    beforeRoute = null;
   }
 
   // The nodes near a point of the map's, the nearest first.
@@ -520,6 +524,7 @@ window.meshctlMap = (() => {
         shownRoute = null;
         drawMarkers();
       }
+      goBack();
       return;
     }
     shownRoute = drawn;
@@ -534,13 +539,35 @@ window.meshctlMap = (() => {
       showCard();
       const points = [...drawn.towards, ...drawn.back].flatMap((s) => [s.from, s.to]);
       if (points.length > 0) {
-        map.fitBounds(points, {
+        // Another route in place of the first: back to before the first.
+        if (!beforeRoute) {
+          beforeRoute = { centre: map.getCenter(), zoom: map.getZoom() };
+        }
+        // The zoom fitBounds goes to, worked out as it does.
+        const bounds = L.latLngBounds(points);
+        beforeRoute.routeZoom = Math.min(15, map.getBoundsZoom(bounds, false, L.point(80, 160)));
+        map.fitBounds(bounds, {
           paddingTopLeft: [40, 80],
           paddingBottomRight: [40, 80],
           maxZoom: 15,
         });
       }
     }
+  }
+
+  // The route gone: the map goes back to where it was before it, unless the
+  // person zoomed meanwhile, and so chose where to look.
+  function goBack() {
+    const before = beforeRoute;
+    beforeRoute = null;
+    if (!before || map.getZoom() !== before.routeZoom) return;
+    map.setView(before.centre, before.zoom);
+  }
+
+  // The route about to go for a reason that is not closing it, as another
+  // node picked: the map stays where it is.
+  function stay() {
+    beforeRoute = null;
   }
 
   // Tells where the map is left, now.
@@ -561,6 +588,7 @@ window.meshctlMap = (() => {
     placed = false;
     savedView = undefined;
     touched = false;
+    beforeRoute = null;
   }
 
   // Where the map was left for the radio, as JSON {latitude, longitude,
@@ -644,5 +672,5 @@ window.meshctlMap = (() => {
     if (map) map.invalidateSize();
   }
 
-  return { open, close, nodes, route, reset, resize, view };
+  return { open, close, nodes, route, stay, reset, resize, view };
 })();

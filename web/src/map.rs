@@ -33,6 +33,8 @@ extern "C" {
     fn map_nodes(json: &str);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = route)]
     fn map_route(json: Option<String>);
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = stay)]
+    fn map_stay();
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = reset)]
     fn map_reset();
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = view)]
@@ -384,6 +386,8 @@ pub fn MapView() -> impl IntoView {
         if previous.is_some_and(|previous| previous != picked) {
             let shown = live.map_route.get_untracked();
             if shown.is_some() && picked.is_some() && shown != picked {
+                // Not closed but left for another node: the map stays put.
+                map_stay();
                 live.map_route.set(None);
             }
         }
