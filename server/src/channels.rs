@@ -118,18 +118,29 @@ pub fn slots(settings: &Settings) -> Vec<Slot> {
         .collect()
 }
 
-/// The slot of a channel the radio has that one of `changed` would be the
-/// very same as, name and key, once they are set: the radio could not tell
-/// them apart. Two that already were the same are left be.
-pub fn duplicate(after: &Settings, changed: &[u32]) -> Option<u32> {
-    let slots = slots(after);
-    slots
-        .iter()
+/// The slot of a channel the radio has that one of `changed` would become
+/// the very same as, name and key, once they are set: the radio could not
+/// tell them apart. Two that already were the same, as another app may have
+/// left them, are left be, and either can still be changed.
+pub fn duplicate(before: &Settings, after: &Settings, changed: &[u32]) -> Option<u32> {
+    let then = slots(before);
+    let now = slots(after);
+    let print_then = |index: u32| {
+        then.iter()
+            .find(|s| s.index == index)
+            .map(|s| s.fingerprint)
+    };
+    now.iter()
         .filter(|s| changed.contains(&s.index))
         .find_map(|new| {
-            slots
-                .iter()
-                .find(|other| other.index != new.index && other.fingerprint == new.fingerprint)
+            now.iter()
+                .find(|other| {
+                    other.index != new.index
+                        && other.fingerprint == new.fingerprint
+                        // Not the same already, both of them as they were.
+                        && !(print_then(new.index) == Some(new.fingerprint)
+                            && print_then(other.index) == Some(other.fingerprint))
+                })
                 .map(|other| other.index)
         })
 }
@@ -340,9 +351,20 @@ mod tests {
         let lab_settings = lab.settings.as_mut().unwrap();
         lab_settings.name = String::new();
         lab_settings.psk = DEFAULT_KEY.to_vec();
-        assert_eq!(duplicate(&settings, &[2]), Some(0));
+        assert_eq!(duplicate(&radio(), &settings, &[2]), Some(0));
         // Not if it is the one left as it was.
-        assert_eq!(duplicate(&settings, &[1]), None);
+        assert_eq!(duplicate(&radio(), &settings, &[1]), None);
+        // Two already the same, one of them changed in something else: left
+        // be.
+        let mut mqtt = settings.clone();
+        mqtt.channels
+            .get_mut(&2)
+            .unwrap()
+            .settings
+            .as_mut()
+            .unwrap()
+            .uplink_enabled = true;
+        assert_eq!(duplicate(&settings, &mqtt, &[2]), None);
     }
 
     #[test]

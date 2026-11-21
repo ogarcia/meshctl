@@ -237,7 +237,7 @@ pub fn change(
             after.channels.insert(channel.index as u32, channel.clone());
         }
         let changed: Vec<u32> = change.channels.iter().map(|c| c.index as u32).collect();
-        if crate::channels::duplicate(&after, &changed).is_some() {
+        if crate::channels::duplicate(settings, &after, &changed).is_some() {
             return Err(Invalid(DUPLICATE));
         }
     }
