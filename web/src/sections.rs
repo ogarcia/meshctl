@@ -293,6 +293,7 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
         field.description.clone().unwrap_or_default(),
     );
     let id = format!("{section}.{name}");
+    let field_id = id.clone();
     let said = Signal::derive(
         move || match (i18n.get_locale(), crate::fields::spanish(&id)) {
             (Locale::es, Some((label, description))) => (label.to_owned(), description.to_owned()),
@@ -370,13 +371,24 @@ fn FieldInput(section: String, field: SettingsField, edits: SectionEdits) -> imp
                     prop:value=move || current().as_str().unwrap_or_default().to_owned()
                     on:change=move |ev| put(Json::String(event_target_value(&ev)))
                 >
-                    {choices
-                        .into_iter()
-                        .map(|code| {
-                            let shown = words(&code.to_lowercase());
-                            view! { <option value=code>{shown}</option> }
-                        })
-                        .collect_view()}
+                    {
+                        let current = current.clone();
+                        move || {
+                            // Built again in another language: the one the
+                            // radio has stays chosen.
+                            let locale = i18n.get_locale();
+                            let chosen = current().as_str().unwrap_or_default().to_owned();
+                            choices
+                                .clone()
+                                .into_iter()
+                                .map(|code| {
+                                    let shown = crate::fields::choice(locale, &field_id, &code);
+                                    let selected = code == chosen;
+                                    view! { <option value=code selected=selected>{shown}</option> }
+                                })
+                                .collect_view()
+                        }
+                    }
                 </select>
             }
             .into_any()

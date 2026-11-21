@@ -175,6 +175,35 @@ fn is_set(value: &Value) -> bool {
     }
 }
 
+/// The settings that are IPv4 addresses, kept as a number with the address's
+/// bytes in order from its lowest one: shown and taken as `192.168.1.10`.
+const ADDRESSES: &[&str] = &[
+    "config.network.ipv4_config.ip",
+    "config.network.ipv4_config.gateway",
+    "config.network.ipv4_config.subnet",
+    "config.network.ipv4_config.dns",
+];
+
+/// An address as it is written, from the number it is kept as; empty for
+/// none.
+fn address(number: u32) -> String {
+    if number == 0 {
+        String::new()
+    } else {
+        std::net::Ipv4Addr::from(number.to_le_bytes()).to_string()
+    }
+}
+
+/// The number an address is kept as, from how it is written; 0 for none.
+fn address_number(json: &Json, name: &str) -> Result<Json, Invalid> {
+    let text = json.as_str().ok_or_else(|| invalid(name))?.trim();
+    if text.is_empty() {
+        return Ok(Json::from(0));
+    }
+    let address: std::net::Ipv4Addr = text.parse().map_err(|_| invalid(name))?;
+    Ok(Json::from(u32::from_le_bytes(address.octets())))
+}
+
 /// Every setting of a message, nested ones by their dotted path.
 fn fields(message: &DynamicMessage, prefix: &str, section: &str, out: &mut Vec<SettingsField>) {
     for field in message.descriptor().fields() {
@@ -210,6 +239,28 @@ fn fields(message: &DynamicMessage, prefix: &str, section: &str, out: &mut Vec<S
             Kind::Bytes => continue,
             integer => (FieldKind::Integer, Vec::new(), integer_range(integer)),
         };
+        // An address, as it is written.
+        if ADDRESSES.contains(&format!("{section}.{name}").as_str()) {
+            let number = match value.as_ref() {
+                Value::U32(n) => *n,
+                _ => 0,
+            };
+            out.push(SettingsField {
+                name,
+                label: said.label,
+                description: said.description,
+                unit: None,
+                kind: FieldKind::Text,
+                min: None,
+                max: None,
+                choices: Vec::new(),
+                secret: false,
+                diy_only: said.diy_only,
+                value: Some(Json::String(address(number))),
+                set: number != 0,
+            });
+            continue;
+        }
         out.push(SettingsField {
             name,
             label: said.label,
@@ -498,7 +549,12 @@ pub fn change(
                 return Err(invalid(id));
             };
             for (path, json) in values {
-                set(&mut part, path, json, path)?;
+                let json = if ADDRESSES.contains(&format!("{id}.{path}").as_str()) {
+                    address_number(json, path)?
+                } else {
+                    json.clone()
+                };
+                set(&mut part, path, &json, path)?;
             }
             change.configs.push(wrap("meshtastic.Config", name, part)?);
         }
@@ -659,6 +715,47 @@ mod tests {
         );
         assert_eq!(mqtt.password, "large4cats", "a secret not given is kept");
         assert_eq!(mqtt.address, "mqtt.lan");
+    }
+
+    #[test]
+    fn addresses_read_and_are_taken_as_written() {
+        let mut settings = settings();
+        if let Some(network) = settings.config.network.as_mut() {
+            network.ipv4_config = Some(pb::config::network_config::IpV4Config {
+                ip: u32::from_le_bytes([192, 168, 1, 10]),
+                ..Default::default()
+            });
+        }
+        let network = sections(&settings)
+            .into_iter()
+            .find(|s| s.id == "config.network")
+            .unwrap();
+        let ip = network
+            .fields
+            .iter()
+            .find(|f| f.name == "ipv4_config.ip")
+            .unwrap();
+        assert_eq!(ip.kind, FieldKind::Text);
+        assert_eq!(ip.value, Some(Json::from("192.168.1.10")));
+        let gateway = network
+            .fields
+            .iter()
+            .find(|f| f.name == "ipv4_config.gateway")
+            .unwrap();
+        assert_eq!(gateway.value, Some(Json::from("")));
+
+        let values =
+            BTreeMap::from([("ipv4_config.gateway".to_owned(), Json::from("192.168.1.1"))]);
+        let change = change(&settings, "config.network", &values).unwrap();
+        let Some(pb::config::PayloadVariant::Network(network)) = &change.configs[0].payload_variant
+        else {
+            panic!("a network config");
+        };
+        let ipv4 = network.ipv4_config.unwrap();
+        assert_eq!(ipv4.gateway, u32::from_le_bytes([192, 168, 1, 1]));
+        assert_eq!(ipv4.ip, u32::from_le_bytes([192, 168, 1, 10]), "kept");
+        let bad = BTreeMap::from([("ipv4_config.dns".to_owned(), Json::from("1.2.3"))]);
+        assert!(super::change(&settings, "config.network", &bad).is_err());
     }
 
     #[test]

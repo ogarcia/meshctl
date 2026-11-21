@@ -5,6 +5,8 @@
 //! what the protobufs say of each, label and description, put faithfully.
 //! In English, and for any field not here, the protobufs' own words.
 
+use crate::i18n::Locale;
+
 /// By `section.field`: the label, and the description (empty for none).
 const ES: &[(&str, &str, &str)] = &[
     // Device.
@@ -819,4 +821,266 @@ pub fn spanish(id: &str) -> Option<(&'static str, &'static str)> {
     ES.iter()
         .find(|(known, _, _)| *known == id)
         .map(|(_, label, description)| (*label, *description))
+}
+
+/// A choice's words, by the field it is of (its last part) and its code: in
+/// Spanish and in English. Codes that read the same in any language are
+/// worked out apart.
+const CHOICES: &[(&str, &str, &str, &str)] = &[
+    ("rebroadcast_mode", "ALL", "Todo", "All"),
+    (
+        "rebroadcast_mode",
+        "ALL_SKIP_DECODING",
+        "Todo, sin descifrar",
+        "All, skipping decoding",
+    ),
+    (
+        "rebroadcast_mode",
+        "LOCAL_ONLY",
+        "Solo los canales propios",
+        "Local only",
+    ),
+    (
+        "rebroadcast_mode",
+        "KNOWN_ONLY",
+        "Solo nodos conocidos",
+        "Known only",
+    ),
+    ("rebroadcast_mode", "NONE", "Nada", "None"),
+    (
+        "rebroadcast_mode",
+        "CORE_PORTNUMS_ONLY",
+        "Solo los puertos básicos",
+        "Core ports only",
+    ),
+    ("buzzer_mode", "ALL_ENABLED", "Todo activado", "All enabled"),
+    ("buzzer_mode", "DISABLED", "Desactivado", "Disabled"),
+    (
+        "buzzer_mode",
+        "NOTIFICATIONS_ONLY",
+        "Solo avisos",
+        "Notifications only",
+    ),
+    (
+        "buzzer_mode",
+        "SYSTEM_ONLY",
+        "Solo el sistema",
+        "System only",
+    ),
+    (
+        "buzzer_mode",
+        "DIRECT_MSG_ONLY",
+        "Solo mensajes directos",
+        "Direct messages only",
+    ),
+    ("gps_mode", "DISABLED", "Desactivado", "Disabled"),
+    ("gps_mode", "ENABLED", "Activado", "Enabled"),
+    ("gps_mode", "NOT_PRESENT", "No tiene", "Not present"),
+    ("address_mode", "DHCP", "DHCP", "DHCP"),
+    ("address_mode", "STATIC", "Estática", "Static"),
+    ("units", "METRIC", "Métrico", "Metric"),
+    ("units", "IMPERIAL", "Imperial", "Imperial"),
+    ("oled", "OLED_AUTO", "Automático", "Automatic"),
+    (
+        "oled",
+        "OLED_SH1107_128_128",
+        "SH1107 128×128",
+        "SH1107 128×128",
+    ),
+    (
+        "oled",
+        "OLED_SH1107_ROTATED",
+        "SH1107 girada",
+        "SH1107 rotated",
+    ),
+    ("displaymode", "DEFAULT", "Por defecto", "Default"),
+    ("displaymode", "TWOCOLOR", "Dos colores", "Two colours"),
+    ("displaymode", "INVERTED", "Invertida", "Inverted"),
+    ("displaymode", "COLOR", "Color", "Colour"),
+    ("mode", "RANDOM_PIN", "PIN aleatorio", "Random PIN"),
+    ("mode", "FIXED_PIN", "PIN fijo", "Fixed PIN"),
+    ("mode", "NO_PIN", "Sin PIN", "No PIN"),
+    ("mode", "DEFAULT", "Por defecto", "Default"),
+    ("mode", "SIMPLE", "Simple", "Simple"),
+    ("mode", "PROTO", "Protobuf", "Protobuf"),
+    ("mode", "TEXTMSG", "Mensajes de texto", "Text messages"),
+    ("mode", "VE_DIRECT", "VE.Direct", "VE.Direct"),
+    ("mode", "NMEA", "NMEA", "NMEA"),
+    ("mode", "WS85", "WS85", "WS85"),
+    ("mode", "MS_CONFIG", "MS_CONFIG", "MS_CONFIG"),
+    ("mode", "CALTOPO", "CalTopo", "CalTopo"),
+    ("mode", "LOG", "Registro", "Log"),
+    ("mode", "LOGTEXT", "Registro de texto", "Text log"),
+    ("mode", "MODBUS", "Modbus", "Modbus"),
+    ("bitrate", "CODEC2_DEFAULT", "Por defecto", "Default"),
+    ("baud", "BAUD_DEFAULT", "Por defecto", "Default"),
+    ("inputbroker_event_cw", "NONE", "Ninguno", "None"),
+    ("inputbroker_event_cw", "SELECT", "Seleccionar", "Select"),
+    ("inputbroker_event_cw", "UP", "Arriba", "Up"),
+    ("inputbroker_event_cw", "DOWN", "Abajo", "Down"),
+    ("inputbroker_event_cw", "LEFT", "Izquierda", "Left"),
+    ("inputbroker_event_cw", "RIGHT", "Derecha", "Right"),
+    ("inputbroker_event_cw", "CANCEL", "Cancelar", "Cancel"),
+    ("inputbroker_event_cw", "BACK", "Atrás", "Back"),
+    (
+        "detection_trigger_type",
+        "LOGIC_LOW",
+        "Nivel bajo",
+        "Logic low",
+    ),
+    (
+        "detection_trigger_type",
+        "LOGIC_HIGH",
+        "Nivel alto",
+        "Logic high",
+    ),
+    (
+        "detection_trigger_type",
+        "FALLING_EDGE",
+        "Flanco de bajada",
+        "Falling edge",
+    ),
+    (
+        "detection_trigger_type",
+        "RISING_EDGE",
+        "Flanco de subida",
+        "Rising edge",
+    ),
+    (
+        "detection_trigger_type",
+        "EITHER_EDGE_ACTIVE_LOW",
+        "Cualquier flanco, activo en bajo",
+        "Either edge, active low",
+    ),
+    (
+        "detection_trigger_type",
+        "EITHER_EDGE_ACTIVE_HIGH",
+        "Cualquier flanco, activo en alto",
+        "Either edge, active high",
+    ),
+    ("team", "Unspecifed_Color", "Sin especificar", "Unspecified"),
+    ("team", "White", "Blanco", "White"),
+    ("team", "Yellow", "Amarillo", "Yellow"),
+    ("team", "Orange", "Naranja", "Orange"),
+    ("team", "Magenta", "Magenta", "Magenta"),
+    ("team", "Red", "Rojo", "Red"),
+    ("team", "Maroon", "Granate", "Maroon"),
+    ("team", "Purple", "Morado", "Purple"),
+    ("team", "Dark_Blue", "Azul oscuro", "Dark blue"),
+    ("team", "Blue", "Azul", "Blue"),
+    ("team", "Cyan", "Cian", "Cyan"),
+    ("team", "Teal", "Verde azulado", "Teal"),
+    ("team", "Green", "Verde", "Green"),
+    ("team", "Dark_Green", "Verde oscuro", "Dark green"),
+    ("team", "Brown", "Marrón", "Brown"),
+    ("role", "Unspecifed", "Sin especificar", "Unspecified"),
+    ("role", "TeamMember", "Miembro del equipo", "Team member"),
+    ("role", "TeamLead", "Jefe de equipo", "Team lead"),
+    ("role", "HQ", "Cuartel general", "HQ"),
+    ("role", "Sniper", "Tirador", "Sniper"),
+    ("role", "Medic", "Sanitario", "Medic"),
+    (
+        "role",
+        "ForwardObserver",
+        "Observador avanzado",
+        "Forward observer",
+    ),
+    ("role", "RTO", "Radiooperador", "Radio operator"),
+    ("role", "K9", "Unidad canina", "K9"),
+];
+
+/// How a choice of a field reads, in the interface's language.
+pub fn choice(locale: Locale, field: &str, code: &str) -> String {
+    let last = field.rsplit('.').next().unwrap_or(field);
+    // The three events of the canned messages' encoder take the same.
+    let family = if last.starts_with("inputbroker_event") {
+        "inputbroker_event_cw"
+    } else {
+        last
+    };
+    match last {
+        "broadcast_offer_region" => return crate::names::region(locale, code),
+        "broadcast_offer_preset" => return crate::names::preset(locale, code),
+        _ => {}
+    }
+    if let Some((_, _, es, en)) = CHOICES
+        .iter()
+        .find(|(f, c, _, _)| *f == family && *c == code)
+    {
+        return match locale {
+            Locale::es => (*es).to_owned(),
+            Locale::en => (*en).to_owned(),
+        };
+    }
+    // Those that read the same in any language.
+    if let Some(degrees) = code.strip_prefix("DEGREES_") {
+        let (angle, inverted) = degrees
+            .strip_suffix("_INVERTED")
+            .map_or((degrees, false), |a| (a, true));
+        return match (inverted, locale) {
+            (false, _) => format!("{angle}°"),
+            (true, Locale::es) => format!("{angle}°, invertida"),
+            (true, Locale::en) => format!("{angle}°, inverted"),
+        };
+    }
+    if let Some(rate) = code.strip_prefix("CODEC2_") {
+        let (bits, variant) = rate.split_at(
+            rate.find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rate.len()),
+        );
+        return if variant.is_empty() {
+            format!("{bits} bps")
+        } else {
+            format!("{bits} bps ({variant})")
+        };
+    }
+    if let Some(baud) = code.strip_prefix("BAUD_") {
+        return baud.to_owned();
+    }
+    if let Some(model) = code.strip_prefix("OLED_") {
+        return model.to_owned();
+    }
+    crate::sections::words(&code.to_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn choices_read_as_people_read_them() {
+        assert_eq!(
+            choice(Locale::es, "config.network.address_mode", "STATIC"),
+            "Estática"
+        );
+        assert_eq!(
+            choice(
+                Locale::en,
+                "config.display.compass_orientation",
+                "DEGREES_90_INVERTED"
+            ),
+            "90°, inverted"
+        );
+        assert_eq!(
+            choice(Locale::es, "module.audio.bitrate", "CODEC2_700B"),
+            "700 bps (B)"
+        );
+        assert_eq!(
+            choice(Locale::es, "module.serial.baud", "BAUD_115200"),
+            "115200"
+        );
+        assert_eq!(
+            choice(Locale::es, "config.display.oled", "OLED_SH1106"),
+            "SH1106"
+        );
+        assert_eq!(
+            choice(
+                Locale::es,
+                "module.canned_message.inputbroker_event_press",
+                "BACK"
+            ),
+            "Atrás"
+        );
+        assert_eq!(choice(Locale::es, "module.serial.mode", "NMEA"), "NMEA");
+    }
 }
