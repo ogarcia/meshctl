@@ -66,14 +66,23 @@ impl Asked {
     }
 }
 
+/// A button of the page: what it sends, and where it is, as two may send
+/// the same (its node info, over all while its name is not known, and in
+/// its section).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ButtonId {
+    asked: Asked,
+    place: &'static str,
+}
+
 /// Which button's channel menu is open, if any.
 #[derive(Clone, Copy)]
-struct OpenMenu(RwSignal<Option<Asked>>);
+struct OpenMenu(RwSignal<Option<ButtonId>>);
 
 /// Which button was pressed last: the one that shows the radio's wait
 /// filling up, while the others it holds back are only off.
 #[derive(Clone, Copy)]
-struct Pressed(RwSignal<Option<Asked>>);
+struct Pressed(RwSignal<Option<ButtonId>>);
 
 #[component]
 pub fn NodeView() -> impl IntoView {
@@ -92,7 +101,7 @@ fn NodePage(num: u32) -> impl IntoView {
     }
     provide_context(Asking { num, clock });
     // One channel menu open at a time, closed by a click anywhere else.
-    let menu = RwSignal::new(None::<Asked>);
+    let menu = RwSignal::new(None::<ButtonId>);
     provide_context(OpenMenu(menu));
     provide_context(Pressed(RwSignal::new(None)));
     let closing = window_event_listener(leptos::ev::click, move |_| menu.set(None));
@@ -103,23 +112,33 @@ fn NodePage(num: u32) -> impl IntoView {
         <div class="node-page">
             <Checks />
             <Tiles num />
-            // In columns that even themselves out, however much or little
-            // the node told.
+            // Two columns, headed by what is looked at most: where it is, and
+            // the routes to it. Who it is goes last, for looking up: asking
+            // for it is over all the rest while its name is not known.
             <div class="node-sections">
-                {move || {
-                    let latest = latest();
-                    view! {
-                        <PositionSection at=latest.position.as_ref().map(|p| p.at) />
-                        <Identity at=latest.node_info.as_ref().map(|p| p.at) />
-                        <Device packet=latest.device.clone() />
-                        <Stats packet=latest.local_stats.clone() />
-                        <Environment packet=latest.environment.clone() />
-                        <PowerSection packet=latest.power.clone() />
-                        <Neighbors packet=latest.neighbors.clone() />
-                    }
-                }}
-                <Traces drawer />
-                {move || view! { <More latest=latest() /> }}
+                <div class="node-column">
+                    {move || {
+                        let latest = latest();
+                        view! {
+                            <PositionSection at=latest.position.as_ref().map(|p| p.at) />
+                            <Device packet=latest.device.clone() />
+                            <Stats packet=latest.local_stats.clone() />
+                            <Identity at=latest.node_info.as_ref().map(|p| p.at) />
+                        }
+                    }}
+                </div>
+                <div class="node-column">
+                    <Traces drawer />
+                    {move || {
+                        let latest = latest();
+                        view! {
+                            <Environment packet=latest.environment.clone() />
+                            <PowerSection packet=latest.power.clone() />
+                            <Neighbors packet=latest.neighbors.clone() />
+                            <More latest />
+                        }
+                    }}
+                </div>
             </div>
             <TracesDrawer open=drawer />
             <Problem />
@@ -248,7 +267,23 @@ fn Checks() -> impl IntoView {
         } else {
             None
         };
-        (note.is_some() || !checks.is_empty()).then(|| {
+        // Its name not known yet: what asks for it, first of all.
+        let unknown = (supported(live)
+            && !own(live, asking.num)
+            && live.nodes.with(|nodes| {
+                nodes
+                    .get(&asking.num)
+                    .is_some_and(|n| n.long_name.is_none())
+            }))
+        .then(|| {
+            view! {
+                <li class="info ask-row">
+                    <span>{t!(i18n, node_unknown)}</span>
+                    <AskButton asked=Asked::Request(RequestKind::NodeInfo) place="top" />
+                </li>
+            }
+        });
+        (note.is_some() || unknown.is_some() || !checks.is_empty()).then(|| {
             let note = note.map(|note| view! { <li class="info">{note}</li> });
             let items = checks
                 .into_iter()
@@ -290,7 +325,7 @@ fn Checks() -> impl IntoView {
                     }
                 })
                 .collect_view();
-            view! { <ul class="node-checks">{note} {items}</ul> }
+            view! { <ul class="node-checks">{unknown} {note} {items}</ul> }
         })
     }
 }
@@ -427,12 +462,13 @@ fn Section(
 /// keeps from sending the like, which it fills up the while; or while the
 /// last one waits for its answer.
 #[component]
-fn AskButton(asked: Asked) -> impl IntoView {
+fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let asking = expect_context::<Asking>();
     let OpenMenu(menu) = expect_context::<OpenMenu>();
     let Pressed(pressed) = expect_context::<Pressed>();
+    let me = ButtonId { asked, place };
     let pending = move || match asked {
         Asked::Request(kind) => live.requests.with(|requests| {
             requests.iter().any(|r| {
@@ -452,7 +488,7 @@ fn AskButton(asked: Asked) -> impl IntoView {
     };
     let off = move || !connected(live) || pending() || wait() > 0;
     let send = move |channel: u32| {
-        pressed.set(Some(asked));
+        pressed.set(Some(me));
         match asked {
             Asked::Request(kind) => live.ask(asking.num, kind, channel),
             Asked::Trace => live.trace(asking.num, channel),
@@ -477,11 +513,19 @@ fn AskButton(asked: Asked) -> impl IntoView {
             })
     };
     let has_menu = move || by_channel() && channels().len() > 1;
-    let open = move || menu.get() == Some(asked);
+    let open = move || menu.get() == Some(me);
+    // Asking, said by the button pressed; by every one that sends it when
+    // it was asked from elsewhere.
+    let asking_here = move || {
+        pending()
+            && pressed
+                .get()
+                .is_none_or(|pressed| pressed == me || pressed.asked != asked)
+    };
     let label = move || {
-        if pending() {
+        if asking_here() {
             t_string!(i18n, node_asking).to_owned()
-        } else if pressed.get() == Some(asked) && wait() > 0 {
+        } else if pressed.get() == Some(me) && wait() > 0 {
             // Answered already, but the radio still keeps from sending the
             // like: the button pressed says so while it fills up.
             t_string!(i18n, node_waiting).to_owned()
@@ -520,7 +564,7 @@ fn AskButton(asked: Asked) -> impl IntoView {
                         {label}
                         {move || {
                             paced()
-                                .filter(|_| pressed.get() == Some(asked))
+                                .filter(|_| pressed.get() == Some(me))
                                 .map(|(_, filled)| {
                                     view! { <i class="fill" style=format!("width: {filled}%")></i> }
                                 })
@@ -540,7 +584,7 @@ fn AskButton(asked: Asked) -> impl IntoView {
                                         on:click=move |ev| {
                                             ev.stop_propagation();
                                             menu.update(|m| {
-                                                *m = if *m == Some(asked) { None } else { Some(asked) };
+                                                *m = if *m == Some(me) { None } else { Some(me) };
                                             });
                                         }
                                     >

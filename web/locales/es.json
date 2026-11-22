@@ -356,6 +356,7 @@
   "node_pace_traceroute": "La radio podrá trazar otra ruta en {n} s.",
   "node_mqtt_hint": "Solo se oye por MQTT: las peticiones pueden no llegarle.",
   "node_identity": "Identidad",
+  "node_unknown": "Aún no sabemos su nombre ni su hardware: los da su información.",
   "node_channel_menu": "Por el canal (el nodo también tiene que tenerlo)",
   "node_channel_choose": "Elegir el canal",
   "node_direct": "Lo que va solo a él",

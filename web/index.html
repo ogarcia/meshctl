@@ -966,8 +966,15 @@
         background: var(--mc-surface);
         font-size: 13px;
       }
-      .node-checks li span { color: var(--mc-muted); }
+      .node-checks li > span:not(.ask-split) { color: var(--mc-muted); }
       .node-checks li.info { border-left-color: var(--mc-primary); color: var(--mc-muted); }
+      .node-checks li.ask-row {
+        flex-direction: row;
+        align-items: center;
+        gap: 12px;
+        padding: 6px 8px 6px 14px;
+        color: var(--mc-text);
+      }
       .node-figures {
         display: flex;
         flex-wrap: wrap;
@@ -1004,7 +1011,16 @@
       .figure.low .value { color: var(--mc-danger); }
       .figure.low .bar i { background: var(--mc-danger); }
       /* Sections in columns that even themselves out, whatever each holds. */
-      .node-sections { columns: 2 440px; column-gap: 40px; }
+      .node-sections {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 40px;
+        align-items: start;
+      }
+      .node-column { display: flex; flex-direction: column; min-width: 0; }
+      @media (max-width: 1000px) {
+        .node-sections { grid-template-columns: minmax(0, 1fr); }
+      }
       .node-section {
         break-inside: avoid;
         padding: 0 4px 18px;
@@ -1034,8 +1050,8 @@
       /* A request's button: on the primary channel, with a menu for another
          beside it when the channel matters; filling up while the radio keeps
          from sending the like. */
-      /* One edge around both halves, lit whole on hovering; the line between
-         them only when the menu is about to open, or is. */
+      /* One edge around both halves, lit whole on hovering either; a faint
+         line between them always, never lit. */
       .ask-split {
         position: relative;
         display: inline-flex;
@@ -1062,12 +1078,10 @@
         display: flex;
         align-items: center;
         padding: 0 6px;
-        border-left: 1px solid transparent;
+        border-left: 1px solid var(--mc-border);
         border-top-left-radius: 0;
         border-bottom-left-radius: 0;
       }
-      .ask-split .caret:not(:disabled):hover,
-      .ask-split.open .caret { border-left-color: var(--mc-primary); }
       .ask-split .caret svg { width: 16px; height: 16px; transition: transform 0.15s; }
       .ask-split.open .caret svg { transform: rotate(180deg); }
       .ask-split .fill {
