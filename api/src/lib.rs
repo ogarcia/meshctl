@@ -1428,6 +1428,9 @@ pub struct Preferences {
     /// Which groups of a node's telemetry charts are folded away, a bit each:
     /// device 1, signal 2, environment 4, power 8.
     pub telemetry_folded: u8,
+    /// Whether the live view shows what the radio itself sends too: by
+    /// default it leaves it out.
+    pub packets_with_own: bool,
 }
 
 /// A column of the nodes list to sort by, and which way.

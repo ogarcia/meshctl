@@ -128,10 +128,8 @@ pub struct Live {
     /// What the selected radio heard, the newest first.
     pub packets: RwSignal<Vec<Packet>>,
     /// Which packets the live view shows, but for the radio's own: those go
-    /// by `packets_hide_own`, as its node changes with the radio.
+    /// by the preferences, as its node changes with the radio.
     pub packet_filter: RwSignal<PacketFilter>,
-    /// Whether the live view leaves out what the radio itself sends.
-    pub packets_hide_own: RwSignal<bool>,
     /// Packets come while the live view holds still, the newest first: to
     /// go on top of it once it goes on.
     pub packets_held: RwSignal<Vec<Packet>>,
@@ -198,7 +196,6 @@ impl Live {
             traceroutes: RwSignal::new(Vec::new()),
             packets: RwSignal::new(Vec::new()),
             packet_filter: RwSignal::new(PacketFilter::default()),
-            packets_hide_own: RwSignal::new(false),
             packets_held: RwSignal::new(Vec::new()),
             packets_paused: RwSignal::new(false),
             packets_away: RwSignal::new(false),
@@ -222,6 +219,12 @@ impl Live {
         }
     }
 
+    /// Whether the live view leaves out what the radio itself sends, as the
+    /// preferences say: so by default.
+    pub fn packets_hide_own(self) -> bool {
+        !self.preferences.with_untracked(|p| p.packets_with_own)
+    }
+
     /// Which packets the live view shows, the radio's own left out if asked
     /// and its node is known.
     pub fn packets_filter(self) -> PacketFilter {
@@ -229,7 +232,7 @@ impl Live {
             .status
             .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
         PacketFilter {
-            not_from: own.filter(|_| self.packets_hide_own.get_untracked()),
+            not_from: own.filter(|_| self.packets_hide_own()),
             ..self.packet_filter.get_untracked()
         }
     }
@@ -430,7 +433,7 @@ impl Live {
                 .local
                 .as_ref()
                 .map(|l| l.num)
-                .filter(|_| self.packets_hide_own.get_untracked()),
+                .filter(|_| self.packets_hide_own()),
             ..self.packet_filter.get_untracked()
         };
         let packets = daemon::packets(radio, None, &filter).await?;

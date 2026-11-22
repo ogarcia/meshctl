@@ -1969,35 +1969,37 @@
       }
       .packet-tools {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr);
         grid-template-areas:
-          "kind channel reach reach"
-          "node node node own";
+          "kind channel reach"
+          "search search search";
         gap: 8px;
         align-items: center;
       }
       .packet-tools .kind { grid-area: kind; }
       .packet-tools .channel { grid-area: channel; }
       .packet-tools .segmented { grid-area: reach; width: auto; }
-      .packet-tools .node-filter { grid-area: node; }
-      .packet-tools .choice { grid-area: own; }
+      .packet-tools .search { grid-area: search; display: flex; align-items: center; gap: 12px; min-width: 0; }
       .packet-tools select,
-      .packet-tools .node-filter,
-      .packet-tools .choice { width: 100%; min-width: 0; min-height: 36px; }
-      .packet-tools .choice { padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .packet-tools .node-filter { width: 100%; min-width: 0; min-height: 36px; }
+      /* The node as wide as the switch leaves; the switch as wide as it is,
+         a hair in from the edge, as the reach's round corner above is. */
+      .packet-tools .node-filter { flex: 1; }
+      .packet-tools .own { flex: none; display: flex; align-items: center; gap: 10px; min-height: 36px; margin-right: 3px; }
+      .packet-tools .own .label { white-space: nowrap; cursor: pointer; }
       @container live (min-width: 1150px) {
         .packet-tools {
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(max-content, 1.6fr) minmax(0, 1.4fr) auto;
-          grid-template-areas: "kind channel reach node own";
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(max-content, 1.6fr) minmax(0, 2fr);
+          grid-template-areas: "kind channel reach search";
         }
       }
-      @container live (max-width: 640px) {
+      @container live (max-width: 700px) {
         .packet-tools {
           grid-template-columns: repeat(2, minmax(0, 1fr));
           grid-template-areas:
             "kind channel"
             "reach reach"
-            "node own";
+            "search search";
         }
       }
       /* The pause, in the heading: marked while paused. */

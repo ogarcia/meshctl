@@ -120,7 +120,7 @@
   "packets_channel": "Canal",
   "packets_channel_all": "Todos los canales",
   "packets_node": "Nodo, de o hacia",
-  "packets_hide_own": "Sin los de esta radio",
+  "packets_with_own": "Incluir esta radio",
   "packets_pause": "Pausar",
   "packets_resume": "Reanudar",
   "packets_new": "{{ count }} nuevos",

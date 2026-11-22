@@ -136,7 +136,10 @@ pub fn PacketsView() -> impl IntoView {
     // Filtered anew: read again from the top. Only as the filters change, not
     // as they are set to what they were, as a field left does.
     Effect::new(move |last: Option<(PacketFilter, bool)>| {
-        let now = (live.packet_filter.get(), live.packets_hide_own.get());
+        let now = (
+            live.packet_filter.get(),
+            !live.preferences.with(|p| p.packets_with_own),
+        );
         if last.is_some_and(|last| last != now) {
             if let Some(main) = scroller() {
                 main.set_scroll_top(0);
@@ -149,9 +152,8 @@ pub fn PacketsView() -> impl IntoView {
         now
     });
 
-    let filtered = move || {
-        live.packet_filter.with(|f| *f != PacketFilter::default()) || live.packets_hide_own.get()
-    };
+    // Filtered by hand: the radio's own left out, as by default, is not.
+    let filtered = move || live.packet_filter.with(|f| *f != PacketFilter::default());
     let held = move || live.packets_held.with(Vec::len);
     provide_context(Shown {
         open: RwSignal::new(false),
@@ -276,6 +278,12 @@ fn PacketTools() -> impl IntoView {
     .collect();
 
     // A node by its name as the list offers it, or by its id written out.
+    // The radio's own in the list or not, kept in the preferences.
+    let with_own = move || {
+        let mut preferences = live.preferences.get_untracked();
+        preferences.packets_with_own = !preferences.packets_with_own;
+        live.prefer(preferences);
+    };
     let node_label = move |num: u32| format!("{} (!{num:08x})", node_name(live, num));
     let pick_node = move |ev: leptos::ev::Event| {
         let text = event_target_value(&ev);
@@ -326,29 +334,35 @@ fn PacketTools() -> impl IntoView {
                 </For>
             </select>
             {pills(reaches)}
-            <input
-                type="search"
-                class="node-filter"
-                list="packet-nodes"
-                placeholder=move || t_string!(i18n, packets_node)
-                prop:value=move || filter.with(|f| f.node).map(node_label).unwrap_or_default()
-                on:change=pick_node
-                on:search=pick_node
-            />
-            <datalist id="packet-nodes">
-                <For each=move || live.nodes.with(|n| n.keys().copied().collect::<Vec<_>>()) key=|num| *num let:num>
-                    <option value=move || node_label(num)></option>
-                </For>
-            </datalist>
-            <button
-                type="button"
-                class="choice"
-                class:on=move || live.packets_hide_own.get()
-                aria-pressed=move || live.packets_hide_own.get().to_string()
-                on:click=move |_| live.packets_hide_own.update(|h| *h = !*h)
-            >
-                {t!(i18n, packets_hide_own)}
-            </button>
+            // The node to follow, as wide as the switch beside it leaves.
+            <div class="search">
+                <input
+                    type="search"
+                    class="node-filter"
+                    list="packet-nodes"
+                    placeholder=move || t_string!(i18n, packets_node)
+                    prop:value=move || filter.with(|f| f.node).map(node_label).unwrap_or_default()
+                    on:change=pick_node
+                    on:search=pick_node
+                />
+                <datalist id="packet-nodes">
+                    <For each=move || live.nodes.with(|n| n.keys().copied().collect::<Vec<_>>()) key=|num| *num let:num>
+                        <option value=move || node_label(num)></option>
+                    </For>
+                </datalist>
+                // The radio's own, left out unless asked for: a switch, off as it
+                // starts, and kept in the preferences.
+                <div class="own">
+                    <crate::radios::Switch
+                        on=Signal::derive(move || live.preferences.with(|p| p.packets_with_own))
+                        label=Signal::derive(move || t_string!(i18n, packets_with_own).to_owned())
+                        flip=move |_| with_own()
+                    />
+                    <span class="label" on:click=move |_| with_own()>
+                        {t!(i18n, packets_with_own)}
+                    </span>
+                </div>
+            </div>
         </div>
     }
 }
