@@ -1027,7 +1027,8 @@
         margin-bottom: 18px;
         border-bottom: 1px solid var(--mc-border);
       }
-      .node-section > header {
+      .node-section > header,
+      .part > header {
         display: flex;
         align-items: center;
         gap: 10px;
@@ -1035,6 +1036,11 @@
         margin-bottom: 8px;
       }
       .node-section h2 { margin: 0; font-size: 16px; }
+      .part { padding-top: 10px; border-top: 1px solid var(--mc-border); }
+      .part + .part { margin-top: 12px; }
+      .part > header { min-height: 32px; margin-bottom: 6px; }
+      .part h3 { flex: none; margin: 0; font-size: 14px; }
+      .part .nothing { margin: 0; }
       .node-section h2 { flex: none; }
       .node-section .when {
         display: flex;
@@ -1149,25 +1155,6 @@
       .facts .copyable .icon-button { width: 28px; height: 28px; }
       .facts .copyable .icon-button svg { width: 16px; height: 16px; }
       .facts .key { font-size: 12px; font-weight: 400; word-break: break-all; }
-      .node-more ul { list-style: none; margin: 0; padding: 0; }
-      .node-more li {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 8px 0;
-        border-top: 1px solid var(--mc-border);
-      }
-      .node-more .what { display: flex; flex-direction: column; gap: 2px; font-weight: 600; }
-      .node-more .what { min-width: 0; }
-      .node-more .why {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 12px;
-        font-weight: 400;
-        color: var(--mc-muted);
-      }
-      .node-more .why:empty { display: none; }
       .node-page button.link {
         padding: 0;
         border: 0;

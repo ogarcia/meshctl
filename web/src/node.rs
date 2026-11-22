@@ -113,8 +113,8 @@ fn NodePage(num: u32) -> impl IntoView {
             <Checks />
             <Tiles num />
             // Two columns, headed by what is looked at most: where it is, and
-            // the routes to it. Who it is goes last, for looking up: asking
-            // for it is over all the rest while its name is not known.
+            // the routes to it: what comes of its own accord on the left, what
+            // is asked for on the right, the least likely to answer last.
             <div class="node-sections">
                 <div class="node-column">
                     {move || {
@@ -123,7 +123,6 @@ fn NodePage(num: u32) -> impl IntoView {
                             <PositionSection at=latest.position.as_ref().map(|p| p.at) />
                             <Device packet=latest.device.clone() />
                             <Stats packet=latest.local_stats.clone() />
-                            <Identity at=latest.node_info.as_ref().map(|p| p.at) />
                         }
                     }}
                 </div>
@@ -132,10 +131,8 @@ fn NodePage(num: u32) -> impl IntoView {
                     {move || {
                         let latest = latest();
                         view! {
-                            <Environment packet=latest.environment.clone() />
-                            <PowerSection packet=latest.power.clone() />
-                            <Neighbors packet=latest.neighbors.clone() />
-                            <More latest />
+                            <Identity at=latest.node_info.as_ref().map(|p| p.at) />
+                            <Sensors latest />
                         }
                     }}
                 </div>
@@ -863,12 +860,9 @@ const ENVIRONMENT_FIELDS: [&str; 19] = [
     "current",
 ];
 
-/// What its environment sensors read: only when it ever told.
-#[component]
-fn Environment(packet: Option<Packet>) -> impl IntoView {
-    let i18n = use_i18n();
-    let at = packet.as_ref().map(|p| p.at);
-    let metrics = object(packet.as_ref(), Some("environment_metrics"))?;
+/// What its environment sensors read.
+fn environment_facts(i18n: I18nContext<Locale>, packet: Option<&Packet>) -> Option<AnyView> {
+    let metrics = object(packet, Some("environment_metrics"))?;
     let facts = ENVIRONMENT_FIELDS
         .iter()
         .filter_map(|key| {
@@ -877,23 +871,12 @@ fn Environment(packet: Option<Packet>) -> impl IntoView {
             Some(fact(label, format!("{value:.decimals$}{unit}")))
         })
         .collect_view();
-    Some(view! {
-        <Section
-            title=t!(i18n, node_environment).into_any()
-            at
-            asked=Some(Asked::Request(RequestKind::EnvironmentTelemetry))
-        >
-            <dl class="facts">{facts}</dl>
-        </Section>
-    })
+    Some(view! { <dl class="facts">{facts}</dl> }.into_any())
 }
 
-/// What its power sensors read, channel by channel: only when it ever told.
-#[component]
-fn PowerSection(packet: Option<Packet>) -> impl IntoView {
-    let i18n = use_i18n();
-    let at = packet.as_ref().map(|p| p.at);
-    let metrics = object(packet.as_ref(), Some("power_metrics"))?;
+/// What its power sensors read, channel by channel.
+fn power_facts(i18n: I18nContext<Locale>, packet: Option<&Packet>) -> Option<AnyView> {
+    let metrics = object(packet, Some("power_metrics"))?;
     let facts = (1..=8)
         .filter_map(|channel| {
             let voltage = number(&metrics, &format!("ch{channel}_voltage"));
@@ -908,10 +891,146 @@ fn PowerSection(packet: Option<Packet>) -> impl IntoView {
             Some(fact(label, value))
         })
         .collect_view();
-    Some(view! {
-        <Section title=t!(i18n, node_power).into_any() at asked=Some(Asked::Request(RequestKind::PowerTelemetry))>
-            <dl class="facts">{facts}</dl>
+    Some(view! { <dl class="facts">{facts}</dl> }.into_any())
+}
+
+/// The nodes it hears directly, each opening its page if the radio knows
+/// of it.
+fn neighbour_list(
+    i18n: I18nContext<Locale>,
+    live: Live,
+    packet: Option<&Packet>,
+) -> Option<AnyView> {
+    let info = object(packet, None)?;
+    let neighbours: Vec<(u32, Option<f64>)> = info
+        .get("neighbors")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|n| {
+                    let num = u32::try_from(n.get("node_id")?.as_u64()?).ok()?;
+                    Some((num, n.get("snr").and_then(Value::as_f64)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if neighbours.is_empty() {
+        return Some(view! { <p class="nothing">{t!(i18n, neighbors_none)}</p> }.into_any());
+    }
+    let rows = neighbours
+        .into_iter()
+        .map(|(num, snr)| {
+            let known = live.nodes.with_untracked(|nodes| nodes.contains_key(&num));
+            let name = move || title(live, Peer::Node { node: num });
+            let who = if known {
+                view! {
+                    <button class="link" on:click=move |_| live.open_node(num)>
+                        {name}
+                    </button>
+                }
+                .into_any()
+            } else {
+                view! { <span class="mono">{name}</span> }.into_any()
+            };
+            view! {
+                <li>
+                    {who}
+                    <span class="snr">{snr.map(|s| format!("{s:.1} dB"))}</span>
+                </li>
+            }
+        })
+        .collect_view();
+    Some(view! { <ul class="neighbours">{rows}</ul> }.into_any())
+}
+
+/// What the node tells only with the sensors or the module for it: always
+/// all three, in the same place, each growing where it is when it tells.
+#[component]
+fn Sensors(latest: NodeLatest) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let at = |packet: &Option<Packet>| packet.as_ref().map(|p| p.at);
+    view! {
+        <Section title=t!(i18n, node_sensors).into_any() class="node-sensors">
+            <p class="hint">{t!(i18n, node_sensors_hint)}</p>
+            <Part
+                kind=RequestKind::EnvironmentTelemetry
+                title=t!(i18n, node_environment).into_any()
+                at=at(&latest.environment)
+                body=environment_facts(i18n, latest.environment.as_ref())
+            />
+            <Part
+                kind=RequestKind::PowerTelemetry
+                title=t!(i18n, node_power).into_any()
+                at=at(&latest.power)
+                body=power_facts(i18n, latest.power.as_ref())
+            />
+            <Part
+                kind=RequestKind::Neighbors
+                title=t!(i18n, node_neighbors).into_any()
+                at=at(&latest.neighbors)
+                body=neighbour_list(i18n, live, latest.neighbors.as_ref())
+            />
         </Section>
+    }
+}
+
+/// One of the sensors or modules: its heading as a section's, and what it
+/// told, or in one line why nothing yet.
+#[component]
+fn Part(
+    kind: RequestKind,
+    title: AnyView,
+    at: Option<i64>,
+    body: Option<AnyView>,
+) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let when = at.map(|at| {
+        let at = u32::try_from(at).unwrap_or_default();
+        move || t_string!(i18n, node_ago).replace("{ago}", &ago(live.now.get(), at))
+    });
+    let body = body.unwrap_or_else(|| {
+        let status = move || {
+            if refused(live, asking.num, kind) {
+                match kind {
+                    RequestKind::EnvironmentTelemetry => t!(i18n, node_no_environment).into_any(),
+                    RequestKind::PowerTelemetry => t!(i18n, node_no_power).into_any(),
+                    _ => t!(i18n, node_no_neighbors).into_any(),
+                }
+            } else {
+                t!(i18n, node_never).into_any()
+            }
+        };
+        view! { <p class="nothing">{status}</p> }.into_any()
+    });
+    view! {
+        <div class="part">
+            <header>
+                <h3>{title}</h3>
+                <span class="when">
+                    {when.map(|when| view! { <span>{when}</span> })}
+                    <Quiet kind />
+                </span>
+                <AskButton asked=Asked::Request(kind) />
+            </header>
+            {body}
+        </div>
+    }
+}
+
+/// Whether the latest time the node was asked for a kind, and it answered
+/// or gave up, it said it has nothing to tell: kept while it is asked anew,
+/// so that the line stays until another takes its place.
+fn refused(live: Live, num: u32, kind: RequestKind) -> bool {
+    live.requests.with(|requests| {
+        requests
+            .iter()
+            .find(|r| r.node == num && r.kind == kind && r.status != RequestStatus::Pending)
+            .is_some_and(|r| {
+                r.status == RequestStatus::Failed && r.error.as_deref() == Some("NO_RESPONSE")
+            })
     })
 }
 
@@ -954,141 +1073,6 @@ fn Stats(packet: Option<Packet>) -> impl IntoView {
         <Section title=t!(i18n, node_stats).into_any() at asked=Some(Asked::Request(RequestKind::LocalStats))>
             {body}
         </Section>
-    }
-}
-
-/// The nodes it hears directly, each opening its page: only when it ever
-/// told.
-#[component]
-fn Neighbors(packet: Option<Packet>) -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let at = packet.as_ref().map(|p| p.at);
-    let info = object(packet.as_ref(), None)?;
-    let neighbours: Vec<(u32, Option<f64>)> = info
-        .get("neighbors")
-        .and_then(Value::as_array)
-        .map(|list| {
-            list.iter()
-                .filter_map(|n| {
-                    let num = u32::try_from(n.get("node_id")?.as_u64()?).ok()?;
-                    Some((num, n.get("snr").and_then(Value::as_f64)))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let body = if neighbours.is_empty() {
-        view! { <p class="nothing">{t!(i18n, neighbors_none)}</p> }.into_any()
-    } else {
-        let rows = neighbours
-            .into_iter()
-            .map(|(num, snr)| {
-                // A node the radio does not know of has no page to open.
-                let known = live.nodes.with_untracked(|nodes| nodes.contains_key(&num));
-                let name = move || title(live, Peer::Node { node: num });
-                let who = if known {
-                    view! {
-                        <button class="link" on:click=move |_| live.open_node(num)>
-                            {name}
-                        </button>
-                    }
-                    .into_any()
-                } else {
-                    view! { <span class="mono">{name}</span> }.into_any()
-                };
-                view! {
-                    <li>
-                        {who}
-                        <span class="snr">{snr.map(|s| format!("{s:.1} dB"))}</span>
-                    </li>
-                }
-            })
-            .collect_view();
-        view! { <ul class="neighbours">{rows}</ul> }.into_any()
-    };
-    Some(view! {
-        <Section title=t!(i18n, node_neighbors).into_any() at asked=Some(Asked::Request(RequestKind::Neighbors))>
-            {body}
-        </Section>
-    })
-}
-
-/// What the node may answer only if it has the sensors or the module on,
-/// and never told yet: to try, and what came of trying.
-#[component]
-fn More(latest: NodeLatest) -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let asking = expect_context::<Asking>();
-    let missing: Vec<RequestKind> = [
-        (
-            RequestKind::EnvironmentTelemetry,
-            latest.environment.is_none(),
-        ),
-        (RequestKind::PowerTelemetry, latest.power.is_none()),
-        (RequestKind::Neighbors, latest.neighbors.is_none()),
-    ]
-    .into_iter()
-    .filter_map(|(kind, missing)| missing.then_some(kind))
-    .collect();
-    if missing.is_empty() || !supported(live) || own(live, asking.num) {
-        return None;
-    }
-    // Whether the latest time it was asked, and it answered or gave up, it
-    // said it has nothing to tell: kept while it is asked anew, so that the
-    // line stays until another takes its place.
-    let refused = move |kind: RequestKind| {
-        live.requests.with(|requests| {
-            requests
-                .iter()
-                .find(|r| {
-                    r.node == asking.num && r.kind == kind && r.status != RequestStatus::Pending
-                })
-                .is_some_and(|r| {
-                    r.status == RequestStatus::Failed && r.error.as_deref() == Some("NO_RESPONSE")
-                })
-        })
-    };
-    let rows = missing
-        .into_iter()
-        .map(|kind| {
-            let why = move || {
-                refused(kind).then(|| match kind {
-                    RequestKind::EnvironmentTelemetry => t!(i18n, node_no_environment).into_any(),
-                    RequestKind::PowerTelemetry => t!(i18n, node_no_power).into_any(),
-                    _ => t!(i18n, node_no_neighbors).into_any(),
-                })
-            };
-            view! {
-                <li>
-                    <span class="what">
-                        <KindLabel kind />
-                        <span class="why">{why}</span>
-                    </span>
-                    <AskButton asked=Asked::Request(kind) />
-                </li>
-            }
-        })
-        .collect_view();
-    Some(view! {
-        <Section title=t!(i18n, node_more).into_any() class="node-more">
-            <p class="hint">{t!(i18n, node_more_hint)}</p>
-            <ul>{rows}</ul>
-        </Section>
-    })
-}
-
-#[component]
-fn KindLabel(kind: RequestKind) -> impl IntoView {
-    let i18n = use_i18n();
-    move || match kind {
-        RequestKind::NodeInfo => t!(i18n, ask_node_info).into_any(),
-        RequestKind::Position => t!(i18n, ask_position).into_any(),
-        RequestKind::DeviceTelemetry => t!(i18n, ask_device).into_any(),
-        RequestKind::EnvironmentTelemetry => t!(i18n, ask_environment).into_any(),
-        RequestKind::PowerTelemetry => t!(i18n, ask_power).into_any(),
-        RequestKind::LocalStats => t!(i18n, ask_local_stats).into_any(),
-        RequestKind::Neighbors => t!(i18n, ask_neighbors).into_any(),
     }
 }
 
