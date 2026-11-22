@@ -153,6 +153,10 @@ pub fn PacketsView() -> impl IntoView {
         live.packet_filter.with(|f| *f != PacketFilter::default()) || live.packets_hide_own.get()
     };
     let held = move || live.packets_held.with(Vec::len);
+    provide_context(Shown {
+        open: RwSignal::new(false),
+        packet: RwSignal::new(None),
+    });
 
     view! {
         <div class="live">
@@ -194,6 +198,9 @@ pub fn PacketsView() -> impl IntoView {
                 </Show>
             </section>
         </div>
+        // Out of the view, which holds its size: a drawer in it would be held
+        // in it too.
+        <PacketDrawer />
     }
 }
 
@@ -314,7 +321,7 @@ fn PacketTools() -> impl IntoView {
                 <option value="">{t!(i18n, packets_channel_all)}</option>
                 <For each=channels key=|slot| *slot let:slot>
                     <option value=slot.to_string()>
-                        {move || format!("# {}", title(live, Peer::Channel { channel: slot }))}
+                        {move || title(live, Peer::Channel { channel: slot })}
                     </option>
                 </For>
             </select>
@@ -382,29 +389,112 @@ pub fn PauseButton() -> impl IntoView {
     }
 }
 
+/// The packet open in its drawer, whole, as a row opens it.
+#[derive(Clone, Copy)]
+struct Shown {
+    open: RwSignal<bool>,
+    packet: RwSignal<Option<Packet>>,
+}
+
+/// How a packet came: sent by the radio itself, or heard, by air or by
+/// MQTT.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Source {
+    Tx,
+    Lora,
+    Mqtt,
+}
+
+impl Source {
+    fn of(live: Live, packet: &Packet) -> Self {
+        let own = live
+            .status
+            .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+        if own == Some(packet.from) {
+            Self::Tx
+        } else if packet.via_mqtt {
+            Self::Mqtt
+        } else {
+            Self::Lora
+        }
+    }
+
+    fn class(self) -> &'static str {
+        match self {
+            Self::Tx => "source tx",
+            Self::Lora => "source lora",
+            Self::Mqtt => "source mqtt",
+        }
+    }
+}
+
+/// A kind of packet's class, for its colour.
+fn kind_class(kind: PacketKind) -> &'static str {
+    match kind {
+        PacketKind::Text => "kind-tag text",
+        PacketKind::Position => "kind-tag position",
+        PacketKind::NodeInfo => "kind-tag node-info",
+        PacketKind::Routing => "kind-tag routing",
+        PacketKind::Telemetry => "kind-tag telemetry",
+        PacketKind::Traceroute => "kind-tag traceroute",
+        PacketKind::Neighbors => "kind-tag neighbors",
+        PacketKind::Encrypted => "kind-tag encrypted",
+        PacketKind::Other => "kind-tag other",
+    }
+}
+
+/// A node by its short name and its long one, or its id alone.
+fn who(live: Live, num: u32) -> String {
+    let short = short_name(live, num);
+    let long = node_name(live, num);
+    if short.is_empty() || long.starts_with('!') {
+        long
+    } else {
+        format!("{short} · {long}")
+    }
+}
+
+/// The node that relayed a packet last, by the last byte of its number, as
+/// the firmware tells: by its short name when only one known node ends so,
+/// or only one heard directly does; by the byte otherwise.
+fn relay_name(live: Live, relay: u32) -> String {
+    live.nodes.with(|nodes| {
+        let ending: Vec<_> = nodes.values().filter(|n| n.num & 0xff == relay).collect();
+        let direct: Vec<_> = ending.iter().filter(|n| n.hops_away == Some(0)).collect();
+        let one = match (ending.as_slice(), direct.as_slice()) {
+            ([only], _) => Some(only.num),
+            (_, [only]) => Some(only.num),
+            _ => None,
+        };
+        one.map_or_else(
+            || format!("··{relay:02x}"),
+            |num| {
+                let short = short_name(live, num);
+                if short.is_empty() {
+                    node_name(live, num)
+                } else {
+                    short
+                }
+            },
+        )
+    })
+}
+
 #[component]
 fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let open = RwSignal::new(false);
+    let shown = expect_context::<Shown>();
     let from = packet.from;
     let to = packet.to;
-    let who = move |num: u32| {
-        let short = short_name(live, num);
-        let long = node_name(live, num);
-        if short.is_empty() || long.starts_with('!') {
-            long
-        } else {
-            format!("{short} · {long}")
-        }
-    };
-    let reception = {
+    let channel = packet.channel;
+    let kind = PacketKind::of(packet.port.as_deref());
+    let source = Source::of(live, &packet);
+    let port = packet.port.clone().map(|p| short_port(&p));
+    let summary = summary(&packet);
+    let (hops_away, hop_start, relay) = (packet.hops_away, packet.hop_start, packet.relay_node);
+    let signal = {
         let mut parts = Vec::new();
-        if packet.via_mqtt {
-            parts.push("MQTT".to_owned());
-        } else if let Some(hops) = packet.hops_away {
-            parts.push(format!("{hops} ⇢"));
-        }
         if let Some(snr) = packet.snr {
             parts.push(format!("{snr:.1} dB"));
         }
@@ -413,46 +503,235 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
         }
         parts.join(" · ")
     };
-    let port = packet.port.clone().map(|p| short_port(&p));
-    let encrypted = packet.port.is_none();
-    let summary = summary(&packet);
-    let detail = packet
-        .payload
-        .as_ref()
-        .and_then(|payload| serde_json::to_string_pretty(payload).ok());
-    let has_detail = detail.is_some();
+    // Heard by air: in how many hops, and by whom last when it was not
+    // straight from its sender.
+    let hops = move || match (source, hops_away) {
+        (Source::Lora, Some(0)) => t!(i18n, packets_direct).into_any(),
+        (Source::Lora, Some(hops)) => {
+            let count = if hops == 1 {
+                t!(i18n, packets_hop).into_any()
+            } else {
+                t!(i18n, packets_hops, count = hops).into_any()
+            };
+            let relay = relay.map(|relay| format!(" · {}", relay_name(live, relay)));
+            view! { {count} {relay} }.into_any()
+        }
+        _ => ().into_any(),
+    };
+    // Of how many it could take, as the firmware counts.
+    let hops_title = move || match hops_away {
+        Some(hops) if source == Source::Lora => format!("{hops}/{hop_start}"),
+        _ => String::new(),
+    };
+    let source_label = move || match source {
+        Source::Tx => t_string!(i18n, packets_tx),
+        Source::Lora => t_string!(i18n, packets_rx_lora),
+        Source::Mqtt => t_string!(i18n, packets_rx_mqtt),
+    };
+    let source_title = move || match source {
+        Source::Tx => t_string!(i18n, packets_tx_title),
+        Source::Lora => t_string!(i18n, packets_rx_lora_title),
+        Source::Mqtt => t_string!(i18n, packets_rx_mqtt_title),
+    };
+    let open = {
+        let packet = packet.clone();
+        move |_| {
+            shown.packet.set(Some(packet.clone()));
+            shown.open.set(true);
+        }
+    };
 
     view! {
-        <li class="packet" class:open=move || open.get() class:arrived=fresh>
-            <button class="packet-line" on:click=move |_| open.update(|o| *o = !*o) disabled=!has_detail>
+        <li class="packet" class:arrived=fresh>
+            <button class="packet-line" on:click=open>
                 <span class="time mono">{clock(packet.at)}</span>
-                <span class="port">
-                    {match port {
-                        Some(port) => port.into_any(),
-                        None => t!(i18n, packets_encrypted).into_any(),
-                    }}
+                <span class="kind">
+                    <span class=kind_class(kind)>
+                        {match port {
+                            Some(port) => port.into_any(),
+                            None => t!(i18n, packets_encrypted).into_any(),
+                        }}
+                    </span>
+                </span>
+                <span class="source-cell">
+                    <span class=source.class() title=source_title>{source_label}</span>
                 </span>
                 <span class="route">
-                    <span class="from">{move || who(from)}</span>
+                    <span class="from">{move || who(live, from)}</span>
                     " → "
                     <span class="to">
                         {move || {
                             if to == BROADCAST {
-                                title(live, Peer::Channel { channel: packet.channel })
+                                title(live, Peer::Channel { channel })
                             } else {
-                                who(to)
+                                who(live, to)
                             }
                         }}
                     </span>
                 </span>
-                <span class="summary" class:dim=encrypted>{summary}</span>
-                <span class="reception mono dim">{reception}</span>
+                <span class="summary" class:dim=kind == PacketKind::Encrypted>{summary}</span>
+                <span class="hops dim" title=hops_title>{hops}</span>
+                <span class="signal mono dim">{signal}</span>
             </button>
-            <Show when=move || open.get()>
-                <pre class="payload mono">{detail.clone()}</pre>
-            </Show>
         </li>
     }
+}
+
+/// The packet open, whole: what is known of it, and itself as text, to
+/// copy.
+#[component]
+fn PacketDrawer() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let shown = expect_context::<Shown>();
+    let title = Signal::derive(move || {
+        shown.packet.with(|p| {
+            p.as_ref().map_or_else(String::new, |p| {
+                p.port
+                    .as_deref()
+                    .map_or_else(|| t_string!(i18n, packets_encrypted).to_owned(), short_port)
+            })
+        })
+    });
+    let text = move || {
+        shown
+            .packet
+            .with(|p| {
+                p.as_ref()
+                    .and_then(|p| serde_json::to_string_pretty(p).ok())
+            })
+            .unwrap_or_default()
+    };
+    let foot = ViewFn::from(move || {
+        view! {
+            <button class="with-icon" on:click=move |_| crate::clipboard::copy(&text())>
+                {t!(i18n, packets_copy)}
+            </button>
+        }
+    });
+    view! {
+        <crate::node::Drawer open=shown.open title foot>
+            {move || {
+                shown
+                    .packet
+                    .get()
+                    .map(|packet| {
+                        let source = Source::of(live, &packet);
+                        let (from, to, channel) = (packet.from, packet.to, packet.channel);
+                        let fact = |label: String, value: AnyView| {
+                            view! {
+                                <div class="fact">
+                                    <dt>{label}</dt>
+                                    <dd>{value}</dd>
+                                </div>
+                            }
+                        };
+                        let text_fact = |label: String, value: String| fact(label, value.into_any());
+                        let mut facts = vec![
+                            text_fact(t_string!(i18n, packets_at).to_owned(), when(packet.at)),
+                            text_fact(
+                                t_string!(i18n, packets_from).to_owned(),
+                                format!("{} (!{from:08x})", who(live, from)),
+                            ),
+                            text_fact(
+                                t_string!(i18n, packets_to).to_owned(),
+                                if to == BROADCAST {
+                                    t_string!(i18n, packets_everyone).to_owned()
+                                } else {
+                                    format!("{} (!{to:08x})", who(live, to))
+                                },
+                            ),
+                            text_fact(
+                                t_string!(i18n, packets_channel).to_owned(),
+                                format!("{channel} · {}", title_of(live, channel)),
+                            ),
+                            text_fact(
+                                t_string!(i18n, packets_source).to_owned(),
+                                match source {
+                                    Source::Tx => t_string!(i18n, packets_tx_title),
+                                    Source::Lora => t_string!(i18n, packets_rx_lora_title),
+                                    Source::Mqtt => t_string!(i18n, packets_rx_mqtt_title),
+                                }
+                                .to_owned(),
+                            ),
+                            text_fact(
+                                t_string!(i18n, packets_id).to_owned(),
+                                format!("{} (0x{:08x})", packet.packet_id, packet.packet_id),
+                            ),
+                        ];
+                        if let Some(hops) = packet.hops_away {
+                            let start = packet.hop_start;
+                            facts.push(fact(
+                                t_string!(i18n, packets_hops_label).to_owned(),
+                                t!(i18n, packets_hops_of, hops = hops, start = start).into_any(),
+                            ));
+                        }
+                        if let Some(relay) = packet
+                            .relay_node
+                            .filter(|_| packet.hops_away.is_some_and(|h| h > 0))
+                        {
+                            facts.push(text_fact(
+                                t_string!(i18n, packets_relay).to_owned(),
+                                format!("{} (··{relay:02x})", relay_name(live, relay)),
+                            ));
+                        }
+                        if let Some(snr) = packet.snr {
+                            facts.push(text_fact("SNR".to_owned(), format!("{snr:.2} dB")));
+                        }
+                        if let Some(rssi) = packet.rssi {
+                            facts.push(text_fact("RSSI".to_owned(), format!("{rssi} dBm")));
+                        }
+                        let mut marks: Vec<AnyView> = Vec::new();
+                        if packet.pki {
+                            marks.push(t!(i18n, packets_pki).into_any());
+                        }
+                        if packet.want_response {
+                            marks.push(t!(i18n, packets_want_response).into_any());
+                        }
+                        if let Some(id) = packet.request_id {
+                            marks.push(t!(i18n, packets_answer_to, id = id).into_any());
+                        }
+                        if let Some(id) = packet.reply_id {
+                            marks.push(t!(i18n, packets_reply_to, id = id).into_any());
+                        }
+                        if !marks.is_empty() {
+                            let marks = marks
+                                .into_iter()
+                                .map(|mark| view! { <span class="mark-item">{mark}</span> })
+                                .collect_view();
+                            facts.push(fact(t_string!(i18n, packets_marks).to_owned(), marks.into_any()));
+                        }
+                        view! {
+                            <div class="packet-detail">
+                                <dl class="packet-facts">{facts}</dl>
+                                <pre class="packet-text mono">{text()}</pre>
+                            </div>
+                        }
+                    })
+            }}
+        </crate::node::Drawer>
+    }
+}
+
+/// A channel's name by its slot.
+fn title_of(live: Live, channel: u32) -> String {
+    title(live, Peer::Channel { channel })
+}
+
+/// The day and the time, in the browser's own zone.
+fn when(at: i64) -> String {
+    #[allow(clippy::cast_precision_loss)]
+    let date = js_sys::Date::new_0();
+    date.set_time(at as f64 * 1000.0);
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        date.get_full_year(),
+        date.get_month() + 1,
+        date.get_date(),
+        date.get_hours(),
+        date.get_minutes(),
+        date.get_seconds()
+    )
 }
 
 /// A port without its `_APP`, as people say it.

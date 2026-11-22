@@ -2034,13 +2034,26 @@
         .packet.arrived { animation: arrived-still 1s step-end 1; }
         @keyframes arrived-still { 0% { background: var(--mc-soft); } }
       }
-      .packet-list { list-style: none; margin: 0; padding: 0; }
-      .packet { border-bottom: 1px solid var(--mc-border); }
+      /*
+       * A packet a line: when, its kind in its colour, how it came, from and
+       * to, what it says, its hops and by whom last, and how strong it was
+       * heard. The columns are the list's, as wide as what they hold in any
+       * row, the route first and what it says after.
+       */
+      .packet-list {
+        display: grid;
+        grid-template-columns: auto auto auto minmax(8rem, max-content) minmax(8rem, 1fr) auto auto;
+        column-gap: 14px;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      .packet { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; border-bottom: 1px solid var(--mc-border); }
       .packet:last-child { border-bottom: 0; }
       .packet-line {
         display: grid;
-        grid-template-columns: 64px 128px minmax(140px, 1fr) minmax(0, 2fr) auto;
-        gap: 12px;
+        grid-template-columns: subgrid;
+        grid-column: 1 / -1;
         align-items: baseline;
         width: 100%;
         padding: 10px 8px;
@@ -2049,26 +2062,90 @@
         background: transparent;
         text-align: left;
       }
-      .packet-line:disabled { opacity: 1; cursor: default; }
-      .packet-line:hover, .packet.open .packet-line { background: var(--mc-raised); }
+      .packet-line:hover { background: var(--mc-raised); }
       .packet-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .packet .port { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; color: var(--mc-primary); }
-      .packet .reception { font-size: 11px; }
-      .packet .payload {
+      .packet .hops { font-size: 12px; text-align: right; }
+      .packet .signal { font-size: 11px; text-align: right; }
+      /* A kind, by its colour: its name in it, never the colour alone. */
+      .kind-tag {
+        display: inline-block;
+        padding: 1px 7px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--kind) 16%, transparent);
+        color: color-mix(in srgb, var(--kind) 72%, var(--mc-text));
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+      .kind-tag.text { --kind: #4a96ea; }
+      .kind-tag.position { --kind: #2fb380; }
+      .kind-tag.node-info { --kind: #9775fa; }
+      .kind-tag.routing { --kind: #8a94a0; }
+      .kind-tag.telemetry { --kind: #22b8cf; }
+      .kind-tag.traceroute { --kind: #f06595; }
+      .kind-tag.neighbors { --kind: #ff922b; }
+      .kind-tag.encrypted { --kind: #8a94a0; background: none; border-style: dashed; border-color: var(--mc-border); }
+      .kind-tag.other { --kind: #adb5bd; background: none; border-color: var(--mc-border); }
+      /* How it came: sent by the radio itself in the accent, heard plainly. */
+      .source {
+        display: inline-block;
+        padding: 1px 6px;
+        border: 1px solid var(--mc-border);
+        border-radius: 6px;
+        color: var(--mc-muted);
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
+      }
+      .source.tx { border-color: color-mix(in srgb, var(--mc-primary) 55%, transparent); color: var(--mc-primary); }
+      .source.mqtt { border-style: dashed; }
+      /*
+       * Short of room for a line each: when, its kind, how it came, and how
+       * strong; from and to, and its hops; what it says.
+       */
+      @container live (max-width: 960px) {
+        .packet-list { display: block; }
+        .packet { display: block; }
+        .packet-line {
+          grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
+          grid-template-areas:
+            "time kind source . signal signal"
+            "route route route route route hops"
+            "summary summary summary summary summary summary";
+          gap: 4px 10px;
+        }
+        .packet .time { grid-area: time; }
+        .packet .kind { grid-area: kind; }
+        .packet .source-cell { grid-area: source; }
+        .packet .hops { grid-area: hops; }
+        .packet .route { grid-area: route; }
+        .packet .signal { grid-area: signal; }
+        .packet .summary { grid-area: summary; }
+      }
+      /* A packet whole, in its drawer: what is known of it, and its text. */
+      .packet-facts {
+        display: grid;
+        grid-template-columns: max-content minmax(0, 1fr);
+        gap: 8px 16px;
         margin: 0;
-        padding: 8px 8px 14px 84px;
+        padding: 14px 20px;
+        font-size: 13px;
+      }
+      .packet-facts .fact { display: contents; }
+      .packet-facts dt { color: var(--mc-muted); }
+      .packet-facts dd { margin: 0; overflow-wrap: anywhere; }
+      .packet-facts .mark-item + .mark-item::before { content: " · "; color: var(--mc-muted); }
+      .packet-text {
+        margin: 0 20px 16px;
+        padding: 12px 14px;
+        border-radius: 8px;
         background: var(--mc-surface-2);
         font-size: 12px;
         white-space: pre-wrap;
-        overflow-x: auto;
-      }
-      /* Short of room for a line each: when, what and how heard; from and to;
-         what it says. */
-      @container live (max-width: 860px) {
-        .packet-line { grid-template-columns: 64px minmax(0, 1fr) auto; gap: 4px 10px; }
-        .packet .route { grid-column: 1 / -1; grid-row: 2; }
-        .packet .summary { grid-column: 1 / -1; grid-row: 3; }
-        .packet .payload { padding-left: 8px; }
+        overflow-wrap: anywhere;
       }
 
       .thread { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
