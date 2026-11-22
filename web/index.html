@@ -526,6 +526,7 @@
       .topbar h1 .favorite.on svg { fill: currentColor; }
       .topbar .actions .with-icon { display: inline-flex; align-items: center; gap: 6px; }
       .topbar .actions .with-icon .icon { display: flex; color: var(--mc-muted); }
+      .topbar .actions .primary.with-icon .icon { color: inherit; }
       .topbar .actions .with-icon svg { width: 16px; height: 16px; }
       .topbar .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
       .topbar .actions button { min-height: 34px; font-weight: 600; white-space: nowrap; }
@@ -2384,6 +2385,78 @@
       .emoji-grid button:hover { background: var(--mc-raised); }
       .emoji-grid button.on { background: var(--mc-soft); }
       .emoji-grid p { grid-column: 1 / -1; margin: 8px 0; }
+
+      /*
+       * A phone, last: over the rules of each page above, at the same weight.
+       */
+      @media (max-width: 760px) {
+        /* The heading in one line: the name cut short, the actions as icons. */
+        .topbar { flex-wrap: nowrap; }
+        .topbar .heading { flex: 1; min-width: 0; }
+        .topbar h1 { min-width: 0; }
+        .topbar h1 .title-text,
+        .topbar .heading > .dim { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .topbar .actions { flex-wrap: nowrap; gap: 6px; }
+        .topbar .actions .with-icon { padding: 0 10px; }
+        .topbar .actions .with-icon .label { display: none; }
+        .topbar .node-avatar { width: 32px; height: 32px; }
+        /* The nodes, each in two lines: who, and how it is heard, small. */
+        .node-tools { flex-direction: column; align-items: stretch; }
+        .node-tools .segmented { width: 100%; }
+        .node-tools input { margin-left: 0; width: 100%; }
+        .nodes-table thead { display: none; }
+        .nodes-table, .nodes-table tbody { display: block; }
+        .nodes-table tr.node-row {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: baseline;
+          padding: 10px 4px;
+          border-bottom: 1px solid var(--mc-border);
+        }
+        .nodes-table tr.node-row td { padding: 0; border: 0; }
+        .nodes-table tr.node-row td:first-child { flex: 1 1 100%; }
+        .nodes-table tr.node-row td:nth-child(2),
+        .nodes-table tr.node-row td:nth-child(3),
+        .nodes-table tr.node-row td:nth-child(4) { margin-top: 2px; font-size: 12px; color: var(--mc-muted); }
+        .nodes-table tr.node-row td:nth-child(2) { margin-left: 52px; }
+        .nodes-table tr.node-row td:nth-child(2):not(:empty) + td::before,
+        .nodes-table tr.node-row td:nth-child(3):not(:empty) + td:not(:empty)::before { content: "·"; margin: 0 6px; }
+        .nodes-table tr.node-row td:nth-child(n + 5) { display: none; }
+        .nodes-table .power svg { width: 13px; height: 13px; }
+        /* A node's figures, two by two. */
+        .node-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+        .figure, .figure:first-child { min-width: 0; padding: 0; border-left: 0; }
+        .figure .bar { width: 100%; }
+      }
+
+      /*
+       * A finger, on any screen: buttons and fields a finger's height, 44px,
+       * as the platforms advise. Those that are words in a line, marks in a
+       * line or whole rows already keep their size.
+       */
+      @media (pointer: coarse) {
+        button, input, select { min-height: 44px; }
+        button.link,
+        .mark,
+        .favorite,
+        .chart-group h3 button,
+        .tabbar button,
+        .request-line,
+        .radio-list button,
+        .phone-list .item,
+        .ask-menu button,
+        .ask-split .ask,
+        .segmented button { min-height: 0; }
+        .icon-button,
+        .facts .copyable .icon-button,
+        .trace header .copy { width: 44px; height: 44px; }
+        .ask-split .ask { min-height: 42px; }
+        .topbar .actions .with-icon { min-width: 44px; justify-content: center; }
+        .segmented button { min-height: 38px; }
+        .ask-menu button { min-height: 44px; }
+        /* A mark that is a button: its finger's room, not its look. */
+        .nodes-table .mark.to-map { padding: 10px; margin: -10px -10px -10px -6px; }
+      }
     </style>
   </head>
   <body></body>

@@ -387,7 +387,9 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
                         <span class="name">
                             {name}
                             {favorite.then(|| view! { <span class="mark star" inner_html=STAR></span> })}
-                            // Where it is: to the map, and not to its page as
+                            {unmessagable.then(|| view! { <span class="mark" title=move || t_string!(i18n, node_unmessagable) inner_html=MESSAGE_OFF></span> })}
+                            // Where it is, always the last, to find it in the
+                            // same place: to the map, and not to its page as
                             // the rest of the row.
                             {placed
                                 .then(|| {
@@ -405,7 +407,6 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
                                         ></button>
                                     }
                                 })}
-                            {unmessagable.then(|| view! { <span class="mark" title=move || t_string!(i18n, node_unmessagable) inner_html=MESSAGE_OFF></span> })}
                         </span>
                         <span class="mono dim">{node.id.clone()}</span>
                     </span>

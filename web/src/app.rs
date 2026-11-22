@@ -980,6 +980,7 @@ enum Shown {
 }
 
 const GEAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/settings.svg");
+const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
 
 /// The first bar: the radios, and meshctl's own settings.
 #[component]
@@ -1543,14 +1544,19 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                                 on:click=move |_| live.open_chat(peer)
                             >
                                 <span class="icon" inner_html=MESSAGE_OFF></span>
-                                {t!(i18n, node_message)}
+                                <span class="label">{t!(i18n, node_message)}</span>
                             </button>
                         }
                         .into_any()
                     } else {
                         view! {
-                            <button class="primary" on:click=move |_| live.open_chat(peer)>
-                                {t!(i18n, node_message)}
+                            <button
+                                class="primary with-icon"
+                                title=move || t_string!(i18n, node_message)
+                                on:click=move |_| live.open_chat(peer)
+                            >
+                                <span class="icon" inner_html=MESSAGE></span>
+                                <span class="label">{t!(i18n, node_message)}</span>
                             </button>
                         }
                         .into_any()
@@ -1615,7 +1621,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 <span class=class>{move || badge::fit(&short_name(live, node))}</span>
                 <div class="heading">
                     <h1>
-                        {move || title(live, peer)}
+                        <span class="title-text">{move || title(live, peer)}</span>
                         {star}
                         {muted}
                     </h1>
