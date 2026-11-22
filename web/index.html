@@ -2430,6 +2430,43 @@
         }
         .nodes-table tr.node-row td { padding: 0; border: 0; }
         .nodes-table tr.node-row:last-child { border-bottom: 0; }
+        /* The page one column the screen wide, whatever it holds. */
+        main { grid-template-columns: minmax(0, 1fr); }
+        /* Settings: each control under what it is, the whole width; the tabs
+           a little tighter, to fit the five. */
+        .pref-control,
+        .section-panel .pref-control { width: 100%; }
+        .pref-row { padding: 14px 4px; }
+        .settings-tabs button { padding: 0 4px; font-size: 13px; }
+        /* The sections in a row of chips that slides sideways, over the
+           panel, and not half the screen above it. */
+        .sections-tab { gap: 12px; }
+        .section-list {
+          flex-direction: row;
+          gap: 6px;
+          margin: 0 -12px;
+          padding: 2px 12px 4px;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .section-list::-webkit-scrollbar { display: none; }
+        .section-list button {
+          flex: none;
+          padding: 0 12px;
+          border: 1px solid var(--mc-border);
+          border-radius: 999px;
+        }
+        .section-list button.on { border-color: var(--mc-primary); }
+        .section-list .state.none { display: none; }
+        .section-list .edited { margin-left: 0; }
+        /* Radios and channels: no handle to drag with a finger, the arrows
+           do it; what does not fit goes under the name. */
+        .radio-row { gap: 8px; padding: 10px 8px; }
+        .radio-row .grip { display: none; }
+        .radio-row .name { flex-wrap: wrap; row-gap: 2px; }
+        .channel-row .pick { flex-wrap: wrap; row-gap: 6px; }
+        .channel-row .channel-facts { flex-basis: 100%; flex-wrap: wrap; padding-left: 52px; }
+        .channel-row .channel-facts:empty { display: none; }
         .nodes-table tr.node-row td:first-child { flex: 1 1 100%; }
         .nodes-table tr.node-row td:nth-child(2),
         .nodes-table tr.node-row td:nth-child(3),
@@ -2462,7 +2499,17 @@
         .phone-list .item,
         .ask-menu button,
         .ask-split .ask,
-        .segmented button { min-height: 0; }
+        .segmented button,
+        .switch,
+        .radio-row .moves button,
+        .radio-row .face-button,
+        .radio-row .pick,
+        .section-list button,
+        input[type=checkbox],
+        input[type=radio],
+        input[type=range] { min-height: 0; }
+        .section-list button { min-height: 38px; }
+        .radio-row .eye { width: 44px; height: 44px; }
         .icon-button,
         .facts .copyable .icon-button,
         .trace header .copy { width: 44px; height: 44px; }

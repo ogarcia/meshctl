@@ -563,7 +563,7 @@ fn FieldInput(
             };
             // One's own while it is not one of those, or while one is being
             // written.
-            let own = RwSignal::new(!steps.contains(&seconds.get()));
+            let own = RwSignal::new(!steps.contains(&seconds.get_untracked()));
             let choice = {
                 let steps = steps.clone();
                 move || {
