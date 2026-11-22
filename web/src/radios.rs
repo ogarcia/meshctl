@@ -115,7 +115,10 @@ pub fn RadiosView() -> impl IntoView {
             >
                 <RadioRow radio at count dragging />
             </For>
-            <p class="hint dim">{t!(i18n, radios_hint)}</p>
+            <p class="hint dim">
+                <span class="wide-only">{t!(i18n, radios_hint)}</span>
+                <span class="phone-only">{t!(i18n, radios_hint_phone)}</span>
+            </p>
         </section>
         {move || {
             // Over the list, on a radio picked or on one to add.

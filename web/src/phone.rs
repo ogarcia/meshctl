@@ -118,19 +118,29 @@ pub fn RadioChip() -> impl IntoView {
 pub fn PhoneBack() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    // On a phone, to the tab's own page; on a wider screen, from the
+    // settings, to the last page out of them, where one came from.
+    let button = move |class: &'static str, to: Page| {
+        view! {
+            <button
+                class=class
+                title=move || t_string!(i18n, back)
+                aria-label=move || t_string!(i18n, back)
+                on:click=move |_| live.go(to)
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 12h14M5 12l6 6M5 12l6 -6"></path>
+                </svg>
+            </button>
+        }
+    };
     move || {
         back_of(live.page.get()).map(|to| {
+            let wide =
+                (to == Page::More).then(|| button("icon-button wide-back", live.came_from.get()));
             view! {
-                <button
-                    class="icon-button phone-back"
-                    title=move || t_string!(i18n, back)
-                    aria-label=move || t_string!(i18n, back)
-                    on:click=move |_| live.go(to)
-                >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M5 12h14M5 12l6 6M5 12l6 -6"></path>
-                    </svg>
-                </button>
+                {button("icon-button phone-back", to)}
+                {wide}
             }
         })
     }

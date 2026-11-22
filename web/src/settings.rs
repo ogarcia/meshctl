@@ -22,6 +22,7 @@ use meshctl_api::{
     RegionLimits, SettingsSection,
 };
 use std::collections::BTreeMap;
+use wasm_bindgen::JsCast;
 
 /// What changed between the settings read and the ones in the form. The
 /// channels are not in it: each is saved on its own, from its editor.
@@ -266,16 +267,19 @@ pub fn SettingsView() -> impl IntoView {
         .into_iter()
         .map(|this| {
             let label = move || match this {
-                Tab::User => t!(i18n, settings_tab_user).into_any(),
-                Tab::Lora => t!(i18n, settings_tab_lora).into_any(),
-                Tab::Channels => t!(i18n, settings_tab_channels).into_any(),
-                Tab::Device => t!(i18n, settings_tab_device).into_any(),
-                Tab::Modules => t!(i18n, settings_tab_modules).into_any(),
+                Tab::User => t_string!(i18n, settings_tab_user).to_string(),
+                Tab::Lora => t_string!(i18n, settings_tab_lora).to_string(),
+                Tab::Channels => t_string!(i18n, settings_tab_channels).to_string(),
+                Tab::Device => t_string!(i18n, settings_tab_device).to_string(),
+                Tab::Modules => t_string!(i18n, settings_tab_modules).to_string(),
             };
             view! {
+                // Its label again, in bold and unseen, so that it is as wide
+                // picked as not.
                 <button
                     type="button"
                     role="tab"
+                    data-label=label
                     class:on=move || tab.get() == this
                     class:edited=move || edited(this)
                     aria-selected=move || (tab.get() == this).to_string()
@@ -290,6 +294,34 @@ pub fn SettingsView() -> impl IntoView {
         })
         .collect_view();
     let at = move || TABS.iter().position(|t| *t == tab.get()).unwrap_or(0);
+
+    // Each tab as wide as its word, the room left shared out: the pill goes
+    // where the one picked is and as wide, measured once it is laid out, as
+    // the tab, the language or the window change.
+    let strip = NodeRef::<leptos::html::Div>::new();
+    let pill = RwSignal::new(String::new());
+    let resized = RwSignal::new(0u32);
+    let resizing = window_event_listener(leptos::ev::resize, move |_| resized.update(|n| *n += 1));
+    on_cleanup(move || resizing.remove());
+    Effect::new(move |_| {
+        let at = at();
+        let _ = i18n.get_locale();
+        resized.track();
+        let Some(strip) = strip.get() else { return };
+        request_animation_frame(move || {
+            let tab = strip
+                .children()
+                .item(at as u32)
+                .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok());
+            if let Some(tab) = tab {
+                pill.set(format!(
+                    "--x: {}px; --w: {}px",
+                    tab.offset_left(),
+                    tab.offset_width()
+                ));
+            }
+        });
+    });
 
     // Built again only as the tab changes, not as anything in it is typed.
     let has_draft = Memo::new(move |_| draft.with(Option::is_some));
@@ -377,7 +409,8 @@ pub fn SettingsView() -> impl IntoView {
                 <div
                     class="segmented settings-tabs"
                     role="tablist"
-                    style=move || format!("--n: {}; --at: {}", TABS.len(), at())
+                    node_ref=strip
+                    style=move || format!("--n: {}; --at: {}; {}", TABS.len(), at(), pill.get())
                 >
                     {tabs.clone()}
                 </div>

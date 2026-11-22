@@ -552,12 +552,17 @@
        * the selected radio in a tab's heading, the way back in a page within
        * it. All of this is hidden on a wider screen.
        */
-      .tabbar, .radio-chip, .phone-back { display: none; }
+      .tabbar, .radio-chip { display: none; }
+      /* Over .icon-button, which comes later: the way back of a phone, and
+         the one of a wider screen. */
+      body .phone-back { display: none; }
       .wide-only { display: contents; }
+      .phone-only { display: none; }
       @media (max-width: 760px) {
         .app { display: flex; flex-direction: column; }
         .page { flex: 1; min-height: 0; }
         .rail, .sidebar, .menu-toggle, .menu-backdrop, .wide-only { display: none !important; }
+        .phone-only { display: contents; }
         .topbar { gap: 10px; min-height: 52px; padding: 6px 12px; }
         .topbar .page-title { display: none; }
         main { padding: 12px; }
@@ -603,7 +608,8 @@
         .radio-chip:active { background: var(--mc-raised); }
         .radio-chip .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
         .radio-chip .caret { flex: none; width: 16px; height: 16px; color: var(--mc-muted); }
-        .phone-back { display: flex; margin-left: -6px; }
+        body .phone-back { display: flex; margin-left: -6px; }
+        body .wide-back { display: none; }
         /* A drawer is a sheet from the foot: over the drawer's own rules,
            which come later. */
         body .drawer {
@@ -807,18 +813,49 @@
         flex-direction: column;
         gap: 16px;
       }
-      .settings-tabs { align-self: center; width: 100%; max-width: 640px; }
-      .settings-tabs button { padding: 0 8px; white-space: nowrap; }
-      /* A tab with changes not saved yet. */
+      /*
+       * The tabs each as wide as its word, the room left shared out, and the
+       * pill where the one picked is and as wide, as measured (--x, --w):
+       * until it is, as any other pill.
+       */
+      .segmented.settings-tabs {
+        align-self: center;
+        width: 100%;
+        max-width: 640px;
+        grid-template-columns: repeat(var(--n), auto);
+      }
+      .segmented.settings-tabs::before {
+        left: 0;
+        width: var(--w, calc((100% - 6px) / var(--n, 3)));
+        transform: translateX(var(--x, calc(3px + var(--at, 0) * 100%)));
+        transition: transform 0.2s ease, width 0.2s ease;
+      }
+      .segmented.settings-tabs button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 0 8px;
+        white-space: nowrap;
+      }
+      /* Its word in bold, unseen, that keeps it as wide picked as not. */
+      .settings-tabs button::before {
+        content: attr(data-label);
+        height: 0;
+        overflow: hidden;
+        visibility: hidden;
+        font-weight: 600;
+      }
+      /* A tab with changes not saved yet: a dot by its word, over the room. */
       .settings-tabs button.edited::after {
         content: "";
-        display: inline-block;
+        position: absolute;
+        top: 6px;
+        right: 3px;
         width: 6px;
         height: 6px;
-        margin-left: 6px;
         border-radius: 50%;
         background: currentColor;
-        vertical-align: middle;
       }
       .settings { display: flex; flex-direction: column; gap: 12px; }
       .settings .preferences { max-width: none; }
@@ -2437,7 +2474,7 @@
         .pref-control,
         .section-panel .pref-control { width: 100%; }
         .pref-row { padding: 14px 4px; }
-        .settings-tabs button { padding: 0 4px; font-size: 13px; }
+        .settings-tabs button { padding: 0 4px; }
         /* The sections in a row of chips that slides sideways, over the
            panel, and not half the screen above it. */
         .sections-tab { gap: 12px; }

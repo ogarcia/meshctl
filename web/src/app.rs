@@ -130,6 +130,9 @@ pub struct Live {
     pub node: RwSignal<Option<u32>>,
     /// Where the open node's page was opened from, the latest last.
     pub back: RwSignal<Vec<Back>>,
+    /// The last page out of the settings, to go back to from them on a wider
+    /// screen.
+    pub came_from: RwSignal<Page>,
     /// Whether the open node's requests are shown, in their drawer.
     pub history: RwSignal<bool>,
     /// Whether the radios are shown to switch the selected one, on a phone.
@@ -178,6 +181,7 @@ impl Live {
             packets: RwSignal::new(Vec::new()),
             node: RwSignal::new(None),
             back: RwSignal::new(Vec::new()),
+            came_from: RwSignal::new(Page::Map),
             history: RwSignal::new(false),
             radio_sheet: RwSignal::new(false),
             map_pick: RwSignal::new(None),
@@ -195,6 +199,10 @@ impl Live {
 
     /// Shows a page, and closes the bars over it on a narrow screen.
     pub fn go(self, page: Page) {
+        let from = self.page.get_untracked();
+        if crate::phone::back_of(from) != Some(Page::More) && from != Page::More {
+            self.came_from.set(from);
+        }
         self.page.set(page);
         self.menu.set(false);
         // A page gone to anew: nothing to go back to from it.
@@ -981,6 +989,7 @@ enum Shown {
 
 const GEAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/settings.svg");
 const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
+const PLUS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plus.svg");
 
 /// The first bar: the radios, and meshctl's own settings.
 #[component]
@@ -1388,12 +1397,19 @@ fn Topbar() -> impl IntoView {
             view! {
                 <div class="heading">
                     <h1>{t!(i18n, radios_title)}</h1>
-                    <span class="dim">{move || t!(i18n, radios_count, count = count())}</span>
+                    <span class="dim">
+                        <span class="wide-only">{move || t!(i18n, radios_count, count = count())}</span>
+                        <span class="phone-only">{move || t!(i18n, radios_count_phone, count = count())}</span>
+                    </span>
                 </div>
                 <div class="actions">
-                    <button class="primary" on:click=move |_| live.radio_editing.set(Editing::Adding)>
-                        "+ "
-                        {t!(i18n, radio_add_title)}
+                    <button
+                        class="primary with-icon"
+                        title=move || t_string!(i18n, radio_add_title)
+                        on:click=move |_| live.radio_editing.set(Editing::Adding)
+                    >
+                        <span class="icon" inner_html=PLUS></span>
+                        <span class="label">{t!(i18n, radio_add_title)}</span>
                     </button>
                 </div>
             }
