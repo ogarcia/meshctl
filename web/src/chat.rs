@@ -15,6 +15,9 @@ use meshctl_api::{
 };
 
 /// The longest text the daemon takes, in bytes.
+/// What sends a message, as an icon.
+const SEND: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/send.svg");
+
 const MAX_TEXT_BYTES: usize = 200;
 
 /// Who a message was exchanged with.
@@ -283,6 +286,13 @@ fn Composer(peer: Peer) -> impl IntoView {
             .with(|nodes| nodes.get(&node).is_some_and(|n| n.unmessagable)),
         Peer::Channel { .. } => false,
     };
+    let send_label = move || {
+        if unmessagable() {
+            t_string!(i18n, chat_send_anyway)
+        } else {
+            t_string!(i18n, chat_send)
+        }
+    };
 
     view! {
         {move || {
@@ -305,18 +315,18 @@ fn Composer(peer: Peer) -> impl IntoView {
             <span class=move || {
                 if bytes() > MAX_TEXT_BYTES { "count over" } else { "count dim" }
             }>{move || format!("{}/{MAX_TEXT_BYTES}", bytes())}</span>
+            // Its icon, and its word where there is room: sending anyway, to a
+            // node that takes no messages, plain and not in the accent.
             <button
                 type="submit"
+                class="send"
                 class:primary=move || !unmessagable()
                 disabled=move || !can_send()
+                title=send_label
+                aria-label=send_label
             >
-                {move || {
-                    if unmessagable() {
-                        t_string!(i18n, chat_send_anyway).to_owned()
-                    } else {
-                        t_string!(i18n, chat_send).to_owned()
-                    }
-                }}
+                <span class="icon" inner_html=SEND></span>
+                <span class="label">{send_label}</span>
             </button>
             <p class="error">{problem}</p>
         </form>

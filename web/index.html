@@ -2231,6 +2231,14 @@
       .composer .count { font-size: 12px; font-family: var(--mc-mono); }
       .composer .count.over { color: var(--mc-danger); }
       .composer button { min-height: 40px; }
+      .composer .send { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+      .composer .send .icon { display: flex; }
+      .composer .send svg { width: 18px; height: 18px; }
+      /* Narrow, its icon alone, as square as it is tall. */
+      @media (max-width: 760px) {
+        .composer .send { min-width: 44px; padding: 0 10px; }
+        .composer .send .label { display: none; }
+      }
       .composer .error { flex-basis: 100%; margin: 0; color: var(--mc-muted); font-size: 12px; }
       .composer .error:empty { display: none; }
 
@@ -2810,6 +2818,8 @@
         .topbar .actions .with-icon { min-width: 44px; justify-content: center; }
         /* Its buttons a finger tall, the heading as tall as the sidebar's. */
         .topbar { padding-top: 4px; padding-bottom: 4px; }
+        /* What a message is written in, and its button, a finger tall too. */
+        .composer input, .composer button { min-height: 44px; }
         .segmented button { min-height: 38px; }
         /* A colour to pick: round, a finger wide, not stretched to its height. */
         .swatch { min-height: 0; }
