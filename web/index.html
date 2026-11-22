@@ -672,7 +672,9 @@
       .radio-list .check { width: 20px; height: 20px; color: var(--mc-primary); }
       .drawer-foot .link { padding: 0; border: 0; background: none; color: var(--mc-primary); cursor: pointer; }
       /* What a phone has in pages, a wider screen has in its bars. */
-      .phone-list { display: flex; flex-direction: column; gap: 2px; width: 100%; max-width: 640px; margin: 0 auto; }
+      /* The whole width, as the nodes' rows: not a column in the middle of a
+         phone on its side. */
+      .phone-list { display: flex; flex-direction: column; gap: 2px; width: 100%; }
       .phone-list h2 {
         margin: 16px 8px 6px;
         font-size: 12px;
