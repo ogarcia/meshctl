@@ -387,7 +387,24 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
                         <span class="name">
                             {name}
                             {favorite.then(|| view! { <span class="mark star" inner_html=STAR></span> })}
-                            {placed.then(|| view! { <span class="mark" inner_html=PIN></span> })}
+                            // Where it is: to the map, and not to its page as
+                            // the rest of the row.
+                            {placed
+                                .then(|| {
+                                    view! {
+                                        <button
+                                            type="button"
+                                            class="mark to-map"
+                                            title=move || t_string!(i18n, node_on_map)
+                                            aria-label=move || t_string!(i18n, node_on_map)
+                                            inner_html=PIN
+                                            on:click=move |ev| {
+                                                ev.stop_propagation();
+                                                live.show_on_map(num);
+                                            }
+                                        ></button>
+                                    }
+                                })}
                             {unmessagable.then(|| view! { <span class="mark" title=move || t_string!(i18n, node_unmessagable) inner_html=MESSAGE_OFF></span> })}
                         </span>
                         <span class="mono dim">{node.id.clone()}</span>

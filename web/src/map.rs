@@ -31,6 +31,8 @@ extern "C" {
     fn map_close();
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = nodes)]
     fn map_nodes(json: &str);
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = focus)]
+    fn map_focus(num: u32);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = route)]
     fn map_route(json: Option<String>);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = stay)]
@@ -436,6 +438,18 @@ pub fn MapView() -> impl IntoView {
             })
         });
         map_route(drawing.and_then(|d| serde_json::to_string(&d).ok()));
+    });
+
+    // A node to go to, asked for from its page: once the map is there, which
+    // goes to it as soon as it has it.
+    Effect::new(move |_| {
+        if element.get().is_none() {
+            return;
+        }
+        if let Some(num) = live.map_focus.get() {
+            map_focus(num);
+            live.map_focus.set(None);
+        }
     });
 
     // Escape takes the route away.

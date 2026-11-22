@@ -378,6 +378,7 @@
   "node_no_power": "It has no power sensors",
   "node_no_neighbors": "Its neighbours module is off",
   "node_coordinates": "Coordinates",
+  "node_on_map": "See on the map",
   "node_coordinates_copy": "Copy the coordinates",
   "node_uptime": "On for",
   "node_air_tx": "Airtime sent",

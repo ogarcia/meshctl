@@ -126,6 +126,8 @@ pub struct Live {
     pub back: RwSignal<Vec<Back>>,
     /// The node picked on the map, if any.
     pub map_pick: RwSignal<Option<u32>>,
+    /// A node for the map to go to once it is showing, as asked from its page.
+    pub map_focus: RwSignal<Option<u32>>,
     /// The node whose last traced route the map shows, if any.
     pub map_route: RwSignal<Option<u32>>,
     /// What the open node was asked for, the newest first.
@@ -167,6 +169,7 @@ impl Live {
             node: RwSignal::new(None),
             back: RwSignal::new(Vec::new()),
             map_pick: RwSignal::new(None),
+            map_focus: RwSignal::new(None),
             map_route: RwSignal::new(None),
             requests: RwSignal::new(Vec::new()),
             latest: RwSignal::new(None),
@@ -184,6 +187,14 @@ impl Live {
         self.menu.set(false);
         // A page gone to anew: nothing to go back to from it.
         self.back.set(Vec::new());
+    }
+
+    /// Shows a node on the map: picked, with its card, and the map gone to
+    /// it.
+    pub fn show_on_map(self, node: u32) {
+        self.map_pick.set(Some(node));
+        self.map_focus.set(Some(node));
+        self.go(Page::Map);
     }
 
     /// Goes back to where the open node's page was opened from: another

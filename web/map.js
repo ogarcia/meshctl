@@ -20,6 +20,8 @@ window.meshctlMap = (() => {
 
   // How long the map stays still before where it is left is kept, in ms.
   const SAVE_AFTER = 1000;
+  // How close the map goes to a node shown from its page, at the least.
+  const FOCUS_ZOOM = 14;
 
   let map = null;
   let markers = null;
@@ -391,8 +393,27 @@ window.meshctlMap = (() => {
     const list = shown.nodes;
     drawMarkers();
     labelAll();
+    centre();
     place();
     showCard();
+  }
+
+  // A node to show, asked for from elsewhere, as its page: the map goes to
+  // it once it has it, instead of to where it was left.
+  let focusOn = null;
+
+  function focus(num) {
+    focusOn = num;
+    centre();
+  }
+
+  function centre() {
+    if (!map || focusOn === null) return;
+    const node = shown.nodes.find((n) => n.num === focusOn);
+    if (!node) return;
+    focusOn = null;
+    placed = true;
+    map.setView([node.lat, node.lon], Math.max(map.getZoom(), FOCUS_ZOOM), { animate: false });
   }
 
   function drawMarkers() {
@@ -672,5 +693,5 @@ window.meshctlMap = (() => {
     if (map) map.invalidateSize();
   }
 
-  return { open, close, nodes, route, stay, reset, resize, view };
+  return { open, close, nodes, focus, route, stay, reset, resize, view };
 })();

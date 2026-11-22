@@ -12,7 +12,7 @@ use crate::app::Live;
 use crate::chat::title;
 use crate::daemon::{self, Failure, TRACES_PAGE};
 use crate::i18n::{Locale, t, t_string, use_i18n};
-use crate::mesh::{ago, radius, reach_words};
+use crate::mesh::{PIN, ago, radius, reach_words};
 use crate::traces::TraceCard;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -732,6 +732,13 @@ fn PositionSection(at: Option<i64>) -> impl IntoView {
                                 aria-label=move || t_string!(i18n, node_coordinates_copy)
                                 inner_html=COPY
                                 on:click=move |_| crate::clipboard::copy(&copied)
+                            ></button>
+                            <button
+                                class="icon-button"
+                                title=move || t_string!(i18n, node_on_map)
+                                aria-label=move || t_string!(i18n, node_on_map)
+                                inner_html=PIN
+                                on:click=move |_| live.show_on_map(asking.num)
                             ></button>
                         </span>
                     },

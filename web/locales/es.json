@@ -378,6 +378,7 @@
   "node_no_power": "No tiene sensores de energía",
   "node_no_neighbors": "No tiene activado el módulo de vecinos",
   "node_coordinates": "Coordenadas",
+  "node_on_map": "Ver en el mapa",
   "node_coordinates_copy": "Copiar las coordenadas",
   "node_uptime": "Encendido",
   "node_air_tx": "Aire transmitido",

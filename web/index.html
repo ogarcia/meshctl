@@ -947,6 +947,14 @@
       .nodes-table .name { display: flex; align-items: center; gap: 6px; font-weight: 600; }
       .nodes-table .mono.dim, .nodes-table .small { font-size: 12px; }
       .nodes-table .mark { display: flex; color: var(--mc-muted); }
+      .nodes-table .mark.to-map {
+        padding: 2px;
+        margin: -2px;
+        border: 0;
+        border-radius: 4px;
+        background: none;
+      }
+      .nodes-table .mark.to-map:hover { color: var(--mc-primary); background: var(--mc-soft); }
       .nodes-table .mark svg { width: 14px; height: 14px; }
       .nodes-table .mark.star { color: var(--mc-primary); }
       .nodes-table .mark.star svg { fill: currentColor; }
