@@ -1029,7 +1029,7 @@ fn Device(packet: Option<Packet>) -> impl IntoView {
                 }
             });
             view! {
-                <dl class="facts">
+                <dl class="facts compact">
                     {battery.map(|b| fact(t!(i18n, node_battery), b))}
                     {number(&metrics, "voltage").map(|v| fact(t!(i18n, node_voltage), format!("{v:.2} V")))}
                     {number(&metrics, "channel_utilization")
@@ -1115,7 +1115,7 @@ fn environment_facts(i18n: I18nContext<Locale>, packet: Option<&Packet>) -> Opti
             Some(fact(label, format!("{value:.decimals$}{unit}")))
         })
         .collect_view();
-    Some(view! { <dl class="facts">{facts}</dl> }.into_any())
+    Some(view! { <dl class="facts compact">{facts}</dl> }.into_any())
 }
 
 /// What its power sensors read, channel by channel.
@@ -1135,7 +1135,7 @@ fn power_facts(i18n: I18nContext<Locale>, packet: Option<&Packet>) -> Option<Any
             Some(fact(label, value))
         })
         .collect_view();
-    Some(view! { <dl class="facts">{facts}</dl> }.into_any())
+    Some(view! { <dl class="facts compact">{facts}</dl> }.into_any())
 }
 
 /// The nodes it hears directly, each opening its page if the radio knows
@@ -1362,7 +1362,7 @@ fn Stats(packet: Option<Packet>) -> impl IntoView {
                 .replace("{total}", &format!("{:.0}", count("num_total_nodes")));
             let counted = |label: String, key: &str| fact(label, format!("{:.0}", count(key)));
             view! {
-                <dl class="facts">
+                <dl class="facts compact">
                     {fact(t!(i18n, stats_online), online)}
                     {counted(t_string!(i18n, stats_packets_tx).to_owned(), "num_packets_tx")}
                     {counted(t_string!(i18n, stats_packets_rx).to_owned(), "num_packets_rx")}

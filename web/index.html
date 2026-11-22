@@ -1369,6 +1369,8 @@
         gap: 12px 24px;
         margin: 0;
       }
+      /* Short values, figures: narrower columns, two even on a phone. */
+      .facts.compact { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
       .facts .wide { grid-column: 1 / -1; }
       .facts dt { font-size: 12px; color: var(--mc-muted); }
       .facts dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
