@@ -454,6 +454,35 @@ pub struct Node {
     pub channel_utilization: Option<f32>,
 }
 
+/// Something amiss with a node, found in what it sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum NodeCheck {
+    /// Its public key is the same as that of other nodes heard in the latest
+    /// week: each of them can read what is sent to the others alone. It
+    /// happens with radios that came with the same key, or whose settings
+    /// were copied from another; making a new key on the node ends it.
+    PublicKeyShared {
+        /// The other nodes' numbers, the most recently heard first.
+        nodes: Vec<u32>,
+    },
+    /// Its latest node info carries more than one public key. Either two
+    /// radios share its id, or the key was made anew, as on reflashing it:
+    /// until the others take the new one, what is sent to it fails. A copy
+    /// damaged on the air is not taken for another key.
+    PublicKeyConflict {
+        /// The keys, in base64, the latest first.
+        keys: Vec<String>,
+    },
+    /// Its latest node info names more than one hardware model: either two
+    /// radios share its id, or the radio was replaced.
+    HardwareChanged {
+        /// As the protobufs name them.
+        models: Vec<String>,
+    },
+}
+
 /// How a message is identified in the API.
 pub type MessageId = i64;
 

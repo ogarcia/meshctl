@@ -11,8 +11,8 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Channel, Error, ErrorCode, LinkState, MapView, Node, Radio, RadioId, RadioOrder, RadioSettings,
-    Status,
+    Channel, Error, ErrorCode, LinkState, MapView, Node, NodeCheck, Radio, RadioId, RadioOrder,
+    RadioSettings, Status,
 };
 use meshctl_core::radio::Mesh;
 use utoipa_axum::router::OpenApiRouter;
@@ -28,6 +28,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(channels))
         .routes(routes!(nodes))
         .routes(routes!(node))
+        .routes(routes!(checks))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -371,6 +372,43 @@ async fn node(
     match mesh.and_then(|mesh| mesh.read(|mesh| mesh.nodes.get(&num).map(convert::node))) {
         Some(node) => Json(node).into_response(),
         None => not_found(),
+    }
+}
+
+/// Node checks
+///
+/// What is amiss with a node, found in what it sent: its public key the same
+/// as other nodes', more than one key in its latest node info, or more than
+/// one hardware model. Empty when nothing is.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/nodes/{node}/checks",
+    tag = "nodes",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = String, Path, description = "The node's id or number", example = "!90cda275"),
+    ),
+    responses(
+        (status = 200, description = "The checks", body = Vec<NodeCheck>),
+        (status = 400, description = "That is neither a node id nor a number", body = Error),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio, or it knows of no such node", body = Error),
+    )
+)]
+async fn checks(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, String)>,
+) -> Response {
+    let Some(num) = node_num(&node) else {
+        return error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest);
+    };
+    match state.radios.checks(radio, num).await {
+        Ok(Some(checks)) => Json(checks).into_response(),
+        Ok(None) => not_found(),
+        Err(err) => {
+            tracing::error!(error = format_args!("{err:#}"), "node checks");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 

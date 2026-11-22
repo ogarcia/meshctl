@@ -10,7 +10,7 @@ use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
     BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkState,
-    MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeSettings,
+    MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeCheck, NodeSettings,
     NodeSettingsChange, Pace, Packet, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
     Request, RequestKind, SectionSecret, SettingsApplied, SettingsSection, SightingId, Status,
     Traceroute, Waits,
@@ -83,6 +83,14 @@ const TRACEROUTE_EXPIRY_TICK: std::time::Duration = std::time::Duration::from_se
 
 /// How long a request is waited for before it is given up on.
 const REQUEST_TIMEOUT: i64 = 120;
+
+/// How far back, in seconds, nodes heard with the same public key count as
+/// sharing it: a week, so that one long gone does not.
+const SHARED_KEY_WINDOW: i64 = 7 * 24 * 3600;
+
+/// How many of a node's latest node infos are looked into for more than
+/// one key or hardware model.
+const NODE_INFOS_CHECKED: u32 = 50;
 
 /// Why a request was not sent.
 #[derive(Debug)]
@@ -653,6 +661,83 @@ impl Radios {
         Ok(self.store.last_paced_at(id, pace).await?.map_or(0, |last| {
             (pace.interval() - (at - last)).clamp(0, pace.interval())
         }))
+    }
+
+    /// What is amiss with a node a radio knows of, found in what it sent:
+    /// `None` if there is no such radio, or it knows of no such node.
+    pub async fn checks(&self, id: RadioId, num: u32) -> Result<Option<Vec<NodeCheck>>> {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD as BASE64;
+        use meshctl_proto::meshtastic::{HardwareModel, PortNum, User};
+        use prost::Message;
+
+        let Some(mesh) = self.mesh(id) else {
+            return Ok(None);
+        };
+        let since = u32::try_from(now() - SHARED_KEY_WINDOW).unwrap_or_default();
+        let Some(mut sharing) = mesh.read(|state| {
+            // A node whose node info was not heard yet has no key to share.
+            let key = state
+                .nodes
+                .get(&num)?
+                .user
+                .as_ref()
+                .map(|u| u.public_key.clone())
+                .unwrap_or_default();
+            Some(
+                state
+                    .nodes
+                    .values()
+                    .filter(|other| {
+                        other.num != num
+                            && !key.is_empty()
+                            && other.last_heard.is_some_and(|heard| heard >= since)
+                            && other.user.as_ref().is_some_and(|u| u.public_key == key)
+                    })
+                    .map(|other| (other.last_heard, other.num))
+                    .collect::<Vec<_>>(),
+            )
+        }) else {
+            return Ok(None);
+        };
+        let mut checks = Vec::new();
+        if !sharing.is_empty() {
+            sharing.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+            checks.push(NodeCheck::PublicKeyShared {
+                nodes: sharing.into_iter().map(|(_, num)| num).collect(),
+            });
+        }
+
+        let users: Vec<User> = self
+            .store
+            .latest_payloads(id, num, PortNum::NodeinfoApp as i32, NODE_INFOS_CHECKED)
+            .await?
+            .iter()
+            .filter_map(|payload| User::decode(payload.as_slice()).ok())
+            .collect();
+        let keys = crate::keys::tell_apart(users.iter().map(|user| user.public_key.as_slice()));
+        if keys.len() > 1 {
+            checks.push(NodeCheck::PublicKeyConflict {
+                keys: keys.into_iter().map(|key| BASE64.encode(key)).collect(),
+            });
+        }
+        let mut models: Vec<String> = Vec::new();
+        for user in &users {
+            if user.hw_model == HardwareModel::Unset as i32 {
+                continue;
+            }
+            let model = HardwareModel::try_from(user.hw_model).map_or_else(
+                |_| format!("UNKNOWN_{}", user.hw_model),
+                |model| model.as_str_name().to_owned(),
+            );
+            if !models.contains(&model) {
+                models.push(model);
+            }
+        }
+        if models.len() > 1 {
+            checks.push(NodeCheck::HardwareChanged { models });
+        }
+        Ok(Some(checks))
     }
 
     /// How long until a radio sends each paced kind again, or `None` if there
@@ -1632,6 +1717,113 @@ mod tests {
         assert!(radios.remove(radio.id).await.unwrap());
         assert!(radios.mesh(radio.id).is_none());
         assert!(radios.list().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_node_is_checked_for_its_key_and_hardware() {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD as BASE64;
+        use meshctl_proto::meshtastic::{HardwareModel, PortNum, User};
+        use prost::Message;
+
+        let store = Store::in_memory().await;
+        let mut off = settings("Home", RadioKind::Meshtastic, "127.0.0.1:1");
+        off.enabled = false;
+        let radio = store.add_radio(&off).await.unwrap().id;
+        let shared = vec![5; 32];
+        let heard = u32::try_from(now()).unwrap();
+        let week_ago = heard - 8 * 24 * 3600;
+        let mut state = MeshState::default();
+        for (num, key, last_heard) in [
+            (1, &shared, heard),
+            (2, &shared, heard - 60),
+            // Heard too long ago to count.
+            (3, &shared, week_ago),
+            (4, &vec![9; 32], heard),
+        ] {
+            let mut node = mesh::Node {
+                num,
+                user: Some(mesh::User {
+                    public_key: key.clone(),
+                    ..Default::default()
+                }),
+                position: None,
+                last_heard: Some(last_heard),
+                snr: None,
+                rssi: None,
+                hops_away: None,
+                via_mqtt: false,
+                favorite: false,
+                battery_level: None,
+                voltage: None,
+                channel_utilization: None,
+            };
+            node.user.as_mut().unwrap().long_name = format!("N{num}");
+            state.nodes.insert(num, node.clone());
+            // One more, its node info not heard yet.
+            if num == 4 {
+                node.num = 5;
+                node.user = None;
+                state.nodes.insert(5, node);
+            }
+        }
+        // Node 1's node infos: two keys made apart, a copy of one damaged
+        // on the air, and two hardware models.
+        let mut damaged = shared.clone();
+        damaged[0] ^= 0b101;
+        for (id, key, model) in [
+            (9, &shared, HardwareModel::HeltecV3),
+            (10, &shared, HardwareModel::HeltecV3),
+            (11, &damaged, HardwareModel::HeltecV3),
+            (12, &vec![0xaa; 32], HardwareModel::Rak4631),
+        ] {
+            let user = User {
+                public_key: key.clone(),
+                hw_model: model as i32,
+                ..Default::default()
+            };
+            let heard_packet = mesh::Heard {
+                packet_id: id,
+                from: 1,
+                to: mesh::BROADCAST,
+                channel: 0,
+                portnum: Some(PortNum::NodeinfoApp as i32),
+                payload: user.encode_to_vec(),
+                request_id: None,
+                reply_id: None,
+                want_response: false,
+                pki: false,
+                at: id,
+                snr: None,
+                rssi: None,
+                hop_limit: 3,
+                hop_start: 3,
+                relay_node: None,
+                via_mqtt: false,
+            };
+            store.add_packet(radio, &heard_packet).await.unwrap();
+        }
+        let radios = Radios::start(store).await.unwrap();
+        radios.insert_mesh(radio, Mesh::new(state));
+
+        let checks = radios.checks(radio, 1).await.unwrap().unwrap();
+        assert_eq!(
+            checks,
+            vec![
+                NodeCheck::PublicKeyShared { nodes: vec![2] },
+                NodeCheck::PublicKeyConflict {
+                    keys: vec![BASE64.encode([0xaa; 32]), BASE64.encode(&shared)],
+                },
+                NodeCheck::HardwareChanged {
+                    models: vec!["RAK4631".into(), "HELTEC_V3".into()],
+                },
+            ]
+        );
+        // Nothing amiss with the node of its own key, nor with one whose node
+        // info was not heard yet; none for one unknown.
+        assert_eq!(radios.checks(radio, 4).await.unwrap(), Some(Vec::new()));
+        assert_eq!(radios.checks(radio, 5).await.unwrap(), Some(Vec::new()));
+        assert_eq!(radios.checks(radio, 99).await.unwrap(), None);
     }
 
     #[tokio::test]

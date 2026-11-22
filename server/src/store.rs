@@ -461,6 +461,28 @@ impl Store {
         Ok(rows.into_iter().map(NodeRow::node).collect())
     }
 
+    /// What the latest packets a radio heard from a node on a port carry,
+    /// the latest first, up to so many.
+    pub async fn latest_payloads(
+        &self,
+        radio: RadioId,
+        from: u32,
+        portnum: i32,
+        limit: u32,
+    ) -> Result<Vec<Vec<u8>>> {
+        Ok(sqlx::query_scalar(
+            "SELECT p.payload FROM packet p JOIN packet_seen s ON s.packet = p.id
+            WHERE s.radio_id = ? AND p.from_num = ? AND p.portnum = ?
+            ORDER BY p.at DESC, p.id DESC LIMIT ?",
+        )
+        .bind(radio)
+        .bind(i64::from(from))
+        .bind(portnum)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn save_node(&self, radio: RadioId, node: &Node) -> Result<()> {
         upsert_node(&self.pool, radio, node).await
     }
