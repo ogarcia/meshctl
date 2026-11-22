@@ -16,7 +16,7 @@ use crate::daemon::{self, Events, Failure};
 use crate::empty::EmptyState;
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
 use crate::map::{MapView, placed};
-use crate::mesh::{MeshView, STAR, ago, avatar_class, model, reach_words};
+use crate::mesh::{MESSAGE_OFF, MeshView, STAR, ago, avatar_class, model, reach_words};
 use crate::node::NodeView;
 use crate::packets::{KEPT, PacketsView};
 use crate::preferences::PreferencesView;
@@ -1346,15 +1346,86 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 class
             };
             let favorite = move || known().is_some_and(|n| n.favorite);
+            let unmessagable = move || known().is_some_and(|n| n.unmessagable);
+            // A favourite of the radio's, or not: marked here, on a Meshtastic
+            // radio, for any node but its own.
+            let can_favor = move || {
+                live.selected_kind() == Some(RadioKind::Meshtastic) && !local() && known().is_some()
+            };
+            let toggle_favorite = move |_| {
+                let Some(radio) = live.selected.get_untracked() else {
+                    return;
+                };
+                let favorite = !favorite();
+                spawn_local(async move {
+                    let _ = daemon::set_favorite(radio, node, favorite).await;
+                });
+            };
+            let star = move || {
+                if can_favor() {
+                    let label = move || {
+                        if favorite() {
+                            t_string!(i18n, node_unfavorite)
+                        } else {
+                            t_string!(i18n, node_favorite)
+                        }
+                    };
+                    view! {
+                        <button
+                            class="favorite"
+                            class:on=favorite
+                            aria-pressed=move || favorite().to_string()
+                            title=label
+                            aria-label=label
+                            inner_html=STAR
+                            on:click=toggle_favorite
+                        ></button>
+                    }
+                    .into_any()
+                } else {
+                    favorite()
+                        .then(|| view! { <span class="mark star" inner_html=STAR></span> })
+                        .into_any()
+                }
+            };
+            // Nobody reads what is sent to it, it tells: marked, and its chat
+            // is not the first thing offered.
+            let muted = move || {
+                unmessagable().then(|| {
+                    view! {
+                        <span
+                            class="mark muted"
+                            title=move || t_string!(i18n, node_unmessagable)
+                            aria-label=move || t_string!(i18n, node_unmessagable)
+                            inner_html=MESSAGE_OFF
+                        ></span>
+                    }
+                })
+            };
             // Where else there is to go with the node: from the chat, its page;
             // from its page, the chat. On the map its card has both already.
             let action = move || {
                 let page = live.page.get();
                 let chat = (page == Page::Node).then(|| {
-                    view! {
-                        <button class="primary" on:click=move |_| live.open_chat(peer)>
-                            {t!(i18n, node_message)}
-                        </button>
+                    if unmessagable() {
+                        view! {
+                            <button
+                                class="with-icon"
+                                title=move || t_string!(i18n, node_unmessagable)
+                                on:click=move |_| live.open_chat(peer)
+                            >
+                                <span class="icon" inner_html=MESSAGE_OFF></span>
+                                {t!(i18n, node_message)}
+                            </button>
+                        }
+                        .into_any()
+                    } else {
+                        view! {
+                            <button class="primary" on:click=move |_| live.open_chat(peer)>
+                                {t!(i18n, node_message)}
+                            </button>
+                        }
+                        .into_any()
                     }
                 });
                 let profile = (page == Page::Chat).then(|| {
@@ -1369,7 +1440,8 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 <div class="heading">
                     <h1>
                         {move || title(live, peer)}
-                        {move || favorite().then(|| view! { <span class="mark star" inner_html=STAR></span> })}
+                        {star}
+                        {muted}
                     </h1>
                     <span class="dim">{detail}</span>
                 </div>

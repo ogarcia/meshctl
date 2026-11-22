@@ -49,8 +49,10 @@ use tokio::sync::broadcast;
 const ME: u32 = 0x1234_abcd;
 const PASSKEY: [u8; 8] = [7; 8];
 const BROADCAST: u32 = 0xffff_ffff;
-/// The one other node of its mesh, who `hear` has speak.
+/// The node of its mesh heard directly, who `hear` has speak.
 const NEIGHBOUR: u32 = 0x0bad_cafe;
+/// A repeater further away, which takes no messages.
+const REPEATER: u32 = 0x0dec_0de5;
 
 /// What the control port has happen to every client.
 #[derive(Debug, Clone)]
@@ -76,6 +78,8 @@ struct Radio {
     /// When a client last sent on a paced port, which the radio takes no
     /// more often than the firmware does.
     paced: BTreeMap<i32, Instant>,
+    /// The nodes marked favourites.
+    favorites: std::collections::BTreeSet<u32>,
 }
 
 /// How the neighbour answers.
@@ -239,6 +243,7 @@ impl Radio {
             limits: true,
             answered: BTreeMap::new(),
             paced: BTreeMap::new(),
+            favorites: std::collections::BTreeSet::new(),
         }
     }
 
@@ -456,6 +461,26 @@ impl Radio {
                 num: NEIGHBOUR,
                 user: Some(neighbour()),
                 hops_away: Some(0),
+                is_favorite: self.favorites.contains(&NEIGHBOUR),
+                ..Default::default()
+            }),
+            // A repeater two hops away, which tells nobody reads messages
+            // sent to it.
+            V::NodeInfo(pb::NodeInfo {
+                num: REPEATER,
+                user: Some(pb::User {
+                    id: format!("!{REPEATER:08x}"),
+                    long_name: "Fake repeater".into(),
+                    short_name: "RPT".into(),
+                    hw_model: pb::HardwareModel::Rak4631 as i32,
+                    role: config::device_config::Role::Router as i32,
+                    public_key: (33..=64).collect(),
+                    is_unmessagable: Some(true),
+                    ..Default::default()
+                }),
+                hops_away: Some(2),
+                last_heard: now_secs() - 600,
+                is_favorite: self.favorites.contains(&REPEATER),
                 ..Default::default()
             }),
         ];
@@ -514,6 +539,16 @@ impl Radio {
             }
             A::CommitEditSettings(_) => {
                 println!("commit edit (a real radio might reboot now)");
+                None
+            }
+            A::SetFavoriteNode(num) => {
+                println!("favourite: !{num:08x}");
+                self.favorites.insert(num);
+                None
+            }
+            A::RemoveFavoriteNode(num) => {
+                println!("no longer favourite: !{num:08x}");
+                self.favorites.remove(&num);
                 None
             }
             other => {

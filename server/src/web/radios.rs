@@ -11,10 +11,10 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Channel, Error, ErrorCode, LinkState, MapView, Node, NodeCheck, NodeLatest, Radio, RadioId,
-    RadioOrder, RadioSettings, Status,
+    Channel, Error, ErrorCode, LinkState, MapView, Node, NodeCheck, NodeFavorite, NodeLatest,
+    Radio, RadioId, RadioOrder, RadioSettings, Status,
 };
-use meshctl_core::radio::Mesh;
+use meshctl_core::radio::{AdminError, Mesh};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -30,6 +30,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(node))
         .routes(routes!(checks))
         .routes(routes!(latest))
+        .routes(routes!(favorite))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -373,6 +374,51 @@ async fn node(
     match mesh.and_then(|mesh| mesh.read(|mesh| mesh.nodes.get(&num).map(convert::node))) {
         Some(node) => Json(node).into_response(),
         None => not_found(),
+    }
+}
+
+/// Favourite node
+///
+/// Marks a node a favourite of the radio, or no longer: the radio keeps it
+/// in its node list however long it goes unheard, and the apps show it
+/// first. Nothing goes on the air. Every client hears of it as `node`.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/nodes/{node}/favorite",
+    tag = "nodes",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = String, Path, description = "The node's id or number", example = "!90cda275"),
+    ),
+    request_body = NodeFavorite,
+    responses(
+        (status = 204, description = "Done"),
+        (status = 400, description = "That is neither a node id nor a number", body = Error),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio, or it knows of no such node", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "A kind of radio that does not do this yet: `unsupported_kind`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn favorite(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, String)>,
+    Json(change): Json<NodeFavorite>,
+) -> Response {
+    let Some(num) = node_num(&node) else {
+        return error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest);
+    };
+    match state.radios.set_favorite(radio, num, change.favorite).await {
+        Ok(Some(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(None) | Err(AdminError::UnknownNode) => not_found(),
+        Err(AdminError::NotConnected) => error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
+        Err(AdminError::Unsupported) => {
+            error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::UnsupportedKind)
+        }
+        Err(AdminError::NoAnswer) => {
+            error(StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer)
+        }
     }
 }
 

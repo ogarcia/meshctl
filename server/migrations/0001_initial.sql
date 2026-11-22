@@ -47,6 +47,8 @@ CREATE TABLE node (
     -- Whether its owner is a licensed radio amateur, who sends nothing
     -- encrypted.
     licensed INTEGER NOT NULL DEFAULT 0,
+    -- Whether it tells that nobody reads messages sent to it.
+    unmessagable INTEGER NOT NULL DEFAULT 0,
     latitude REAL,
     longitude REAL,
     altitude INTEGER,

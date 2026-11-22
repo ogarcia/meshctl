@@ -421,5 +421,10 @@
   "drawer_close": "Cerrar",
   "node_no_key": "No conocemos su clave pública, y sin ella no se le puede pedir telemetría ni vecinos: la trae su información, si su firmware la tiene.",
   "node_needs_key": "Hace falta su clave pública, que trae su información: sin ella la radio no lo envía.",
-  "node_direct_none": "Nada, hasta tener su clave: la radio cifra con ella lo que va solo a él"
+  "node_direct_none": "Nada, hasta tener su clave: la radio cifra con ella lo que va solo a él",
+  "node_favorite": "Marcar como favorito",
+  "node_unfavorite": "Quitar de favoritos",
+  "node_unmessagable": "No acepta mensajes",
+  "chat_unmessagable": "Este nodo indica que nadie lee sus mensajes; suele ser un repetidor o un sensor. Puedes escribirle, pero probablemente nadie lo lea.",
+  "chat_send_anyway": "Enviar igualmente"
 }

@@ -53,6 +53,7 @@ pub fn node(node: &mesh::Node) -> api::Node {
             .filter(|key| !key.is_empty())
             .map(|key| BASE64.encode(key)),
         licensed: user.is_some_and(|u| u.licensed),
+        unmessagable: user.is_some_and(|u| u.unmessagable),
         position: node.position.map(|p| api::Position {
             latitude: p.latitude,
             longitude: p.longitude,

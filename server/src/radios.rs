@@ -668,6 +668,21 @@ impl Radios {
         }))
     }
 
+    /// Marks a node a favourite of a radio, or no longer; `None` if there is
+    /// no such radio. Every client hears of it as the node changes.
+    pub async fn set_favorite(
+        &self,
+        id: RadioId,
+        num: u32,
+        favorite: bool,
+    ) -> Result<Option<()>, AdminError> {
+        let Some(mesh) = self.mesh(id) else {
+            return Ok(None);
+        };
+        mesh.set_favorite(num, favorite).await?;
+        Ok(Some(()))
+    }
+
     /// What a node a radio knows of last told of each kind: `None` if there
     /// is no such radio, or it knows of no such node.
     pub async fn latest(&self, id: RadioId, num: u32) -> Result<Option<NodeLatest>> {
@@ -1464,6 +1479,8 @@ fn admin_failure(error: AdminError) -> SettingsFailure {
         AdminError::NotConnected => SettingsFailure::NotConnected,
         AdminError::NoAnswer => SettingsFailure::NoAnswer,
         AdminError::Unsupported => SettingsFailure::Unsupported,
+        // Settings name no node.
+        AdminError::UnknownNode => SettingsFailure::NotConnected,
     }
 }
 

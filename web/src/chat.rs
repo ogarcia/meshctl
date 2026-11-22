@@ -275,7 +275,27 @@ fn Composer(peer: Peer) -> impl IntoView {
         })
     };
 
+    // A node that tells nobody reads what is sent to it: said over where it
+    // is written, and the button says it goes all the same.
+    let unmessagable = move || match peer {
+        Peer::Node { node } => live
+            .nodes
+            .with(|nodes| nodes.get(&node).is_some_and(|n| n.unmessagable)),
+        Peer::Channel { .. } => false,
+    };
+
     view! {
+        {move || {
+            unmessagable()
+                .then(|| {
+                    view! {
+                        <p class="unmessagable">
+                            <span class="icon" inner_html=crate::mesh::MESSAGE_OFF></span>
+                            {t!(i18n, chat_unmessagable)}
+                        </p>
+                    }
+                })
+        }}
         <form class="composer" on:submit=submit>
             <input
                 placeholder=move || t_string!(i18n, chat_write)
@@ -285,8 +305,18 @@ fn Composer(peer: Peer) -> impl IntoView {
             <span class=move || {
                 if bytes() > MAX_TEXT_BYTES { "count over" } else { "count dim" }
             }>{move || format!("{}/{MAX_TEXT_BYTES}", bytes())}</span>
-            <button type="submit" class="primary" disabled=move || !can_send()>
-                {t!(i18n, chat_send)}
+            <button
+                type="submit"
+                class:primary=move || !unmessagable()
+                disabled=move || !can_send()
+            >
+                {move || {
+                    if unmessagable() {
+                        t_string!(i18n, chat_send_anyway).to_owned()
+                    } else {
+                        t_string!(i18n, chat_send).to_owned()
+                    }
+                }}
             </button>
             <p class="error">{problem}</p>
         </form>

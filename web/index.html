@@ -500,8 +500,26 @@
       .topbar .avatar { width: 32px; height: 32px; font-size: 11px; background: var(--mc-near); color: var(--mc-text); }
       .topbar .node-avatar { width: 36px; height: 36px; font-size: 10px; }
       .topbar h1 { display: flex; align-items: center; gap: 6px; }
-      .topbar h1 .mark { display: flex; color: var(--mc-primary); }
-      .topbar h1 .mark svg { width: 15px; height: 15px; fill: currentColor; }
+      .topbar h1 .mark { display: flex; color: var(--mc-muted); }
+      .topbar h1 .mark svg { width: 15px; height: 15px; }
+      .topbar h1 .mark.star { color: var(--mc-primary); }
+      .topbar h1 .mark.star svg { fill: currentColor; }
+      /* The star as a button: an outline to mark it, filled once marked. */
+      .topbar h1 .favorite {
+        display: flex;
+        padding: 2px;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        color: var(--mc-muted);
+      }
+      .topbar h1 .favorite svg { width: 16px; height: 16px; }
+      .topbar h1 .favorite:hover { color: var(--mc-primary); }
+      .topbar h1 .favorite.on { color: var(--mc-primary); }
+      .topbar h1 .favorite.on svg { fill: currentColor; }
+      .topbar .actions .with-icon { display: inline-flex; align-items: center; gap: 6px; }
+      .topbar .actions .with-icon .icon { display: flex; color: var(--mc-muted); }
+      .topbar .actions .with-icon svg { width: 16px; height: 16px; }
       .topbar .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
       .topbar .actions button { min-height: 34px; font-weight: 600; white-space: nowrap; }
       .menu-toggle { display: none; }
@@ -1628,6 +1646,21 @@
       .mark.delivered { color: var(--mc-second); }
       .mark.sent { color: var(--mc-muted); }
       .mark.failed { color: var(--mc-danger); cursor: help; }
+      /* Over where it is written, to a node that takes no messages. */
+      .unmessagable {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0;
+        padding: 10px 20px;
+        border-top: 1px solid var(--mc-border);
+        border-left: 3px solid var(--mc-warn);
+        background: var(--mc-surface);
+        color: var(--mc-muted);
+        font-size: 13px;
+      }
+      .unmessagable .icon { display: flex; flex: none; color: var(--mc-warn); }
+      .unmessagable svg { width: 18px; height: 18px; }
       .composer {
         display: flex;
         gap: 10px;

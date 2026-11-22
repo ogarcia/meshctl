@@ -433,6 +433,9 @@ pub struct Node {
     /// Whether its owner is a licensed radio amateur, who sends nothing
     /// encrypted and is sent nothing encrypted either.
     pub licensed: bool,
+    /// Whether it tells that nobody reads messages sent to it, as a
+    /// repeater or a sensor of the mesh's own: they can be sent all the same.
+    pub unmessagable: bool,
     pub position: Option<Position>,
     /// When it was last heard, in seconds since the epoch.
     pub last_heard: Option<u32>,
@@ -474,6 +477,13 @@ pub struct NodeLatest {
     pub local_stats: Option<Packet>,
     /// The nodes it hears directly.
     pub neighbors: Option<Packet>,
+}
+
+/// Whether a node is to be a favourite of the radio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeFavorite {
+    pub favorite: bool,
 }
 
 /// Something amiss with a node, found in what it sent.

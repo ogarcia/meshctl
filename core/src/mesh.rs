@@ -61,6 +61,9 @@ pub struct User {
     /// Whether its owner is a licensed radio amateur: then it sends nothing
     /// encrypted, to itself either.
     pub licensed: bool,
+    /// Whether it tells that nobody reads messages sent to it, as a
+    /// repeater or a sensor of the mesh's own.
+    pub unmessagable: bool,
 }
 
 /// Where a node says it is, in degrees and metres.
@@ -645,6 +648,7 @@ fn user_from(user: pb::User) -> User {
         role: role_name(user.role),
         public_key: user.public_key,
         licensed: user.is_licensed,
+        unmessagable: user.is_unmessagable.unwrap_or(false),
     }
 }
 

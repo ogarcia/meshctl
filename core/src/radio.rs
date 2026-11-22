@@ -146,6 +146,8 @@ pub enum AdminError {
     NoAnswer,
     /// Not something this kind of radio does yet.
     Unsupported,
+    /// A node the radio does not know of.
+    UnknownNode,
 }
 
 /// How long the radio has to answer an admin request.
@@ -383,33 +385,7 @@ impl Mesh {
         if self.is_meshcore() {
             return Err(AdminError::Unsupported);
         }
-        let me = self
-            .read(|state| state.local.as_ref().map(|l| l.num))
-            .ok_or(AdminError::NotConnected)?;
-
-        // Changing settings takes the passkey the radio gives out with what it
-        // answers; asking who it is is the cheapest way to have one.
-        let (answer, answered) = oneshot::channel();
-        let request = self.admin(
-            me,
-            admin_message::PayloadVariant::GetOwnerRequest(true),
-            vec![],
-        )?;
-        self.waiting
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(request.0, answer);
-        self.send_raw(request.1)?;
-        let passkey = match tokio::time::timeout(ADMIN_TIMEOUT, answered).await {
-            Ok(Ok(passkey)) => passkey,
-            _ => {
-                self.waiting
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .remove(&request.0);
-                return Err(AdminError::NoAnswer);
-            }
-        };
+        let (me, passkey) = self.passkey().await?;
 
         use admin_message::PayloadVariant as A;
         let mut steps = vec![A::BeginEditSettings(true)];
@@ -430,6 +406,63 @@ impl Mesh {
             let _ = mesh.resync();
         });
         Ok(())
+    }
+
+    /// Marks a node a favourite of the radio, or no longer: the radio keeps
+    /// it in its node list however long it goes unheard. Nothing goes on the
+    /// air; the node changes here at once, as the radio does not tell.
+    pub async fn set_favorite(&self, num: u32, favorite: bool) -> Result<(), AdminError> {
+        if self.is_meshcore() {
+            return Err(AdminError::Unsupported);
+        }
+        if !self.read(|state| state.nodes.contains_key(&num)) {
+            return Err(AdminError::UnknownNode);
+        }
+        let (me, passkey) = self.passkey().await?;
+        let variant = if favorite {
+            admin_message::PayloadVariant::SetFavoriteNode(num)
+        } else {
+            admin_message::PayloadVariant::RemoveFavoriteNode(num)
+        };
+        let (_, packet) = self.admin(me, variant, passkey)?;
+        self.send_raw(packet)?;
+        self.update(|state| {
+            state.nodes.get_mut(&num).map_or_else(Vec::new, |node| {
+                node.favorite = favorite;
+                vec![Event::Node(node.clone())]
+            })
+        });
+        Ok(())
+    }
+
+    /// The radio's own number, and the passkey changing it takes, which it
+    /// gives out with what it answers: asking who it is is the cheapest way
+    /// to have one.
+    async fn passkey(&self) -> Result<(u32, Vec<u8>), AdminError> {
+        let me = self
+            .read(|state| state.local.as_ref().map(|l| l.num))
+            .ok_or(AdminError::NotConnected)?;
+        let (answer, answered) = oneshot::channel();
+        let request = self.admin(
+            me,
+            admin_message::PayloadVariant::GetOwnerRequest(true),
+            vec![],
+        )?;
+        self.waiting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(request.0, answer);
+        self.send_raw(request.1)?;
+        match tokio::time::timeout(ADMIN_TIMEOUT, answered).await {
+            Ok(Ok(passkey)) => Ok((me, passkey)),
+            _ => {
+                self.waiting
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&request.0);
+                Err(AdminError::NoAnswer)
+            }
+        }
     }
 
     /// An admin message to the radio itself, as the packet that carries it,

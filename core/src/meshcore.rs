@@ -302,6 +302,7 @@ fn node_from(contact: &Contact) -> Node {
             role: role_name(contact.kind),
             public_key: contact.public_key.to_vec(),
             licensed: false,
+            unmessagable: false,
         }),
         position: position(contact.lat, contact.lon),
         last_heard: last_heard(contact),

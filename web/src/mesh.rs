@@ -313,6 +313,8 @@ const SORTED_BACK: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-up.svg");
 const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
 pub const STAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/star.svg");
+pub const MESSAGE_OFF: &str =
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message-off.svg");
 pub const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");
 pub const PLUG: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plug.svg");
 pub const BATTERY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-2.svg");
@@ -374,6 +376,7 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
     let role = node.role.clone();
     let favorite = node.favorite;
     let placed = node.position.is_some();
+    let unmessagable = node.unmessagable;
 
     view! {
         <tr class="node-row" on:click=move |_| live.open_node(num)>
@@ -385,6 +388,7 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
                             {name}
                             {favorite.then(|| view! { <span class="mark star" inner_html=STAR></span> })}
                             {placed.then(|| view! { <span class="mark" inner_html=PIN></span> })}
+                            {unmessagable.then(|| view! { <span class="mark" title=move || t_string!(i18n, node_unmessagable) inner_html=MESSAGE_OFF></span> })}
                         </span>
                         <span class="mono dim">{node.id.clone()}</span>
                     </span>

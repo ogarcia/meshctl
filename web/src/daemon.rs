@@ -199,6 +199,16 @@ pub async fn requests(radio: RadioId, node: u32) -> Result<Vec<meshctl_api::Requ
     get(&format!("/radios/{radio}/requests?node={node}&limit=50")).await
 }
 
+/// Marks a node a favourite of a radio, or no longer.
+pub async fn set_favorite(radio: RadioId, node: u32, favorite: bool) -> Result<(), Failure> {
+    let request = with_token(Request::put(&url(&format!(
+        "/radios/{radio}/nodes/{node}/favorite"
+    ))))
+    .json(&meshctl_api::NodeFavorite { favorite })
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// What a node last told a radio of each kind.
 pub async fn node_latest(radio: RadioId, node: u32) -> Result<meshctl_api::NodeLatest, Failure> {
     get(&format!("/radios/{radio}/nodes/{node}/latest")).await

@@ -421,5 +421,10 @@
   "drawer_close": "Close",
   "node_no_key": "Its public key is not known, and without it it cannot be asked for telemetry or neighbours: its node info brings it, if its firmware has one.",
   "node_needs_key": "Its public key is needed, which its node info brings: without it the radio does not send this.",
-  "node_direct_none": "Nothing, until its key is known: the radio encrypts to it what is for it alone"
+  "node_direct_none": "Nothing, until its key is known: the radio encrypts to it what is for it alone",
+  "node_favorite": "Mark as a favourite",
+  "node_unfavorite": "No longer a favourite",
+  "node_unmessagable": "Takes no messages",
+  "chat_unmessagable": "This node tells that nobody reads its messages; it is usually a repeater or a sensor. You can write to it, but most likely nobody will read it.",
+  "chat_send_anyway": "Send all the same"
 }
