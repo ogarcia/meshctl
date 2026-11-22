@@ -818,7 +818,7 @@
       /*
        * Options each as wide as its word, the room left shared out, and the
        * pill where the one chosen is and as wide, as measured (--x, --w):
-       * until it is, as any other pill.
+       * unseen until it is, and sliding only once it has been placed.
        */
       .segmented.fitted { grid-template-columns: repeat(var(--n), auto); }
       .settings-tabs { align-self: center; width: 100%; max-width: 640px; }
@@ -826,7 +826,8 @@
         left: 0;
         width: var(--w, calc((100% - 6px) / var(--n, 3)));
         transform: translateX(var(--x, calc(3px + var(--at, 0) * 100%)));
-        transition: transform 0.2s ease, width 0.2s ease;
+        transition: transform var(--slide, 0s) ease, width var(--slide, 0s) ease;
+        opacity: var(--shown, 0);
       }
       .segmented.fitted button {
         display: flex;
@@ -1434,7 +1435,13 @@
       .telemetry > header { flex-wrap: wrap; }
       /* The whiles, under a pill that slides to the one chosen: small. */
       .telemetry .segmented.windows { margin-left: auto; padding: 2px; border-radius: 8px; }
-      .telemetry .segmented.windows::before { top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / var(--n, 3)); border-radius: 6px; }
+      .telemetry .segmented.windows::before {
+        top: 2px;
+        bottom: 2px;
+        width: var(--w, calc((100% - 4px) / var(--n, 3)));
+        transform: translateX(var(--x, calc(2px + var(--at, 0) * 100%)));
+        border-radius: 6px;
+      }
       .telemetry .segmented.windows button {
         min-height: 26px;
         padding: 0 10px;
@@ -2515,6 +2522,12 @@
         .node-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
         .figure, .figure:first-child { min-width: 0; padding: 0; border-left: 0; }
         .figure .bar { width: 100%; }
+        /* The whiles by the title, in one line: tighter. */
+        .telemetry .segmented.windows button { padding: 0 6px; }
+      }
+      /* The narrowest phones: the whiles tighter still, by the title. */
+      @media (max-width: 370px) {
+        .telemetry .segmented.windows button { padding: 0 4px; }
       }
 
       /*

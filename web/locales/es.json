@@ -93,7 +93,7 @@
   "nav_menu": "Menú",
   "nav_channel_slot": "Canal {{ index }}",
   "prefs_title": "Apariencia",
-  "prefs_text": "Las guarda meshctl: son las mismas en todos los navegadores desde los que lo abras.",
+  "prefs_text": "Las mismas en cualquier navegador",
   "prefs_theme": "Tema",
   "theme_system": "Según el sistema",
   "theme_light": "Claro",

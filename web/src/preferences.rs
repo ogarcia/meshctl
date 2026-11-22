@@ -190,6 +190,7 @@ pub fn slide(strip: NodeRef<leptos::html::Div>, at: Memo<usize>) -> RwSignal<Str
     use wasm_bindgen::closure::Closure;
     let i18n = use_i18n();
     let pill = RwSignal::new(String::new());
+    let sliding = RwSignal::new(false);
     let resized = RwSignal::new(0u32);
     // What watches its size, and what it calls, kept to be let go with it.
     let watch = StoredValue::new_local(None::<(web_sys::ResizeObserver, Closure<dyn FnMut()>)>);
@@ -221,12 +222,24 @@ pub fn slide(strip: NodeRef<leptos::html::Div>, at: Memo<usize>) -> RwSignal<Str
                 .children()
                 .item(at as u32)
                 .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok());
-            if let Some(option) = option {
-                pill.set(format!(
-                    "--x: {}px; --w: {}px",
-                    option.offset_left(),
-                    option.offset_width()
-                ));
+            // Hidden, it measures as nothing: left for when it is shown.
+            let Some(option) = option.filter(|o| o.offset_width() > 0) else {
+                return;
+            };
+            let slides = sliding.get_untracked();
+            pill.set(format!(
+                "--x: {}px; --w: {}px; --shown: 1{}",
+                option.offset_left(),
+                option.offset_width(),
+                if slides { "; --slide: 0.2s" } else { "" }
+            ));
+            // Placed at once the first time, and seen: sliding from then on,
+            // not from where it was before it was measured.
+            if !slides {
+                request_animation_frame(move || {
+                    sliding.set(true);
+                    pill.update(|p| p.push_str("; --slide: 0.2s"));
+                });
             }
         });
     });

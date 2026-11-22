@@ -295,10 +295,19 @@ pub fn Telemetry(num: u32) -> impl IntoView {
                 .unwrap_or_default()
         })
     });
+    // Each as wide as its name, so that they fit by the title on a phone.
+    let at = Memo::new(move |_| {
+        windows.with(|ws| ws.iter().position(|&w| w == window.get()).unwrap_or(0))
+    });
+    let strip = NodeRef::<leptos::html::Div>::new();
+    let slid = crate::preferences::slide(strip, at);
     let pill = move || {
-        let windows = windows.get();
-        let at = windows.iter().position(|&w| w == window.get()).unwrap_or(0);
-        format!("--n: {}; --at: {at}", windows.len())
+        format!(
+            "--n: {}; --at: {}; {}",
+            windows.with(Vec::len),
+            at.get(),
+            slid.get()
+        )
     };
     let pills = move || {
         windows
@@ -311,6 +320,7 @@ pub fn Telemetry(num: u32) -> impl IntoView {
                         role="radio"
                         class:on=move || window.get() == w
                         aria-checked=move || (window.get() == w).to_string()
+                        data-label=window_label(i18n, w)
                         on:click=move |_| choose(w)
                     >
                         {window_label(i18n, w)}
@@ -348,7 +358,7 @@ pub fn Telemetry(num: u32) -> impl IntoView {
                 <section class="node-section telemetry">
                     <header>
                         <h2>{t!(i18n, chart_title)}</h2>
-                        <div class="segmented windows" role="radiogroup" style=pill>
+                        <div class="segmented fitted windows" role="radiogroup" node_ref=strip style=pill>
                             {pills}
                         </div>
                     </header>

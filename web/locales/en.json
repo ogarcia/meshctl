@@ -93,7 +93,7 @@
   "nav_menu": "Menu",
   "nav_channel_slot": "Channel {{ index }}",
   "prefs_title": "Appearance",
-  "prefs_text": "meshctl keeps these: they are the same in every browser that opens it.",
+  "prefs_text": "The same in any browser",
   "prefs_theme": "Theme",
   "theme_system": "As the system",
   "theme_light": "Light",
