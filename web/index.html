@@ -534,7 +534,7 @@
       /* On a wide screen the map goes without the bar over it, as its nodes'
          cards say all it would. A narrow one keeps it, for its menu button,
          until phones get a design of their own. */
-      @media (min-width: 761px) {
+      @media (min-width: 761px) and (min-height: 501px), (min-width: 761px) and (pointer: fine) {
         .app.on-map .topbar { display: none; }
       }
       main {
@@ -558,7 +558,7 @@
       body .phone-back { display: none; }
       .wide-only { display: contents; }
       .phone-only { display: none; }
-      @media (max-width: 760px) {
+      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
         .app { display: flex; flex-direction: column; }
         .page { flex: 1; min-height: 0; }
         .rail, .sidebar, .menu-toggle, .menu-backdrop, .wide-only { display: none !important; }
@@ -2439,7 +2439,7 @@
       /*
        * A phone, last: over the rules of each page above, at the same weight.
        */
-      @media (max-width: 760px) {
+      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
         /* The heading in one line: the name cut short, the actions as icons. */
         .topbar { flex-wrap: nowrap; }
         .topbar .heading { flex: 1; min-width: 0; }
@@ -2457,6 +2457,18 @@
           margin-bottom: 18px;
           border-bottom: 1px solid var(--mc-border);
         }
+        /* The page one column the screen wide, whatever it holds. */
+        main { grid-template-columns: minmax(0, 1fr); }
+        /* Radios and channels: no handle to drag with a finger, the arrows
+           do it. */
+        .radio-row .grip { display: none; }
+      }
+      /*
+       * Narrow, whether a phone or not: what does not fit side by side goes
+       * one under the other. A phone on its side is wide enough for the
+       * pages as on a wider screen.
+       */
+      @media (max-width: 760px) {
         /* The nodes, each in two lines: who, and how it is heard, small. */
         .node-tools { flex-direction: column; align-items: stretch; }
         .node-tools .segmented { width: 100%; }
@@ -2472,8 +2484,6 @@
         }
         .nodes-table tr.node-row td { padding: 0; border: 0; }
         .nodes-table tr.node-row:last-child { border-bottom: 0; }
-        /* The page one column the screen wide, whatever it holds. */
-        main { grid-template-columns: minmax(0, 1fr); }
         /* Settings: each control under what it is, the whole width; the tabs
            a little tighter, to fit the five. */
         .pref-control,
@@ -2501,10 +2511,8 @@
         .section-list button.on { border-color: var(--mc-primary); }
         .section-list .state.none { display: none; }
         .section-list .edited { margin-left: 0; }
-        /* Radios and channels: no handle to drag with a finger, the arrows
-           do it; what does not fit goes under the name. */
+        /* Radios and channels: what does not fit goes under the name. */
         .radio-row { gap: 8px; padding: 10px 8px; }
-        .radio-row .grip { display: none; }
         .radio-row .name { flex-wrap: wrap; row-gap: 2px; }
         .channel-row .pick { flex-wrap: wrap; row-gap: 6px; }
         .channel-row .channel-facts { flex-basis: 100%; flex-wrap: wrap; padding-left: 52px; }
@@ -2524,6 +2532,37 @@
         .figure .bar { width: 100%; }
         /* The whiles by the title, in one line: tighter. */
         .telemetry .segmented.windows button { padding: 0 6px; }
+      }
+      /*
+       * A phone on its side: short of height, not of width. The bar of tabs
+       * goes up the left, a column, to leave the page all the height there
+       * is; the drawers come from the side again, as tall as the screen.
+       */
+      @media (max-height: 500px) and (pointer: coarse) and (orientation: landscape) {
+        .app { flex-direction: row; }
+        .page { min-width: 0; }
+        .tabbar {
+          order: -1;
+          grid-template-columns: none;
+          grid-template-rows: repeat(5, minmax(0, 1fr));
+          width: 72px;
+          padding: 4px 4px calc(4px + env(safe-area-inset-bottom)) calc(4px + env(safe-area-inset-left));
+          border-top: 0;
+          border-right: 1px solid var(--mc-border);
+        }
+        .tabbar button { justify-content: center; }
+        body .drawer {
+          top: 0;
+          left: auto;
+          width: min(480px, 75vw);
+          max-height: none;
+          border-top: 0;
+          border-left: 1px solid var(--mc-border);
+          border-radius: 0;
+          box-shadow: -12px 0 32px rgb(0 0 0 / 25%);
+          padding-bottom: 0;
+          padding-right: env(safe-area-inset-right);
+        }
       }
       /* The narrowest phones: the whiles tighter still, by the title. */
       @media (max-width: 370px) {
