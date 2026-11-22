@@ -1225,28 +1225,25 @@
        * faint grid; what a point says, on hovering it.
        */
       .telemetry > header { flex-wrap: wrap; }
-      .telemetry .windows {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 2px;
-        margin-left: auto;
-        padding: 2px;
-        border: 1px solid var(--mc-border);
-        border-radius: 8px;
-        background: var(--mc-raised);
-      }
-      .telemetry .windows button {
+      /* The whiles, under a pill that slides to the one chosen: small. */
+      .telemetry .segmented.windows { margin-left: auto; padding: 2px; border-radius: 8px; }
+      .telemetry .segmented.windows::before { top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / var(--n, 3)); border-radius: 6px; }
+      .telemetry .segmented.windows button {
         min-height: 26px;
-        padding: 0 9px;
-        border: 0;
-        border-radius: 6px;
-        background: none;
-        color: var(--mc-muted);
+        padding: 0 10px;
         font-size: 12px;
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
-      .telemetry .windows button:hover { color: var(--mc-text); }
-      .telemetry .windows button.on { background: var(--mc-surface); color: var(--mc-text); font-weight: 600; }
+      .chart-group + .chart-group { margin-top: 22px; }
+      .chart-group h3 {
+        margin: 0 0 10px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--mc-muted);
+      }
       .charts {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));

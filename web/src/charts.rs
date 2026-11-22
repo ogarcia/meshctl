@@ -16,10 +16,9 @@ use leptos::task::spawn_local;
 use leptos_i18n::I18nContext;
 use meshctl_api::{NodeTelemetry, TelemetryPoint};
 
-/// The whiles there are to choose, in seconds.
-const WINDOWS: [u32; 11] = [
-    900, 3_600, 10_800, 21_600, 43_200, 86_400, 172_800, 259_200, 604_800, 1_209_600, 2_592_000,
-];
+/// The whiles there are to choose, in seconds: from a day, as nodes send
+/// their telemetry once an hour by default, and routers twice a day.
+const WINDOWS: [u32; 6] = [86_400, 172_800, 259_200, 604_800, 1_209_600, 2_592_000];
 
 /// The while charted when none was chosen: a day.
 const DEFAULT_WINDOW: u32 = 86_400;
@@ -27,11 +26,6 @@ const DEFAULT_WINDOW: u32 = 86_400;
 /// How a while is named, short.
 fn window_label(i18n: I18nContext<Locale>, window: u32) -> String {
     match window {
-        900 => "15 min".into(),
-        3_600 => "1 h".into(),
-        10_800 => "3 h".into(),
-        21_600 => "6 h".into(),
-        43_200 => "12 h".into(),
         86_400 => "24 h".into(),
         172_800 => "48 h".into(),
         259_200 => "3 d".into(),
@@ -61,12 +55,36 @@ fn offered(oldest: Option<i64>, now: i64) -> Vec<u32> {
 /// A chart to draw: its title, its unit and decimals, its lines, each with
 /// its name and its measure, and what its scale is held to.
 struct Spec {
+    group: Group,
     title: String,
     unit: &'static str,
     decimals: usize,
     lines: Vec<(String, &'static str)>,
     floor: Option<f64>,
     ceiling: Option<f64>,
+}
+
+/// What a chart is of, as the node's page groups it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Group {
+    Device,
+    Signal,
+    Environment,
+    Power,
+}
+
+impl Group {
+    const ALL: [Self; 4] = [Self::Device, Self::Signal, Self::Environment, Self::Power];
+
+    fn title(self, i18n: I18nContext<Locale>) -> String {
+        match self {
+            Self::Device => t_string!(i18n, node_device),
+            Self::Signal => t_string!(i18n, node_signal),
+            Self::Environment => t_string!(i18n, node_environment),
+            Self::Power => t_string!(i18n, node_power),
+        }
+        .to_owned()
+    }
 }
 
 /// The charts there are for a node's series, in the order they are shown:
@@ -86,6 +104,7 @@ fn specs(
     };
     let mut specs = vec![
         Spec {
+            group: Group::Device,
             title: t_string!(i18n, node_battery).to_owned(),
             unit: " %",
             decimals: 0,
@@ -94,6 +113,7 @@ fn specs(
             ceiling: Some(100.0),
         },
         Spec {
+            group: Group::Device,
             title: t_string!(i18n, node_voltage).to_owned(),
             unit: " V",
             decimals: 2,
@@ -102,6 +122,7 @@ fn specs(
             ceiling: None,
         },
         Spec {
+            group: Group::Device,
             title: t_string!(i18n, chart_airtime).to_owned(),
             unit: " %",
             decimals: 1,
@@ -119,6 +140,7 @@ fn specs(
             ceiling: None,
         },
         Spec {
+            group: Group::Signal,
             title: "SNR".into(),
             unit: " dB",
             decimals: 1,
@@ -127,6 +149,7 @@ fn specs(
             ceiling: None,
         },
         Spec {
+            group: Group::Signal,
             title: "RSSI".into(),
             unit: " dBm",
             decimals: 0,
@@ -143,6 +166,7 @@ fn specs(
             && let Some((title, unit, decimals)) = crate::node::environment_field(i18n, key)
         {
             specs.push(Spec {
+                group: Group::Environment,
                 title,
                 unit,
                 decimals,
@@ -165,6 +189,7 @@ fn specs(
                     t_string!(i18n, power_channel).replace("{n}", &channel.to_string())
                 );
                 specs.push(Spec {
+                    group: Group::Power,
                     title,
                     unit,
                     decimals,
@@ -241,18 +266,25 @@ pub fn Telemetry(num: u32) -> impl IntoView {
         preferences.telemetry_window = Some(window);
         live.prefer(preferences);
     };
-    move || {
-        let telemetry = data.get()?;
-        let offered = offered(telemetry.oldest, i64::from(live.now.get()));
-        if offered.is_empty() {
-            return None;
-        }
-        let current = window.get();
-        let end = i64::from(live.now.get_untracked());
-        let start = end - i64::from(current);
-        let pills = offered
-            .iter()
-            .map(|&w| {
+    // The whiles worth offering, which change seldom: the choice of them
+    // stays as it is while another is chosen, so that its pill slides.
+    let windows = Memo::new(move |_| {
+        data.with(|d| {
+            d.as_ref()
+                .map(|d| offered(d.oldest, i64::from(live.now.get())))
+                .unwrap_or_default()
+        })
+    });
+    let pill = move || {
+        let windows = windows.get();
+        let at = windows.iter().position(|&w| w == window.get()).unwrap_or(0);
+        format!("--n: {}; --at: {at}", windows.len())
+    };
+    let pills = move || {
+        windows
+            .get()
+            .into_iter()
+            .map(|w| {
                 view! {
                     <button
                         type="button"
@@ -265,25 +297,55 @@ pub fn Telemetry(num: u32) -> impl IntoView {
                     </button>
                 }
             })
-            .collect_view();
-        let charts = specs(i18n, &telemetry);
-        let body = if charts.is_empty() {
-            view! { <p class="nothing">{t!(i18n, chart_nothing)}</p> }.into_any()
-        } else {
-            charts
+            .collect_view()
+    };
+    // The charts, in groups as the page's sections: a group with none, left
+    // out.
+    let body = move || {
+        let telemetry = data.get()?;
+        let end = i64::from(live.now.get_untracked());
+        let start = end - i64::from(window.get());
+        let mut charts = specs(i18n, &telemetry);
+        if charts.is_empty() {
+            return Some(view! { <p class="nothing">{t!(i18n, chart_nothing)}</p> }.into_any());
+        }
+        Some(
+            Group::ALL
                 .into_iter()
-                .map(|(spec, lines)| view! { <Chart spec lines start end /> })
+                .filter_map(|group| {
+                    let (of, rest): (Vec<_>, Vec<_>) =
+                        charts.drain(..).partition(|(spec, _)| spec.group == group);
+                    charts = rest;
+                    (!of.is_empty()).then(|| {
+                        let of = of
+                            .into_iter()
+                            .map(|(spec, lines)| view! { <Chart spec lines start end /> })
+                            .collect_view();
+                        view! {
+                            <div class="chart-group">
+                                <h3>{group.title(i18n)}</h3>
+                                <div class="charts">{of}</div>
+                            </div>
+                        }
+                    })
+                })
                 .collect_view()
-                .into_any()
-        };
-        Some(view! {
-            <section class="node-section telemetry">
-                <header>
-                    <h2>{t!(i18n, chart_title)}</h2>
-                    <div class="windows" role="radiogroup">{pills}</div>
-                </header>
-                <div class="charts">{body}</div>
-            </section>
+                .into_any(),
+        )
+    };
+    move || {
+        (!windows.with(Vec::is_empty)).then(|| {
+            view! {
+                <section class="node-section telemetry">
+                    <header>
+                        <h2>{t!(i18n, chart_title)}</h2>
+                        <div class="segmented windows" role="radiogroup" style=pill>
+                            {pills}
+                        </div>
+                    </header>
+                    {body}
+                </section>
+            }
         })
     }
 }
@@ -298,6 +360,7 @@ const H: f64 = 100.0;
 #[component]
 fn Chart(spec: Spec, lines: Vec<Vec<TelemetryPoint>>, start: i64, end: i64) -> impl IntoView {
     let Spec {
+        group: _,
         title,
         unit,
         decimals,
@@ -515,10 +578,12 @@ mod tests {
     #[test]
     fn whiles_are_offered_up_to_the_first_that_holds_all() {
         assert!(offered(None, 1000).is_empty());
-        assert_eq!(offered(Some(1000 - 600), 1000), [900]);
+        // Less than a day: a day, the shortest there is.
+        assert_eq!(offered(Some(1000 - 600), 1000), [86_400]);
+        // Two days and a half: up to three.
         assert_eq!(
-            offered(Some(1000 - 20 * 3600), 1000),
-            [900, 3_600, 10_800, 21_600, 43_200, 86_400]
+            offered(Some(1_000_000 - 60 * 3600), 1_000_000),
+            [86_400, 172_800, 259_200]
         );
         assert_eq!(offered(Some(0), 100_000_000).len(), WINDOWS.len());
     }
