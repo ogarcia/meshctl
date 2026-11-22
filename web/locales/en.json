@@ -106,7 +106,7 @@
   "packets_empty": "Nothing heard yet: packets show here as the radio hears them.",
   "packets_older": "Older",
   "packets_encrypted": "Encrypted",
-  "node_page": "Node",
+  "node_page": "Details",
   "node_message": "Message",
   "node_signal": "Signal",
   "node_position": "Position",
