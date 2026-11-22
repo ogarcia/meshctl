@@ -20,6 +20,16 @@ fn node_label(live: Live, num: u32) -> String {
     })
 }
 
+/// A node by its long name, or its id when it has none.
+fn node_name(live: Live, num: u32) -> String {
+    live.nodes.with(|nodes| {
+        nodes
+            .get(&num)
+            .and_then(|n| n.long_name.clone())
+            .unwrap_or_else(|| format!("!{num:08x}"))
+    })
+}
+
 fn node_title(live: Live, num: u32) -> String {
     live.nodes.with(|nodes| {
         let id = format!("!{num:08x}");
@@ -101,7 +111,17 @@ pub fn TraceCard(traceroute: Traceroute) -> impl IntoView {
     view! {
         <article class="trace">
             <header>
-                <strong>{move || node_title(live, target)}</strong>
+                // Its name and its id, in a box one line tall: the id goes,
+                // whole, where both do not fit, and the name is cut short
+                // where it alone does not.
+                <strong class="target">
+                    <span class="name">{move || node_name(live, target)}</span>
+                    {move || {
+                        live.nodes
+                            .with(|nodes| nodes.get(&target).is_some_and(|n| n.long_name.is_some()))
+                            .then(|| view! { <span class="id dim">{format!("(!{target:08x})")}</span> })
+                    }}
+                </strong>
                 {status}
                 <span class="dim when">{move || ago(live.now.get(), at)}</span>
                 {copy}

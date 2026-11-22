@@ -833,7 +833,7 @@ fn Radio() -> impl IntoView {
                 let copied = key.clone();
                 view! {
                     <span class="copyable">
-                        <span class="mono key">{key}</span>
+                        <span class="mono key" title=copied.clone()>{key}</span>
                         <button
                             class="icon-button"
                             title=move || t_string!(i18n, node_key_copy)
@@ -973,7 +973,7 @@ fn Identity(at: Option<i64>) -> impl IntoView {
                 let copied = key.clone();
                 view! {
                     <span class="copyable">
-                        <span class="mono key">{key}</span>
+                        <span class="mono key" title=copied.clone()>{key}</span>
                         <button
                             class="icon-button"
                             title=move || t_string!(i18n, node_key_copy)

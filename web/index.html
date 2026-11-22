@@ -1376,9 +1376,10 @@
       .facts dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
       .facts .copyable { display: flex; align-items: center; gap: 4px; }
       .facts .copyable .icon-button { width: 28px; height: 28px; }
-      /* A node's key, cut where it must, its button kept beside it: not a
-         channel's key, which stays in one line. */
-      .facts .copyable .key { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+      /* A node's key in one line, cut short where it must (its button copies
+         it whole, and it shows whole on hovering it), its button beside it:
+         not a channel's key, as the classes are the same. */
+      .facts .copyable .key { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; }
       .facts .copyable .icon-button { flex: none; }
       .facts .copyable .icon-button svg { width: 16px; height: 16px; }
       .facts .key { font-size: 12px; font-weight: 400; word-break: break-all; }
@@ -1626,7 +1627,23 @@
       .chart .tip strong { font-variant-numeric: tabular-nums; }
       .trace { padding: 12px 16px; border-bottom: 1px solid var(--mc-border); }
       .trace:last-child { border-bottom: 0; }
-      .trace header { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+      /* One line always: whom to, how it went, when, and its copy button,
+         which never go under. Whom to, its name and id in a box a line tall:
+         where both do not fit, the id goes under, out of sight, whole; where
+         the name alone does not, it is cut short. */
+      .trace header { display: flex; gap: 12px; align-items: center; flex-wrap: nowrap; min-width: 0; }
+      .trace header > :not(.target) { flex: none; }
+      .trace .target {
+        display: flex;
+        flex-wrap: wrap;
+        column-gap: 0.35em;
+        flex: 0 1 auto;
+        min-width: 0;
+        height: 1lh;
+        overflow: hidden;
+      }
+      .trace .target .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .trace .target .id { font-weight: 400; white-space: nowrap; }
       .trace .when { margin-left: auto; font-size: 12px; }
       .trace header .copy { width: 28px; height: 28px; margin: -4px -6px -4px 0; }
       .trace header .copy svg { width: 16px; height: 16px; }
