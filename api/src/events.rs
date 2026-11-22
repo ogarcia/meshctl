@@ -55,6 +55,11 @@ pub enum ServerMessage {
     Synced { radio: RadioId },
     /// A radio heard a node, or something about one changed.
     Node { radio: RadioId, node: Node },
+    /// A radio forgot a node, as asked: out of its node list.
+    NodeRemoved { radio: RadioId, node: u32 },
+    /// All kept of a node was forgotten, as asked: what was asked of it, the
+    /// routes traced to it, its conversation and what it sent.
+    NodeForgotten { radio: RadioId, node: u32 },
     /// A message heard or sent through a radio.
     Message { radio: RadioId, message: Message },
     /// What became of a message sent.

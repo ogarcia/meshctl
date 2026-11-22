@@ -141,6 +141,8 @@ pub enum Event {
     /// read before is out of date.
     Synced,
     Node(Node),
+    /// The radio forgot a node, as asked: out of its node list.
+    NodeRemoved(u32),
     /// A packet the radio heard, whatever it carries: what a log of the mesh
     /// keeps. What it means, a message or an answer, comes as its own event
     /// besides.

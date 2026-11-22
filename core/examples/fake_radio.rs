@@ -82,6 +82,8 @@ struct Radio {
     paced: BTreeMap<i32, Instant>,
     /// The nodes marked favourites.
     favorites: std::collections::BTreeSet<u32>,
+    /// The nodes a client had it forget: left out of its node list.
+    removed: std::collections::BTreeSet<u32>,
 }
 
 /// How the neighbour answers.
@@ -246,6 +248,7 @@ impl Radio {
             answered: BTreeMap::new(),
             paced: BTreeMap::new(),
             favorites: std::collections::BTreeSet::new(),
+            removed: std::collections::BTreeSet::new(),
         }
     }
 
@@ -486,6 +489,8 @@ impl Radio {
                 ..Default::default()
             }),
         ];
+        // Those it was told to forget, out, until it is restarted.
+        out.retain(|v| !matches!(v, V::NodeInfo(n) if self.removed.contains(&n.num)));
         out.extend(self.channels.values().cloned().map(V::Channel));
         out.extend(self.configs.values().cloned().map(V::Config));
         out.extend(self.modules.values().cloned().map(V::ModuleConfig));
@@ -546,6 +551,11 @@ impl Radio {
             A::SetFavoriteNode(num) => {
                 println!("favourite: !{num:08x}");
                 self.favorites.insert(num);
+                None
+            }
+            A::RemoveByNodenum(num) => {
+                println!("forgotten: !{num:08x}");
+                self.removed.insert(num);
                 None
             }
             A::RemoveFavoriteNode(num) => {
@@ -636,24 +646,34 @@ async fn serve(
                         continue;
                     };
                     let answer = radio.lock().unwrap().admin(admin);
-                    answer
-                        .map(|answer| {
-                            from_radio::PayloadVariant::Packet(MeshPacket {
-                                from: ME,
-                                to: ME,
-                                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(
-                                    pb::Data {
-                                        portnum: PortNum::AdminApp as i32,
-                                        payload: answer.encode_to_vec(),
-                                        request_id: packet.id,
-                                        ..Default::default()
-                                    },
+                    // What has its own answer gets it; what does not, but
+                    // wants one, an acknowledgement, as the firmware's admin
+                    // module gives.
+                    let (portnum, payload) = match answer {
+                        Some(answer) => (PortNum::AdminApp, answer.encode_to_vec()),
+                        None if data.want_response => (
+                            PortNum::RoutingApp,
+                            pb::Routing {
+                                variant: Some(pb::routing::Variant::ErrorReason(
+                                    pb::routing::Error::None as i32,
                                 )),
                                 ..Default::default()
-                            })
-                        })
-                        .into_iter()
-                        .collect()
+                            }
+                            .encode_to_vec(),
+                        ),
+                        None => continue,
+                    };
+                    vec![from_radio::PayloadVariant::Packet(MeshPacket {
+                        from: ME,
+                        to: ME,
+                        payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                            portnum: portnum as i32,
+                            payload,
+                            request_id: packet.id,
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    })]
                 }
                 _ => continue,
             };

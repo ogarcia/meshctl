@@ -152,6 +152,8 @@ pub struct Live {
     /// The last page out of the settings, to go back to from them on a wider
     /// screen.
     pub came_from: RwSignal<Page>,
+    /// Whether the open node's removal is offered, in its drawer.
+    pub removing: RwSignal<bool>,
     /// Whether the open node's requests are shown, in their drawer.
     pub history: RwSignal<bool>,
     /// Whether the radios are shown to switch the selected one, on a phone.
@@ -213,6 +215,7 @@ impl Live {
             back: RwSignal::new(Vec::new()),
             came_from: RwSignal::new(Page::Map),
             history: RwSignal::new(false),
+            removing: RwSignal::new(false),
             radio_sheet: RwSignal::new(false),
             map_pick: RwSignal::new(None),
             map_focus: RwSignal::new(None),
@@ -483,6 +486,7 @@ impl Live {
     fn show_node(self, node: u32) {
         self.node.set(Some(node));
         self.history.set(false);
+        self.removing.set(false);
         self.requests.set(Vec::new());
         self.latest.set(None);
         self.checks.set(Vec::new());
@@ -781,6 +785,36 @@ impl Live {
                         self.nodes.update(|nodes| {
                             nodes.insert(node.num, node);
                         });
+                    }
+                    Ok(())
+                }
+                // Forgotten by the radio: out of the list, and out of its page
+                // if it was open, back where it was opened from.
+                ServerMessage::NodeRemoved { radio, node } if self.is_selected(radio) => {
+                    self.nodes.update(|nodes| {
+                        nodes.remove(&node);
+                    });
+                    if self.page.get_untracked() == Page::Node
+                        && self.node.get_untracked() == Some(node)
+                    {
+                        self.go_back();
+                    }
+                    Ok(())
+                }
+                // All kept of it forgotten: out of what this page has too.
+                ServerMessage::NodeForgotten { radio, node } if self.is_selected(radio) => {
+                    let peer = Peer::Node { node };
+                    self.requests.update(|r| r.retain(|r| r.node != node));
+                    self.traceroutes.update(|t| t.retain(|t| t.target != node));
+                    self.conversations.update(|c| c.retain(|c| c.peer != peer));
+                    self.packets.update(|p| p.retain(|p| p.from != node));
+                    self.packets_held.update(|p| p.retain(|p| p.from != node));
+                    if self.open.get_untracked() == Some(peer) {
+                        self.open.set(None);
+                        self.thread.set(Vec::new());
+                        if self.page.get_untracked() == Page::Chat {
+                            self.go(Page::Chats);
+                        }
                     }
                     Ok(())
                 }
@@ -1112,6 +1146,7 @@ enum Shown {
 }
 
 const GEAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/settings.svg");
+const TRASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/trash.svg");
 const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
 const PLUS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plus.svg");
 
@@ -1766,6 +1801,22 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                     }
                 });
                 // What it was asked for, on its page: in a drawer.
+                // Forgetting it, on a Meshtastic radio: in a drawer, which
+                // says how much.
+                let remove = (page == Page::Node
+                    && !local()
+                    && live.selected_kind() == Some(RadioKind::Meshtastic))
+                .then(|| {
+                    view! {
+                        <button
+                            class="icon-button"
+                            title=move || t_string!(i18n, remove_title)
+                            aria-label=move || t_string!(i18n, remove_title)
+                            inner_html=TRASH
+                            on:click=move |_| live.removing.set(true)
+                        ></button>
+                    }
+                });
                 let history = (page == Page::Node && !local()).then(|| {
                     view! {
                         <button
@@ -1781,7 +1832,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         </button>
                     }
                 });
-                view! { {history} {profile} {settings} {chat} }
+                view! { {remove} {history} {profile} {settings} {chat} }
             };
             // Back to where its page was opened from, on its page.
             let back = move || {

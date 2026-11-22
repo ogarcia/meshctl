@@ -57,6 +57,9 @@ pub enum Change {
     Request(RadioId, Request),
     /// The interface's preferences changed.
     Preferences(Preferences),
+    /// All kept of a node was forgotten, as asked: what was asked of it, the
+    /// routes traced to it, its conversation and what it sent.
+    NodeForgotten(RadioId, u32),
     /// Events of a radio were lost on their way here.
     Lagged,
 }
@@ -776,6 +779,31 @@ impl Radios {
         Ok(Some(()))
     }
 
+    /// Has a radio forget a node, and with `everything`, forgets all kept of
+    /// it besides: `None` if there is no such radio. Every client hears of it
+    /// as `node_removed`, and of the rest as `node_forgotten`.
+    pub async fn remove_node(
+        &self,
+        id: RadioId,
+        num: u32,
+        everything: bool,
+    ) -> Result<Result<Option<()>, AdminError>> {
+        let Some(mesh) = self.mesh(id) else {
+            return Ok(Ok(None));
+        };
+        if let Err(err) = mesh.remove_node(num).await {
+            return Ok(Err(err));
+        }
+        // Out of the list now, rather than once the event is taken: what
+        // comes from it next finds it gone.
+        self.store.remove_node(id, num).await?;
+        if everything {
+            self.store.forget_node(id, num).await?;
+            let _ = self.changes.send(Change::NodeForgotten(id, num));
+        }
+        Ok(Ok(Some(())))
+    }
+
     /// What a node a radio knows of last told of each kind: `None` if there
     /// is no such radio, or it knows of no such node.
     pub async fn latest(&self, id: RadioId, num: u32) -> Result<Option<NodeLatest>> {
@@ -1486,6 +1514,7 @@ impl Radios {
                 };
                 let stored = match event {
                     Ok(mesh::Event::Node(node)) => store.save_node(id, &node).await,
+                    Ok(mesh::Event::NodeRemoved(num)) => store.remove_node(id, num).await,
                     Ok(mesh::Event::Packet(heard)) => {
                         keep_packet(&store, &changes, id, &heard).await
                     }
@@ -1631,7 +1660,9 @@ fn admin_failure(error: AdminError) -> SettingsFailure {
         AdminError::NoAnswer => SettingsFailure::NoAnswer,
         AdminError::Unsupported => SettingsFailure::Unsupported,
         // Settings name no node.
-        AdminError::UnknownNode => SettingsFailure::NotConnected,
+        AdminError::UnknownNode | AdminError::OwnNode => SettingsFailure::NotConnected,
+        // Settings are not acknowledged, but read back.
+        AdminError::Refused(_) => SettingsFailure::NoAnswer,
     }
 }
 

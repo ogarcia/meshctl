@@ -66,6 +66,8 @@ pub enum ErrorCode {
     InvalidSettings,
     /// The radio did not answer the request a change of settings starts with.
     RadioDidNotAnswer,
+    /// The radio would not do it.
+    RadioRefused,
     /// The radio has no such channel, or it is disabled.
     InvalidChannel,
     /// Not a button a radio can have: a colour that is not `#rrggbb`, text of

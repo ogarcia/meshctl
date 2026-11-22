@@ -173,6 +173,7 @@ fn NodePage(num: u32) -> impl IntoView {
                 (!is_own.get()).then(|| view! {
                     <TracesDrawer open=drawer />
                     <RequestsDrawer />
+                    <RemoveDrawer />
                 })
             }}
             <Problem />
@@ -1532,6 +1533,120 @@ fn Forget(history: History, reload: Callback<()>) -> impl IntoView {
                 </button>
             </Show>
         </div>
+    }
+}
+
+/// Forgetting the node: by the radio alone, or by meshctl too, all it kept
+/// of it. Each once more said sure, as neither can be undone; done once the
+/// radio says it did.
+#[component]
+fn RemoveDrawer() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let title = Signal::derive(move || t_string!(i18n, remove_title).to_owned());
+    let problem = RwSignal::new(None::<Failure>);
+    let busy = RwSignal::new(false);
+    view! {
+        <Drawer open=live.removing title>
+            <div class="removal">
+                <Removal everything=false busy problem />
+                <Removal everything=true busy problem />
+                {move || {
+                    problem
+                        .get()
+                        .map(|failure| {
+                            let text = match failure {
+                                Failure::Rejected(ErrorCode::RadioRefused) => t!(i18n, remove_refused).into_any(),
+                                Failure::Rejected(ErrorCode::RadioDidNotAnswer) => t!(i18n, remove_no_answer).into_any(),
+                                Failure::Rejected(ErrorCode::RadioNotConnected) => t!(i18n, node_not_connected).into_any(),
+                                _ => t!(i18n, error_failed).into_any(),
+                            };
+                            view! { <p class="problem">{text}</p> }
+                        })
+                }}
+            </div>
+        </Drawer>
+    }
+}
+
+/// One way to forget the node: what it does, and doing it, once more said
+/// sure.
+#[component]
+fn Removal(
+    everything: bool,
+    busy: RwSignal<bool>,
+    problem: RwSignal<Option<Failure>>,
+) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let sure = RwSignal::new(false);
+    let remove = move |_| {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        busy.set(true);
+        problem.set(None);
+        spawn_local(async move {
+            let done = daemon::remove_node(radio, asking.num, everything).await;
+            busy.set(false);
+            sure.set(false);
+            match done {
+                // The page goes as the node does, as every client hears.
+                Ok(()) => live.removing.set(false),
+                Err(failure) => problem.set(Some(failure)),
+            }
+        });
+    };
+    let (title, text) = if everything {
+        (
+            t!(i18n, remove_all).into_any(),
+            t!(i18n, remove_all_text).into_any(),
+        )
+    } else {
+        (
+            t!(i18n, remove_radio).into_any(),
+            t!(i18n, remove_radio_text).into_any(),
+        )
+    };
+    let button = move || {
+        if everything {
+            t!(i18n, remove_all_button).into_any()
+        } else {
+            t!(i18n, remove_radio_button).into_any()
+        }
+    };
+    view! {
+        <section class="way">
+            <h3>{title}</h3>
+            <p class="dim">{text}</p>
+            <Show
+                when=move || sure.get()
+                fallback=move || {
+                    view! {
+                        <button class="danger-outline" disabled=move || busy.get() on:click=move |_| sure.set(true)>
+                            {button}
+                        </button>
+                    }
+                }
+            >
+                <div class="forget">
+                    <span class="question">{t!(i18n, remove_sure)}</span>
+                    <button class="danger" disabled=move || busy.get() on:click=remove>
+                        {move || {
+                            if busy.get() {
+                                t!(i18n, remove_waiting).into_any()
+                            } else {
+                                t!(i18n, forget_yes).into_any()
+                            }
+                        }}
+                    </button>
+                    <button disabled=move || busy.get() on:click=move |_| sure.set(false)>
+                        {t!(i18n, forget_no)}
+                    </button>
+                </div>
+            </Show>
+        </section>
     }
 }
 

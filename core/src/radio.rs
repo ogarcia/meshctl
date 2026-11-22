@@ -138,7 +138,7 @@ pub struct SettingsChange {
 }
 
 /// Why the radio's settings were not changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminError {
     /// The radio is not connected and in sync.
     NotConnected,
@@ -148,6 +148,10 @@ pub enum AdminError {
     Unsupported,
     /// A node the radio does not know of.
     UnknownNode,
+    /// The radio's own node, which it cannot forget.
+    OwnNode,
+    /// The radio would not do it, and said why, as the protobufs name it.
+    Refused(String),
 }
 
 /// How long the radio has to answer an admin request.
@@ -431,6 +435,54 @@ impl Mesh {
                 node.favorite = favorite;
                 vec![Event::Node(node.clone())]
             })
+        });
+        Ok(())
+    }
+
+    /// Has the radio forget a node: out of its node list, until it is heard
+    /// again. Nothing goes on the air.
+    pub async fn remove_node(&self, num: u32) -> Result<(), AdminError> {
+        if self.is_meshcore() {
+            return Err(AdminError::Unsupported);
+        }
+        if !self.read(|state| state.nodes.contains_key(&num)) {
+            return Err(AdminError::UnknownNode);
+        }
+        let (me, passkey) = self.passkey().await?;
+        if num == me {
+            return Err(AdminError::OwnNode);
+        }
+        let (id, packet) = self.admin(
+            me,
+            admin_message::PayloadVariant::RemoveByNodenum(num),
+            passkey,
+        )?;
+        // Forgotten once the radio says so: it answers what it does on its
+        // own with an acknowledgement, or why not. Until then, nothing here
+        // changes, nor anything kept of it.
+        let mut events = self.subscribe();
+        self.send_raw(packet)?;
+        let acknowledged = tokio::time::timeout(ADMIN_TIMEOUT, async {
+            loop {
+                match events.recv().await {
+                    Ok(Event::Ack(ack)) if ack.packet_id == id => return Some(ack.error),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        })
+        .await;
+        match acknowledged {
+            Ok(Some(None)) => {}
+            Ok(Some(Some(reason))) => return Err(AdminError::Refused(reason)),
+            Ok(None) | Err(_) => return Err(AdminError::NoAnswer),
+        }
+        self.update(|state| {
+            if state.nodes.remove(&num).is_some() {
+                vec![Event::NodeRemoved(num)]
+            } else {
+                Vec::new()
+            }
         });
         Ok(())
     }

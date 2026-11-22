@@ -88,6 +88,10 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
             link: link(state),
         },
         Change::Mesh(radio, mesh::Event::Synced) => ServerMessage::Synced { radio },
+        Change::Mesh(radio, mesh::Event::NodeRemoved(node)) => {
+            ServerMessage::NodeRemoved { radio, node }
+        }
+        Change::NodeForgotten(radio, node) => ServerMessage::NodeForgotten { radio, node },
         Change::Mesh(radio, mesh::Event::Node(n)) => ServerMessage::Node {
             radio,
             node: node(&n),

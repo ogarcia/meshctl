@@ -209,6 +209,15 @@ pub async fn set_favorite(radio: RadioId, node: u32, favorite: bool) -> Result<(
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Has the radio forget a node, and with `everything`, meshctl all it kept
+/// of it besides; once the radio says it did.
+pub async fn remove_node(radio: RadioId, node: u32, everything: bool) -> Result<(), Failure> {
+    let request = with_token(Request::delete(&url(&format!(
+        "/radios/{radio}/nodes/{node}?everything={everything}"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// A node's telemetry over the latest so many seconds.
 pub async fn node_telemetry(
     radio: RadioId,

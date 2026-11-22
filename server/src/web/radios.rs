@@ -29,7 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(status))
         .routes(routes!(channels))
         .routes(routes!(nodes))
-        .routes(routes!(node))
+        .routes(routes!(node, remove_node))
         .routes(routes!(checks))
         .routes(routes!(latest))
         .routes(routes!(favorite))
@@ -381,6 +381,85 @@ async fn node(
     }
 }
 
+/// How much of a node to forget.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct Removal {
+    /// All kept of it too: what it was asked and the routes traced to it, the
+    /// conversation with it, and what it was heard to send, its telemetry
+    /// with it. What it wrote in channels stays. Without it, only the radio
+    /// forgets it, and meshctl's list with it.
+    #[serde(default)]
+    everything: bool,
+}
+
+/// Remove node
+///
+/// Has the radio forget a node: out of its node list until it is heard
+/// again, as out of meshctl's. Nothing goes on the air. With `everything`,
+/// meshctl forgets all it kept of the node besides. Every client hears of
+/// it as `node_removed`, and of the rest as `node_forgotten`.
+#[utoipa::path(
+    delete,
+    path = "/radios/{radio}/nodes/{node}",
+    tag = "nodes",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = String, Path, description = "The node's id or number", example = "!90cda275"),
+        Removal,
+    ),
+    responses(
+        (status = 204, description = "Done"),
+        (status = 400, description = "That is neither a node id nor a number, or it is the radio's own node", body = Error),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio, or it knows of no such node", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "A kind of radio that does not do this yet: `unsupported_kind`", body = Error),
+        (status = 502, description = "The radio would not do it: `radio_refused`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn remove_node(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, String)>,
+    Query(removal): Query<Removal>,
+) -> Response {
+    let Some(num) = node_num(&node) else {
+        return error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest);
+    };
+    match state
+        .radios
+        .remove_node(radio, num, removal.everything)
+        .await
+    {
+        Ok(Ok(Some(()))) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Ok(None) | Err(AdminError::UnknownNode)) => not_found(),
+        Ok(Err(AdminError::OwnNode)) => error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest),
+        Ok(Err(AdminError::NotConnected)) => {
+            error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected)
+        }
+        Ok(Err(AdminError::Unsupported)) => {
+            error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::UnsupportedKind)
+        }
+        Ok(Err(AdminError::NoAnswer)) => {
+            error(StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer)
+        }
+        Ok(Err(AdminError::Refused(reason))) => {
+            tracing::warn!(
+                radio,
+                node = num,
+                reason,
+                "the radio would not forget a node"
+            );
+            error(StatusCode::BAD_GATEWAY, ErrorCode::RadioRefused)
+        }
+        Err(err) => {
+            tracing::error!(error = format_args!("{err:#}"), "remove node");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
 /// Over how long a node's telemetry is read.
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -460,6 +539,7 @@ async fn telemetry(
         (status = 404, description = "There is no such radio, or it knows of no such node", body = Error),
         (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
         (status = 422, description = "A kind of radio that does not do this yet: `unsupported_kind`", body = Error),
+        (status = 502, description = "The radio would not do it: `radio_refused`", body = Error),
         (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
     )
 )]
@@ -474,6 +554,7 @@ async fn favorite(
     match state.radios.set_favorite(radio, num, change.favorite).await {
         Ok(Some(())) => StatusCode::NO_CONTENT.into_response(),
         Ok(None) | Err(AdminError::UnknownNode) => not_found(),
+        Err(AdminError::OwnNode) => error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest),
         Err(AdminError::NotConnected) => error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
         Err(AdminError::Unsupported) => {
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::UnsupportedKind)
@@ -481,6 +562,7 @@ async fn favorite(
         Err(AdminError::NoAnswer) => {
             error(StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer)
         }
+        Err(AdminError::Refused(_)) => error(StatusCode::BAD_GATEWAY, ErrorCode::RadioRefused),
     }
 }
 

@@ -571,6 +571,63 @@ impl Store {
         upsert_node(&self.pool, radio, node).await
     }
 
+    /// Forgets a node a radio forgot: out of its node list, what was heard
+    /// of it kept.
+    pub async fn remove_node(&self, radio: RadioId, num: u32) -> Result<()> {
+        sqlx::query("DELETE FROM node WHERE radio_id = ? AND num = ?")
+            .bind(radio)
+            .bind(i64::from(num))
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Forgets all a radio has of a node: what it was asked and the routes
+    /// traced to it, the conversation with it, and what it was heard to send,
+    /// its telemetry with it. What it wrote in channels stays: it is theirs.
+    pub async fn forget_node(&self, radio: RadioId, num: u32) -> Result<()> {
+        let num = i64::from(num);
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query("DELETE FROM request WHERE radio_id = ? AND node = ?")
+            .bind(radio)
+            .bind(num)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM traceroute WHERE radio_id = ? AND target = ?")
+            .bind(radio)
+            .bind(num)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "DELETE FROM message WHERE radio_id = ? AND to_num != ?
+                AND (from_num = ? OR to_num = ?)",
+        )
+        .bind(radio)
+        .bind(i64::from(BROADCAST))
+        .bind(num)
+        .bind(num)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM packet_seen WHERE radio_id = ?
+                AND packet IN (SELECT id FROM packet WHERE from_num = ?)",
+        )
+        .bind(radio)
+        .bind(num)
+        .execute(&mut *tx)
+        .await?;
+        // What no radio heard any longer.
+        sqlx::query(
+            "DELETE FROM packet WHERE from_num = ?
+                AND NOT EXISTS (SELECT 1 FROM packet_seen s WHERE s.packet = packet.id)",
+        )
+        .bind(num)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Everything a radio said when it synced, at once: itself, every node it
     /// knows, and that it was connected then.
     pub async fn save_sync(
@@ -1612,6 +1669,80 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn forgetting_a_node_leaves_its_channel_messages_and_the_rest() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        store.save_node(radio, &node(9, "Faro")).await.unwrap();
+        store.save_node(radio, &node(5, "Otro")).await.unwrap();
+        // Its conversation with the radio (7), and a message on a channel.
+        store
+            .add_message(radio, &text(1, 9, 7, false))
+            .await
+            .unwrap();
+        store
+            .add_message(radio, &text(2, 7, 9, true))
+            .await
+            .unwrap();
+        store
+            .add_message(radio, &text(3, 9, BROADCAST, false))
+            .await
+            .unwrap();
+        store
+            .add_message(radio, &text(4, 5, 7, false))
+            .await
+            .unwrap();
+        // What it was asked, the routes traced to it, and what it sent.
+        store
+            .add_request(radio, 9, meshctl_api::RequestKind::Position, 0, 10, 100)
+            .await
+            .unwrap();
+        store.add_traceroute(radio, 11, 7, 9, 100).await.unwrap();
+        store.add_traceroute(radio, 12, 7, 5, 100).await.unwrap();
+        let heard = |packet_id: u32, from: u32| Heard {
+            packet_id,
+            from,
+            to: BROADCAST,
+            channel: 0,
+            portnum: Some(67),
+            payload: Vec::new(),
+            request_id: None,
+            reply_id: None,
+            want_response: false,
+            pki: false,
+            at: 100,
+            snr: None,
+            rssi: None,
+            hop_limit: 3,
+            hop_start: 3,
+            relay_node: None,
+            via_mqtt: false,
+        };
+        store.add_packet(radio, &heard(20, 9)).await.unwrap();
+        store.add_packet(radio, &heard(21, 5)).await.unwrap();
+
+        store.remove_node(radio, 9).await.unwrap();
+        store.forget_node(radio, 9).await.unwrap();
+
+        let count = |sql: &'static str| {
+            let pool = store.pool.clone();
+            async move {
+                sqlx::query_scalar::<_, i64>(sql)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(count("SELECT count(*) FROM node WHERE num = 9").await, 0);
+        assert_eq!(count("SELECT count(*) FROM node").await, 1);
+        // Its channel message and the other node's stay.
+        assert_eq!(count("SELECT count(*) FROM message").await, 2);
+        assert_eq!(count("SELECT count(*) FROM request").await, 0);
+        assert_eq!(count("SELECT count(*) FROM traceroute").await, 1);
+        assert_eq!(count("SELECT count(*) FROM packet").await, 1);
+        assert_eq!(count("SELECT count(*) FROM packet_seen").await, 1);
     }
 
     fn text(packet_id: u32, from: u32, to: u32, outgoing: bool) -> NewMessageRow {
