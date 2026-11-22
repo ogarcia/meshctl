@@ -2474,10 +2474,6 @@
        * pages as on a wider screen.
        */
       @media (max-width: 760px) {
-        /* The nodes, each in two lines: who, and how it is heard, small. */
-        /* The nodes' tools one under the other. */
-        .node-tools .segmented { width: 100%; }
-        .node-tools input { margin-left: 0; width: 100%; }
         /* Settings: each control under what it is, the whole width; the tabs
            a little tighter, to fit the five. */
         .pref-control,
@@ -2517,6 +2513,15 @@
         .figure .bar { width: 100%; }
         /* The whiles by the title, in one line: tighter. */
         .telemetry .segmented.windows button { padding: 0 6px; }
+      }
+      /*
+       * The nodes' tools one under the other, each the whole width, while
+       * the reach and the search do not fit side by side in the list.
+       */
+      @container nodes (max-width: 680px) {
+        .node-tools { flex-direction: column; align-items: stretch; }
+        .node-tools .segmented { width: 100%; }
+        .node-tools input { margin-left: 0; width: 100%; }
       }
       /*
        * The nodes, each in two lines, who and how it is heard, small, while
