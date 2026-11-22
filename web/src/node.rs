@@ -1138,14 +1138,21 @@ fn Traces(drawer: RwSignal<bool>) -> impl IntoView {
         live.traceroutes
             .with(|traces| traces.iter().find(|t| t.target == asking.num).cloned())
     };
+    // Earlier ones, the history: only then is there anything to see.
+    let earlier = move || {
+        live.traceroutes
+            .with(|traces| traces.iter().filter(|t| t.target == asking.num).count() > 1)
+    };
     view! {
         <Section title=t!(i18n, node_traces).into_any() asked=Some(Asked::Trace) class="node-traces">
             {move || match last() {
                 Some(traceroute) => view! {
                     <TraceCard traceroute />
-                    <button class="link all" on:click=move |_| drawer.set(true)>
-                        {t!(i18n, traces_all)}
-                    </button>
+                    <Show when=earlier>
+                        <button class="link all" on:click=move |_| drawer.set(true)>
+                            {t!(i18n, traces_all)}
+                        </button>
+                    </Show>
                 }
                 .into_any(),
                 None => view! { <p class="nothing">{t!(i18n, traces_none)}</p> }.into_any(),
@@ -1158,7 +1165,14 @@ fn Traces(drawer: RwSignal<bool>) -> impl IntoView {
 /// title, what it holds, and closing it, by its button, by a click beside
 /// it or by Escape.
 #[component]
-fn Drawer(open: RwSignal<bool>, title: Signal<String>, children: ChildrenFn) -> impl IntoView {
+fn Drawer(
+    open: RwSignal<bool>,
+    title: Signal<String>,
+    /// What can be done with what it holds: at its foot, always in sight.
+    #[prop(optional)]
+    foot: Option<ViewFn>,
+    children: ChildrenFn,
+) -> impl IntoView {
     let i18n = use_i18n();
     let escape = window_event_listener(leptos::ev::keydown, move |ev| {
         if ev.key() == "Escape" {
@@ -1184,8 +1198,67 @@ fn Drawer(open: RwSignal<bool>, title: Signal<String>, children: ChildrenFn) -> 
                     </button>
                 </header>
                 <div class="drawer-body">{children()}</div>
+                {foot.clone().map(|foot| view! { <footer class="drawer-foot">{foot.run()}</footer> })}
             </aside>
         </Show>
+    }
+}
+
+/// What a history is, for its button that forgets it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum History {
+    Requests,
+    Traceroutes,
+}
+
+/// Forgets a history of the node's, once more said sure: it cannot be
+/// undone. What is forgotten is read again after.
+#[component]
+fn Forget(history: History, reload: Callback<()>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let sure = RwSignal::new(false);
+    let busy = RwSignal::new(false);
+    let forget = move |_| {
+        busy.set(true);
+        spawn_local(async move {
+            let done = match history {
+                History::Requests => live.forget_requests(asking.num).await,
+                History::Traceroutes => live.forget_traceroutes(asking.num).await,
+            };
+            busy.set(false);
+            sure.set(false);
+            if done.is_ok() {
+                reload.run(());
+            }
+        });
+    };
+    let question = move || match history {
+        History::Requests => t_string!(i18n, forget_requests_sure).to_owned(),
+        History::Traceroutes => t_string!(i18n, forget_traces_sure).to_owned(),
+    };
+    view! {
+        <div class="forget">
+            <Show
+                when=move || sure.get()
+                fallback=move || {
+                    view! {
+                        <button class="link" on:click=move |_| sure.set(true)>
+                            {t!(i18n, forget_history)}
+                        </button>
+                    }
+                }
+            >
+                <span class="question">{question}</span>
+                <button class="danger" disabled=move || busy.get() on:click=forget>
+                    {t!(i18n, forget_yes)}
+                </button>
+                <button disabled=move || busy.get() on:click=move |_| sure.set(false)>
+                    {t!(i18n, forget_no)}
+                </button>
+            </Show>
+        </div>
     }
 }
 
@@ -1204,11 +1277,15 @@ fn TracesDrawer(open: RwSignal<bool>) -> impl IntoView {
         spawn_local(async move {
             if let Ok(page) = daemon::traceroutes_to(radio, asking.num, before).await {
                 more.set(page.len() == TRACES_PAGE);
-                pages.update(|pages| pages.extend(page));
+                // The latest is no history: it is on the page, and stays.
+                let skip = usize::from(before.is_none());
+                pages.update(|pages| pages.extend(page.into_iter().skip(skip)));
             }
         });
     };
+    // Read anew on opening, and as the routes change while open.
     Effect::new(move |_| {
+        live.traceroutes.track();
         if open.get() {
             pages.set(Vec::new());
             load(None);
@@ -1218,11 +1295,30 @@ fn TracesDrawer(open: RwSignal<bool>) -> impl IntoView {
         t_string!(i18n, traces_drawer_title)
             .replace("{name}", &title(live, Peer::Node { node: asking.num }))
     });
+    // At its foot: forgetting what it holds, when there is any.
+    let foot = ViewFn::from(move || {
+        view! {
+            <Show when=move || pages.with(|p| p.iter().any(|t| t.status != TracerouteStatus::Pending))>
+                <Forget
+                    history=History::Traceroutes
+                    reload=Callback::new(move |()| {
+                        pages.set(Vec::new());
+                        load(None);
+                    })
+                />
+            </Show>
+        }
+    });
     view! {
-        <Drawer open title>
-            <For each=move || pages.get() key=|t| (t.id, t.status) let:traceroute>
-                <TraceCard traceroute />
-            </For>
+        <Drawer open title foot>
+            <Show
+                when=move || pages.with(|p| !p.is_empty())
+                fallback=move || view! { <p class="nothing">{t!(i18n, traces_earlier_none)}</p> }
+            >
+                <For each=move || pages.get() key=|t| (t.id, t.status) let:traceroute>
+                    <TraceCard traceroute />
+                </For>
+            </Show>
             <Show when=move || more.get()>
                 <button
                     class="more"
@@ -1269,8 +1365,22 @@ fn RequestsDrawer() -> impl IntoView {
         t_string!(i18n, requests_drawer_title)
             .replace("{name}", &title(live, Peer::Node { node: asking.num }))
     });
+    // At its foot: forgetting what it holds, when there is any.
+    let foot = ViewFn::from(move || {
+        view! {
+            <Show when=move || pages.with(|p| p.iter().any(|r| r.status != RequestStatus::Pending))>
+                <Forget
+                    history=History::Requests
+                    reload=Callback::new(move |()| {
+                        pages.set(Vec::new());
+                        load(None);
+                    })
+                />
+            </Show>
+        }
+    });
     view! {
-        <Drawer open title>
+        <Drawer open title foot>
             <Show
                 when=move || pages.with(|p| !p.is_empty())
                 fallback=move || view! { <p class="nothing">{t!(i18n, requests_none)}</p> }

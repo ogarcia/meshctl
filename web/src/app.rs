@@ -499,6 +499,39 @@ impl Live {
         self.ask_error.set(Some(failure));
     }
 
+    /// Forgets what the open node was asked for, but what still waits: here
+    /// as in the daemon.
+    pub async fn forget_requests(self, node: u32) -> Result<(), Failure> {
+        let Some(radio) = self.selected.get_untracked() else {
+            return Ok(());
+        };
+        daemon::forget_requests(radio, node).await?;
+        self.requests.update(|requests| {
+            requests.retain(|r| r.node != node || r.status == RequestStatus::Pending);
+        });
+        Ok(())
+    }
+
+    /// Forgets the routes traced to a node but the latest and those waiting:
+    /// here as in the daemon.
+    pub async fn forget_traceroutes(self, node: u32) -> Result<(), Failure> {
+        let Some(radio) = self.selected.get_untracked() else {
+            return Ok(());
+        };
+        daemon::forget_traceroutes(radio, node).await?;
+        self.traceroutes.update(|traceroutes| {
+            let latest = traceroutes
+                .iter()
+                .filter(|t| t.target == node)
+                .map(|t| t.id)
+                .max();
+            traceroutes.retain(|t| {
+                t.target != node || Some(t.id) == latest || t.status == TracerouteStatus::Pending
+            });
+        });
+        Ok(())
+    }
+
     /// Puts a traceroute in the list, or where it was, as it is now.
     fn keep_traceroute(self, traceroute: Traceroute) {
         self.traceroutes.update(|traceroutes| {

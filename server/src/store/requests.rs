@@ -146,6 +146,20 @@ impl Store {
             .await?)
     }
 
+    /// Forgets what a node was asked for through a radio, but what still
+    /// waits for its answer; how many were. The packets that answered stay,
+    /// as what the node told.
+    pub async fn forget_requests(&self, radio: RadioId, node: u32) -> Result<u64> {
+        Ok(sqlx::query(
+            "DELETE FROM request WHERE radio_id = ? AND node = ? AND status != 'pending'",
+        )
+        .bind(radio)
+        .bind(i64::from(node))
+        .execute(&self.pool)
+        .await?
+        .rows_affected())
+    }
+
     /// Whether the same thing was asked of the same node and is still waiting.
     pub async fn is_asking(&self, radio: RadioId, node: u32, kind: RequestKind) -> Result<bool> {
         let row: Option<(i64,)> = sqlx::query_as(
@@ -417,5 +431,19 @@ mod tests {
             .await
             .unwrap();
         assert!(older.iter().all(|r| r.id < to_one[0].id));
+
+        // Forgotten, but what still waits.
+        let waiting = store
+            .add_request(1, 0x55, RequestKind::Position, 0, 3, 300)
+            .await
+            .unwrap();
+        assert_eq!(store.forget_requests(1, 0x55).await.unwrap(), 1);
+        let left = store.requests(1, Some(0x55), None, 10).await.unwrap();
+        assert_eq!(left.iter().map(|r| r.id).collect::<Vec<_>>(), [waiting.id]);
+        // Those to other nodes stay.
+        assert_eq!(
+            store.requests(1, Some(0x66), None, 10).await.unwrap().len(),
+            1
+        );
     }
 }

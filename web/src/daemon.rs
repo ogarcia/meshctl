@@ -262,6 +262,22 @@ pub async fn requests_page(
     .await
 }
 
+/// Forgets what a node was asked for, but what still waits.
+pub async fn forget_requests(radio: RadioId, node: u32) -> Result<(), Failure> {
+    let request = with_token(Request::delete(&url(&format!(
+        "/radios/{radio}/requests?node={node}"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
+/// Forgets the routes traced to a node but the latest, and those waiting.
+pub async fn forget_traceroutes(radio: RadioId, node: u32) -> Result<(), Failure> {
+    let request = with_token(Request::delete(&url(&format!(
+        "/radios/{radio}/traceroutes?node={node}"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// How many requests a page of a node's has.
 pub const REQUESTS_PAGE: usize = 20;
 

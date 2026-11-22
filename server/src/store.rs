@@ -1133,6 +1133,22 @@ impl Store {
         Ok(rows.into_iter().map(TracerouteRow::traceroute).collect())
     }
 
+    /// Forgets the routes traced from a radio to a node but the latest, which
+    /// its page shows, and those still waiting; how many were.
+    pub async fn forget_traceroutes(&self, radio: RadioId, target: u32) -> Result<u64> {
+        Ok(sqlx::query(
+            "DELETE FROM traceroute WHERE radio_id = ? AND target = ? AND status != 'pending'
+                AND id < (SELECT max(id) FROM traceroute WHERE radio_id = ? AND target = ?)",
+        )
+        .bind(radio)
+        .bind(i64::from(target))
+        .bind(radio)
+        .bind(i64::from(target))
+        .execute(&self.pool)
+        .await?
+        .rows_affected())
+    }
+
     /// When the radio last sent a traceroute, if ever.
     pub async fn last_traceroute_at(&self, radio: RadioId) -> Result<Option<i64>> {
         Ok(
@@ -1800,6 +1816,16 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(older.iter().map(|t| t.id).collect::<Vec<_>>(), [first.id]);
+
+        // Forgotten, but the latest, which the node's page shows; and those
+        // still waiting.
+        let waiting = store.add_traceroute(radio, 44, 7, 8, 300).await.unwrap();
+        assert_eq!(store.forget_traceroutes(radio, 9).await.unwrap(), 1);
+        let left = store.traceroutes(radio, Some(9), None, 50).await.unwrap();
+        assert_eq!(left.iter().map(|t| t.id).collect::<Vec<_>>(), [second.id]);
+        assert_eq!(store.forget_traceroutes(radio, 8).await.unwrap(), 1);
+        let left = store.traceroutes(radio, Some(8), None, 50).await.unwrap();
+        assert_eq!(left.iter().map(|t| t.id).collect::<Vec<_>>(), [waiting.id]);
     }
 
     #[tokio::test]

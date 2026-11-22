@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, ErrorCode, NewRequest, RadioId, Request, RequestId, Waits};
+use meshctl_api::{Error, ErrorCode, Forgotten, NewRequest, RadioId, Request, RequestId, Waits};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -23,7 +23,7 @@ const PAGE_MAX: u32 = 500;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list, ask))
+        .routes(routes!(list, ask, forget))
         .routes(routes!(waits))
 }
 
@@ -138,6 +138,42 @@ async fn ask(
         )
             .into_response(),
         Err(AskFailure::Failed(err)) => failed(&err),
+    }
+}
+
+/// Whose history to forget.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct Whose {
+    /// The node's number.
+    node: u32,
+}
+
+/// Forget requests
+///
+/// Forgets what a node was asked for through the radio, but what still
+/// waits for its answer. The packets that answered stay, as what the node
+/// told: its page shows the same.
+#[utoipa::path(
+    delete,
+    path = "/radios/{radio}/requests",
+    tag = "requests",
+    params(("radio" = RadioId, Path, description = "The radio's id"), Whose),
+    responses(
+        (status = 200, description = "How many were forgotten", body = Forgotten),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+    )
+)]
+async fn forget(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Query(whose): Query<Whose>,
+) -> Response {
+    match state.radios.forget_requests(radio, whose.node).await {
+        Ok(Some(count)) => Json(Forgotten { count }).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(err) => failed(&err),
     }
 }
 

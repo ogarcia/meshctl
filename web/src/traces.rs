@@ -5,9 +5,10 @@
 
 use crate::app::Live;
 
-use crate::i18n::{t, use_i18n};
+use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::mesh::ago;
 use leptos::prelude::*;
+use leptos_i18n::I18nContext;
 use meshctl_api::{Hop, Traceroute, TracerouteStatus};
 
 fn node_label(live: Live, num: u32) -> String {
@@ -83,16 +84,82 @@ pub fn TraceCard(traceroute: Traceroute) -> impl IntoView {
         }
     });
 
+    // An answered one, as text to paste anywhere.
+    let copy = (traceroute.status == TracerouteStatus::Done).then(|| {
+        let traceroute = traceroute.clone();
+        view! {
+            <button
+                class="icon-button copy"
+                title=move || t_string!(i18n, trace_copy)
+                aria-label=move || t_string!(i18n, trace_copy)
+                inner_html=COPY
+                on:click=move |_| crate::clipboard::copy(&as_text(live, i18n, &traceroute))
+            ></button>
+        }
+    });
+
     view! {
         <article class="trace">
             <header>
                 <strong>{move || node_title(live, target)}</strong>
                 {status}
                 <span class="dim when">{move || ago(live.now.get(), at)}</span>
+                {copy}
             </header>
             {routes}
         </article>
     }
+}
+
+const COPY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/copy.svg");
+
+/// A traced route as text: whom to, when, and each way node by node, each
+/// with the SNR it heard the one before at.
+///
+/// ```text
+/// Traza a KMesh7 (!98127f33) · 22/11/2026 12:48
+/// Ida (2): ART1 → stlo (11.2 dB) → AERO (12.0 dB) → KMs7 (-6.8 dB)
+/// Vuelta (3): KMs7 → z4p4 (-7.2 dB) → AERO (0.5 dB) → stlo (11.8 dB) → ART1 (12.2 dB)
+/// ```
+fn as_text(live: Live, i18n: I18nContext<Locale>, traceroute: &Traceroute) -> String {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+        traceroute.at as f64 * 1000.0,
+    ));
+    let when = format!(
+        "{:02}/{:02}/{} {:02}:{:02}",
+        date.get_date(),
+        date.get_month() + 1,
+        date.get_full_year(),
+        date.get_hours(),
+        date.get_minutes()
+    );
+    let way = |hops: &[Hop]| {
+        hops.iter()
+            .enumerate()
+            .map(|(i, hop)| {
+                let name = hop
+                    .node
+                    .map_or_else(|| "?".to_owned(), |num| node_label(live, num));
+                match hop.snr {
+                    Some(snr) if i > 0 => format!("{name} ({snr:.1} dB)"),
+                    None if i > 0 => format!("{name} (?)"),
+                    _ => name,
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" → ")
+    };
+    let title =
+        t_string!(i18n, trace_text_title).replace("{name}", &node_title(live, traceroute.target));
+    format!(
+        "{title} · {when}\n{} ({}): {}\n{} ({}): {}",
+        t_string!(i18n, trace_towards),
+        traceroute.towards.len().saturating_sub(2),
+        way(&traceroute.towards),
+        t_string!(i18n, trace_back),
+        traceroute.back.len().saturating_sub(2),
+        way(&traceroute.back),
+    )
 }
 
 /// A route, node by node, with the SNR each hop was heard at between them.

@@ -922,6 +922,24 @@ impl Radios {
         Ok(Some(checks))
     }
 
+    /// Forgets what a node was asked for through a radio, but what waits for
+    /// its answer: how many were, or `None` if there is no such radio.
+    pub async fn forget_requests(&self, id: RadioId, node: u32) -> Result<Option<u64>> {
+        if self.mesh(id).is_none() {
+            return Ok(None);
+        }
+        Ok(Some(self.store.forget_requests(id, node).await?))
+    }
+
+    /// Forgets the routes traced to a node but the latest and those waiting:
+    /// how many were, or `None` if there is no such radio.
+    pub async fn forget_traceroutes(&self, id: RadioId, node: u32) -> Result<Option<u64>> {
+        if self.mesh(id).is_none() {
+            return Ok(None);
+        }
+        Ok(Some(self.store.forget_traceroutes(id, node).await?))
+    }
+
     /// How long until a radio sends each paced kind again, or `None` if there
     /// is no such radio.
     pub async fn waits(&self, id: RadioId) -> Result<Option<Waits>> {

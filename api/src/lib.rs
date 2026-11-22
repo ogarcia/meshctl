@@ -515,6 +515,13 @@ pub struct TelemetryPoint {
     pub value: f64,
 }
 
+/// How many of a history were forgotten.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Forgotten {
+    pub count: u64,
+}
+
 /// Whether a node is to be a favourite of the radio.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

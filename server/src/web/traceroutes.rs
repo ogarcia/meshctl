@@ -9,7 +9,9 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, ErrorCode, NewTraceroute, Pace, RadioId, Traceroute, TracerouteId};
+use meshctl_api::{
+    Error, ErrorCode, Forgotten, NewTraceroute, Pace, RadioId, Traceroute, TracerouteId,
+};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -22,7 +24,7 @@ const PAGE: u32 = 50;
 const PAGE_MAX: u32 = 500;
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(list, trace))
+    OpenApiRouter::new().routes(routes!(list, trace, forget))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -73,6 +75,41 @@ async fn list(
         .await
     {
         Ok(Some(traceroutes)) => Json(traceroutes).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Whose traceroutes to forget.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct Whose {
+    /// The node's number.
+    node: u32,
+}
+
+/// Forget traceroutes
+///
+/// Forgets the routes traced to a node but the latest, which is no history
+/// but what its page shows, and those still waiting for their answer.
+#[utoipa::path(
+    delete,
+    path = "/radios/{radio}/traceroutes",
+    tag = "traceroutes",
+    params(("radio" = RadioId, Path, description = "The radio's id"), Whose),
+    responses(
+        (status = 200, description = "How many were forgotten", body = Forgotten),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+    )
+)]
+async fn forget(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Query(whose): Query<Whose>,
+) -> Response {
+    match state.radios.forget_traceroutes(radio, whose.node).await {
+        Ok(Some(count)) => Json(Forgotten { count }).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         Err(err) => failed(&err),
     }
