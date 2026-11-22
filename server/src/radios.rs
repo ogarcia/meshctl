@@ -942,12 +942,13 @@ impl Radios {
         &self,
         id: RadioId,
         node: Option<u32>,
+        before: Option<meshctl_api::RequestId>,
         limit: u32,
     ) -> Result<Option<Vec<Request>>> {
         if self.mesh(id).is_none() {
             return Ok(None);
         }
-        Ok(Some(self.store.requests(id, node, limit).await?))
+        Ok(Some(self.store.requests(id, node, before, limit).await?))
     }
 
     /// A radio's own settings, as it sent them on syncing. Only while it is

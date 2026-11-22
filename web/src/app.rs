@@ -124,6 +124,8 @@ pub struct Live {
     pub node: RwSignal<Option<u32>>,
     /// Where the open node's page was opened from, the latest last.
     pub back: RwSignal<Vec<Back>>,
+    /// Whether the open node's requests are shown, in their drawer.
+    pub history: RwSignal<bool>,
     /// The node picked on the map, if any.
     pub map_pick: RwSignal<Option<u32>>,
     /// A node for the map to go to once it is showing, as asked from its page.
@@ -168,6 +170,7 @@ impl Live {
             packets: RwSignal::new(Vec::new()),
             node: RwSignal::new(None),
             back: RwSignal::new(Vec::new()),
+            history: RwSignal::new(false),
             map_pick: RwSignal::new(None),
             map_focus: RwSignal::new(None),
             map_route: RwSignal::new(None),
@@ -350,6 +353,7 @@ impl Live {
     /// Shows a node's page, and reads what it shows.
     fn show_node(self, node: u32) {
         self.node.set(Some(node));
+        self.history.set(false);
         self.requests.set(Vec::new());
         self.latest.set(None);
         self.checks.set(Vec::new());
@@ -1493,7 +1497,23 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         <button on:click=move |_| live.open_node(node)>{t!(i18n, node_page)}</button>
                     }
                 });
-                view! { {profile} {chat} }
+                // What it was asked for, on its page: in a drawer.
+                let history = (page == Page::Node && !local()).then(|| {
+                    view! {
+                        <button
+                            class="icon-button"
+                            title=move || t_string!(i18n, requests_title)
+                            aria-label=move || t_string!(i18n, requests_title)
+                            on:click=move |_| live.history.set(true)
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M12 8v4l2 2"></path>
+                                <path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"></path>
+                            </svg>
+                        </button>
+                    }
+                });
+                view! { {history} {profile} {chat} }
             };
             // Back to where its page was opened from, on its page.
             let back = move || {

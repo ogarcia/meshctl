@@ -439,5 +439,14 @@
   "back_map": "Volver al mapa",
   "back_chat": "Volver al chat",
   "back_packets": "Volver a En directo",
-  "back_node": "Volver a {name}"
+  "back_node": "Volver a {name}",
+  "requests_title": "Historial de peticiones",
+  "requests_drawer_title": "Peticiones a {name}",
+  "requests_none": "Aún no se le ha pedido nada.",
+  "request_pending": "Esperando",
+  "request_answered": "Respondida",
+  "request_failed": "Sin respuesta",
+  "request_no_response": "no tiene ese dato",
+  "request_timeout": "nada en dos minutos; puede que ya respondiera hace poco",
+  "request_no_key": "la radio no lo envió: le falta su clave pública"
 }

@@ -248,6 +248,23 @@ pub async fn traceroutes_to(
     .await
 }
 
+/// A page of what a node was asked for, the newest first: those before one,
+/// for older pages.
+pub async fn requests_page(
+    radio: RadioId,
+    node: u32,
+    before: Option<meshctl_api::RequestId>,
+) -> Result<Vec<meshctl_api::Request>, Failure> {
+    let before = before.map_or_else(String::new, |id| format!("&before={id}"));
+    get(&format!(
+        "/radios/{radio}/requests?node={node}&limit={REQUESTS_PAGE}{before}"
+    ))
+    .await
+}
+
+/// How many requests a page of a node's has.
+pub const REQUESTS_PAGE: usize = 20;
+
 /// How many traceroutes a page of a node's has.
 pub const TRACES_PAGE: usize = 20;
 

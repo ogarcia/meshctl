@@ -110,10 +110,10 @@ fn Route(hops: Vec<Hop>) -> impl IntoView {
                 let quality = quality(hop.snr);
                 view! { <span class=format!("hop {quality}")>"→ " {snr} " →"</span> }
             });
-            let name = hop
-                .node
-                .map_or_else(|| "?".to_owned(), |num| node_label(live, num));
-            let title = hop.node.map(|num| node_title(live, num));
+            // Named as the radio knows them now: a name learnt later shows.
+            let num = hop.node;
+            let name = move || num.map_or_else(|| "?".to_owned(), |num| node_label(live, num));
+            let title = move || num.map(|num| node_title(live, num));
             view! {
                 {link}
                 <span class="short" title=title>{name}</span>

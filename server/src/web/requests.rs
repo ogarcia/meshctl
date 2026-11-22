@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, ErrorCode, NewRequest, RadioId, Request, Waits};
+use meshctl_api::{Error, ErrorCode, NewRequest, RadioId, Request, RequestId, Waits};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -42,6 +42,8 @@ fn failed(err: &anyhow::Error) -> Response {
 struct Which {
     /// Only those to this node.
     node: Option<u32>,
+    /// Only those sent before this one, for the next page.
+    before: Option<RequestId>,
     /// How many, 50 if not said and at most 500.
     limit: Option<u32>,
 }
@@ -67,7 +69,11 @@ async fn list(
     Query(which): Query<Which>,
 ) -> Response {
     let limit = which.limit.unwrap_or(PAGE).clamp(1, PAGE_MAX);
-    match state.radios.requests(radio, which.node, limit).await {
+    match state
+        .radios
+        .requests(radio, which.node, which.before, limit)
+        .await
+    {
         Ok(Some(requests)) => Json(requests).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         Err(err) => failed(&err),

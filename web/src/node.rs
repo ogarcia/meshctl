@@ -10,7 +10,7 @@
 
 use crate::app::Live;
 use crate::chat::title;
-use crate::daemon::{self, Failure, TRACES_PAGE};
+use crate::daemon::{self, Failure, REQUESTS_PAGE, TRACES_PAGE};
 use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::mesh::{PIN, ago, radius, reach_words};
 use crate::traces::TraceCard;
@@ -19,7 +19,7 @@ use leptos::task::spawn_local;
 use leptos_i18n::I18nContext;
 use meshctl_api::{
     ErrorCode, LinkState, NodeCheck, NodeLatest, Pace, Packet, Peer, PositionSource, RadioKind,
-    RequestKind, RequestStatus, Traceroute, TracerouteStatus,
+    Request, RequestKind, RequestStatus, Traceroute, TracerouteStatus,
 };
 use serde_json::{Map, Value};
 use std::time::Duration;
@@ -140,6 +140,7 @@ fn NodePage(num: u32) -> impl IntoView {
             // Eye-catching, but long: below what is looked at most.
             <crate::charts::Telemetry num />
             <TracesDrawer open=drawer />
+            <RequestsDrawer />
             <Problem />
         </div>
     }
@@ -1153,8 +1154,42 @@ fn Traces(drawer: RwSignal<bool>) -> impl IntoView {
     }
 }
 
-/// Every route traced to the node, the newest first, a page at a time, in a
-/// drawer over the page's side.
+/// A drawer over the page's side, for a list too long for the page: its
+/// title, what it holds, and closing it, by its button, by a click beside
+/// it or by Escape.
+#[component]
+fn Drawer(open: RwSignal<bool>, title: Signal<String>, children: ChildrenFn) -> impl IntoView {
+    let i18n = use_i18n();
+    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            open.set(false);
+        }
+    });
+    on_cleanup(move || escape.remove());
+    view! {
+        <Show when=move || open.get()>
+            <div class="drawer-shade" on:click=move |_| open.set(false)></div>
+            <aside class="drawer" role="dialog" aria-modal="true">
+                <header>
+                    <h2>{move || title.get()}</h2>
+                    <button
+                        class="icon-button"
+                        title=move || t_string!(i18n, drawer_close)
+                        aria-label=move || t_string!(i18n, drawer_close)
+                        on:click=move |_| open.set(false)
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M18 6L6 18M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </header>
+                <div class="drawer-body">{children()}</div>
+            </aside>
+        </Show>
+    }
+}
+
+/// Every route traced to the node, the newest first, a page at a time.
 #[component]
 fn TracesDrawer(open: RwSignal<bool>) -> impl IntoView {
     let i18n = use_i18n();
@@ -1179,45 +1214,159 @@ fn TracesDrawer(open: RwSignal<bool>) -> impl IntoView {
             load(None);
         }
     });
-    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
-        if ev.key() == "Escape" {
-            open.set(false);
+    let title = Signal::derive(move || {
+        t_string!(i18n, traces_drawer_title)
+            .replace("{name}", &title(live, Peer::Node { node: asking.num }))
+    });
+    view! {
+        <Drawer open title>
+            <For each=move || pages.get() key=|t| (t.id, t.status) let:traceroute>
+                <TraceCard traceroute />
+            </For>
+            <Show when=move || more.get()>
+                <button
+                    class="more"
+                    on:click=move |_| load(pages.with_untracked(|p| p.last().map(|t| t.id)))
+                >
+                    {t!(i18n, traces_more)}
+                </button>
+            </Show>
+        </Drawer>
+    }
+}
+
+/// Everything the node was asked for, the newest first, a page at a time,
+/// each with what came of it and, on opening it, its whole answer.
+#[component]
+fn RequestsDrawer() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let open = live.history;
+    let pages = RwSignal::new(Vec::<Request>::new());
+    let more = RwSignal::new(false);
+    let load = move |before| {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        spawn_local(async move {
+            if let Ok(page) = daemon::requests_page(radio, asking.num, before).await {
+                more.set(page.len() == REQUESTS_PAGE);
+                pages.update(|pages| pages.extend(page));
+            }
+        });
+    };
+    // Read anew on opening, and as one changes while open: one asked, or
+    // one answered.
+    Effect::new(move |_| {
+        live.requests.track();
+        if open.get() {
+            pages.set(Vec::new());
+            load(None);
         }
     });
-    on_cleanup(move || escape.remove());
-    let name = move || title(live, Peer::Node { node: asking.num });
+    let title = Signal::derive(move || {
+        t_string!(i18n, requests_drawer_title)
+            .replace("{name}", &title(live, Peer::Node { node: asking.num }))
+    });
     view! {
-        <Show when=move || open.get()>
-            <div class="drawer-shade" on:click=move |_| open.set(false)></div>
-            <aside class="drawer" role="dialog" aria-modal="true">
-                <header>
-                    <h2>{move || t_string!(i18n, traces_drawer_title).replace("{name}", &name())}</h2>
-                    <button
-                        class="icon-button"
-                        title=move || t_string!(i18n, drawer_close)
-                        aria-label=move || t_string!(i18n, drawer_close)
-                        on:click=move |_| open.set(false)
-                    >
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M18 6L6 18M6 6l12 12"></path>
-                        </svg>
-                    </button>
-                </header>
-                <div class="drawer-body">
-                    <For each=move || pages.get() key=|t| (t.id, t.status) let:traceroute>
-                        <TraceCard traceroute />
+        <Drawer open title>
+            <Show
+                when=move || pages.with(|p| !p.is_empty())
+                fallback=move || view! { <p class="nothing">{t!(i18n, requests_none)}</p> }
+            >
+                <ol class="requests">
+                    <For each=move || pages.get() key=|r| (r.id, r.status) let:request>
+                        <RequestRow request />
                     </For>
-                    <Show when=move || more.get()>
-                        <button
-                            class="more"
-                            on:click=move |_| load(pages.with_untracked(|p| p.last().map(|t| t.id)))
-                        >
-                            {t!(i18n, traces_more)}
-                        </button>
-                    </Show>
-                </div>
-            </aside>
-        </Show>
+                </ol>
+            </Show>
+            <Show when=move || more.get()>
+                <button
+                    class="more"
+                    on:click=move |_| load(pages.with_untracked(|p| p.last().map(|r| r.id)))
+                >
+                    {t!(i18n, traces_more)}
+                </button>
+            </Show>
+        </Drawer>
+    }
+}
+
+/// One request: what was asked, what came of it, on which channel and when;
+/// opening an answered one shows its whole answer.
+#[component]
+fn RequestRow(request: Request) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let open = RwSignal::new(false);
+    let at = u32::try_from(request.at).unwrap_or_default();
+    let error = request.error.clone();
+    let status = move || match request.status {
+        RequestStatus::Pending => view! {
+            <span class="badge syncing">{t!(i18n, request_pending)}</span>
+        }
+        .into_any(),
+        RequestStatus::Answered => view! {
+            <span class="badge ready">{t!(i18n, request_answered)}</span>
+        }
+        .into_any(),
+        RequestStatus::Failed => {
+            let why = match error.as_deref() {
+                Some("TIMEOUT") => t_string!(i18n, request_timeout).to_owned(),
+                Some("NO_RESPONSE") => t_string!(i18n, request_no_response).to_owned(),
+                Some("PKI_SEND_FAIL_PUBLIC_KEY") => t_string!(i18n, request_no_key).to_owned(),
+                Some(code) => code.to_owned(),
+                None => String::new(),
+            };
+            view! {
+                <span class="badge radio-down">{t!(i18n, request_failed)} " · " {why}</span>
+            }
+            .into_any()
+        }
+    };
+    let answer = request.answer.clone();
+    let line = answer.as_ref().map(crate::packets::summary);
+    let detail = answer
+        .and_then(|a| a.payload)
+        .and_then(|payload| serde_json::to_string_pretty(&payload).ok());
+    let has_detail = detail.is_some();
+    let kind = request.kind;
+    view! {
+        <li class="request" class:open=move || open.get()>
+            <button
+                class="request-line"
+                disabled=!has_detail
+                on:click=move |_| open.update(|o| *o = !*o)
+            >
+                <span class="head">
+                    <strong><KindLabel kind /></strong>
+                    <span class="when">
+                        "#" {request.channel} " · " {move || ago(live.now.get(), at)}
+                    </span>
+                </span>
+                {status}
+                <span class="summary">{line}</span>
+            </button>
+            <Show when=move || open.get()>
+                <pre class="payload mono">{detail.clone()}</pre>
+            </Show>
+        </li>
+    }
+}
+
+/// What a kind of request is called.
+#[component]
+fn KindLabel(kind: RequestKind) -> impl IntoView {
+    let i18n = use_i18n();
+    move || match kind {
+        RequestKind::NodeInfo => t!(i18n, ask_node_info).into_any(),
+        RequestKind::Position => t!(i18n, ask_position).into_any(),
+        RequestKind::DeviceTelemetry => t!(i18n, ask_device).into_any(),
+        RequestKind::EnvironmentTelemetry => t!(i18n, ask_environment).into_any(),
+        RequestKind::PowerTelemetry => t!(i18n, ask_power).into_any(),
+        RequestKind::LocalStats => t!(i18n, ask_local_stats).into_any(),
+        RequestKind::Neighbors => t!(i18n, ask_neighbors).into_any(),
     }
 }
 

@@ -242,18 +242,21 @@ impl Store {
         &self,
         radio: RadioId,
         node: Option<u32>,
+        before: Option<RequestId>,
         limit: u32,
     ) -> Result<Vec<Request>> {
         let node = node.map(i64::from);
         let rows = sqlx::query_as(
             "SELECT id, node, kind, channel, status, error, at, answered_at, answer
             FROM request
-            WHERE radio_id = ? AND (? IS NULL OR node = ?)
+            WHERE radio_id = ? AND (? IS NULL OR node = ?) AND (? IS NULL OR id < ?)
             ORDER BY id DESC LIMIT ?",
         )
         .bind(radio)
         .bind(node)
         .bind(node)
+        .bind(before)
+        .bind(before)
         .bind(i64::from(limit))
         .fetch_all(&self.pool)
         .await?;
@@ -405,8 +408,14 @@ mod tests {
         assert_eq!(expired[0].error.as_deref(), Some("TIMEOUT"));
         assert_eq!(expired[0].channel, 2);
 
-        let to_one = store.requests(1, Some(0x55), 10).await.unwrap();
+        let to_one = store.requests(1, Some(0x55), None, 10).await.unwrap();
         assert_eq!(to_one.len(), 1);
-        assert_eq!(store.requests(1, None, 10).await.unwrap().len(), 2);
+        assert_eq!(store.requests(1, None, None, 10).await.unwrap().len(), 2);
+        // A page of them, before the latest: the older.
+        let older = store
+            .requests(1, None, Some(to_one[0].id), 10)
+            .await
+            .unwrap();
+        assert!(older.iter().all(|r| r.id < to_one[0].id));
     }
 }
