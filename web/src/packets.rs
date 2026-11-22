@@ -491,16 +491,17 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
         move || summary(&packet, i18n.get_locale())
     };
     let (hops_away, hop_start, relay) = (packet.hops_away, packet.hop_start, packet.relay_node);
-    let signal = {
-        let mut parts = Vec::new();
-        if let Some(snr) = packet.snr {
-            parts.push(format!("{snr:.1} dB"));
+    // How strong: its SNR, and its RSSI apart, which a narrow row leaves out
+    // beside a kind of a long name.
+    let snr = packet.snr.map(|snr| format!("{snr:.1} dB"));
+    let rssi = packet.rssi.map(|rssi| {
+        if snr.is_some() {
+            format!(" · {rssi} dBm")
+        } else {
+            format!("{rssi} dBm")
         }
-        if let Some(rssi) = packet.rssi {
-            parts.push(format!("{rssi} dBm"));
-        }
-        parts.join(" · ")
-    };
+    });
+    let long_kind = port.as_ref().is_some_and(|p| p.chars().count() > 9);
     // Heard by air: in how many hops, and by whom last when it was not
     // straight from its sender.
     let hops = move || match (source, hops_away) {
@@ -552,7 +553,7 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
     };
 
     view! {
-        <li class="packet" class:arrived=fresh>
+        <li class="packet" class:arrived=fresh class:long-kind=long_kind>
             <button class="packet-line" on:click=open>
                 <span class="time mono">{clock(packet.at)}</span>
                 <span class="kind">
@@ -581,7 +582,10 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
                 </span>
                 <span class="summary" class:dim=kind == PacketKind::Encrypted>{summary}</span>
                 <span class="hops dim" title=hops_title>{hops}</span>
-                <span class="signal mono dim">{signal}</span>
+                <span class="signal mono dim">
+                    {snr}
+                    <span class="rssi">{rssi}</span>
+                </span>
             </button>
         </li>
     }

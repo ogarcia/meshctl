@@ -2066,14 +2066,15 @@
       .packet-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .packet .hops { font-size: 12px; text-align: right; }
       .packet .signal { font-size: 11px; text-align: right; }
-      /* A kind, by its colour: its name in it, never the colour alone. */
+      /* A kind, by its colour: its name in it, never the colour alone, at
+         5.8:1 or better against its tint in either theme. */
       .kind-tag {
         display: inline-block;
         padding: 1px 7px;
         border: 1px solid transparent;
         border-radius: 6px;
-        background: color-mix(in srgb, var(--kind) 16%, transparent);
-        color: color-mix(in srgb, var(--kind) 72%, var(--mc-text));
+        background: color-mix(in srgb, var(--kind) 20%, transparent);
+        color: color-mix(in srgb, var(--kind) 40%, var(--mc-text));
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.04em;
@@ -2140,6 +2141,8 @@
         .packet .route { grid-area: route; }
         .packet .signal { grid-area: signal; }
         .packet .summary { grid-area: summary; }
+        /* Beside a kind of a long name, its SNR alone, so that the name fits. */
+        .packet.long-kind .rssi { display: none; }
       }
       /* From and to, each cut short as it must, so that neither goes whole. */
       .packet .route { display: flex; gap: 0.4em; }
