@@ -137,6 +137,8 @@ fn NodePage(num: u32) -> impl IntoView {
                     }}
                 </div>
             </div>
+            // Eye-catching, but long: below what is looked at most.
+            <crate::charts::Telemetry num />
             <TracesDrawer open=drawer />
             <Problem />
         </div>
@@ -807,7 +809,8 @@ fn Identity(at: Option<i64>) -> impl IntoView {
 fn Device(packet: Option<Packet>) -> impl IntoView {
     let i18n = use_i18n();
     let at = packet.as_ref().map(|p| p.at);
-    let body = match object(packet.as_ref(), Some("device_metrics")) {
+    // Its words follow the language: read where that is tracked.
+    let body = move || match object(packet.as_ref(), Some("device_metrics")) {
         Some(metrics) => {
             let battery = number(&metrics, "battery_level").map(|level| {
                 if level > 100.0 {
@@ -840,7 +843,7 @@ fn Device(packet: Option<Packet>) -> impl IntoView {
 
 /// What a value of an environment sensor is, in the interface's words, its
 /// unit and how many decimals it is read with.
-fn environment_field(
+pub(crate) fn environment_field(
     i18n: I18nContext<Locale>,
     key: &str,
 ) -> Option<(String, &'static str, usize)> {
@@ -870,7 +873,7 @@ fn environment_field(
 }
 
 /// The order environment values are shown in.
-const ENVIRONMENT_FIELDS: [&str; 19] = [
+pub(crate) const ENVIRONMENT_FIELDS: [&str; 19] = [
     "temperature",
     "relative_humidity",
     "barometric_pressure",
@@ -982,28 +985,36 @@ fn Sensors(latest: NodeLatest) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let at = |packet: &Option<Packet>| packet.as_ref().map(|p| p.at);
-    view! {
-        <Section title=t!(i18n, node_sensors).into_any() class="node-sensors">
-            <p class="hint">{t!(i18n, node_sensors_hint)}</p>
-            <Part
-                kind=RequestKind::EnvironmentTelemetry
-                title=t!(i18n, node_environment).into_any()
-                at=at(&latest.environment)
-                body=environment_facts(i18n, latest.environment.as_ref())
-            />
-            <Part
-                kind=RequestKind::PowerTelemetry
-                title=t!(i18n, node_power).into_any()
-                at=at(&latest.power)
-                body=power_facts(i18n, latest.power.as_ref())
-            />
-            <Part
-                kind=RequestKind::Neighbors
-                title=t!(i18n, node_neighbors).into_any()
-                at=at(&latest.neighbors)
-                body=neighbour_list(i18n, live, latest.neighbors.as_ref())
-            />
-        </Section>
+    // Its words follow the language: built where that is tracked.
+    move || {
+        // Here, and not as the parts' properties: those are built untracked.
+        let environment = environment_facts(i18n, latest.environment.as_ref());
+        let power = power_facts(i18n, latest.power.as_ref());
+        let neighbours = neighbour_list(i18n, live, latest.neighbors.as_ref());
+        let latest = latest.clone();
+        view! {
+            <Section title=t!(i18n, node_sensors).into_any() class="node-sensors">
+                <p class="hint">{t!(i18n, node_sensors_hint)}</p>
+                <Part
+                    kind=RequestKind::EnvironmentTelemetry
+                    title=t!(i18n, node_environment).into_any()
+                    at=at(&latest.environment)
+                    body=environment
+                />
+                <Part
+                    kind=RequestKind::PowerTelemetry
+                    title=t!(i18n, node_power).into_any()
+                    at=at(&latest.power)
+                    body=power
+                />
+                <Part
+                    kind=RequestKind::Neighbors
+                    title=t!(i18n, node_neighbors).into_any()
+                    at=at(&latest.neighbors)
+                    body=neighbours
+                />
+            </Section>
+        }
     }
 }
 
@@ -1071,7 +1082,8 @@ fn refused(live: Live, num: u32, kind: RequestKind) -> bool {
 fn Stats(packet: Option<Packet>) -> impl IntoView {
     let i18n = use_i18n();
     let at = packet.as_ref().map(|p| p.at);
-    let body = match object(packet.as_ref(), Some("local_stats")) {
+    // Its words follow the language: read where that is tracked.
+    let body = move || match object(packet.as_ref(), Some("local_stats")) {
         Some(stats) => {
             // What a protobuf leaves at zero its JSON leaves out.
             let count = |key: &str| number(&stats, key).unwrap_or_default();

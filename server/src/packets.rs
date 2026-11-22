@@ -45,7 +45,7 @@ fn port_name(portnum: i32) -> String {
 }
 
 /// What a payload says, if it can be read and may be shown.
-fn read(portnum: i32, payload: &[u8]) -> Option<serde_json::Value> {
+pub fn read(portnum: i32, payload: &[u8]) -> Option<serde_json::Value> {
     let message = match PortNum::try_from(portnum).ok()? {
         PortNum::TextMessageApp
         | PortNum::RangeTestApp

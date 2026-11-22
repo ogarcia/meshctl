@@ -487,6 +487,63 @@ impl Store {
         .await?)
     }
 
+    /// The telemetry a radio heard from a node since a time, each as when it
+    /// was heard and what it carries, the oldest first.
+    pub async fn telemetry_since(
+        &self,
+        radio: RadioId,
+        from: u32,
+        since: i64,
+    ) -> Result<Vec<(i64, Vec<u8>)>> {
+        Ok(sqlx::query_as(
+            "SELECT s.at, p.payload FROM packet p JOIN packet_seen s ON s.packet = p.id
+            WHERE s.radio_id = ? AND p.from_num = ? AND p.portnum = ? AND p.at >= ?
+            ORDER BY s.at",
+        )
+        .bind(radio)
+        .bind(i64::from(from))
+        .bind(meshctl_proto::meshtastic::PortNum::TelemetryApp as i32)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// How a radio heard a node directly since a time, each hearing as when,
+    /// its SNR and its RSSI, the oldest first: not relayed, nor through MQTT.
+    pub async fn signal_since(
+        &self,
+        radio: RadioId,
+        from: u32,
+        since: i64,
+    ) -> Result<Vec<(i64, f64, Option<i64>)>> {
+        Ok(sqlx::query_as(
+            "SELECT s.at, s.snr, s.rssi FROM packet p JOIN packet_seen s ON s.packet = p.id
+            WHERE s.radio_id = ? AND p.from_num = ? AND p.at >= ?
+                AND s.snr IS NOT NULL AND s.hop_limit = s.hop_start AND s.via_mqtt = 0
+            ORDER BY s.at",
+        )
+        .bind(radio)
+        .bind(i64::from(from))
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// When a radio first heard a node's telemetry, or the node directly,
+    /// if it ever did: how far back its charts can go.
+    pub async fn oldest_telemetry(&self, radio: RadioId, from: u32) -> Result<Option<i64>> {
+        Ok(sqlx::query_scalar(
+            "SELECT min(s.at) FROM packet p JOIN packet_seen s ON s.packet = p.id
+            WHERE s.radio_id = ? AND p.from_num = ? AND (p.portnum = ?
+                OR (s.snr IS NOT NULL AND s.hop_limit = s.hop_start AND s.via_mqtt = 0))",
+        )
+        .bind(radio)
+        .bind(i64::from(from))
+        .bind(meshctl_proto::meshtastic::PortNum::TelemetryApp as i32)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
     pub async fn save_node(&self, radio: RadioId, node: &Node) -> Result<()> {
         upsert_node(&self.pool, radio, node).await
     }

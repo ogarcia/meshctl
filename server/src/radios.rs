@@ -11,9 +11,10 @@ use anyhow::Result;
 use meshctl_api::{
     BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkState,
     MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeCheck, NodeLatest,
-    NodeSettings, NodeSettingsChange, Pace, Packet, Peer, Preferences, Radio, RadioId, RadioKind,
-    RadioSettings, Request, RequestKind, SectionSecret, SettingsApplied, SettingsSection,
-    SightingId, Status, Traceroute, TracerouteId, Waits,
+    NodeSettings, NodeSettingsChange, NodeTelemetry, Pace, Packet, Peer, Preferences, Radio,
+    RadioId, RadioKind, RadioSettings, Request, RequestKind, SectionSecret, SettingsApplied,
+    SettingsSection, SightingId, Status, TelemetryPoint, TelemetrySeries, Traceroute, TracerouteId,
+    Waits,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -91,6 +92,10 @@ const SHARED_KEY_WINDOW: i64 = 7 * 24 * 3600;
 /// How many of a node's latest node infos are looked into for more than
 /// one key or hardware model.
 const NODE_INFOS_CHECKED: u32 = 50;
+
+/// The most points a chart's series has: more than a chart's width shows,
+/// few enough to send at once.
+const CHART_POINTS: usize = 300;
 
 /// How many of a node's latest telemetry packets are looked into for the
 /// latest of each kind: one it sends seldom, as power, may be further back
@@ -665,6 +670,81 @@ impl Radios {
     async fn wait(&self, id: RadioId, pace: Pace, at: i64) -> Result<i64> {
         Ok(self.store.last_paced_at(id, pace).await?.map_or(0, |last| {
             (pace.interval() - (at - last)).clamp(0, pace.interval())
+        }))
+    }
+
+    /// A node's telemetry over the latest so many seconds, and the signal it
+    /// was heard directly at: `None` if there is no such radio, or it knows
+    /// of no such node.
+    pub async fn telemetry(
+        &self,
+        id: RadioId,
+        num: u32,
+        window: i64,
+    ) -> Result<Option<NodeTelemetry>> {
+        use meshctl_proto::meshtastic::PortNum;
+        use serde_json::Value;
+
+        let Some(mesh) = self.mesh(id) else {
+            return Ok(None);
+        };
+        if !mesh.read(|state| state.nodes.contains_key(&num)) {
+            return Ok(None);
+        }
+        let end = now();
+        let since = end - window;
+        let mut series: BTreeMap<String, Vec<TelemetryPoint>> = BTreeMap::new();
+        let mut push = |metric: String, at: i64, value: f64| {
+            series
+                .entry(metric)
+                .or_default()
+                .push(TelemetryPoint { at, value });
+        };
+        for (at, payload) in self.store.telemetry_since(id, num, since).await? {
+            let Some(Value::Object(telemetry)) =
+                crate::packets::read(PortNum::TelemetryApp as i32, &payload)
+            else {
+                continue;
+            };
+            for (kind, prefix) in [
+                ("device_metrics", "device"),
+                ("environment_metrics", "environment"),
+                ("power_metrics", "power"),
+            ] {
+                let Some(Value::Object(fields)) = telemetry.get(kind) else {
+                    continue;
+                };
+                for (field, value) in fields {
+                    let Some(value) = value.as_f64() else {
+                        continue;
+                    };
+                    // How long it has been on only grows; a level over 100
+                    // is the firmware's way of saying it is plugged in.
+                    let skipped = prefix == "device"
+                        && (field == "uptime_seconds"
+                            || (field == "battery_level" && value > 100.0));
+                    if !skipped {
+                        push(format!("{prefix}.{field}"), at, value);
+                    }
+                }
+            }
+        }
+        for (at, snr, rssi) in self.store.signal_since(id, num, since).await? {
+            push("signal.snr".into(), at, snr);
+            if let Some(rssi) = rssi {
+                #[allow(clippy::cast_precision_loss)]
+                push("signal.rssi".into(), at, rssi as f64);
+            }
+        }
+        Ok(Some(NodeTelemetry {
+            oldest: self.store.oldest_telemetry(id, num).await?,
+            series: series
+                .into_iter()
+                .map(|(metric, points)| TelemetrySeries {
+                    metric,
+                    points: thin(points, since, end, CHART_POINTS),
+                })
+                .collect(),
         }))
     }
 
@@ -1473,6 +1553,45 @@ impl Radios {
     }
 }
 
+/// Points over a while, at most so many: as they are when they fit, or else
+/// averaged in as many stretches of the while, each at its points' mean
+/// time. A stretch with none is left out, so that a chart shows the gap.
+fn thin(points: Vec<TelemetryPoint>, start: i64, end: i64, most: usize) -> Vec<TelemetryPoint> {
+    if points.len() <= most || most == 0 || end <= start {
+        return points;
+    }
+    #[allow(clippy::cast_possible_wrap)]
+    let stretch = ((end - start) / most as i64).max(1);
+    let mut thinned: Vec<TelemetryPoint> = Vec::with_capacity(most);
+    let mut current: Option<(i64, i64, f64, u32)> = None;
+    for point in points {
+        let index = (point.at - start) / stretch;
+        match &mut current {
+            Some((at, sum_at, sum, count)) if *at == index => {
+                *sum_at += point.at;
+                *sum += point.value;
+                *count += 1;
+            }
+            _ => {
+                if let Some((_, sum_at, sum, count)) = current.take() {
+                    thinned.push(TelemetryPoint {
+                        at: sum_at / i64::from(count),
+                        value: sum / f64::from(count),
+                    });
+                }
+                current = Some((index, point.at, point.value, 1));
+            }
+        }
+    }
+    if let Some((_, sum_at, sum, count)) = current {
+        thinned.push(TelemetryPoint {
+            at: sum_at / i64::from(count),
+            value: sum / f64::from(count),
+        });
+    }
+    thinned
+}
+
 /// What a radio refusing a change of settings means for the API.
 fn admin_failure(error: AdminError) -> SettingsFailure {
     match error {
@@ -1813,6 +1932,28 @@ mod tests {
         assert!(radios.remove(radio.id).await.unwrap());
         assert!(radios.mesh(radio.id).is_none());
         assert!(radios.list().await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn points_are_thinned_by_stretches_of_the_while() {
+        let point = |at, value| TelemetryPoint { at, value };
+        let few = vec![point(10, 1.0), point(20, 2.0)];
+        assert_eq!(thin(few.clone(), 0, 100, 5), few);
+        // Ten points over 100 s in five stretches of 20 s; nothing from 60 to
+        // 80, a gap that stays one.
+        let many: Vec<_> = [0, 5, 20, 25, 30, 35, 50, 55, 85, 95]
+            .into_iter()
+            .map(|at| point(at, f64::from(at as u32)))
+            .collect();
+        assert_eq!(
+            thin(many, 0, 100, 5),
+            [
+                point(2, 2.5),
+                point(27, 27.5),
+                point(52, 52.5),
+                point(90, 90.0)
+            ]
+        );
     }
 
     #[tokio::test]

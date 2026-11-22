@@ -202,6 +202,9 @@ CREATE TABLE packet (
 
 CREATE UNIQUE INDEX packet_identity ON packet (from_num, packet_id);
 CREATE INDEX packet_to ON packet (to_num, at);
+-- What a node sent, by when: its telemetry and signal over a while, and the
+-- latest of each kind.
+CREATE INDEX packet_from ON packet (from_num, at);
 CREATE INDEX packet_request ON packet (request_id) WHERE request_id IS NOT NULL;
 
 -- Each radio's hearing of a packet. A radio, or a tasticsplitter, replays

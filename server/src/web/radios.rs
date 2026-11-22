@@ -7,14 +7,16 @@
 use super::{AppState, convert};
 use crate::radios::{tidy, validate};
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
     Channel, Error, ErrorCode, LinkState, MapView, Node, NodeCheck, NodeFavorite, NodeLatest,
-    Radio, RadioId, RadioOrder, RadioSettings, Status,
+    NodeTelemetry, Radio, RadioId, RadioOrder, RadioSettings, Status,
 };
 use meshctl_core::radio::{AdminError, Mesh};
+use serde::Deserialize;
+use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -31,6 +33,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(checks))
         .routes(routes!(latest))
         .routes(routes!(favorite))
+        .routes(routes!(telemetry))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -374,6 +377,64 @@ async fn node(
     match mesh.and_then(|mesh| mesh.read(|mesh| mesh.nodes.get(&num).map(convert::node))) {
         Some(node) => Json(node).into_response(),
         None => not_found(),
+    }
+}
+
+/// Over how long a node's telemetry is read.
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct Window {
+    /// In seconds back from now: from a quarter of an hour to a month, a
+    /// day if not said.
+    window: Option<i64>,
+}
+
+/// The shortest and longest while a node's telemetry is read over.
+const WINDOW_MIN: i64 = 15 * 60;
+const WINDOW_MAX: i64 = 31 * 24 * 3600;
+
+/// Node telemetry
+///
+/// A node's telemetry over a while, as series of points to chart: its
+/// device's, its environment sensors' and its power sensors', as it sent
+/// them, and the SNR and RSSI it was heard at directly. A long while's are
+/// averaged into a few hundred points. `oldest` says how far back there is
+/// anything at all.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/nodes/{node}/telemetry",
+    tag = "nodes",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = String, Path, description = "The node's id or number", example = "!90cda275"),
+        Window,
+    ),
+    responses(
+        (status = 200, description = "The telemetry", body = NodeTelemetry),
+        (status = 400, description = "That is neither a node id nor a number", body = Error),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio, or it knows of no such node", body = Error),
+    )
+)]
+async fn telemetry(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, String)>,
+    Query(window): Query<Window>,
+) -> Response {
+    let Some(num) = node_num(&node) else {
+        return error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest);
+    };
+    let window = window
+        .window
+        .unwrap_or(24 * 3600)
+        .clamp(WINDOW_MIN, WINDOW_MAX);
+    match state.radios.telemetry(radio, num, window).await {
+        Ok(Some(telemetry)) => Json(telemetry).into_response(),
+        Ok(None) => not_found(),
+        Err(err) => {
+            tracing::error!(error = format_args!("{err:#}"), "node telemetry");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 

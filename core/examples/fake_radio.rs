@@ -29,6 +29,8 @@
 //!   within one to six seconds; sometimes, four times in ten not at all and
 //!   otherwise within up to 26 seconds.
 //! - `limits on|off`: whether the neighbour keeps from answering too often.
+//! - `history <hours>`: the neighbour's telemetry and signal over the last so
+//!   many hours, as heard then, for charts to show.
 
 use meshctl_proto::descriptors;
 use meshctl_proto::frame::{self, FrameParser};
@@ -662,6 +664,68 @@ async fn serve(
     }
 }
 
+/// What the neighbour sent over the last so many hours, as heard then:
+/// device telemetry every quarter of an hour, its battery running down and
+/// charging by day, and environment telemetry every half hour, warmer by day.
+fn history(hours: u32) -> Vec<MeshPacket> {
+    static NEXT_ID: AtomicU32 = AtomicU32::new(0x7000_0000);
+    let now = now_secs();
+    let step = 15 * 60;
+    let steps = hours * 3600 / step;
+    let mut packets = Vec::new();
+    for i in (1..=steps).rev() {
+        let at = now - i * step;
+        // Hours into the day, and a wave over it: lowest at four, highest
+        // at four in the afternoon.
+        let hour = f64::from(at % 86_400) / 3600.0;
+        let day = (std::f64::consts::TAU * (hour - 10.0) / 24.0).sin();
+        let battery = (70.0 + 25.0 * day + random(4) as f64).clamp(5.0, 100.0);
+        let snr = 6.0 + 3.0 * day + random(30) as f64 / 10.0 - 1.5;
+        let telemetry = |variant| pb::Telemetry {
+            time: at,
+            variant: Some(variant),
+        };
+        let mut variants = vec![pb::telemetry::Variant::DeviceMetrics(pb::DeviceMetrics {
+            battery_level: Some(battery as u32),
+            voltage: Some((3.3 + battery / 100.0 * 0.9) as f32),
+            channel_utilization: Some((4.0 + 3.0 * (day + 1.0) + random(20) as f64 / 10.0) as f32),
+            air_util_tx: Some((0.5 + random(15) as f64 / 10.0) as f32),
+            uptime_seconds: Some(at.saturating_sub(now - hours * 3600)),
+        })];
+        if i % 2 == 0 {
+            variants.push(pb::telemetry::Variant::EnvironmentMetrics(
+                pb::EnvironmentMetrics {
+                    temperature: Some((17.0 + 6.0 * day + random(10) as f64 / 10.0) as f32),
+                    relative_humidity: Some((60.0 - 15.0 * day + random(50) as f64 / 10.0) as f32),
+                    barometric_pressure: Some(
+                        (1015.0 + 4.0 * (f64::from(at) / 43_200.0).sin()) as f32,
+                    ),
+                    ..Default::default()
+                },
+            ));
+        }
+        for variant in variants {
+            packets.push(MeshPacket {
+                from: NEIGHBOUR,
+                to: BROADCAST,
+                id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                rx_time: Some(at),
+                rx_snr: snr as f32,
+                rx_rssi: Some(-75 - random(20) as i32),
+                hop_limit: 3,
+                hop_start: 3,
+                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                    portnum: PortNum::TelemetryApp as i32,
+                    payload: telemetry(variant).encode_to_vec(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            });
+        }
+    }
+    packets
+}
+
 /// Does what a line of the control port says; what to answer it.
 fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) -> String {
     static NEXT_ID: AtomicU32 = AtomicU32::new(0x5000_0000);
@@ -731,6 +795,22 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             let _ = events.send(Event::Drop);
             "dropped".into()
         }
+        Some("history") => {
+            let Some(hours) = words.next().and_then(|w| w.parse::<u32>().ok()) else {
+                return "usage: history <hours>".into();
+            };
+            let packets = history(hours);
+            let count = packets.len();
+            // A few at a time, as clients keep only so many events behind.
+            let events = events.clone();
+            tokio::spawn(async move {
+                for packet in packets {
+                    let _ = events.send(Event::Heard(packet));
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            });
+            format!("{count} packets of the neighbour's last {hours} hours, on their way")
+        }
         Some("answers") => {
             let answers = match words.next() {
                 Some("always") => Answers::Always,
@@ -752,7 +832,7 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             radio.answered.clear();
             format!("the neighbour keeps from answering too often: {limits}")
         }
-        _ => "hear <slot> <text> | twin <from> <to> | off <slot> | drop | answers always|sometimes|never | limits on|off".into(),
+        _ => "hear <slot> <text> | twin <from> <to> | off <slot> | drop | answers always|sometimes|never | limits on|off | history <hours>".into(),
     }
 }
 

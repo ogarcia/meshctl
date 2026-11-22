@@ -426,5 +426,10 @@
   "node_unfavorite": "Quitar de favoritos",
   "node_unmessagable": "No acepta mensajes",
   "chat_unmessagable": "Este nodo indica que nadie lee sus mensajes; suele ser un repetidor o un sensor. Puedes escribirle, pero probablemente nadie lo lea.",
-  "chat_send_anyway": "Enviar igualmente"
+  "chat_send_anyway": "Enviar igualmente",
+  "chart_title": "Telemetría",
+  "chart_nothing": "Nada que mostrar en este tiempo.",
+  "chart_airtime": "Uso del canal y del aire",
+  "window_two_weeks": "2 sem",
+  "window_month": "1 mes"
 }

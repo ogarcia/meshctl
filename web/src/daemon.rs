@@ -209,6 +209,18 @@ pub async fn set_favorite(radio: RadioId, node: u32, favorite: bool) -> Result<(
     answer(request.send().await).await.map(|_| ())
 }
 
+/// A node's telemetry over the latest so many seconds.
+pub async fn node_telemetry(
+    radio: RadioId,
+    node: u32,
+    window: u32,
+) -> Result<meshctl_api::NodeTelemetry, Failure> {
+    get(&format!(
+        "/radios/{radio}/nodes/{node}/telemetry?window={window}"
+    ))
+    .await
+}
+
 /// What a node last told a radio of each kind.
 pub async fn node_latest(radio: RadioId, node: u32) -> Result<meshctl_api::NodeLatest, Failure> {
     get(&format!("/radios/{radio}/nodes/{node}/latest")).await

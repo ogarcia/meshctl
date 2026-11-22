@@ -426,5 +426,10 @@
   "node_unfavorite": "No longer a favourite",
   "node_unmessagable": "Takes no messages",
   "chat_unmessagable": "This node tells that nobody reads its messages; it is usually a repeater or a sensor. You can write to it, but most likely nobody will read it.",
-  "chat_send_anyway": "Send all the same"
+  "chat_send_anyway": "Send all the same",
+  "chart_title": "Telemetry",
+  "chart_nothing": "Nothing to show over this while.",
+  "chart_airtime": "Channel and airtime use",
+  "window_two_weeks": "2 wk",
+  "window_month": "1 mo"
 }

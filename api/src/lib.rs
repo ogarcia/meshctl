@@ -479,6 +479,41 @@ pub struct NodeLatest {
     pub neighbors: Option<Packet>,
 }
 
+/// A node's telemetry over a while, as series of points to chart: what it
+/// sent of its own accord or answering, and the signal it was heard at.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeTelemetry {
+    /// When the oldest point the node has is, of any series and however long
+    /// ago, in seconds since the epoch: how far back there is to look. None
+    /// when it has none.
+    pub oldest: Option<i64>,
+    /// Each measure with any point in the while, in no particular order.
+    pub series: Vec<TelemetrySeries>,
+}
+
+/// One measure over a while, the oldest point first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TelemetrySeries {
+    /// What it measures, as its kind and its field in the protobufs say it:
+    /// `device.battery_level`, `environment.temperature`,
+    /// `power.ch1_voltage`; and `signal.snr` and `signal.rssi` for how the
+    /// radio heard it directly.
+    #[cfg_attr(feature = "openapi", schema(example = "device.voltage"))]
+    pub metric: String,
+    /// At most a few hundred: a long while's are averaged into as many.
+    pub points: Vec<TelemetryPoint>,
+}
+
+/// A value at a time, in seconds since the epoch.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TelemetryPoint {
+    pub at: i64,
+    pub value: f64,
+}
+
 /// Whether a node is to be a favourite of the radio.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -1278,6 +1313,9 @@ pub struct Preferences {
     /// How the nodes list is sorted; none for favourites first, then the
     /// most recently heard.
     pub nodes_sort: Option<NodesSort>,
+    /// Over how long a node's telemetry is charted, in seconds; none for a
+    /// day.
+    pub telemetry_window: Option<u32>,
 }
 
 /// A column of the nodes list to sort by, and which way.
@@ -1384,7 +1422,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null}"#
         );
     }
 
