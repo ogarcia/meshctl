@@ -14,7 +14,7 @@ use leptos::prelude::*;
 use meshctl_api::Peer;
 
 const MAP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map.svg");
-const USERS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/users.svg");
+const ANTENNA: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/antenna.svg");
 const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
 const ACTIVITY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/activity.svg");
 const DOTS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/dots.svg");
@@ -75,7 +75,7 @@ pub fn TabBar() -> impl IntoView {
     view! {
         <nav class="tabbar" aria-label=move || t_string!(i18n, nav_menu)>
             {tab(Page::Map, MAP)}
-            {tab(Page::Nodes, USERS)}
+            {tab(Page::Nodes, ANTENNA)}
             {tab(Page::Chats, MESSAGE)}
             {tab(Page::Packets, ACTIVITY)}
             {tab(Page::More, DOTS)}
