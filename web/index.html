@@ -1019,26 +1019,55 @@
         margin-bottom: 8px;
       }
       .node-section h2 { margin: 0; font-size: 16px; }
-      .node-section .when { font-size: 12px; color: var(--mc-muted); }
+      .node-section h2 { flex: none; }
+      .node-section .when {
+        display: flex;
+        gap: 6px;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        font-size: 12px;
+        color: var(--mc-muted);
+      }
+      .node-section .when .quiet { overflow: hidden; text-overflow: ellipsis; color: var(--mc-warn); }
+      .node-section .when span + .quiet::before { content: "· "; color: var(--mc-muted); }
       /* A request's button: on the primary channel, with a menu for another
          beside it when the channel matters; filling up while the radio keeps
          from sending the like. */
-      .ask-split { position: relative; display: inline-flex; margin-left: auto; }
+      /* One edge around both halves, lit whole on hovering; the line between
+         them only when the menu is about to open, or is. */
+      .ask-split {
+        position: relative;
+        display: inline-flex;
+        margin-left: auto;
+        border: 1px solid var(--mc-border);
+        border-radius: 8px;
+        background: var(--mc-raised);
+      }
+      .ask-split:has(.ask:not(:disabled):hover),
+      .ask-split.open { border-color: var(--mc-primary); }
+      .ask-split:has(.ask:disabled) { opacity: 0.6; }
       .ask-split .ask {
         position: relative;
         overflow: hidden;
-        min-height: 32px;
+        min-height: 30px;
         padding: 0 14px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
       }
+      .ask-split .ask:disabled { opacity: 1; }
       .ask-split .ask.split { border-top-right-radius: 0; border-bottom-right-radius: 0; }
       .ask-split .caret {
         display: flex;
         align-items: center;
         padding: 0 6px;
-        margin-left: -1px;
+        border-left: 1px solid transparent;
         border-top-left-radius: 0;
         border-bottom-left-radius: 0;
       }
+      .ask-split .caret:not(:disabled):hover,
+      .ask-split.open .caret { border-left-color: var(--mc-primary); }
       .ask-split .caret svg { width: 16px; height: 16px; transition: transform 0.15s; }
       .ask-split.open .caret svg { transform: rotate(180deg); }
       .ask-split .fill {
@@ -1090,10 +1119,8 @@
         box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
         font-size: 13px;
       }
-      .node-section .quiet,
       .node-section .hint,
       .node-section .nothing { margin: 0 0 8px; font-size: 13px; color: var(--mc-muted); }
-      .node-section .quiet { border-left: 3px solid var(--mc-warn); padding-left: 8px; }
       .node-section .hint:empty { display: none; }
       .facts {
         display: grid;
@@ -1117,7 +1144,15 @@
         border-top: 1px solid var(--mc-border);
       }
       .node-more .what { display: flex; flex-direction: column; gap: 2px; font-weight: 600; }
-      .node-more .why { font-size: 12px; font-weight: 400; color: var(--mc-muted); }
+      .node-more .what { min-width: 0; }
+      .node-more .why {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--mc-muted);
+      }
       .node-more .why:empty { display: none; }
       .node-page button.link {
         padding: 0;

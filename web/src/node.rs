@@ -70,6 +70,11 @@ impl Asked {
 #[derive(Clone, Copy)]
 struct OpenMenu(RwSignal<Option<Asked>>);
 
+/// Which button was pressed last: the one that shows the radio's wait
+/// filling up, while the others it holds back are only off.
+#[derive(Clone, Copy)]
+struct Pressed(RwSignal<Option<Asked>>);
+
 #[component]
 pub fn NodeView() -> impl IntoView {
     let live = expect_context::<Live>();
@@ -89,6 +94,7 @@ fn NodePage(num: u32) -> impl IntoView {
     // One channel menu open at a time, closed by a click anywhere else.
     let menu = RwSignal::new(None::<Asked>);
     provide_context(OpenMenu(menu));
+    provide_context(Pressed(RwSignal::new(None)));
     let closing = window_event_listener(leptos::ev::click, move |_| menu.set(None));
     on_cleanup(move || closing.remove());
     let drawer = RwSignal::new(false);
@@ -397,10 +403,12 @@ fn Section(
         <section class=format!("node-section {class}")>
             <header>
                 <h2>{title}</h2>
-                {when.map(|when| view! { <span class="when">{when}</span> })}
+                <span class="when">
+                    {when.map(|when| view! { <span>{when}</span> })}
+                    {quiet}
+                </span>
                 {asked.map(|asked| view! { <AskButton asked /> })}
             </header>
-            {quiet}
             {children()}
         </section>
     }
@@ -416,6 +424,7 @@ fn AskButton(asked: Asked) -> impl IntoView {
     let live = expect_context::<Live>();
     let asking = expect_context::<Asking>();
     let OpenMenu(menu) = expect_context::<OpenMenu>();
+    let Pressed(pressed) = expect_context::<Pressed>();
     let pending = move || match asked {
         Asked::Request(kind) => live.requests.with(|requests| {
             requests.iter().any(|r| {
@@ -434,9 +443,12 @@ fn AskButton(asked: Asked) -> impl IntoView {
             .map_or(0, |pace| live.wait(pace, asking.clock.get()))
     };
     let off = move || !connected(live) || pending() || wait() > 0;
-    let send = move |channel: u32| match asked {
-        Asked::Request(kind) => live.ask(asking.num, kind, channel),
-        Asked::Trace => live.trace(asking.num, channel),
+    let send = move |channel: u32| {
+        pressed.set(Some(asked));
+        match asked {
+            Asked::Request(kind) => live.ask(asking.num, kind, channel),
+            Asked::Trace => live.trace(asking.num, channel),
+        }
     };
     let channels = move || {
         live.channels.with(|channels| {
@@ -496,6 +508,7 @@ fn AskButton(asked: Asked) -> impl IntoView {
                         {label}
                         {move || {
                             paced()
+                                .filter(|_| pressed.get() == Some(asked))
                                 .map(|(_, filled)| {
                                     view! { <i class="fill" style=format!("width: {filled}%")></i> }
                                 })
@@ -577,11 +590,19 @@ fn Quiet(kind: RequestKind) -> impl IntoView {
         let answered = u32::try_from(answered).ok()?;
         let now = asking.clock.get();
         let since = now.saturating_sub(answered);
+        // Short on the heading's line, so that nothing moves for it; all of
+        // it on hovering.
         (since < window).then(|| {
-            let text = t_string!(i18n, node_quiet)
+            let left = ago(window, since);
+            let whole = t_string!(i18n, node_quiet)
                 .replace("{ago}", &ago(now, answered))
-                .replace("{left}", &ago(window, since));
-            view! { <p class="quiet">{text}</p> }
+                .replace("{left}", &left);
+            let short = t_string!(i18n, node_quiet_short).replace("{left}", &left);
+            view! {
+                <span class="quiet" title=whole>
+                    {short}
+                </span>
+            }
         })
     }
 }
@@ -957,12 +978,16 @@ fn More(latest: NodeLatest) -> impl IntoView {
     if missing.is_empty() || !supported(live) {
         return None;
     }
-    // Whether the latest time it was asked it said it has nothing to tell.
+    // Whether the latest time it was asked, and it answered or gave up, it
+    // said it has nothing to tell: kept while it is asked anew, so that the
+    // line stays until another takes its place.
     let refused = move |kind: RequestKind| {
         live.requests.with(|requests| {
             requests
                 .iter()
-                .find(|r| r.node == asking.num && r.kind == kind)
+                .find(|r| {
+                    r.node == asking.num && r.kind == kind && r.status != RequestStatus::Pending
+                })
                 .is_some_and(|r| {
                     r.status == RequestStatus::Failed && r.error.as_deref() == Some("NO_RESPONSE")
                 })

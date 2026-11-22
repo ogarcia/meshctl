@@ -349,6 +349,7 @@
   "node_ago": "{ago} ago",
   "node_never": "Nothing yet",
   "node_quiet": "It answered {ago} ago: it will not answer again for {left}.",
+  "node_quiet_short": "answers again in {left}",
   "node_pace_position": "The radio can send positions again in {n} s.",
   "node_pace_telemetry": "The radio can send telemetry again in {n} s.",
   "node_pace_traceroute": "The radio can trace another route in {n} s.",

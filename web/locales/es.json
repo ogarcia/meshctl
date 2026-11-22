@@ -349,6 +349,7 @@
   "node_ago": "hace {ago}",
   "node_never": "Sin datos todavía",
   "node_quiet": "Respondió hace {ago}: no volverá a responder hasta dentro de {left}.",
+  "node_quiet_short": "responde de nuevo en {left}",
   "node_pace_position": "La radio podrá enviar posiciones en {n} s.",
   "node_pace_telemetry": "La radio podrá enviar telemetría en {n} s.",
   "node_pace_traceroute": "La radio podrá trazar otra ruta en {n} s.",
