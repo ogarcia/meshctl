@@ -93,6 +93,7 @@
   "nav_own_node": "This radio’s page",
   "own_settings": "Settings",
   "remove_title": "Remove the node",
+  "heading_more": "More actions",
   "remove_radio": "Remove from the radio",
   "remove_radio_text": "The radio forgets it and it leaves the nodes list. What meshctl keeps of it stays: heard again, it comes back with its history.",
   "remove_radio_button": "Remove from the radio",

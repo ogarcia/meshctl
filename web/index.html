@@ -2706,6 +2706,40 @@
       .emoji-grid button.on { background: var(--mc-soft); }
       .emoji-grid p { grid-column: 1 / -1; margin: 8px 0; }
 
+      /* A node's lesser actions as icons where there is room; behind three
+         dots, in a menu under them, where there is not. */
+      .topbar .actions .more-actions { display: none; position: relative; }
+      .heading-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        right: 0;
+        z-index: 60;
+        display: flex;
+        flex-direction: column;
+        min-width: 220px;
+        padding: 6px;
+        border: 1px solid var(--mc-border);
+        border-radius: 12px;
+        background: var(--mc-surface);
+        box-shadow: 0 12px 32px rgb(0 0 0 / 30%);
+      }
+      .heading-menu button {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 40px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 8px;
+        background: none;
+        font-weight: 400;
+        text-align: left;
+        white-space: nowrap;
+      }
+      .heading-menu button:hover { background: var(--mc-raised); }
+      .heading-menu .icon { display: flex; color: var(--mc-muted); }
+      .heading-menu svg { width: 18px; height: 18px; }
+      .heading-menu .danger-item, .heading-menu .danger-item .icon { color: var(--mc-danger); }
       /*
        * A heading short of room, by its own width and not the screen's (a
        * phone, or a narrow window beside the bars): the actions as icons, a
@@ -2717,6 +2751,9 @@
         .topbar .actions .with-icon .label { display: none; }
         .topbar .node-avatar { width: 32px; height: 32px; }
         .topbar .heading .code { display: none; }
+        /* The lesser actions behind three dots. */
+        .topbar .actions .spare { display: none; }
+        .topbar .actions .more-actions { display: block; }
       }
       /*
        * A phone, last: over the rules of each page above, at the same weight.

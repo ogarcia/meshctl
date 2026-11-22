@@ -93,6 +93,7 @@
   "nav_own_node": "La página de esta radio",
   "own_settings": "Ajustes",
   "remove_title": "Eliminar el nodo",
+  "heading_more": "Más acciones",
   "remove_radio": "Quitar de la radio",
   "remove_radio_text": "La radio lo olvida y sale de la lista de nodos. Lo que meshctl guarda de él se queda: si vuelve a oírse, vuelve con su historial.",
   "remove_radio_button": "Quitar de la radio",

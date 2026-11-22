@@ -1147,6 +1147,9 @@ enum Shown {
 
 const GEAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/settings.svg");
 const TRASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/trash.svg");
+const HISTORY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/history.svg");
+const DOTS_VERTICAL: &str =
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/dots-vertical.svg");
 const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
 const PLUS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plus.svg");
 
@@ -1809,7 +1812,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 .then(|| {
                     view! {
                         <button
-                            class="icon-button"
+                            class="icon-button spare"
                             title=move || t_string!(i18n, remove_title)
                             aria-label=move || t_string!(i18n, remove_title)
                             inner_html=TRASH
@@ -1820,7 +1823,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 let history = (page == Page::Node && !local()).then(|| {
                     view! {
                         <button
-                            class="icon-button"
+                            class="icon-button spare"
                             title=move || t_string!(i18n, requests_title)
                             aria-label=move || t_string!(i18n, requests_title)
                             on:click=move |_| live.history.set(true)
@@ -1832,7 +1835,13 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         </button>
                     }
                 });
-                view! { {remove} {history} {profile} {settings} {chat} }
+                // Where there is no room for them, those two in a menu.
+                let can_remove = remove.is_some();
+                let can_history = history.is_some();
+                let more = (can_remove || can_history)
+                    .then(|| view! { <HeadingMore can_history can_remove /> });
+                // The three dots last, against the edge, as menus go.
+                view! { {remove} {history} {profile} {settings} {chat} {more} }
             };
             // Back to where its page was opened from, on its page.
             let back = move || {
@@ -1904,6 +1913,63 @@ pub fn link_class(link: LinkState) -> &'static str {
         LinkState::Connecting => "connecting",
         LinkState::Disconnected => "radio-down",
         LinkState::Disabled => "disabled",
+    }
+}
+
+/// A node's page's lesser actions, where the heading has no room for them
+/// as icons: behind three dots, each by its icon and its words. Closed by
+/// a click anywhere else, or by choosing.
+#[component]
+fn HeadingMore(can_history: bool, can_remove: bool) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let open = RwSignal::new(false);
+    let closing = window_event_listener(leptos::ev::click, move |_| open.set(false));
+    on_cleanup(move || closing.remove());
+    let choose = move |what: RwSignal<bool>| {
+        move |_| {
+            open.set(false);
+            what.set(true);
+        }
+    };
+    view! {
+        <span class="more-actions">
+            <button
+                class="icon-button"
+                class:on=move || open.get()
+                aria-haspopup="menu"
+                aria-expanded=move || open.get().to_string()
+                title=move || t_string!(i18n, heading_more)
+                aria-label=move || t_string!(i18n, heading_more)
+                inner_html=DOTS_VERTICAL
+                on:click=move |ev| {
+                    ev.stop_propagation();
+                    open.update(|o| *o = !*o);
+                }
+            ></button>
+            <Show when=move || open.get()>
+                <div class="heading-menu" role="menu" on:click=|ev| ev.stop_propagation()>
+                    {can_history
+                        .then(|| {
+                            view! {
+                                <button role="menuitem" on:click=choose(live.history)>
+                                    <span class="icon" inner_html=HISTORY></span>
+                                    {t!(i18n, requests_title)}
+                                </button>
+                            }
+                        })}
+                    {can_remove
+                        .then(|| {
+                            view! {
+                                <button role="menuitem" class="danger-item" on:click=choose(live.removing)>
+                                    <span class="icon" inner_html=TRASH></span>
+                                    {t!(i18n, remove_title)}
+                                </button>
+                            }
+                        })}
+                </div>
+            </Show>
+        </span>
     }
 }
 
