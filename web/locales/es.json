@@ -358,13 +358,12 @@
   "node_identity": "Identidad",
   "node_sensors": "Sensores y módulos",
   "node_sensors_hint": "Solo responde si tiene los sensores o el módulo activado.",
-  "node_unknown": "Aún no sabemos su nombre ni su hardware: los da su información.",
+  "node_unknown": "Aún no sabemos su nombre, su hardware ni su clave pública, y sin su clave no se le puede pedir telemetría ni vecinos: todo eso lo trae su información.",
   "node_channel_menu": "Por el canal (el nodo también tiene que tenerlo)",
   "node_channel_choose": "Elegir el canal",
   "node_direct": "Lo que va solo a él",
   "node_direct_pki": "Cifrado con su clave pública, sea cual sea el canal",
-  "node_direct_channel": "Por el canal: no conocemos su clave",
-  "node_direct_licensed": "Por el canal: con licencia, nada va cifrado",
+  "node_direct_licensed": "Por el canal: tu radio tiene licencia, nada va cifrado",
   "node_public_key": "Clave pública",
   "node_key_unknown": "Desconocida",
   "node_key_copy": "Copiar la clave pública",
@@ -419,5 +418,8 @@
   "traces_more": "Cargar más",
   "traces_none": "Aún no se ha trazado ninguna ruta hasta él.",
   "traces_drawer_title": "Trazas a {name}",
-  "drawer_close": "Cerrar"
+  "drawer_close": "Cerrar",
+  "node_no_key": "No conocemos su clave pública, y sin ella no se le puede pedir telemetría ni vecinos: la trae su información, si su firmware la tiene.",
+  "node_needs_key": "Hace falta su clave pública, que trae su información: sin ella la radio no lo envía.",
+  "node_direct_none": "Nada, hasta tener su clave: la radio cifra con ella lo que va solo a él"
 }

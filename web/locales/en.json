@@ -358,13 +358,12 @@
   "node_identity": "Identity",
   "node_sensors": "Sensors and modules",
   "node_sensors_hint": "It answers only with the sensors, or the module on.",
-  "node_unknown": "Its name and hardware are not known yet: its node info tells them.",
+  "node_unknown": "Its name, hardware and public key are not known yet, and without its key it cannot be asked for telemetry or neighbours: its node info brings all of them.",
   "node_channel_menu": "On the channel (the node has to have it too)",
   "node_channel_choose": "Choose the channel",
   "node_direct": "What is for it alone",
   "node_direct_pki": "Encrypted to its public key, whatever the channel",
-  "node_direct_channel": "On the channel: its key is not known",
-  "node_direct_licensed": "On the channel: licensed, nothing goes encrypted",
+  "node_direct_licensed": "On the channel: your radio is licensed, nothing goes encrypted",
   "node_public_key": "Public key",
   "node_key_unknown": "Unknown",
   "node_key_copy": "Copy the public key",
@@ -419,5 +418,8 @@
   "traces_more": "Load more",
   "traces_none": "No route to it traced yet.",
   "traces_drawer_title": "Traceroutes to {name}",
-  "drawer_close": "Close"
+  "drawer_close": "Close",
+  "node_no_key": "Its public key is not known, and without it it cannot be asked for telemetry or neighbours: its node info brings it, if its firmware has one.",
+  "node_needs_key": "Its public key is needed, which its node info brings: without it the radio does not send this.",
+  "node_direct_none": "Nothing, until its key is known: the radio encrypts to it what is for it alone"
 }

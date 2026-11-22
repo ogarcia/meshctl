@@ -187,6 +187,29 @@ fn own(live: Live, num: u32) -> bool {
         == Some(num)
 }
 
+/// Whether the selected radio's owner is a licensed radio amateur: then it
+/// sends nothing encrypted, and what goes to a node alone goes on the
+/// channel.
+fn licensed(live: Live) -> bool {
+    let local = live
+        .status
+        .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+    local.is_some_and(|local| {
+        live.nodes
+            .with(|nodes| nodes.get(&local).is_some_and(|n| n.licensed))
+    })
+}
+
+/// Whether what goes to a node alone cannot be sent to it yet: the radio
+/// encrypts it to the node's public key, and refuses to without it, which
+/// its node info brings.
+fn needs_key(live: Live, num: u32) -> bool {
+    !licensed(live)
+        && live
+            .nodes
+            .with(|nodes| nodes.get(&num).is_some_and(|n| n.public_key.is_none()))
+}
+
 /// Whether the selected radio can ask nodes for anything yet: MeshCore's
 /// requests are still to come.
 fn supported(live: Live) -> bool {
@@ -264,18 +287,25 @@ fn Checks() -> impl IntoView {
         } else {
             None
         };
-        // Its name not known yet: what asks for it, first of all.
+        // Its name, or its key, not known yet: what asks for them, first of
+        // all, as without its key it cannot be asked for its telemetry.
+        let nameless = live.nodes.with(|nodes| {
+            nodes
+                .get(&asking.num)
+                .is_some_and(|n| n.long_name.is_none())
+        });
         let unknown = (supported(live)
             && !own(live, asking.num)
-            && live.nodes.with(|nodes| {
-                nodes
-                    .get(&asking.num)
-                    .is_some_and(|n| n.long_name.is_none())
-            }))
+            && (nameless || needs_key(live, asking.num)))
         .then(|| {
+            let text = if nameless {
+                t!(i18n, node_unknown).into_any()
+            } else {
+                t!(i18n, node_no_key).into_any()
+            };
             view! {
                 <li class="info ask-row">
-                    <span>{t!(i18n, node_unknown)}</span>
+                    <span>{text}</span>
                     <AskButton asked=Asked::Request(RequestKind::NodeInfo) place="top" />
                 </li>
             }
@@ -483,7 +513,9 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
             .pace()
             .map_or(0, |pace| live.wait(pace, asking.clock.get()))
     };
-    let off = move || !connected(live) || pending() || wait() > 0;
+    // Not to be sent without its key: the radio refuses to.
+    let keyless = move || asked.private() && needs_key(live, asking.num);
+    let off = move || !connected(live) || pending() || wait() > 0 || keyless();
     let send = move |channel: u32| {
         pressed.set(Some(me));
         match asked {
@@ -500,15 +532,9 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
                 .collect::<Vec<_>>()
         })
     };
-    // The channel matters unless it goes encrypted to the node's own key.
-    let by_channel = move || {
-        !asked.private()
-            || live.nodes.with(|nodes| {
-                nodes
-                    .get(&asking.num)
-                    .is_none_or(|node| node.public_key.is_none() || node.licensed)
-            })
-    };
+    // What goes to it alone goes encrypted to its key, whatever the
+    // channel, unless the radio's owner is licensed.
+    let by_channel = move || !asked.private() || licensed(live);
     let has_menu = move || by_channel() && channels().len() > 1;
     let open = move || menu.get() == Some(me);
     // Asking, said by the button pressed; by every one that sends it when
@@ -555,7 +581,13 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
                         class="ask"
                         class:split=has_menu
                         disabled=off
-                        title=move || paced().map(|(text, _)| text)
+                        title=move || {
+                            if keyless() {
+                                Some(t_string!(i18n, node_needs_key).to_owned())
+                            } else {
+                                paced().map(|(text, _)| text)
+                            }
+                        }
                         on:click=move |_| send(0)
                     >
                         {label}
@@ -746,12 +778,12 @@ fn Identity(at: Option<i64>) -> impl IntoView {
         };
         // How what is for it alone reaches it: telemetry and neighbours
         // asked, and messages to it.
-        let direct = if node.licensed {
+        let direct = if licensed(live) {
             t!(i18n, node_direct_licensed).into_any()
         } else if node.public_key.is_some() {
             t!(i18n, node_direct_pki).into_any()
         } else {
-            t!(i18n, node_direct_channel).into_any()
+            t!(i18n, node_direct_none).into_any()
         };
         Some(view! {
             <dl class="facts">
