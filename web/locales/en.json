@@ -132,6 +132,7 @@
   "packets_hops_of": "{{ hops }} of {{ start }} hops",
   "packets_hops_label": "Hops",
   "packets_relay": "Last hop",
+  "packets_relay_unknown": "Not told: the node that relayed it does not say",
   "packets_tx": "TX",
   "packets_rx_lora": "RX LoRa",
   "packets_rx_mqtt": "RX MQTT",

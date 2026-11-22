@@ -1436,7 +1436,9 @@ fn RequestRow(request: Request) -> impl IntoView {
         }
     };
     let answer = request.answer.clone();
-    let line = answer.as_ref().map(crate::packets::summary);
+    let line = answer
+        .as_ref()
+        .map(|answer| crate::packets::summary(answer, i18n.get_locale_untracked()));
     let detail = answer
         .and_then(|a| a.payload)
         .and_then(|payload| serde_json::to_string_pretty(&payload).ok());

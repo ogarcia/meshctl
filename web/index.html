@@ -2103,10 +2103,26 @@
       .source.tx { border-color: color-mix(in srgb, var(--mc-primary) 55%, transparent); color: var(--mc-primary); }
       .source.mqtt { border-style: dashed; }
       /*
-       * Short of room for a line each: when, its kind, how it came, and how
-       * strong; from and to, and its hops; what it says.
+       * Short of room for a line each, two: when, its kind, how it came, from
+       * and to, and how strong; what it says, and its hops. Still the list's
+       * columns, so that every row lines up.
        */
       @container live (max-width: 960px) {
+        .packet-list { grid-template-columns: auto auto auto minmax(0, 1fr) auto; }
+        .packet-line { row-gap: 4px; }
+        .packet .time { grid-column: 1; grid-row: 1; }
+        .packet .kind { grid-column: 2; grid-row: 1; }
+        .packet .source-cell { grid-column: 3; grid-row: 1; }
+        .packet .route { grid-column: 4; grid-row: 1; }
+        .packet .signal { grid-column: 5; grid-row: 1; }
+        .packet .summary { grid-column: 1 / 5; grid-row: 2; }
+        .packet .hops { grid-column: 5; grid-row: 2; }
+      }
+      /*
+       * Shorter still, three, each row its own: when, its kind, how it came,
+       * and how strong; from and to, and its hops; what it says.
+       */
+      @container live (max-width: 640px) {
         .packet-list { display: block; }
         .packet { display: block; }
         .packet-line {
@@ -2125,6 +2141,11 @@
         .packet .signal { grid-area: signal; }
         .packet .summary { grid-area: summary; }
       }
+      /* From and to, each cut short as it must, so that neither goes whole. */
+      .packet .route { display: flex; gap: 0.4em; }
+      .packet .route > .from,
+      .packet .route > .to { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .packet .route > .arrow { flex: none; }
       /* A packet whole, in its drawer: what is known of it, and its text. */
       .packet-facts {
         display: grid;

@@ -10,7 +10,7 @@
 use crate::app::Live;
 use crate::chat::{node_name, short_name, title};
 use crate::daemon;
-use crate::i18n::{t, t_string, use_i18n};
+use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::preferences::{Choice, pills};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -443,15 +443,10 @@ fn kind_class(kind: PacketKind) -> &'static str {
     }
 }
 
-/// A node by its short name and its long one, or its id alone.
+/// A node by its long name, or its id when it has none: the short one
+/// besides would take the room the route has.
 fn who(live: Live, num: u32) -> String {
-    let short = short_name(live, num);
-    let long = node_name(live, num);
-    if short.is_empty() || long.starts_with('!') {
-        long
-    } else {
-        format!("{short} · {long}")
-    }
+    node_name(live, num)
 }
 
 /// The node that relayed a packet last, by the last byte of its number, as
@@ -471,7 +466,7 @@ fn relay_name(live: Live, relay: u32) -> String {
             |num| {
                 let short = short_name(live, num);
                 if short.is_empty() {
-                    node_name(live, num)
+                    format!("!{num:08x}")
                 } else {
                     short
                 }
@@ -491,7 +486,10 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
     let kind = PacketKind::of(packet.port.as_deref());
     let source = Source::of(live, &packet);
     let port = packet.port.clone().map(|p| short_port(&p));
-    let summary = summary(&packet);
+    let summary = {
+        let packet = packet.clone();
+        move || summary(&packet, i18n.get_locale())
+    };
     let (hops_away, hop_start, relay) = (packet.hops_away, packet.hop_start, packet.relay_node);
     let signal = {
         let mut parts = Vec::new();
@@ -513,14 +511,26 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
             } else {
                 t!(i18n, packets_hops, count = hops).into_any()
             };
-            let relay = relay.map(|relay| format!(" · {}", relay_name(live, relay)));
+            // The relay's byte, when the firmware gives it; a question mark
+            // when it does not, as the node that relayed it did not say.
+            let relay = format!(
+                " · {}",
+                relay.map_or_else(|| "?".to_owned(), |relay| relay_name(live, relay))
+            );
             view! { {count} {relay} }.into_any()
         }
         _ => ().into_any(),
     };
     // Of how many it could take, as the firmware counts.
     let hops_title = move || match hops_away {
-        Some(hops) if source == Source::Lora => format!("{hops}/{hop_start}"),
+        Some(hops) if source == Source::Lora => {
+            let mut title = format!("{hops}/{hop_start}");
+            if hops > 0 && relay.is_none() {
+                title.push_str(" · ");
+                title.push_str(t_string!(i18n, packets_relay_unknown));
+            }
+            title
+        }
         _ => String::new(),
     };
     let source_label = move || match source {
@@ -558,7 +568,7 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
                 </span>
                 <span class="route">
                     <span class="from">{move || who(live, from)}</span>
-                    " → "
+                    <span class="arrow">"→"</span>
                     <span class="to">
                         {move || {
                             if to == BROADCAST {
@@ -666,13 +676,13 @@ fn PacketDrawer() -> impl IntoView {
                                 t!(i18n, packets_hops_of, hops = hops, start = start).into_any(),
                             ));
                         }
-                        if let Some(relay) = packet
-                            .relay_node
-                            .filter(|_| packet.hops_away.is_some_and(|h| h > 0))
-                        {
+                        if packet.hops_away.is_some_and(|h| h > 0) {
                             facts.push(text_fact(
                                 t_string!(i18n, packets_relay).to_owned(),
-                                format!("{} (··{relay:02x})", relay_name(live, relay)),
+                                packet.relay_node.map_or_else(
+                                    || t_string!(i18n, packets_relay_unknown).to_owned(),
+                                    |relay| format!("{} (··{relay:02x})", relay_name(live, relay)),
+                                ),
                             ));
                         }
                         if let Some(snr) = packet.snr {
@@ -753,7 +763,7 @@ fn clock(at: i64) -> String {
 }
 
 /// What a packet says, in a line.
-pub fn summary(packet: &Packet) -> String {
+pub fn summary(packet: &Packet, locale: Locale) -> String {
     let Some(payload) = &packet.payload else {
         return String::new();
     };
@@ -766,7 +776,7 @@ pub fn summary(packet: &Packet) -> String {
             let model = payload["hw_model"].as_str().unwrap_or_default();
             Some(format!("{name} · {model}"))
         }
-        "TELEMETRY_APP" => telemetry(payload),
+        "TELEMETRY_APP" => telemetry(payload, locale),
         "ROUTING_APP" => payload["error_reason"]
             .as_str()
             .map(str::to_owned)
@@ -804,28 +814,87 @@ fn position(payload: &Value) -> Option<String> {
     Some(format!("{latitude:.5}, {longitude:.5}{altitude}"))
 }
 
-fn telemetry(payload: &Value) -> Option<String> {
-    let parts: Vec<String> = [
-        ("device_metrics", "battery_level", "%"),
-        ("device_metrics", "voltage", "V"),
-        ("device_metrics", "channel_utilization", "% ch"),
-        ("device_metrics", "air_util_tx", "% tx"),
-        ("environment_metrics", "temperature", "°C"),
-        ("environment_metrics", "relative_humidity", "% RH"),
-        ("environment_metrics", "barometric_pressure", "hPa"),
-        ("power_metrics", "ch1_voltage", "V"),
-        ("local_stats", "num_online_nodes", "online"),
-    ]
-    .iter()
-    .filter_map(|(group, key, unit)| {
-        let value = payload[group][key].as_f64()?;
-        Some(if value.fract() == 0.0 {
+/// The measures a telemetry line reads, by group, with their units: the
+/// rest of them, in its drawer.
+const MEASURES: &[(&str, &str, &str)] = &[
+    ("device_metrics", "battery_level", "%"),
+    ("device_metrics", "voltage", "V"),
+    ("device_metrics", "channel_utilization", "% ch"),
+    ("device_metrics", "air_util_tx", "% tx"),
+    ("environment_metrics", "temperature", "°C"),
+    ("environment_metrics", "relative_humidity", "% RH"),
+    ("environment_metrics", "barometric_pressure", "hPa"),
+    ("environment_metrics", "gas_resistance", "MΩ"),
+    ("environment_metrics", "iaq", "IAQ"),
+    ("environment_metrics", "lux", "lx"),
+    ("environment_metrics", "voltage", "V"),
+    ("environment_metrics", "current", "mA"),
+    ("environment_metrics", "wind_speed", "m/s"),
+    ("environment_metrics", "wind_direction", "°"),
+    ("environment_metrics", "rainfall_1h", "mm/h"),
+    ("environment_metrics", "soil_moisture", "% soil"),
+    ("environment_metrics", "weight", "kg"),
+    ("environment_metrics", "distance", "mm"),
+    ("environment_metrics", "radiation", "µR/h"),
+    ("power_metrics", "ch1_voltage", "V"),
+    ("power_metrics", "ch1_current", "mA"),
+    ("power_metrics", "ch2_voltage", "V"),
+    ("power_metrics", "ch2_current", "mA"),
+    ("power_metrics", "ch3_voltage", "V"),
+    ("power_metrics", "ch3_current", "mA"),
+    ("air_quality_metrics", "pm25_standard", "µg/m³ PM2.5"),
+    ("air_quality_metrics", "pm10_standard", "µg/m³ PM10"),
+    ("air_quality_metrics", "co2", "ppm CO₂"),
+    ("health_metrics", "heart_bpm", "bpm"),
+    ("health_metrics", "spO2", "% SpO₂"),
+    ("health_metrics", "temperature", "°C"),
+    ("local_stats", "noise_floor", "dBm"),
+    ("host_metrics", "load1", "load"),
+];
+
+fn telemetry(payload: &Value, locale: Locale) -> Option<String> {
+    let number = |value: f64, unit: &str| {
+        if value.fract() == 0.0 {
             format!("{value:.0} {unit}")
         } else {
             format!("{value:.1} {unit}")
-        })
-    })
-    .collect();
+        }
+    };
+    let mut parts: Vec<String> = Vec::new();
+    // The radio's own stats: how many of the nodes it knows are online.
+    let stats = &payload["local_stats"];
+    if let (Some(online), Some(total)) = (
+        stats["num_online_nodes"].as_u64(),
+        stats["num_total_nodes"].as_u64(),
+    ) {
+        let nodes = match locale {
+            Locale::es => "nodos",
+            Locale::en => "nodes",
+        };
+        parts.push(format!("{online}/{total} {nodes}"));
+    }
+    parts.extend(
+        MEASURES
+            .iter()
+            .filter_map(|(group, key, unit)| Some(number(payload[group][key].as_f64()?, unit))),
+    );
+    // None of those: whatever it has, by its names, rather than nothing.
+    if parts.is_empty() {
+        parts = payload
+            .as_object()?
+            .values()
+            .filter_map(Value::as_object)
+            .flat_map(|group| group.iter())
+            .filter_map(|(key, value)| {
+                Some(format!(
+                    "{} {}",
+                    key.replace('_', " "),
+                    number(value.as_f64()?, "").trim_end()
+                ))
+            })
+            .take(4)
+            .collect();
+    }
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
@@ -859,17 +928,38 @@ mod tests {
 
     #[test]
     fn packets_read_in_a_line() {
-        assert_eq!(summary(&packet("TEXT_MESSAGE_APP", "hola".into())), "hola");
+        assert_eq!(
+            summary(&packet("TEXT_MESSAGE_APP", "hola".into()), Locale::es),
+            "hola"
+        );
         let position = serde_json::json!({"latitude_i": 433_000_000, "longitude_i": -84_000_000});
         assert_eq!(
-            summary(&packet("POSITION_APP", position)),
+            summary(&packet("POSITION_APP", position), Locale::es),
             "43.30000, -8.40000"
         );
         let telemetry =
             serde_json::json!({"device_metrics": {"battery_level": 101, "voltage": 4.2}});
         assert_eq!(
-            summary(&packet("TELEMETRY_APP", telemetry)),
+            summary(&packet("TELEMETRY_APP", telemetry), Locale::es),
             "101 % · 4.2 V"
+        );
+        // A current sensor, as a node's environment.
+        let current =
+            serde_json::json!({"environment_metrics": {"current": 22.4, "voltage": 5.168}});
+        assert_eq!(
+            summary(&packet("TELEMETRY_APP", current), Locale::es),
+            "5.2 V · 22.4 mA"
+        );
+        let stats = serde_json::json!({"local_stats": {"num_online_nodes": 37, "num_total_nodes": 80, "noise_floor": -105}});
+        assert_eq!(
+            summary(&packet("TELEMETRY_APP", stats), Locale::en),
+            "37/80 nodes · -105 dBm"
+        );
+        // Measures it does not know, by their names, not as JSON.
+        let unknown = serde_json::json!({"traffic_management_stats": {"packets_seen": 12}});
+        assert_eq!(
+            summary(&packet("TELEMETRY_APP", unknown), Locale::es),
+            "packets seen 12"
         );
         assert_eq!(short_port("TEXT_MESSAGE_APP"), "TEXT MESSAGE");
     }

@@ -132,6 +132,7 @@
   "packets_hops_of": "{{ hops }} de {{ start }} saltos",
   "packets_hops_label": "Saltos",
   "packets_relay": "Último salto",
+  "packets_relay_unknown": "No lo dice: quien lo retransmitió no lo indica",
   "packets_tx": "TX",
   "packets_rx_lora": "RX LoRa",
   "packets_rx_mqtt": "RX MQTT",
