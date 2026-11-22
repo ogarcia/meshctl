@@ -181,27 +181,74 @@ pub fn pills(options: Vec<Choice>) -> impl IntoView {
 }
 
 /// Where the pill of a strip of options goes and how wide, as the one at
-/// `at` is laid out (`--x` and `--w`, for its style): measured again as it
-/// is another, as the language changes, and as the strip changes size: the
-/// window's, its fonts loaded, or shown after being hidden, when it was
-/// measured as nothing.
+/// `at` is laid out (`--x` and `--w`, for its style). It slides as another
+/// is chosen, or the language changes; as the strip changes size (the
+/// window's, its fonts loaded, a phone turned, or shown after being hidden)
+/// it is placed at once, before the screen is drawn, and does not stretch
+/// to it.
 pub fn slide(strip: NodeRef<leptos::html::Div>, at: Memo<usize>) -> RwSignal<String> {
     use wasm_bindgen::JsCast;
     use wasm_bindgen::closure::Closure;
     let i18n = use_i18n();
     let pill = RwSignal::new(String::new());
+    // Whether it slides: not until it has been placed and seen once.
     let sliding = RwSignal::new(false);
-    let resized = RwSignal::new(0u32);
-    // What watches its size, and what it calls, kept to be let go with it.
+
+    // The one at `at`, measured: none while hidden, as it measures nothing.
+    let place = move |at: usize, slides: bool| {
+        let Some(strip) = strip.get_untracked() else {
+            return;
+        };
+        let Some(option) = strip
+            .children()
+            .item(at as u32)
+            .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok())
+            .filter(|o| o.offset_width() > 0)
+        else {
+            return;
+        };
+        pill.set(format!(
+            "--x: {}px; --w: {}px; --shown: 1{}",
+            option.offset_left(),
+            option.offset_width(),
+            if slides { "; --slide: 0.2s" } else { "" }
+        ));
+        // Sliding again, or for the first time, from the next frame on:
+        // from where it is now.
+        if !slides {
+            request_animation_frame(move || {
+                sliding.set(true);
+                pill.update(|p| {
+                    if !p.contains("--slide") {
+                        p.push_str("; --slide: 0.2s");
+                    }
+                });
+            });
+        }
+    };
+
+    // Another chosen, or the language changed: once laid out, sliding.
+    Effect::new(move |_| {
+        let at = at.get();
+        let _ = i18n.get_locale();
+        if strip.get().is_none() {
+            return;
+        }
+        request_animation_frame(move || place(at, sliding.get_untracked()));
+    });
+
+    // Its size changed: placed at once, as its size is known and before
+    // the screen is drawn. What watches it, and what it calls, kept to be
+    // let go with it.
     let watch = StoredValue::new_local(None::<(web_sys::ResizeObserver, Closure<dyn FnMut()>)>);
     Effect::new(move |_| {
-        let Some(strip) = strip.get() else { return };
+        let Some(element) = strip.get() else { return };
         if watch.with_value(Option::is_some) {
             return;
         }
-        let call = Closure::<dyn FnMut()>::new(move || resized.update(|n| *n += 1));
+        let call = Closure::<dyn FnMut()>::new(move || place(at.get_untracked(), false));
         if let Ok(observer) = web_sys::ResizeObserver::new(call.as_ref().unchecked_ref()) {
-            observer.observe(&strip);
+            observer.observe(&element);
             watch.set_value(Some((observer, call)));
         }
     });
@@ -209,37 +256,6 @@ pub fn slide(strip: NodeRef<leptos::html::Div>, at: Memo<usize>) -> RwSignal<Str
         watch.update_value(|w| {
             if let Some((observer, _)) = w.take() {
                 observer.disconnect();
-            }
-        });
-    });
-    Effect::new(move |_| {
-        let at = at.get();
-        let _ = i18n.get_locale();
-        resized.track();
-        let Some(strip) = strip.get() else { return };
-        request_animation_frame(move || {
-            let option = strip
-                .children()
-                .item(at as u32)
-                .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok());
-            // Hidden, it measures as nothing: left for when it is shown.
-            let Some(option) = option.filter(|o| o.offset_width() > 0) else {
-                return;
-            };
-            let slides = sliding.get_untracked();
-            pill.set(format!(
-                "--x: {}px; --w: {}px; --shown: 1{}",
-                option.offset_left(),
-                option.offset_width(),
-                if slides { "; --slide: 0.2s" } else { "" }
-            ));
-            // Placed at once the first time, and seen: sliding from then on,
-            // not from where it was before it was measured.
-            if !slides {
-                request_animation_frame(move || {
-                    sliding.set(true);
-                    pill.update(|p| p.push_str("; --slide: 0.2s"));
-                });
             }
         });
     });

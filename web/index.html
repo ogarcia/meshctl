@@ -1026,7 +1026,7 @@
        * The nodes a radio hears: each with its short name in a circle the
        * colour of how far it is, as on the map; the whole row opens it.
        */
-      .node-list { width: 100%; max-width: 1200px; margin: 0 auto; }
+      .node-list { width: 100%; max-width: 1200px; margin: 0 auto; container: nodes / inline-size; }
       .node-tools { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
       .node-tools .segmented { width: 420px; max-width: 100%; }
       .node-tools .segmented button { padding: 0 8px; white-space: nowrap; }
@@ -2470,20 +2470,9 @@
        */
       @media (max-width: 760px) {
         /* The nodes, each in two lines: who, and how it is heard, small. */
-        .node-tools { flex-direction: column; align-items: stretch; }
+        /* The nodes' tools one under the other. */
         .node-tools .segmented { width: 100%; }
         .node-tools input { margin-left: 0; width: 100%; }
-        .nodes-table thead { display: none; }
-        .nodes-table, .nodes-table tbody { display: block; }
-        .nodes-table tr.node-row {
-          display: flex;
-          flex-wrap: wrap;
-          align-items: baseline;
-          padding: 10px 4px;
-          border-bottom: 1px solid var(--mc-border);
-        }
-        .nodes-table tr.node-row td { padding: 0; border: 0; }
-        .nodes-table tr.node-row:last-child { border-bottom: 0; }
         /* Settings: each control under what it is, the whole width; the tabs
            a little tighter, to fit the five. */
         .pref-control,
@@ -2517,6 +2506,30 @@
         .channel-row .pick { flex-wrap: wrap; row-gap: 6px; }
         .channel-row .channel-facts { flex-basis: 100%; flex-wrap: wrap; padding-left: 52px; }
         .channel-row .channel-facts:empty { display: none; }
+        /* A node's figures, two by two. */
+        .node-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+        .figure, .figure:first-child { min-width: 0; padding: 0; border-left: 0; }
+        .figure .bar { width: 100%; }
+        /* The whiles by the title, in one line: tighter. */
+        .telemetry .segmented.windows button { padding: 0 6px; }
+      }
+      /*
+       * The nodes, each in two lines, who and how it is heard, small, while
+       * the list has not the room for the table: by its own width, not the
+       * screen's, as the names and hardware of the nodes make it wide.
+       */
+      @container nodes (max-width: 860px) {
+        .nodes-table thead { display: none; }
+        .nodes-table, .nodes-table tbody { display: block; }
+        .nodes-table tr.node-row {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: baseline;
+          padding: 10px 4px;
+          border-bottom: 1px solid var(--mc-border);
+        }
+        .nodes-table tr.node-row td { padding: 0; border: 0; }
+        .nodes-table tr.node-row:last-child { border-bottom: 0; }
         .nodes-table tr.node-row td:first-child { flex: 1 1 100%; }
         .nodes-table tr.node-row td:nth-child(2),
         .nodes-table tr.node-row td:nth-child(3),
@@ -2526,12 +2539,6 @@
         .nodes-table tr.node-row td:nth-child(3):not(:empty) + td:not(:empty)::before { content: "·"; margin: 0 6px; }
         .nodes-table tr.node-row td:nth-child(n + 5) { display: none; }
         .nodes-table .power svg { width: 13px; height: 13px; }
-        /* A node's figures, two by two. */
-        .node-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
-        .figure, .figure:first-child { min-width: 0; padding: 0; border-left: 0; }
-        .figure .bar { width: 100%; }
-        /* The whiles by the title, in one line: tighter. */
-        .telemetry .segmented.windows button { padding: 0 6px; }
       }
       /*
        * A phone on its side: short of height, not of width. The bar of tabs
