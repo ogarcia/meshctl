@@ -456,5 +456,10 @@
   "forget_traces_sure": "Delete the earlier traceroutes? The latest stays on the page.",
   "forget_yes": "Yes, delete",
   "forget_no": "Cancel",
-  "traces_earlier_none": "No earlier traceroutes."
+  "traces_earlier_none": "No earlier traceroutes.",
+  "page_chats": "Chats",
+  "page_more": "More",
+  "nav_switch_radio": "Switch radio",
+  "nav_manage_radios": "Manage the radios",
+  "back": "Back"
 }

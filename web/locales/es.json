@@ -456,5 +456,10 @@
   "forget_traces_sure": "¿Borrar las trazas anteriores? La más reciente sigue en la página.",
   "forget_yes": "Sí, borrar",
   "forget_no": "Cancelar",
-  "traces_earlier_none": "No hay trazas anteriores."
+  "traces_earlier_none": "No hay trazas anteriores.",
+  "page_chats": "Chats",
+  "page_more": "Más",
+  "nav_switch_radio": "Cambiar de radio",
+  "nav_manage_radios": "Gestionar las radios",
+  "back": "Volver"
 }

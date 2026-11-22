@@ -546,48 +546,147 @@
       }
       main:has(> .thread) { display: flex; padding: 0; overflow: hidden; }
 
-      /* A narrow screen: the page, and the bars over it when asked for. */
+      /*
+       * A phone: the page over a bar of tabs, instead of the two bars aside;
+       * the selected radio in a tab's heading, the way back in a page within
+       * it. All of this is hidden on a wider screen.
+       */
+      .tabbar, .radio-chip, .phone-back { display: none; }
+      .wide-only { display: contents; }
       @media (max-width: 760px) {
-        .app { grid-template-columns: minmax(0, 1fr); }
-        .rail, .sidebar { display: none; }
-        .app.menu-open .rail,
-        .app.menu-open .sidebar {
+        .app { display: flex; flex-direction: column; }
+        .page { flex: 1; min-height: 0; }
+        .rail, .sidebar, .menu-toggle, .menu-backdrop, .wide-only { display: none !important; }
+        .topbar { gap: 10px; min-height: 52px; padding: 6px 12px; }
+        .topbar .page-title { display: none; }
+        main { padding: 12px; }
+        .tabbar {
+          flex: none;
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+          background: var(--mc-surface);
+          border-top: 1px solid var(--mc-border);
+        }
+        /* A conversation takes the whole screen, to write. */
+        .app.in-chat .tabbar { display: none; }
+        .tabbar button {
           display: flex;
-          position: fixed;
-          top: 0;
-          bottom: 0;
-          z-index: 2000;
-        }
-        .app.menu-open .rail { left: 0; width: 72px; }
-        .app.menu-open .sidebar {
-          left: 72px;
-          width: min(264px, calc(100vw - 72px));
-          box-shadow: var(--mc-shadow);
-        }
-        /* Behind the bars and over the page: a touch on it closes them. */
-        .app.menu-open .menu-backdrop {
-          display: block;
-          position: fixed;
-          inset: 0;
-          z-index: 1999;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+          min-width: 0;
+          padding: 6px 2px;
           border: 0;
-          border-radius: 0;
-          padding: 0;
-          background: rgba(0, 0, 0, 0.4);
+          border-radius: 10px;
+          background: none;
+          color: var(--mc-muted);
+          font-size: 11px;
         }
-        .menu-toggle {
+        .tabbar button .tab-icon { display: flex; }
+        .tabbar button svg { flex: none; width: 22px; height: 22px; }
+        .tabbar button .label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tabbar button.on { color: var(--mc-primary); font-weight: 600; }
+        .tabbar button.on .tab-icon { background: var(--mc-soft); border-radius: 12px; padding: 2px 14px; margin: -2px 0; }
+        .radio-chip {
           display: flex;
           align-items: center;
-          justify-content: center;
-          width: 40px;
-          height: 40px;
-          padding: 0;
+          gap: 8px;
+          min-width: 0;
+          padding: 4px 8px 4px 4px;
+          border: 0;
+          border-radius: 12px;
+          background: none;
+          font-weight: 600;
         }
-        .menu-toggle svg { width: 20px; height: 20px; }
-        .topbar { padding: 8px 12px; }
-        main { padding: 12px; }
+        .radio-chip:active { background: var(--mc-raised); }
+        .radio-chip .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+        .radio-chip .caret { flex: none; width: 16px; height: 16px; color: var(--mc-muted); }
+        .phone-back { display: flex; margin-left: -6px; }
+        /* A drawer is a sheet from the foot: over the drawer's own rules,
+           which come later. */
+        body .drawer {
+          top: auto;
+          left: 0;
+          right: 0;
+          width: 100%;
+          max-height: 85dvh;
+          border-left: 0;
+          border-top: 1px solid var(--mc-border);
+          border-radius: 16px 16px 0 0;
+          box-shadow: 0 -12px 32px rgb(0 0 0 / 25%);
+          padding-bottom: env(safe-area-inset-bottom);
+        }
       }
-
+      /* A radio's button in small, as a phone's heading and its sheet have it. */
+      .radio-face {
+        position: relative;
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        background: var(--mc-raised);
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .radio-face.colored { background: var(--badge-on); color: var(--badge-on-ink); }
+      .radio-face .dot {
+        position: absolute;
+        right: -3px;
+        bottom: -3px;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        border: 2px solid var(--mc-surface);
+      }
+      .radio-list { list-style: none; margin: 0; padding: 4px 8px; }
+      .radio-list button {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 10px 12px;
+        border: 0;
+        border-radius: 12px;
+        background: none;
+        text-align: left;
+      }
+      .radio-list button.on { background: var(--mc-soft); }
+      .radio-list .who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+      .radio-list .who .dim { font-size: 12px; }
+      .radio-list .check { width: 20px; height: 20px; color: var(--mc-primary); }
+      .drawer-foot .link { padding: 0; border: 0; background: none; color: var(--mc-primary); cursor: pointer; }
+      /* What a phone has in pages, a wider screen has in its bars. */
+      .phone-list { display: flex; flex-direction: column; gap: 2px; width: 100%; max-width: 640px; margin: 0 auto; }
+      .phone-list h2 {
+        margin: 16px 8px 6px;
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--mc-muted);
+      }
+      .phone-list h2:first-child { margin-top: 4px; }
+      .phone-list .item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        min-height: 48px;
+        padding: 10px 12px;
+        border: 0;
+        border-radius: 10px;
+        background: none;
+        text-align: left;
+        font-size: 15px;
+      }
+      .phone-list .item:active { background: var(--mc-raised); }
+      .phone-list .item .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .phone-list .item .chevron { width: 18px; height: 18px; color: var(--mc-muted); }
+      .phone-list .empty { margin: 4px 12px; }
+      .phone-list .local-foot { border: 1px solid var(--mc-border); border-radius: 12px; margin-bottom: 8px; }
       /* Pages. */
       .card {
         background: var(--mc-surface);

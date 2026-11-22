@@ -1165,7 +1165,7 @@ fn Traces(drawer: RwSignal<bool>) -> impl IntoView {
 /// title, what it holds, and closing it, by its button, by a click beside
 /// it or by Escape.
 #[component]
-fn Drawer(
+pub(crate) fn Drawer(
     open: RwSignal<bool>,
     title: Signal<String>,
     /// What can be done with what it holds: at its foot, always in sight.

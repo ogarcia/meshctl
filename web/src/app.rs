@@ -79,6 +79,12 @@ pub enum Page {
     Preferences,
     /// meshctl's: the radios it connects to.
     Radios,
+    /// On a phone: the selected radio's channels and direct conversations,
+    /// which a wider screen has aside.
+    Chats,
+    /// On a phone: the rest, that a wider screen has in its bars: the radio's
+    /// own node and settings, the radios, the preferences.
+    More,
 }
 
 impl Page {
@@ -126,6 +132,8 @@ pub struct Live {
     pub back: RwSignal<Vec<Back>>,
     /// Whether the open node's requests are shown, in their drawer.
     pub history: RwSignal<bool>,
+    /// Whether the radios are shown to switch the selected one, on a phone.
+    pub radio_sheet: RwSignal<bool>,
     /// The node picked on the map, if any.
     pub map_pick: RwSignal<Option<u32>>,
     /// A node for the map to go to once it is showing, as asked from its page.
@@ -171,6 +179,7 @@ impl Live {
             node: RwSignal::new(None),
             back: RwSignal::new(Vec::new()),
             history: RwSignal::new(false),
+            radio_sheet: RwSignal::new(false),
             map_pick: RwSignal::new(None),
             map_focus: RwSignal::new(None),
             map_route: RwSignal::new(None),
@@ -883,7 +892,13 @@ fn Shell() -> impl IntoView {
         // On a wide screen the map takes the whole page, without the bar over
         // it: what that would say, its nodes' cards say. The style sheet
         // decides, by the width.
-        <div class=class class:on-map=move || live.page.get() == Page::Map>
+        // A phone has a bar of tabs at the foot instead of the two aside, but
+        // in a conversation, which takes the whole screen to write.
+        <div
+            class=class
+            class:on-map=move || live.page.get() == Page::Map
+            class:in-chat=move || live.page.get() == Page::Chat
+        >
             <Rail />
             <Sidebar />
             // Over the page while the bars are open on a narrow screen: a touch
@@ -900,6 +915,8 @@ fn Shell() -> impl IntoView {
                     <Content />
                 </main>
             </div>
+            <crate::phone::TabBar />
+            <crate::phone::RadioSheet />
         </div>
     }
 }
@@ -947,6 +964,8 @@ fn Content() -> impl IntoView {
         Shown::Page(Page::Node) => view! { <NodeView /> }.into_any(),
         Shown::Page(Page::Packets) => view! { <PacketsView /> }.into_any(),
         Shown::Page(Page::RadioSettings) => view! { <SettingsView /> }.into_any(),
+        Shown::Page(Page::Chats) => view! { <crate::phone::ChatsView /> }.into_any(),
+        Shown::Page(Page::More) => view! { <crate::phone::MoreView /> }.into_any(),
     }
 }
 
@@ -1215,7 +1234,7 @@ fn RadioHead() -> impl IntoView {
 
 /// A channel or a node to talk to.
 #[component]
-fn PeerItem(peer: Peer) -> impl IntoView {
+pub(crate) fn PeerItem(peer: Peer) -> impl IntoView {
     let live = expect_context::<Live>();
     let class = move || {
         if live.page.get() == Page::Chat && live.open.get() == Some(peer) {
@@ -1256,7 +1275,7 @@ fn PeerItem(peer: Peer) -> impl IntoView {
 
 /// The selected radio's own node, and the way to its settings.
 #[component]
-fn LocalFoot() -> impl IntoView {
+pub(crate) fn LocalFoot() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let local = move || live.status.get().and_then(|s| s.local);
@@ -1332,12 +1351,22 @@ fn Topbar() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let heading = move || match live.page.get() {
-        Page::Nodes => view! { <h1>{t!(i18n, nodes_title)}</h1> }.into_any(),
+        // A tab's own page, on a phone, says the radio instead of its name,
+        // which the bar of tabs says.
+        Page::Nodes => view! { <h1 class="page-title">{t!(i18n, nodes_title)}</h1> }.into_any(),
         Page::Map => match live.map_pick.get() {
-            Some(node) => view! { <PeerHeading peer=Peer::Node { node } /> }.into_any(),
-            None => view! { <h1>{t!(i18n, page_map)}</h1> }.into_any(),
+            // On a phone the node's card says it all, under the radio.
+            Some(node) => view! {
+                <div class="wide-only">
+                    <PeerHeading peer=Peer::Node { node } />
+                </div>
+            }
+            .into_any(),
+            None => view! { <h1 class="page-title">{t!(i18n, page_map)}</h1> }.into_any(),
         },
-        Page::Packets => view! { <h1>{t!(i18n, page_packets)}</h1> }.into_any(),
+        Page::Packets => view! { <h1 class="page-title">{t!(i18n, page_packets)}</h1> }.into_any(),
+        Page::Chats => view! { <h1 class="page-title">{t!(i18n, page_chats)}</h1> }.into_any(),
+        Page::More => view! { <h1 class="page-title">{t!(i18n, page_more)}</h1> }.into_any(),
         Page::Node => match live.node.get() {
             Some(node) => view! { <PeerHeading peer=Peer::Node { node } /> }.into_any(),
             None => ().into_any(),
@@ -1385,6 +1414,8 @@ fn Topbar() -> impl IntoView {
                     <path d="M4 6h16M4 12h16M4 18h16"></path>
                 </svg>
             </button>
+            <crate::phone::PhoneBack />
+            {move || crate::phone::is_tab(live.page.get()).then(|| view! { <crate::phone::RadioChip /> })}
             {heading}
         </header>
     }

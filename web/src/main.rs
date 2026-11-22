@@ -18,6 +18,7 @@ mod mesh;
 mod names;
 mod node;
 mod packets;
+mod phone;
 mod preferences;
 mod radios;
 mod sections;
