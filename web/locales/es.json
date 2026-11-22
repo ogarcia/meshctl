@@ -431,5 +431,7 @@
   "chart_nothing": "Nada que mostrar en este tiempo.",
   "chart_airtime": "Uso del canal y del aire",
   "window_two_weeks": "2 sem",
-  "window_month": "1 mes"
+  "window_month": "1 mes",
+  "chart_hops": "Saltos",
+  "chart_more": "Mostrar {n} más"
 }

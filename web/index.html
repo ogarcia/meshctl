@@ -1236,19 +1236,38 @@
         white-space: nowrap;
       }
       .chart-group + .chart-group { margin-top: 22px; }
-      .chart-group h3 {
-        margin: 0 0 10px;
+      /* Its title folds it away, and back. */
+      .chart-group h3 { margin: 0 0 10px; }
+      .chart-group h3 button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--mc-muted);
         font-size: 12px;
         font-weight: 600;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        color: var(--mc-muted);
       }
-      .charts {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-        gap: 20px 32px;
+      .chart-group h3 button:hover { color: var(--mc-text); }
+      .chart-group h3 svg {
+        width: 14px;
+        height: 14px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        transition: transform 0.15s;
       }
+      .chart-group.folded h3 svg { transform: rotate(-90deg); }
+      .chart-group .hidden { display: none !important; }
+      .chart-group .more { margin-top: 12px; font-size: 13px; }
+      /* A group's charts fill their rows: two share one, one takes it all,
+         the last row's share what the others leave. */
+      .charts { display: flex; flex-wrap: wrap; gap: 20px 32px; }
+      .charts .chart { flex: 1 1 340px; }
+      .charts > .rest { display: contents; }
       .chart { margin: 0; min-width: 0; }
       .chart figcaption {
         display: flex;

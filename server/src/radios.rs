@@ -736,6 +736,15 @@ impl Radios {
                 push("signal.rssi".into(), at, rssi as f64);
             }
         }
+        // How far each packet came from, when it ever came through others:
+        // a node always heard directly has nothing to chart.
+        let hops = self.store.hops_since(id, num, since).await?;
+        if hops.iter().any(|&(_, hops)| hops > 0) {
+            for (at, hops) in hops {
+                #[allow(clippy::cast_precision_loss)]
+                push("signal.hops".into(), at, hops as f64);
+            }
+        }
         Ok(Some(NodeTelemetry {
             oldest: self.store.oldest_telemetry(id, num).await?,
             series: series

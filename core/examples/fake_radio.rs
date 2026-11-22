@@ -705,6 +705,12 @@ fn history(hours: u32) -> Vec<MeshPacket> {
             ));
         }
         for variant in variants {
+            // Now and then it is heard through one or two others.
+            let hops = if random(4) == 0 {
+                1 + random(2) as u32
+            } else {
+                0
+            };
             packets.push(MeshPacket {
                 from: NEIGHBOUR,
                 to: BROADCAST,
@@ -712,7 +718,7 @@ fn history(hours: u32) -> Vec<MeshPacket> {
                 rx_time: Some(at),
                 rx_snr: snr as f32,
                 rx_rssi: Some(-75 - random(20) as i32),
-                hop_limit: 3,
+                hop_limit: 3 - hops,
                 hop_start: 3,
                 payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
                     portnum: PortNum::TelemetryApp as i32,

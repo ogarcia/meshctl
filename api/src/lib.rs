@@ -498,8 +498,9 @@ pub struct NodeTelemetry {
 pub struct TelemetrySeries {
     /// What it measures, as its kind and its field in the protobufs say it:
     /// `device.battery_level`, `environment.temperature`,
-    /// `power.ch1_voltage`; and `signal.snr` and `signal.rssi` for how the
-    /// radio heard it directly.
+    /// `power.ch1_voltage`; `signal.snr` and `signal.rssi` for how the radio
+    /// heard it directly, and `signal.hops` for how many hops each packet
+    /// took, only when any took more than none.
     #[cfg_attr(feature = "openapi", schema(example = "device.voltage"))]
     pub metric: String,
     /// At most a few hundred: a long while's are averaged into as many.
@@ -1316,6 +1317,9 @@ pub struct Preferences {
     /// Over how long a node's telemetry is charted, in seconds; none for a
     /// day.
     pub telemetry_window: Option<u32>,
+    /// Which groups of a node's telemetry charts are folded away, a bit each:
+    /// device 1, signal 2, environment 4, power 8.
+    pub telemetry_folded: u8,
 }
 
 /// A column of the nodes list to sort by, and which way.
@@ -1422,7 +1426,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0}"#
         );
     }
 

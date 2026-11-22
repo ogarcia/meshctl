@@ -529,6 +529,29 @@ impl Store {
         .await?)
     }
 
+    /// How many hops each packet a radio heard from a node since a time took,
+    /// as when it was heard and the hops, the oldest first: not through MQTT,
+    /// and only when the packet says how many it started with, as firmware
+    /// before 2.3 does not.
+    pub async fn hops_since(
+        &self,
+        radio: RadioId,
+        from: u32,
+        since: i64,
+    ) -> Result<Vec<(i64, i64)>> {
+        Ok(sqlx::query_as(
+            "SELECT s.at, s.hop_start - s.hop_limit FROM packet p JOIN packet_seen s ON s.packet = p.id
+            WHERE s.radio_id = ? AND p.from_num = ? AND p.at >= ?
+                AND s.hop_start > 0 AND s.hop_start >= s.hop_limit AND s.via_mqtt = 0
+            ORDER BY s.at",
+        )
+        .bind(radio)
+        .bind(i64::from(from))
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// When a radio first heard a node's telemetry, or the node directly,
     /// if it ever did: how far back its charts can go.
     pub async fn oldest_telemetry(&self, radio: RadioId, from: u32) -> Result<Option<i64>> {

@@ -76,6 +76,16 @@ enum Group {
 impl Group {
     const ALL: [Self; 4] = [Self::Device, Self::Signal, Self::Environment, Self::Power];
 
+    /// Its bit in the preferences' groups folded away.
+    const fn bit(self) -> u8 {
+        match self {
+            Self::Device => 1,
+            Self::Signal => 2,
+            Self::Environment => 4,
+            Self::Power => 8,
+        }
+    }
+
     fn title(self, i18n: I18nContext<Locale>) -> String {
         match self {
             Self::Device => t_string!(i18n, node_device),
@@ -155,6 +165,16 @@ fn specs(
             decimals: 0,
             lines: vec![(String::new(), "signal.rssi")],
             floor: None,
+            ceiling: None,
+        },
+        // Only there when some packet came through others.
+        Spec {
+            group: Group::Signal,
+            title: t_string!(i18n, chart_hops).to_owned(),
+            unit: "",
+            decimals: 0,
+            lines: vec![(String::new(), "signal.hops")],
+            floor: Some(0.0),
             ceiling: None,
         },
     ];
@@ -316,18 +336,7 @@ pub fn Telemetry(num: u32) -> impl IntoView {
                     let (of, rest): (Vec<_>, Vec<_>) =
                         charts.drain(..).partition(|(spec, _)| spec.group == group);
                     charts = rest;
-                    (!of.is_empty()).then(|| {
-                        let of = of
-                            .into_iter()
-                            .map(|(spec, lines)| view! { <Chart spec lines start end /> })
-                            .collect_view();
-                        view! {
-                            <div class="chart-group">
-                                <h3>{group.title(i18n)}</h3>
-                                <div class="charts">{of}</div>
-                            </div>
-                        }
-                    })
+                    (!of.is_empty()).then(|| view! { <ChartGroup group charts=of start end /> })
                 })
                 .collect_view()
                 .into_any(),
@@ -350,6 +359,78 @@ pub fn Telemetry(num: u32) -> impl IntoView {
     }
 }
 
+/// How many charts a group shows before the rest are asked for: a row's.
+const GROUP_SHOWN: usize = 3;
+
+/// A group of charts under its title, which folds it away and back, as the
+/// preferences keep; a long one shows its first row, and the rest on asking.
+#[component]
+fn ChartGroup(
+    group: Group,
+    charts: Vec<(Spec, Vec<Vec<TelemetryPoint>>)>,
+    start: i64,
+    end: i64,
+) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let bit = group.bit();
+    let folded = move || live.preferences.with(|p| p.telemetry_folded & bit != 0);
+    let toggle = move |_| {
+        let mut preferences = live.preferences.get_untracked();
+        preferences.telemetry_folded ^= bit;
+        live.prefer(preferences);
+    };
+    let all = RwSignal::new(false);
+    let hidden = charts.len().saturating_sub(GROUP_SHOWN);
+    let (first, rest): (Vec<_>, Vec<_>) = charts
+        .into_iter()
+        .enumerate()
+        .partition(|(index, _)| *index < GROUP_SHOWN);
+    let first = first
+        .into_iter()
+        .map(|(_, (spec, lines))| view! { <Chart spec lines start end /> })
+        .collect_view();
+    let rest = rest
+        .into_iter()
+        .map(|(_, (spec, lines))| view! { <Chart spec lines start end /> })
+        .collect_view();
+    view! {
+        <div class="chart-group" class:folded=folded>
+            <h3>
+                <button
+                    type="button"
+                    aria-expanded=move || (!folded()).to_string()
+                    on:click=toggle
+                >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M6 9l6 6l6 -6"></path>
+                    </svg>
+                    {move || group.title(i18n)}
+                </button>
+            </h3>
+            <div class="charts" class:hidden=folded>
+                {first}
+                <div class="rest" class:hidden=move || !all.get()>
+                    {rest}
+                </div>
+            </div>
+            {(hidden > 0)
+                .then(|| {
+                    view! {
+                        <button
+                            type="button"
+                            class="link more"
+                            class:hidden=move || folded() || all.get()
+                            on:click=move |_| all.set(true)
+                        >
+                            {move || t_string!(i18n, chart_more).replace("{n}", &hidden.to_string())}
+                        </button>
+                    }
+                })}
+        </div>
+    }
+}
+
 /// Where a chart's plot is drawn, in the SVG's own units: stretched to the
 /// plot's size, the lines keep their width.
 const W: f64 = 1000.0;
@@ -368,14 +449,28 @@ fn Chart(spec: Spec, lines: Vec<Vec<TelemetryPoint>>, start: i64, end: i64) -> i
         floor,
         ceiling,
     } = spec;
-    let format = move |value: f64| format!("{value:.decimals$}{unit}");
-    let (lo, hi) = scale(&lines, floor, ceiling);
+    // Hops go by whole steps; a long while's averaged, with a decimal.
+    let stepped = names.iter().any(|(_, metric)| *metric == "signal.hops");
+    let format = move |value: f64| {
+        if stepped && (value - value.round()).abs() > 0.05 {
+            format!("{value:.1}{unit}")
+        } else {
+            format!("{value:.decimals$}{unit}")
+        }
+    };
+    // Hops, from none up to the most, in whole hops.
+    let (lo, hi) = if stepped {
+        let most = lines.iter().flatten().map(|p| p.value).fold(0.0, f64::max);
+        (0.0, most.ceil().max(1.0))
+    } else {
+        scale(&lines, floor, ceiling)
+    };
     let span = (end - start).max(1) as f64;
     let x = move |at: i64| (at - start) as f64 / span * W;
     let y = move |value: f64| H - (value - lo) / (hi - lo) * H;
     let paths: Vec<String> = lines
         .iter()
-        .map(|points| path(points, x, y, (end - start) / 50))
+        .map(|points| path(points, x, y, (end - start) / 50, stepped))
         .collect();
     let latest = lines
         .first()
@@ -520,6 +615,7 @@ fn path(
     x: impl Fn(i64) -> f64,
     y: impl Fn(f64) -> f64,
     gap: i64,
+    stepped: bool,
 ) -> String {
     // Further apart than what they usually are, too.
     let mut steps: Vec<i64> = points.windows(2).map(|w| w[1].at - w[0].at).collect();
@@ -531,6 +627,10 @@ fn path(
     for point in points {
         let (px, py) = (x(point.at), y(point.value));
         match last {
+            // In steps, it keeps its value until the next one.
+            Some(at) if point.at - at <= gap && stepped => {
+                d.push_str(&format!("H{px:.1}V{py:.2}"));
+            }
             Some(at) if point.at - at <= gap => d.push_str(&format!("L{px:.1} {py:.2}")),
             // A new stretch: a point alone shows as a dot, by the line's caps.
             _ => d.push_str(&format!("M{px:.1} {py:.2}l0 0")),
@@ -597,8 +697,11 @@ mod tests {
             point(20, 2.0),
             point(500, 3.0),
         ];
-        let d = path(&points, |at| at as f64, |v| v, 50);
+        let d = path(&points, |at| at as f64, |v| v, 50, false);
         assert_eq!(d, "M0.0 0.00l0 0L10.0 1.00L20.0 2.00M500.0 3.00l0 0");
+        // In steps: across at the last value, then up or down.
+        let d = path(&points[..3], |at| at as f64, |v| v, 50, true);
+        assert_eq!(d, "M0.0 0.00l0 0H10.0V1.00H20.0V2.00");
     }
 
     #[test]

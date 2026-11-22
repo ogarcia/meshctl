@@ -431,5 +431,7 @@
   "chart_nothing": "Nothing to show over this while.",
   "chart_airtime": "Channel and airtime use",
   "window_two_weeks": "2 wk",
-  "window_month": "1 mo"
+  "window_month": "1 mo",
+  "chart_hops": "Hops",
+  "chart_more": "Show {n} more"
 }
