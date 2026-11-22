@@ -408,6 +408,7 @@
   "check_hardware_text": "Its latest node info names more than one hardware model: {models}. Either two radios share its id, or the radio was replaced.",
   "node_ask_button": "Ask",
   "node_asking": "Asking…",
+  "node_tracing": "Tracing…",
   "node_waiting": "Waiting",
   "node_trace_button": "Trace",
   "node_ago": "{ago} ago",

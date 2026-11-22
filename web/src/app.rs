@@ -168,6 +168,10 @@ pub struct Live {
     pub latest: RwSignal<Option<NodeLatest>>,
     /// What is amiss with the open node.
     pub checks: RwSignal<Vec<NodeCheck>>,
+    /// The request or traceroute button pressed last, and on whose page:
+    /// the one that shows the radio's wait filling up, kept as pages come
+    /// and go.
+    pub pressed: RwSignal<Option<(u32, crate::node::ButtonId)>>,
     /// Why the last request or traceroute was not sent.
     pub ask_error: RwSignal<Option<Failure>>,
     /// When, by this browser's clock, the selected radio sends each paced
@@ -216,6 +220,7 @@ impl Live {
             requests: RwSignal::new(Vec::new()),
             latest: RwSignal::new(None),
             checks: RwSignal::new(Vec::new()),
+            pressed: RwSignal::new(None),
             ask_error: RwSignal::new(None),
             ready: RwSignal::new(HashMap::new()),
             synced: RwSignal::new(0),

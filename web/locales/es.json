@@ -408,6 +408,7 @@
   "check_hardware_text": "Sus últimos NodeInfo nombran más de un modelo: {models}. O dos radios comparten su ID, o se cambió la radio.",
   "node_ask_button": "Pedir",
   "node_asking": "Pidiendo…",
+  "node_tracing": "Trazando…",
   "node_waiting": "Esperando",
   "node_trace_button": "Trazar",
   "node_ago": "hace {ago}",

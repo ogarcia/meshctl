@@ -36,7 +36,7 @@ struct Asking {
 
 /// What a button of the page sends: a request of a kind, or a traceroute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Asked {
+pub(crate) enum Asked {
     Request(RequestKind),
     Trace,
 }
@@ -70,7 +70,7 @@ impl Asked {
 /// the same (its node info, over all while its name is not known, and in
 /// its section).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ButtonId {
+pub(crate) struct ButtonId {
     asked: Asked,
     place: &'static str,
 }
@@ -78,11 +78,6 @@ struct ButtonId {
 /// Which button's channel menu is open, if any.
 #[derive(Clone, Copy)]
 struct OpenMenu(RwSignal<Option<ButtonId>>);
-
-/// Which button was pressed last: the one that shows the radio's wait
-/// filling up, while the others it holds back are only off.
-#[derive(Clone, Copy)]
-struct Pressed(RwSignal<Option<ButtonId>>);
 
 #[component]
 pub fn NodeView() -> impl IntoView {
@@ -103,7 +98,6 @@ fn NodePage(num: u32) -> impl IntoView {
     // One channel menu open at a time, closed by a click anywhere else.
     let menu = RwSignal::new(None::<ButtonId>);
     provide_context(OpenMenu(menu));
-    provide_context(Pressed(RwSignal::new(None)));
     let closing = window_event_listener(leptos::ev::click, move |_| menu.set(None));
     on_cleanup(move || closing.remove());
     let drawer = RwSignal::new(false);
@@ -557,8 +551,23 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
     let live = expect_context::<Live>();
     let asking = expect_context::<Asking>();
     let OpenMenu(menu) = expect_context::<OpenMenu>();
-    let Pressed(pressed) = expect_context::<Pressed>();
+    // The button pressed last, on any node's page, kept as pages come and go:
+    // the one that says the radio keeps from sending the like, and fills up
+    // the while. Here, it is this one if it was pressed on this node's page;
+    // or, pressed on another's, if it sends the same, in its section.
     let me = ButtonId { asked, place };
+    let pressed = live.pressed;
+    let is_pressed = move || match pressed.get() {
+        Some((node, id)) if node == asking.num => id == me,
+        Some((_, id)) => id.asked == asked && place.is_empty(),
+        None => false,
+    };
+    let pressed_here = move || {
+        pressed
+            .get()
+            .filter(|(node, _)| *node == asking.num)
+            .map(|(_, id)| id)
+    };
     let pending = move || match asked {
         Asked::Request(kind) => live.requests.with(|requests| {
             requests.iter().any(|r| {
@@ -580,7 +589,7 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
     let keyless = move || asked.private() && needs_key(live, asking.num);
     let off = move || !connected(live) || pending() || wait() > 0 || keyless();
     let send = move |channel: u32| {
-        pressed.set(Some(me));
+        pressed.set(Some((asking.num, me)));
         match asked {
             Asked::Request(kind) => live.ask(asking.num, kind, channel),
             Asked::Trace => live.trace(asking.num, channel),
@@ -603,15 +612,17 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
     // Asking, said by the button pressed; by every one that sends it when
     // it was asked from elsewhere.
     let asking_here = move || {
-        pending()
-            && pressed
-                .get()
-                .is_none_or(|pressed| pressed == me || pressed.asked != asked)
+        pending() && pressed_here().is_none_or(|pressed| pressed == me || pressed.asked != asked)
     };
     let label = move || {
         if asking_here() {
-            t_string!(i18n, node_asking).to_owned()
-        } else if pressed.get() == Some(me) && wait() > 0 {
+            // A trace is traced; anything else, asked for.
+            if asked == Asked::Trace {
+                t_string!(i18n, node_tracing).to_owned()
+            } else {
+                t_string!(i18n, node_asking).to_owned()
+            }
+        } else if is_pressed() && wait() > 0 {
             // Answered already, but the radio still keeps from sending the
             // like: the button pressed says so while it fills up.
             t_string!(i18n, node_waiting).to_owned()
@@ -656,7 +667,7 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
                         {label}
                         {move || {
                             paced()
-                                .filter(|_| pressed.get() == Some(me))
+                                .filter(|_| is_pressed())
                                 .map(|(_, filled)| {
                                     view! { <i class="fill" style=format!("width: {filled}%")></i> }
                                 })
