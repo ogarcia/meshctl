@@ -199,6 +199,11 @@ pub async fn requests(radio: RadioId, node: u32) -> Result<Vec<meshctl_api::Requ
     get(&format!("/radios/{radio}/requests?node={node}&limit=50")).await
 }
 
+/// How long until a radio sends each paced kind of thing again.
+pub async fn waits(radio: RadioId) -> Result<meshctl_api::Waits, Failure> {
+    get(&format!("/radios/{radio}/waits")).await
+}
+
 pub async fn ask(
     radio: RadioId,
     new: &meshctl_api::NewRequest,

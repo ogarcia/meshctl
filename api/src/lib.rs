@@ -606,7 +606,7 @@ pub struct NewTraceroute {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum RequestKind {
-    /// Who it is. A node answers the same asker once in 12 hours at most.
+    /// Who it is. A node answers once a minute at most.
     NodeInfo,
     /// Where it is, at the precision of the channel asked on. Once in three
     /// minutes at most.
@@ -621,6 +621,66 @@ pub enum RequestKind {
     LocalStats,
     /// The nodes it hears directly. Once in three minutes at most.
     Neighbors,
+}
+
+impl RequestKind {
+    /// The pace the radio sends it at, whoever it is for; none when the
+    /// radio sends it whenever asked.
+    pub const fn pace(self) -> Option<Pace> {
+        match self {
+            Self::NodeInfo | Self::Neighbors => None,
+            Self::Position => Some(Pace::Position),
+            Self::DeviceTelemetry
+            | Self::EnvironmentTelemetry
+            | Self::PowerTelemetry
+            | Self::LocalStats => Some(Pace::Telemetry),
+        }
+    }
+}
+
+/// What a radio sends no more often than once in so long, whichever node it
+/// is for: the firmware drops what comes sooner without a word, so meshctl
+/// does not send it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Pace {
+    /// Positions, and asking for them.
+    Position,
+    /// Telemetry of any kind, and asking for it: device, environment, power
+    /// and local stats go at one pace.
+    Telemetry,
+    Traceroute,
+}
+
+impl Pace {
+    /// How long, in seconds, the radio takes before it sends the same again.
+    pub const fn interval(self) -> i64 {
+        match self {
+            Self::Position | Self::Telemetry => 10,
+            Self::Traceroute => 30,
+        }
+    }
+}
+
+/// How long, in seconds, until a radio sends each kind of paced thing
+/// again: 0 when it can now.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Waits {
+    pub position: i64,
+    pub telemetry: i64,
+    pub traceroute: i64,
+}
+
+impl Waits {
+    pub const fn of(&self, pace: Pace) -> i64 {
+        match pace {
+            Pace::Position => self.position,
+            Pace::Telemetry => self.telemetry,
+            Pace::Traceroute => self.traceroute,
+        }
+    }
 }
 
 /// Where a request is.

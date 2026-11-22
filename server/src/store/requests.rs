@@ -5,7 +5,7 @@
 
 use super::{Store, u32_from};
 use anyhow::{Context, Result};
-use meshctl_api::{RadioId, Request, RequestId, RequestKind, RequestStatus, SightingId};
+use meshctl_api::{Pace, RadioId, Request, RequestId, RequestKind, RequestStatus, SightingId};
 use meshctl_proto::meshtastic::PortNum;
 
 #[derive(sqlx::FromRow)]
@@ -117,6 +117,33 @@ impl Store {
         .await?
         .context("a request just kept is not there")?;
         self.request_of(row).await
+    }
+
+    /// When a radio last asked any node for something sent at its own pace,
+    /// if it ever did: a traceroute, or a request of that pace.
+    pub async fn last_paced_at(&self, radio: RadioId, pace: Pace) -> Result<Option<i64>> {
+        if pace == Pace::Traceroute {
+            return self.last_traceroute_at(radio).await;
+        }
+        let kinds = [
+            RequestKind::NodeInfo,
+            RequestKind::Position,
+            RequestKind::DeviceTelemetry,
+            RequestKind::EnvironmentTelemetry,
+            RequestKind::PowerTelemetry,
+            RequestKind::LocalStats,
+            RequestKind::Neighbors,
+        ]
+        .into_iter()
+        .filter(|kind| kind.pace() == Some(pace))
+        .map(|kind| format!("'{}'", kind_name(kind)))
+        .collect::<Vec<_>>()
+        .join(", ");
+        let query = format!("SELECT max(at) FROM request WHERE radio_id = ? AND kind IN ({kinds})");
+        Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(query))
+            .bind(radio)
+            .fetch_one(&self.pool)
+            .await?)
     }
 
     /// Whether the same thing was asked of the same node and is still waiting.
@@ -276,6 +303,30 @@ mod tests {
             relay_node: None,
             via_mqtt: false,
         }
+    }
+
+    #[tokio::test]
+    async fn telemetry_of_every_kind_goes_at_one_pace() {
+        let store = store().await;
+        assert_eq!(store.last_paced_at(1, Pace::Telemetry).await.unwrap(), None);
+        store
+            .add_request(1, 0x55, RequestKind::DeviceTelemetry, 0, 1, 10)
+            .await
+            .unwrap();
+        store
+            .add_request(1, 0x66, RequestKind::LocalStats, 0, 2, 14)
+            .await
+            .unwrap();
+        // Node info goes whenever asked: it sets no pace.
+        store
+            .add_request(1, 0x66, RequestKind::NodeInfo, 0, 3, 20)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.last_paced_at(1, Pace::Telemetry).await.unwrap(),
+            Some(14)
+        );
+        assert_eq!(store.last_paced_at(1, Pace::Position).await.unwrap(), None);
     }
 
     #[tokio::test]

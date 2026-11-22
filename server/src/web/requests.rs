@@ -7,9 +7,9 @@ use super::AppState;
 use crate::radios::AskFailure;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, ErrorCode, NewRequest, RadioId, Request};
+use meshctl_api::{Error, ErrorCode, NewRequest, RadioId, Request, Waits};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -22,7 +22,9 @@ const PAGE: u32 = 50;
 const PAGE_MAX: u32 = 500;
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(list, ask))
+    OpenApiRouter::new()
+        .routes(routes!(list, ask))
+        .routes(routes!(waits))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -79,10 +81,14 @@ async fn list(
 /// answer arrives on the event stream as `request`, within two minutes.
 ///
 /// The node answers on the channel asked on, which it has to have too. Nodes
-/// keep from answering too often: the same asker gets its node info once in
-/// 12 hours, and anyone its position or neighbours once in three minutes. A
-/// request it keeps from answering ends in `TIMEOUT`; one it has nothing to
-/// answer with, as environment telemetry without sensors, in `NO_RESPONSE`.
+/// keep from answering too often: their node info once a minute, and their
+/// position or neighbours once in three minutes, whoever asks. A request it
+/// keeps from answering ends in `TIMEOUT`; one it has nothing to answer
+/// with, as environment telemetry without sensors, in `NO_RESPONSE`.
+///
+/// The radio itself sends positions and telemetry at a pace, whichever node
+/// they are for, and drops what comes sooner: so does meshctl, with
+/// `too_soon` and how long to wait, as the waits tell beforehand.
 #[utoipa::path(
     post,
     path = "/radios/{radio}/requests",
@@ -95,7 +101,7 @@ async fn list(
         (status = 404, description = "There is no such radio", body = Error),
         (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
         (status = 422, description = "Everyone, or the radio itself: `invalid_node`; a channel it does not use: `invalid_channel`; a kind of radio that does not do this yet: `unsupported_kind`", body = Error),
-        (status = 429, description = "The same is still waiting for its answer: `too_soon`", body = Error),
+        (status = 429, description = "The same is still waiting for its answer, or the radio sent the like too recently: `too_soon`, with `Retry-After` for the latter", body = Error),
     )
 )]
 async fn ask(
@@ -117,7 +123,39 @@ async fn ask(
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidChannel)
         }
         Err(AskFailure::Pending) => error(StatusCode::TOO_MANY_REQUESTS, ErrorCode::TooSoon),
+        Err(AskFailure::TooSoon { wait }) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, wait.max(1).to_string())],
+            Json(Error {
+                error: ErrorCode::TooSoon,
+            }),
+        )
+            .into_response(),
         Err(AskFailure::Failed(err)) => failed(&err),
+    }
+}
+
+/// Waits
+///
+/// How long until the radio sends each paced kind of thing again, in
+/// seconds: positions, telemetry of any kind and traceroutes, whichever node
+/// they are for. Asking sooner gets `too_soon`.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/waits",
+    tag = "requests",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    responses(
+        (status = 200, description = "The waits", body = Waits),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+    )
+)]
+async fn waits(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
+    match state.radios.waits(radio).await {
+        Ok(Some(waits)) => Json(waits).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(err) => failed(&err),
     }
 }
 

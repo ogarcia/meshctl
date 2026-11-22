@@ -27,11 +27,11 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
 use meshctl_api::{
-    Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, NewRequest, Node,
-    Packet, Peer, Preferences, Radio, RadioId, RadioKind, Request, RequestKind, Status, Theme,
-    Traceroute,
+    Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, NewRequest, Node, Pace,
+    Packet, Peer, Preferences, Radio, RadioId, RadioKind, Request, RequestKind, RequestStatus,
+    Status, Theme, Traceroute, TracerouteStatus,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 /// How long to wait before trying the daemon again.
@@ -119,6 +119,9 @@ pub struct Live {
     pub requests: RwSignal<Vec<Request>>,
     /// Why the last request or traceroute was not sent.
     pub ask_error: RwSignal<Option<Failure>>,
+    /// When, by this browser's clock, the selected radio sends each paced
+    /// kind of thing again: until then it would drop it.
+    pub ready: RwSignal<HashMap<Pace, u32>>,
     /// Bumped each time the selected radio syncs, for what is read only then.
     pub synced: RwSignal<u32>,
     /// Seconds since the epoch, ticking.
@@ -149,6 +152,7 @@ impl Live {
             map_route: RwSignal::new(None),
             requests: RwSignal::new(Vec::new()),
             ask_error: RwSignal::new(None),
+            ready: RwSignal::new(HashMap::new()),
             synced: RwSignal::new(0),
             now: RwSignal::new(now()),
         }
@@ -294,6 +298,44 @@ impl Live {
                 self.requests.set(requests);
             }
         });
+        self.read_waits(radio);
+    }
+
+    /// Reads how long the radio takes to send each paced kind again.
+    fn read_waits(self, radio: RadioId) {
+        spawn_local(async move {
+            if let Ok(waits) = daemon::waits(radio).await
+                && self.selected.get_untracked() == Some(radio)
+            {
+                let at = now();
+                self.ready.set(
+                    [Pace::Position, Pace::Telemetry, Pace::Traceroute]
+                        .into_iter()
+                        .map(|pace| {
+                            let wait = u32::try_from(waits.of(pace)).unwrap_or_default();
+                            (pace, at + wait)
+                        })
+                        .collect(),
+                );
+            }
+        });
+    }
+
+    /// Something of a pace just sent through the selected radio, here or
+    /// from another client: the like waits its interval from now.
+    fn paced(self, pace: Pace) {
+        let until = now() + u32::try_from(pace.interval()).unwrap_or_default();
+        self.ready.update(|ready| {
+            let at = ready.entry(pace).or_default();
+            *at = (*at).max(until);
+        });
+    }
+
+    /// How many seconds until the selected radio sends something of a pace
+    /// again, by a clock that ticks as often as needed.
+    pub fn wait(self, pace: Pace, now: u32) -> u32 {
+        self.ready
+            .with(|ready| ready.get(&pace).map_or(0, |at| at.saturating_sub(now)))
     }
 
     /// Asks a node for something, on a channel of the selected radio.
@@ -309,8 +351,13 @@ impl Live {
                 channel,
             };
             match daemon::ask(radio, &new).await {
-                Ok(request) => self.keep_request(request),
-                Err(failure) => self.ask_error.set(Some(failure)),
+                Ok(request) => {
+                    if let Some(pace) = kind.pace() {
+                        self.paced(pace);
+                    }
+                    self.keep_request(request);
+                }
+                Err(failure) => self.refused(radio, failure),
             }
         });
     }
@@ -336,10 +383,22 @@ impl Live {
         self.ask_error.set(None);
         spawn_local(async move {
             match daemon::trace(radio, node, channel).await {
-                Ok(traceroute) => self.keep_traceroute(traceroute),
-                Err(failure) => self.ask_error.set(Some(failure)),
+                Ok(traceroute) => {
+                    self.paced(Pace::Traceroute);
+                    self.keep_traceroute(traceroute);
+                }
+                Err(failure) => self.refused(radio, failure),
             }
         });
+    }
+
+    /// A request or traceroute not sent, and why. Too soon, the waits are
+    /// read again: another client may have sent the like.
+    fn refused(self, radio: RadioId, failure: Failure) {
+        if failure == Failure::Rejected(meshctl_api::ErrorCode::TooSoon) {
+            self.read_waits(radio);
+        }
+        self.ask_error.set(Some(failure));
     }
 
     /// Puts a traceroute in the list, or where it was, as it is now.
@@ -506,10 +565,18 @@ impl Live {
                     Ok(())
                 }
                 ServerMessage::Traceroute { radio, traceroute } if self.is_selected(radio) => {
+                    if traceroute.status == TracerouteStatus::Pending {
+                        self.paced(Pace::Traceroute);
+                    }
                     self.keep_traceroute(traceroute);
                     Ok(())
                 }
                 ServerMessage::Request { radio, request } if self.is_selected(radio) => {
+                    if request.status == RequestStatus::Pending
+                        && let Some(pace) = request.kind.pace()
+                    {
+                        self.paced(pace);
+                    }
                     self.keep_request(request);
                     Ok(())
                 }
@@ -564,7 +631,7 @@ fn follow(live: Live) {
     });
 }
 
-fn now() -> u32 {
+pub fn now() -> u32 {
     // Milliseconds as an f64, which holds them exactly for a long while yet.
     (js_sys::Date::now() / 1000.0) as u32
 }

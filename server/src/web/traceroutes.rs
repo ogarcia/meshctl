@@ -4,12 +4,12 @@
 //! Traceroutes: tracing the route from a radio to a node, and the ones traced.
 
 use super::AppState;
-use crate::radios::{TRACEROUTE_INTERVAL, TraceFailure};
+use crate::radios::TraceFailure;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, ErrorCode, NewTraceroute, RadioId, Traceroute};
+use meshctl_api::{Error, ErrorCode, NewTraceroute, Pace, RadioId, Traceroute};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -122,7 +122,7 @@ async fn trace(
             StatusCode::TOO_MANY_REQUESTS,
             [(
                 header::RETRY_AFTER,
-                wait.clamp(1, TRACEROUTE_INTERVAL).to_string(),
+                wait.clamp(1, Pace::Traceroute.interval()).to_string(),
             )],
             Json(Error {
                 error: ErrorCode::TooSoon,

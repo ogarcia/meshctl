@@ -11,9 +11,9 @@ use anyhow::Result;
 use meshctl_api::{
     BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkState,
     MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeSettings,
-    NodeSettingsChange, Packet, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
+    NodeSettingsChange, Pace, Packet, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
     Request, RequestKind, SectionSecret, SettingsApplied, SettingsSection, SightingId, Status,
-    Traceroute,
+    Traceroute, Waits,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -75,10 +75,6 @@ impl From<anyhow::Error> for SendFailure {
     }
 }
 
-/// How long a radio waits between traceroutes, as the official clients do:
-/// each one floods the mesh both ways.
-pub const TRACEROUTE_INTERVAL: i64 = 30;
-
 /// How long a traceroute is waited for before it is given up on.
 const TRACEROUTE_TIMEOUT: i64 = 120;
 
@@ -101,6 +97,11 @@ pub enum AskFailure {
     InvalidChannel,
     /// The same was asked of the same node, and is still waiting.
     Pending,
+    /// The radio sent the like too recently, and would drop it: so many
+    /// seconds more to wait.
+    TooSoon {
+        wait: i64,
+    },
     Failed(anyhow::Error),
 }
 
@@ -573,13 +574,9 @@ impl Radios {
             return Err(TraceFailure::NotConnected);
         }
         let at = now();
-        if let Some(last) = self.store.last_traceroute_at(id).await? {
-            let since = at - last;
-            if since < TRACEROUTE_INTERVAL {
-                return Err(TraceFailure::TooSoon {
-                    wait: TRACEROUTE_INTERVAL - since,
-                });
-            }
+        let wait = self.wait(id, Pace::Traceroute, at).await?;
+        if wait > 0 {
+            return Err(TraceFailure::TooSoon { wait });
         }
         let packet_id = mesh
             .send_traceroute(node, channel)
@@ -619,6 +616,12 @@ impl Radios {
         if self.store.is_asking(id, new.node, new.kind).await? {
             return Err(AskFailure::Pending);
         }
+        if let Some(pace) = new.kind.pace() {
+            let wait = self.wait(id, pace, now()).await?;
+            if wait > 0 {
+                return Err(AskFailure::TooSoon { wait });
+            }
+        }
         let ask = match new.kind {
             RequestKind::NodeInfo => Ask::NodeInfo,
             RequestKind::Position => Ask::Position,
@@ -642,6 +645,28 @@ impl Radios {
             .await?;
         let _ = self.changes.send(Change::Request(id, request.clone()));
         Ok(request)
+    }
+
+    /// How long, in seconds, until a radio sends the like of what goes at a
+    /// pace again: 0 when it can now.
+    async fn wait(&self, id: RadioId, pace: Pace, at: i64) -> Result<i64> {
+        Ok(self.store.last_paced_at(id, pace).await?.map_or(0, |last| {
+            (pace.interval() - (at - last)).clamp(0, pace.interval())
+        }))
+    }
+
+    /// How long until a radio sends each paced kind again, or `None` if there
+    /// is no such radio.
+    pub async fn waits(&self, id: RadioId) -> Result<Option<Waits>> {
+        if self.mesh(id).is_none() {
+            return Ok(None);
+        }
+        let at = now();
+        Ok(Some(Waits {
+            position: self.wait(id, Pace::Position, at).await?,
+            telemetry: self.wait(id, Pace::Telemetry, at).await?,
+            traceroute: self.wait(id, Pace::Traceroute, at).await?,
+        }))
     }
 
     /// The requests sent through a radio, the newest first, or `None` if

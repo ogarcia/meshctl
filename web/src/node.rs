@@ -14,8 +14,10 @@ use crate::packets::summary;
 use crate::traces::TraceCard;
 use leptos::prelude::*;
 use meshctl_api::{
-    ErrorCode, LinkState, Peer, PositionSource, RadioKind, Request, RequestKind, RequestStatus,
+    ErrorCode, LinkState, Pace, Peer, PositionSource, RadioKind, Request, RequestKind,
+    RequestStatus,
 };
+use std::time::Duration;
 
 #[component]
 pub fn NodeView() -> impl IntoView {
@@ -198,16 +200,30 @@ fn Ask(num: u32) -> impl IntoView {
         RequestKind::LocalStats,
         RequestKind::Neighbors,
     ];
+    // A clock of its own, by the second, for how long the radio keeps from
+    // sending what it sent a moment ago.
+    let clock = RwSignal::new(crate::app::now());
+    if let Ok(ticking) =
+        set_interval_with_handle(move || clock.set(crate::app::now()), Duration::from_secs(1))
+    {
+        on_cleanup(move || ticking.clear());
+    }
+    let wait = move |pace: Option<Pace>| pace.map_or(0, |pace| live.wait(pace, clock.get()));
+    let countdown = move |pace: Option<Pace>| {
+        let wait = wait(pace);
+        (wait > 0).then(|| view! { <span class="wait">{format!("{wait} s")}</span> })
+    };
     let buttons = move || {
         kinds
             .into_iter()
             .map(|kind| {
                 view! {
                     <button
-                        disabled=move || !connected() || waiting(kind)
+                        disabled=move || !connected() || waiting(kind) || (wait(kind.pace()) > 0)
                         on:click=move |_| live.ask(num, kind, channel.get_untracked())
                     >
                         <KindLabel kind />
+                        {move || countdown(kind.pace())}
                     </button>
                 }
             })
@@ -263,10 +279,11 @@ fn Ask(num: u32) -> impl IntoView {
                 <div class="asks">
                     {buttons}
                     <button
-                        disabled=move || !connected()
+                        disabled=move || !connected() || (wait(Some(Pace::Traceroute)) > 0)
                         on:click=move |_| live.trace(num, channel.get_untracked())
                     >
                         {t!(i18n, ask_traceroute)}
+                        {move || countdown(Some(Pace::Traceroute))}
                     </button>
                 </div>
                 <p class="error">{problem}</p>
