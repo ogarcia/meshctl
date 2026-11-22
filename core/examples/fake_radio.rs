@@ -7,6 +7,14 @@
 //! takes in what it is told to change, so that reading it back shows it.
 //! It transmits nothing, anywhere.
 //!
+//! Its one neighbour answers what it is asked for, after a few seconds:
+//! who it is, where, its device telemetry, environment and local stats (it
+//! has no power sensors, so `NO_RESPONSE` to that), its neighbours, and
+//! traceroutes. As a node does, it keeps from answering its node info more
+//! than once a minute, and its position or neighbours once in three; as the
+//! firmware does, the radio drops positions and telemetry sent within 10
+//! seconds of the last, traceroutes within 30 and texts within 2.
+//!
 //!     cargo run -p meshctl-core --example fake_radio -- [port] [control port]
 //!
 //! With a control port, it listens there, on this machine only, for lines
@@ -17,6 +25,10 @@
 //!   very same channel twice, as another app may leave it.
 //! - `off <slot>`: the channel in a slot is switched off.
 //! - `drop`: the link to every client drops, which reads it all anew.
+//! - `answers always|sometimes|never`: how the neighbour answers. Always is
+//!   within one to six seconds; sometimes, four times in ten not at all and
+//!   otherwise within up to 26 seconds.
+//! - `limits on|off`: whether the neighbour keeps from answering too often.
 
 use meshctl_proto::descriptors;
 use meshctl_proto::frame::{self, FrameParser};
@@ -27,9 +39,9 @@ use meshctl_proto::meshtastic::{
 use prost::Message;
 use prost_reflect::{DynamicMessage, Value};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
@@ -55,6 +67,61 @@ struct Radio {
     configs: BTreeMap<String, pb::Config>,
     modules: BTreeMap<String, pb::ModuleConfig>,
     channels: BTreeMap<i32, pb::Channel>,
+    /// How the neighbour answers what it is asked.
+    answers: Answers,
+    /// Whether the neighbour keeps from answering too often, as nodes do.
+    limits: bool,
+    /// When the neighbour last answered, by port.
+    answered: BTreeMap<i32, Instant>,
+    /// When a client last sent on a paced port, which the radio takes no
+    /// more often than the firmware does.
+    paced: BTreeMap<i32, Instant>,
+}
+
+/// How the neighbour answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Answers {
+    /// Always, within a few seconds.
+    Always,
+    /// Most of the time, sometimes late.
+    Sometimes,
+    Never,
+}
+
+/// A number from 0 up to, not including, `below`: not for secrets, only so
+/// that answers come at their own time.
+fn random(below: u64) -> u64 {
+    static STATE: AtomicU64 = AtomicU64::new(0);
+    let mut x = STATE.load(Ordering::Relaxed);
+    if x == 0 {
+        x = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0x2545_f491, |d| d.as_nanos() as u64)
+            | 1;
+    }
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    STATE.store(x, Ordering::Relaxed);
+    x % below.max(1)
+}
+
+/// Who the neighbour says it is.
+fn neighbour() -> pb::User {
+    pb::User {
+        id: format!("!{NEIGHBOUR:08x}"),
+        long_name: "Fake neighbour".into(),
+        short_name: "NBR".into(),
+        hw_model: pb::HardwareModel::WismeshTag as i32,
+        role: config::device_config::Role::Router as i32,
+        ..Default::default()
+    }
+}
+
+fn now_secs() -> u32 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as u32)
 }
 
 /// The name of the one part a `Config` or `ModuleConfig` carries.
@@ -166,6 +233,198 @@ impl Radio {
             configs,
             modules,
             channels,
+            answers: Answers::Always,
+            limits: true,
+            answered: BTreeMap::new(),
+            paced: BTreeMap::new(),
+        }
+    }
+
+    /// Whether a client sent on a paced port too soon after the last time,
+    /// as the firmware counts it: it drops such a packet without a word.
+    fn too_soon(&mut self, port: i32) -> bool {
+        let interval = match PortNum::try_from(port) {
+            Ok(PortNum::TracerouteApp) => Duration::from_secs(30),
+            Ok(PortNum::PositionApp | PortNum::TelemetryApp) => Duration::from_secs(10),
+            Ok(PortNum::TextMessageApp) => Duration::from_secs(2),
+            _ => return false,
+        };
+        if self
+            .paced
+            .get(&port)
+            .is_some_and(|at| at.elapsed() < interval)
+        {
+            return true;
+        }
+        self.paced.insert(port, Instant::now());
+        false
+    }
+
+    /// What the neighbour answers a packet sent to it that wants one, and
+    /// after how long; none when it keeps from answering, or the radio
+    /// dropped it.
+    fn ask(&mut self, packet: &MeshPacket, data: &pb::Data) -> Option<(Duration, MeshPacket)> {
+        use pb::telemetry::Variant as T;
+        if self.too_soon(data.portnum) {
+            println!("port {} sent too soon: dropped", data.portnum);
+            return None;
+        }
+        if packet.to != NEIGHBOUR || !data.want_response {
+            return None;
+        }
+        let port = PortNum::try_from(data.portnum).ok()?;
+        // As nodes keep from answering the same too often, whoever asks.
+        let quiet = match port {
+            PortNum::NodeinfoApp => Duration::from_secs(60),
+            PortNum::PositionApp | PortNum::NeighborinfoApp => Duration::from_secs(180),
+            _ => Duration::ZERO,
+        };
+        if self.limits
+            && self
+                .answered
+                .get(&data.portnum)
+                .is_some_and(|at| at.elapsed() < quiet)
+        {
+            println!("neighbour answered port {} lately: quiet", data.portnum);
+            return None;
+        }
+        let delay = match self.answers {
+            Answers::Never => {
+                println!("neighbour does not answer");
+                return None;
+            }
+            Answers::Always => Duration::from_millis(1_000 + random(5_000)),
+            Answers::Sometimes => {
+                if random(10) < 4 {
+                    println!("neighbour does not answer, this time");
+                    return None;
+                }
+                Duration::from_millis(1_000 + random(25_000))
+            }
+        };
+        let snr = 4.0 + random(80) as f32 / 10.0;
+        let (port, payload) = match port {
+            PortNum::NodeinfoApp => (port, neighbour().encode_to_vec()),
+            PortNum::PositionApp => (
+                port,
+                pb::Position {
+                    latitude_i: Some(404_168_000 + random(2_000) as i32),
+                    longitude_i: Some(-37_038_000 + random(2_000) as i32),
+                    altitude: Some(650 + random(20) as i32),
+                    time: now_secs(),
+                    location_source: pb::position::LocSource::LocInternal as i32,
+                    precision_bits: 32,
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+            ),
+            PortNum::TelemetryApp => {
+                let asked = pb::Telemetry::decode(data.payload.as_slice()).ok()?;
+                let variant = match asked.variant? {
+                    T::DeviceMetrics(_) => T::DeviceMetrics(pb::DeviceMetrics {
+                        battery_level: Some(60 + random(40) as u32),
+                        voltage: Some(3.7 + random(50) as f32 / 100.0),
+                        channel_utilization: Some(random(150) as f32 / 10.0),
+                        air_util_tx: Some(random(30) as f32 / 10.0),
+                        uptime_seconds: Some(3_600 + random(86_400) as u32),
+                    }),
+                    T::EnvironmentMetrics(_) => T::EnvironmentMetrics(pb::EnvironmentMetrics {
+                        temperature: Some(15.0 + random(100) as f32 / 10.0),
+                        relative_humidity: Some(40.0 + random(400) as f32 / 10.0),
+                        barometric_pressure: Some(1_000.0 + random(300) as f32 / 10.0),
+                        ..Default::default()
+                    }),
+                    T::LocalStats(_) => T::LocalStats(pb::LocalStats {
+                        uptime_seconds: 3_600 + random(86_400) as u32,
+                        channel_utilization: random(150) as f32 / 10.0,
+                        air_util_tx: random(30) as f32 / 10.0,
+                        num_packets_tx: 100 + random(900) as u32,
+                        num_packets_rx: 1_000 + random(9_000) as u32,
+                        num_packets_rx_bad: random(50) as u32,
+                        num_online_nodes: 5 + random(30) as u32,
+                        num_total_nodes: 40 + random(60) as u32,
+                        noise_floor: -110 + random(15) as i32,
+                        ..Default::default()
+                    }),
+                    // No power sensors: nothing to answer with.
+                    _ => {
+                        let routing = pb::Routing {
+                            variant: Some(pb::routing::Variant::ErrorReason(
+                                pb::routing::Error::NoResponse as i32,
+                            )),
+                            ..Default::default()
+                        };
+                        return Some((
+                            delay,
+                            self.reply(packet, PortNum::RoutingApp, routing.encode_to_vec(), snr),
+                        ));
+                    }
+                };
+                (
+                    port,
+                    pb::Telemetry {
+                        time: now_secs(),
+                        variant: Some(variant),
+                    }
+                    .encode_to_vec(),
+                )
+            }
+            PortNum::NeighborinfoApp => (
+                port,
+                pb::NeighborInfo {
+                    node_id: NEIGHBOUR,
+                    last_sent_by_id: NEIGHBOUR,
+                    node_broadcast_interval_secs: 900,
+                    neighbors: vec![
+                        pb::Neighbor {
+                            node_id: ME,
+                            snr,
+                            ..Default::default()
+                        },
+                        pb::Neighbor {
+                            node_id: 0x0dec_0de5,
+                            snr: -2.0 + random(60) as f32 / 10.0,
+                            ..Default::default()
+                        },
+                    ],
+                }
+                .encode_to_vec(),
+            ),
+            PortNum::TracerouteApp => (
+                port,
+                pb::RouteDiscovery {
+                    snr_towards: vec![(snr * 4.0) as i32],
+                    snr_back: vec![((snr - 1.0) * 4.0) as i32],
+                    ..Default::default()
+                }
+                .encode_to_vec(),
+            ),
+            _ => return None,
+        };
+        self.answered.insert(data.portnum, Instant::now());
+        Some((delay, self.reply(packet, port, payload, snr)))
+    }
+
+    /// The neighbour's answer to a packet, heard straight from it.
+    fn reply(&self, packet: &MeshPacket, port: PortNum, payload: Vec<u8>, snr: f32) -> MeshPacket {
+        static NEXT_ID: AtomicU32 = AtomicU32::new(0x6000_0000);
+        MeshPacket {
+            from: NEIGHBOUR,
+            to: ME,
+            channel: packet.channel,
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            rx_time: Some(now_secs()),
+            rx_snr: snr,
+            rx_rssi: Some(-60 - random(40) as i32),
+            hop_limit: 3,
+            hop_start: 3,
+            payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                portnum: port as i32,
+                payload,
+                request_id: packet.id,
+                ..Default::default()
+            })),
+            ..Default::default()
         }
     }
 
@@ -193,12 +452,7 @@ impl Radio {
             }),
             V::NodeInfo(pb::NodeInfo {
                 num: NEIGHBOUR,
-                user: Some(pb::User {
-                    id: format!("!{NEIGHBOUR:08x}"),
-                    long_name: "Fake neighbour".into(),
-                    short_name: "NBR".into(),
-                    ..Default::default()
-                }),
+                user: Some(neighbour()),
                 hops_away: Some(0),
                 ..Default::default()
             }),
@@ -283,8 +537,9 @@ async fn send(
 async fn serve(
     stream: TcpStream,
     radio: Arc<Mutex<Radio>>,
-    mut events: broadcast::Receiver<Event>,
+    sender: broadcast::Sender<Event>,
 ) -> std::io::Result<()> {
+    let mut events = sender.subscribe();
     let (mut reader, mut writer) = stream.into_split();
     let mut parser = FrameParser::new();
     let mut buf = [0u8; 1024];
@@ -315,7 +570,8 @@ async fn serve(
                     radio.lock().unwrap().configuration(nonce)
                 }
                 Some(to_radio::PayloadVariant::Packet(packet)) => {
-                    let Some(mesh_packet::PayloadVariant::Decoded(data)) = packet.payload_variant
+                    let Some(mesh_packet::PayloadVariant::Decoded(data)) =
+                        packet.payload_variant.clone()
                     else {
                         continue;
                     };
@@ -324,6 +580,17 @@ async fn serve(
                             "packet to !{:08x} on port {}, not sent anywhere",
                             packet.to, data.portnum
                         );
+                        // The neighbour answers what it is asked, in its own
+                        // time, to every client, as heard over the air.
+                        let answer = radio.lock().unwrap().ask(&packet, &data);
+                        if let Some((delay, reply)) = answer {
+                            println!("neighbour answers in {} ms", delay.as_millis());
+                            let sender = sender.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(delay).await;
+                                let _ = sender.send(Event::Heard(reply));
+                            });
+                        }
                         continue;
                     }
                     let Ok(admin) = AdminMessage::decode(data.payload.as_slice()) else {
@@ -427,7 +694,28 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             let _ = events.send(Event::Drop);
             "dropped".into()
         }
-        _ => "hear <slot> <text> | twin <from> <to> | off <slot> | drop".into(),
+        Some("answers") => {
+            let answers = match words.next() {
+                Some("always") => Answers::Always,
+                Some("sometimes") => Answers::Sometimes,
+                Some("never") => Answers::Never,
+                _ => return "usage: answers always|sometimes|never".into(),
+            };
+            radio.lock().unwrap().answers = answers;
+            format!("the neighbour answers: {answers:?}")
+        }
+        Some("limits") => {
+            let limits = match words.next() {
+                Some("on") => true,
+                Some("off") => false,
+                _ => return "usage: limits on|off".into(),
+            };
+            let mut radio = radio.lock().unwrap();
+            radio.limits = limits;
+            radio.answered.clear();
+            format!("the neighbour keeps from answering too often: {limits}")
+        }
+        _ => "hear <slot> <text> | twin <from> <to> | off <slot> | drop | answers always|sometimes|never | limits on|off".into(),
     }
 }
 
@@ -473,7 +761,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (stream, address) = listener.accept().await?;
         println!("client {address}");
         let radio = Arc::clone(&radio);
-        let events = events.subscribe();
+        let events = events.clone();
         tokio::spawn(async move {
             if let Err(error) = serve(stream, radio, events).await {
                 println!("client {address} gone: {error}");
