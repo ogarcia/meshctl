@@ -1301,6 +1301,107 @@ pub struct Packet {
     pub via_mqtt: bool,
 }
 
+/// What kind of thing a packet carries, as the live view sorts them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum PacketKind {
+    Text,
+    Position,
+    NodeInfo,
+    Routing,
+    Telemetry,
+    Traceroute,
+    Neighbors,
+    /// Still encrypted: no port known.
+    Encrypted,
+    /// Any other port.
+    Other,
+}
+
+impl PacketKind {
+    pub const ALL: [Self; 9] = [
+        Self::Text,
+        Self::Position,
+        Self::NodeInfo,
+        Self::Routing,
+        Self::Telemetry,
+        Self::Traceroute,
+        Self::Neighbors,
+        Self::Encrypted,
+        Self::Other,
+    ];
+
+    /// The ports of it, as the protobufs name them: none for the encrypted
+    /// and the others, which go by what they are not.
+    pub fn ports(self) -> &'static [&'static str] {
+        match self {
+            Self::Text => &["TEXT_MESSAGE_APP", "TEXT_MESSAGE_COMPRESSED_APP"],
+            Self::Position => &["POSITION_APP"],
+            Self::NodeInfo => &["NODEINFO_APP"],
+            Self::Routing => &["ROUTING_APP"],
+            Self::Telemetry => &["TELEMETRY_APP"],
+            Self::Traceroute => &["TRACEROUTE_APP"],
+            Self::Neighbors => &["NEIGHBORINFO_APP"],
+            Self::Encrypted | Self::Other => &[],
+        }
+    }
+
+    /// The kind of a packet by its port, none while it is encrypted.
+    pub fn of(port: Option<&str>) -> Self {
+        let Some(port) = port else {
+            return Self::Encrypted;
+        };
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.ports().contains(&port))
+            .unwrap_or(Self::Other)
+    }
+}
+
+/// How a packet reached the radio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum PacketReach {
+    /// Straight from its sender, no hops.
+    Direct,
+    /// Through other nodes, hop by hop.
+    Mesh,
+    Mqtt,
+}
+
+/// Which packets the live view shows: all of them with nothing set.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PacketFilter {
+    pub kind: Option<PacketKind>,
+    /// The channel's slot.
+    pub channel: Option<u32>,
+    pub reach: Option<PacketReach>,
+    /// Only those from or to this node.
+    pub node: Option<u32>,
+    /// None from this node: the radio's own, to leave them out.
+    pub not_from: Option<u32>,
+}
+
+impl PacketFilter {
+    /// Whether a packet is one of those it lets through.
+    pub fn lets(&self, packet: &Packet) -> bool {
+        self.kind
+            .is_none_or(|kind| PacketKind::of(packet.port.as_deref()) == kind)
+            && self.channel.is_none_or(|channel| packet.channel == channel)
+            && self.reach.is_none_or(|reach| match reach {
+                PacketReach::Direct => packet.hops_away == Some(0),
+                PacketReach::Mesh => packet.hops_away.is_some_and(|hops| hops > 0),
+                PacketReach::Mqtt => packet.via_mqtt,
+            })
+            && self
+                .node
+                .is_none_or(|node| packet.from == node || packet.to == node)
+            && self.not_from.is_none_or(|num| packet.from != num)
+    }
+}
+
 /// How the interface looks and speaks, the same in every browser that opens
 /// it: kept by the daemon, not by each browser.
 ///

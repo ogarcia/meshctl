@@ -28,8 +28,9 @@ use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
 use meshctl_api::{
     Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, NewRequest, Node,
-    NodeCheck, NodeLatest, Pace, Packet, Peer, Preferences, Radio, RadioId, RadioKind, Request,
-    RequestKind, RequestStatus, Status, Theme, Traceroute, TracerouteStatus,
+    NodeCheck, NodeLatest, Pace, Packet, PacketFilter, Peer, Preferences, Radio, RadioId,
+    RadioKind, Request, RequestKind, RequestStatus, SightingId, Status, Theme, Traceroute,
+    TracerouteStatus,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
@@ -126,6 +127,23 @@ pub struct Live {
     pub traceroutes: RwSignal<Vec<Traceroute>>,
     /// What the selected radio heard, the newest first.
     pub packets: RwSignal<Vec<Packet>>,
+    /// Which packets the live view shows, but for the radio's own: those go
+    /// by `packets_hide_own`, as its node changes with the radio.
+    pub packet_filter: RwSignal<PacketFilter>,
+    /// Whether the live view leaves out what the radio itself sends.
+    pub packets_hide_own: RwSignal<bool>,
+    /// Packets come while the live view holds still, the newest first: to
+    /// go on top of it once it goes on.
+    pub packets_held: RwSignal<Vec<Packet>>,
+    /// Whether the live view was paused.
+    pub packets_paused: RwSignal<bool>,
+    /// Whether the live view is scrolled away from its top, being read.
+    pub packets_away: RwSignal<bool>,
+    /// Whether there is nothing older than what the live view has.
+    pub packets_end: RwSignal<bool>,
+    /// The newest packet when the live view was last read or opened: those
+    /// after it are new, and show it as they come.
+    pub packets_mark: RwSignal<SightingId>,
     /// The node whose page is open, if any.
     pub node: RwSignal<Option<u32>>,
     /// Where the open node's page was opened from, the latest last.
@@ -179,6 +197,13 @@ impl Live {
             thread: RwSignal::new(Vec::new()),
             traceroutes: RwSignal::new(Vec::new()),
             packets: RwSignal::new(Vec::new()),
+            packet_filter: RwSignal::new(PacketFilter::default()),
+            packets_hide_own: RwSignal::new(false),
+            packets_held: RwSignal::new(Vec::new()),
+            packets_paused: RwSignal::new(false),
+            packets_away: RwSignal::new(false),
+            packets_end: RwSignal::new(false),
+            packets_mark: RwSignal::new(0),
             node: RwSignal::new(None),
             back: RwSignal::new(Vec::new()),
             came_from: RwSignal::new(Page::Map),
@@ -195,6 +220,65 @@ impl Live {
             synced: RwSignal::new(0),
             now: RwSignal::new(now()),
         }
+    }
+
+    /// Which packets the live view shows, the radio's own left out if asked
+    /// and its node is known.
+    pub fn packets_filter(self) -> PacketFilter {
+        let own = self
+            .status
+            .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+        PacketFilter {
+            not_from: own.filter(|_| self.packets_hide_own.get_untracked()),
+            ..self.packet_filter.get_untracked()
+        }
+    }
+
+    /// Whether what comes waits apart: the live view paused, or being read
+    /// away from its top.
+    pub fn packets_holding(self) -> bool {
+        self.packets_paused.get_untracked() || self.packets_away.get_untracked()
+    }
+
+    /// What came while the live view held still, on top of it.
+    pub fn release_packets(self) {
+        let held = self
+            .packets_held
+            .try_update(std::mem::take)
+            .unwrap_or_default();
+        if held.is_empty() {
+            return;
+        }
+        self.packets.update(|packets| {
+            packets.splice(0..0, held);
+            packets.truncate(KEPT);
+        });
+    }
+
+    /// The live view read again, as its filters say: what was held goes, as
+    /// it may not be let through now.
+    pub async fn reload_packets(self) -> Result<(), Failure> {
+        let Some(radio) = self.selected.get_untracked() else {
+            return Ok(());
+        };
+        let filter = self.packets_filter();
+        let packets = daemon::packets(radio, None, &filter).await?;
+        if self.selected.get_untracked() == Some(radio) && self.packets_filter() == filter {
+            self.set_packets(packets);
+        }
+        Ok(())
+    }
+
+    /// The live view's packets, read anew: none of them new.
+    fn set_packets(self, packets: Vec<Packet>) {
+        self.packets_end.set(packets.len() < daemon::PACKETS_PAGE);
+        self.packets_mark.set(
+            packets
+                .first()
+                .map_or(self.packets_mark.get_untracked(), |p| p.id),
+        );
+        self.packets_held.set(Vec::new());
+        self.packets.set(packets);
     }
 
     /// Shows a page, and closes the bars over it on a narrow screen.
@@ -245,6 +329,12 @@ impl Live {
         self.requests.set(Vec::new());
         self.map_pick.set(None);
         self.map_route.set(None);
+        // The live view's channel and node were the last one's.
+        self.packet_filter.update(|f| {
+            f.channel = None;
+            f.node = None;
+        });
+        self.packets_held.set(Vec::new());
         if matches!(self.page.get_untracked(), Page::Chat | Page::Node)
             || self.page.get_untracked().is_meshctl()
         {
@@ -333,7 +423,17 @@ impl Live {
         let channels = daemon::channels(radio).await?;
         let conversations = daemon::conversations(radio).await?;
         let traceroutes = daemon::traceroutes(radio).await?;
-        let packets = daemon::packets(radio, None).await?;
+        // The live view's, as its filters say: the radio's own node, from
+        // what was just read of it.
+        let filter = PacketFilter {
+            not_from: status
+                .local
+                .as_ref()
+                .map(|l| l.num)
+                .filter(|_| self.packets_hide_own.get_untracked()),
+            ..self.packet_filter.get_untracked()
+        };
+        let packets = daemon::packets(radio, None, &filter).await?;
         // The selection may have moved on while we were asking.
         if self.selected.get_untracked() == Some(radio) {
             self.status.set(Some(status));
@@ -342,7 +442,7 @@ impl Live {
             self.channels.set(channels);
             self.conversations.set(conversations);
             self.traceroutes.set(traceroutes);
-            self.packets.set(packets);
+            self.set_packets(packets);
             self.loaded.set(Some(radio));
         }
         self.refresh_thread().await
@@ -742,10 +842,19 @@ impl Live {
                             _ => {}
                         }
                     }
-                    self.packets.update(|packets| {
-                        packets.insert(0, packet);
-                        packets.truncate(KEPT);
-                    });
+                    // In the live view if it lets it through: on top, or apart
+                    // while it holds still.
+                    if self.packets_filter().lets(&packet) {
+                        let list = if self.packets_holding() {
+                            self.packets_held
+                        } else {
+                            self.packets
+                        };
+                        list.update(|packets| {
+                            packets.insert(0, packet);
+                            packets.truncate(KEPT);
+                        });
+                    }
                     Ok(())
                 }
                 ServerMessage::Preferences { preferences } => {
@@ -1374,7 +1483,13 @@ fn Topbar() -> impl IntoView {
             .into_any(),
             None => view! { <h1 class="page-title">{t!(i18n, page_map)}</h1> }.into_any(),
         },
-        Page::Packets => view! { <h1 class="page-title">{t!(i18n, page_packets)}</h1> }.into_any(),
+        Page::Packets => view! {
+            <h1 class="page-title">{t!(i18n, page_packets)}</h1>
+            <div class="actions">
+                <crate::packets::PauseButton />
+            </div>
+        }
+        .into_any(),
         Page::Chats => view! { <h1 class="page-title">{t!(i18n, page_chats)}</h1> }.into_any(),
         Page::More => view! { <h1 class="page-title">{t!(i18n, page_more)}</h1> }.into_any(),
         Page::Node => match live.node.get() {

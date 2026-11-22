@@ -6,7 +6,7 @@
 //! the same way, without code for each.
 
 use crate::store::PacketRow;
-use meshctl_api::Packet;
+use meshctl_api::{Packet, PacketKind};
 use meshctl_proto::meshtastic::PortNum;
 use prost_reflect::{DynamicMessage, SerializeOptions};
 
@@ -42,6 +42,21 @@ pub fn packet(row: PacketRow) -> Packet {
 /// know it.
 fn port_name(portnum: i32) -> String {
     PortNum::try_from(portnum).map_or_else(|_| portnum.to_string(), |p| p.as_str_name().into())
+}
+
+/// The ports' numbers of a kind of packet; for the others, those of every
+/// kind that has its own, which they are not.
+pub fn portnums(kind: PacketKind) -> Vec<i32> {
+    let kinds = if kind == PacketKind::Other {
+        PacketKind::ALL.to_vec()
+    } else {
+        vec![kind]
+    };
+    kinds
+        .into_iter()
+        .flat_map(PacketKind::ports)
+        .filter_map(|name| PortNum::from_str_name(name).map(|port| port as i32))
+        .collect()
 }
 
 /// What a payload says, if it can be read and may be shown.

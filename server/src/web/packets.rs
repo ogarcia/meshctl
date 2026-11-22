@@ -9,7 +9,9 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, ErrorCode, Packet, RadioId, SightingId};
+use meshctl_api::{
+    Error, ErrorCode, Packet, PacketFilter, PacketKind, PacketReach, RadioId, SightingId,
+};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -31,17 +33,37 @@ pub fn router() -> OpenApiRouter<AppState> {
 struct Which {
     /// Only those heard before this one, for the page after the last read.
     before: Option<SightingId>,
+    /// Only those that carry this kind of thing.
+    kind: Option<PacketKind>,
+    /// Only those on the channel in this slot.
+    channel: Option<u32>,
+    /// Only those that came this way.
+    reach: Option<PacketReach>,
     /// Only those from or to this node.
     node: Option<u32>,
+    /// None from this node, as the radio's own node, to leave them out.
+    not_from: Option<u32>,
     /// How many, 100 if not said and at most 1000.
     limit: Option<u32>,
+}
+
+impl Which {
+    fn filter(&self) -> PacketFilter {
+        PacketFilter {
+            kind: self.kind,
+            channel: self.channel,
+            reach: self.reach,
+            node: self.node,
+            not_from: self.not_from,
+        }
+    }
 }
 
 /// Packets
 ///
 /// The packets the radio heard, the newest first, each with what it carries
 /// read where it can be. Pages go back with `before`, the `id` of the last
-/// packet read.
+/// packet read; each filter leaves out what it does not let through.
 #[utoipa::path(
     get,
     path = "/radios/{radio}/packets",
@@ -61,7 +83,7 @@ async fn list(
     let limit = which.limit.unwrap_or(PAGE).clamp(1, PAGE_MAX);
     match state
         .radios
-        .packets(radio, which.before, which.node, limit)
+        .packets(radio, which.before, &which.filter(), limit)
         .await
     {
         Ok(Some(packets)) => Json(packets).into_response(),
@@ -152,5 +174,68 @@ mod tests {
 
         let (status, _) = ask(app, get("/api/v1/radios/9/packets")).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn are_filtered_as_the_live_view_asks() {
+        let radios = radios().await;
+        let store = radios.store();
+        let packets = [
+            // A text, heard straight from its sender on the first channel.
+            heard(1, 0x10),
+            // A position, two hops away, on the second channel.
+            Heard {
+                portnum: Some(3),
+                channel: 1,
+                hop_limit: 1,
+                ..heard(2, 0x20)
+            },
+            // Telemetry by MQTT.
+            Heard {
+                portnum: Some(67),
+                via_mqtt: true,
+                ..heard(3, 0x30)
+            },
+            // Still encrypted.
+            Heard {
+                portnum: None,
+                ..heard(4, 0x10)
+            },
+            // A port of no kind of its own: the store and forward.
+            Heard {
+                portnum: Some(65),
+                ..heard(5, 0x20)
+            },
+        ];
+        for packet in &packets {
+            store.add_packet(RADIO, packet).await.unwrap();
+        }
+        let app = router(AppState {
+            auth: Auth::new(None),
+            radios,
+        });
+        let ids = |query: &'static str| {
+            let app = app.clone();
+            async move {
+                let (status, body) =
+                    ask(app, get(&format!("/api/v1/radios/1/packets?{query}"))).await;
+                assert_eq!(status, StatusCode::OK, "{query}");
+                json::<Vec<Packet>>(&body)
+                    .iter()
+                    .map(|p| p.packet_id)
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(ids("kind=text").await, [1]);
+        assert_eq!(ids("kind=position").await, [2]);
+        assert_eq!(ids("kind=encrypted").await, [4]);
+        assert_eq!(ids("kind=other").await, [5]);
+        assert_eq!(ids("channel=1").await, [2]);
+        assert_eq!(ids("reach=direct").await, [5, 4, 1]);
+        assert_eq!(ids("reach=mesh").await, [2]);
+        assert_eq!(ids("reach=mqtt").await, [3]);
+        assert_eq!(ids("not_from=16").await, [5, 3, 2]);
+        assert_eq!(ids("node=16&kind=text").await, [1]);
+        assert_eq!(ids("reach=direct&channel=0&not_from=32").await, [4, 1]);
     }
 }

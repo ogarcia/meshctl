@@ -12,8 +12,8 @@ use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
     API_V1, Channel, ChannelHistory, ChannelOrder, ChannelSecret, Conversation, Error, ErrorCode,
     MapView, Message, NewMessage, NewTraceroute, Node, NodeSettings, NodeSettingsChange, Packet,
-    Peer, Preferences, Radio, RadioId, RadioOrder, RadioSettings, SectionChange, SectionSecret,
-    SettingsApplied, SettingsSection, SightingId, Status, TOKEN_HEADER, Traceroute,
+    PacketFilter, Peer, Preferences, Radio, RadioId, RadioOrder, RadioSettings, SectionChange,
+    SectionSecret, SettingsApplied, SettingsSection, SightingId, Status, TOKEN_HEADER, Traceroute,
 };
 use serde::de::DeserializeOwned;
 
@@ -300,10 +300,43 @@ pub async fn ask(
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
-/// The packets a radio heard, the newest first: before one, for older pages.
-pub async fn packets(radio: RadioId, before: Option<SightingId>) -> Result<Vec<Packet>, Failure> {
-    let before = before.map_or_else(String::new, |id| format!("&before={id}"));
-    get(&format!("/radios/{radio}/packets?limit=200{before}")).await
+/// How many packets a page of them has: fewer, and there are no more.
+pub const PACKETS_PAGE: usize = 200;
+
+/// The packets a radio heard that a filter lets through, the newest first:
+/// before one, for older pages.
+pub async fn packets(
+    radio: RadioId,
+    before: Option<SightingId>,
+    filter: &PacketFilter,
+) -> Result<Vec<Packet>, Failure> {
+    // An enum as the query has it: its name, as JSON gives it.
+    let name = |value: serde_json::Value| value.as_str().unwrap_or_default().to_owned();
+    let mut query = format!("limit={PACKETS_PAGE}");
+    let mut add = |key: &str, value: Option<String>| {
+        if let Some(value) = value {
+            query.push_str(&format!("&{key}={value}"));
+        }
+    };
+    add("before", before.map(|id| id.to_string()));
+    add(
+        "kind",
+        filter
+            .kind
+            .and_then(|k| serde_json::to_value(k).ok())
+            .map(name),
+    );
+    add("channel", filter.channel.map(|c| c.to_string()));
+    add(
+        "reach",
+        filter
+            .reach
+            .and_then(|r| serde_json::to_value(r).ok())
+            .map(name),
+    );
+    add("node", filter.node.map(|n| n.to_string()));
+    add("not_from", filter.not_from.map(|n| n.to_string()));
+    get(&format!("/radios/{radio}/packets?{query}")).await
 }
 
 pub async fn preferences() -> Result<Preferences, Failure> {

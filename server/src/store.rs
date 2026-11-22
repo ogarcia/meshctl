@@ -7,9 +7,9 @@
 use crate::channels::{Chat, Fingerprint, Slot, assign, provisional};
 use anyhow::{Context, Result};
 use meshctl_api::{
-    BROADCAST, Badge, Conversation, Hop, MapView, Message, MessageId, MessageStatus, Peer,
-    Preferences, RadioId, RadioKind, RadioSettings, SightingId, Traceroute, TracerouteId,
-    TracerouteStatus,
+    BROADCAST, Badge, Conversation, Hop, MapView, Message, MessageId, MessageStatus, PacketFilter,
+    PacketKind, PacketReach, Peer, Preferences, RadioId, RadioKind, RadioSettings, SightingId,
+    Traceroute, TracerouteId, TracerouteStatus,
 };
 use meshctl_core::mesh::{Heard, LocalNode, Node, Position, PositionSource, User};
 use sqlx::SqliteConnection;
@@ -705,35 +705,83 @@ impl Store {
         &self,
         radio: RadioId,
         before: Option<SightingId>,
-        node: Option<u32>,
+        filter: &PacketFilter,
         limit: u32,
     ) -> Result<Vec<PacketRow>> {
-        let node = node.map(i64::from);
-        let rows = sqlx::query_as(
-            "SELECT s.id, p.packet_id, p.from_num, p.to_num,
-                coalesce(
-                    (SELECT min(c.slot) FROM channel_slot c WHERE c.channel_id = s.channel_id),
-                    s.channel
-                ) AS channel,
+        // The channel's slot now, where it has one, the slot it was heard on
+        // otherwise: as the packet shows it, and as it is filtered by.
+        const SLOT: &str = "coalesce(
+                (SELECT min(c.slot) FROM channel_slot c WHERE c.channel_id = s.channel_id),
+                s.channel
+            )";
+        let mut query = sqlx::QueryBuilder::new(format!(
+            "SELECT s.id, p.packet_id, p.from_num, p.to_num, {SLOT} AS channel,
                 p.portnum, p.payload,
                 p.request_id, p.reply_id, p.want_response, p.pki, s.at, s.snr, s.rssi,
                 s.hop_limit, s.hop_start, s.relay_node, s.via_mqtt
             FROM packet_seen s JOIN packet p ON p.id = s.packet
-            WHERE s.radio_id = ?
-                AND (? IS NULL OR s.id < ?)
-                AND (? IS NULL OR p.from_num = ? OR p.to_num = ?)
-            ORDER BY s.id DESC
-            LIMIT ?",
-        )
-        .bind(radio)
-        .bind(before)
-        .bind(before)
-        .bind(node)
-        .bind(node)
-        .bind(node)
-        .bind(i64::from(limit))
-        .fetch_all(&self.pool)
-        .await?;
+            WHERE s.radio_id = "
+        ));
+        query.push_bind(radio);
+        if let Some(before) = before {
+            query.push(" AND s.id < ").push_bind(before);
+        }
+        if let Some(kind) = filter.kind {
+            let ports = crate::packets::portnums(kind);
+            match kind {
+                PacketKind::Encrypted => {
+                    query.push(" AND p.portnum IS NULL");
+                }
+                PacketKind::Other => {
+                    query.push(" AND p.portnum IS NOT NULL AND p.portnum NOT IN (");
+                    let mut list = query.separated(", ");
+                    for port in ports {
+                        list.push_bind(port);
+                    }
+                    query.push(")");
+                }
+                _ => {
+                    query.push(" AND p.portnum IN (");
+                    let mut list = query.separated(", ");
+                    for port in ports {
+                        list.push_bind(port);
+                    }
+                    query.push(")");
+                }
+            }
+        }
+        if let Some(channel) = filter.channel {
+            query
+                .push(format!(" AND {SLOT} = "))
+                .push_bind(i64::from(channel));
+        }
+        match filter.reach {
+            Some(PacketReach::Direct) => {
+                query.push(" AND s.via_mqtt = 0 AND s.hop_start > 0 AND s.hop_start = s.hop_limit");
+            }
+            Some(PacketReach::Mesh) => {
+                query.push(" AND s.via_mqtt = 0 AND s.hop_start > 0 AND s.hop_start > s.hop_limit");
+            }
+            Some(PacketReach::Mqtt) => {
+                query.push(" AND s.via_mqtt = 1");
+            }
+            None => {}
+        }
+        if let Some(node) = filter.node.map(i64::from) {
+            query
+                .push(" AND (p.from_num = ")
+                .push_bind(node)
+                .push(" OR p.to_num = ")
+                .push_bind(node)
+                .push(")");
+        }
+        if let Some(num) = filter.not_from {
+            query.push(" AND p.from_num != ").push_bind(i64::from(num));
+        }
+        query
+            .push(" ORDER BY s.id DESC LIMIT ")
+            .push_bind(i64::from(limit));
+        let rows = query.build_query_as().fetch_all(&self.pool).await?;
         Ok(rows)
     }
 

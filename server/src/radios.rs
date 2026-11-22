@@ -11,8 +11,8 @@ use anyhow::Result;
 use meshctl_api::{
     BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkState,
     MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeCheck, NodeLatest,
-    NodeSettings, NodeSettingsChange, NodeTelemetry, Pace, Packet, Peer, Preferences, Radio,
-    RadioId, RadioKind, RadioSettings, Request, RequestKind, SectionSecret, SettingsApplied,
+    NodeSettings, NodeSettingsChange, NodeTelemetry, Pace, Packet, PacketFilter, Peer, Preferences,
+    Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind, SectionSecret, SettingsApplied,
     SettingsSection, SightingId, Status, TelemetryPoint, TelemetrySeries, Traceroute, TracerouteId,
     Waits,
 };
@@ -1197,13 +1197,13 @@ impl Radios {
         &self,
         id: RadioId,
         before: Option<SightingId>,
-        node: Option<u32>,
+        filter: &PacketFilter,
         limit: u32,
     ) -> Result<Option<Vec<Packet>>> {
         if self.mesh(id).is_none() {
             return Ok(None);
         }
-        let rows = self.store.packets(id, before, node, limit).await?;
+        let rows = self.store.packets(id, before, filter, limit).await?;
         Ok(Some(rows.into_iter().map(crate::packets::packet).collect()))
     }
 
