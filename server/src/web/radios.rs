@@ -289,6 +289,7 @@ async fn status(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Re
     }
     let status = state.radios.status(radio).unwrap_or(Status {
         link: LinkState::Disabled,
+        since: None,
         local: None,
     });
     Json(status).into_response()

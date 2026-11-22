@@ -439,11 +439,15 @@ impl Radios {
 
     /// A radio's link and what it said of itself, if there is such a radio.
     pub fn status(&self, id: RadioId) -> Option<Status> {
-        let local = self
-            .mesh(id)?
-            .read(|state| state.local.as_ref().map(crate::web::convert::local));
+        let (local, since) = self.mesh(id)?.read(|state| {
+            (
+                state.local.as_ref().map(crate::web::convert::local),
+                state.link_since,
+            )
+        });
         Some(Status {
             link: self.link(id),
+            since: since.map(i64::from),
             local,
         })
     }

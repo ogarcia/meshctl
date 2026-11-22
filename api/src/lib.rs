@@ -327,6 +327,10 @@ pub enum LinkState {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Status {
     pub link: LinkState,
+    /// Since when the link is as it is, in seconds since the epoch, while
+    /// meshctl runs; none until it first changes.
+    #[serde(default)]
+    pub since: Option<i64>,
     pub local: Option<LocalNode>,
 }
 
@@ -1537,7 +1541,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0,"packets_with_own":false}"#
         );
     }
 

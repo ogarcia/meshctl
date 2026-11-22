@@ -314,6 +314,9 @@ pub struct Ack {
 #[derive(Debug, Clone, Default)]
 pub struct MeshState {
     pub link: LinkState,
+    /// When the link came to be as it is, in seconds since the epoch; none
+    /// until it first changes.
+    pub link_since: Option<u32>,
     pub local: Option<LocalNode>,
     pub channels: BTreeMap<u32, Channel>,
     pub nodes: BTreeMap<u32, Node>,

@@ -178,9 +178,14 @@ fn NodeList() -> impl IntoView {
     let shown = move || {
         let needle = filter.get().to_lowercase();
         let reach = reach.get();
+        let local = live
+            .status
+            .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+        // What the radio hears, not the radio: its own node has its own page.
         let mut nodes: Vec<Node> = live.nodes.with(|nodes| {
             nodes
                 .values()
+                .filter(|node| Some(node.num) != local)
                 .filter(|node| needle.is_empty() || matches(node, &needle))
                 .filter(|node| match reach {
                     Reach::All => true,
@@ -191,9 +196,6 @@ fn NodeList() -> impl IntoView {
                 .cloned()
                 .collect()
         });
-        let local = live
-            .status
-            .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
         match sort.get() {
             Some((column, upright)) => nodes.sort_by(|a, b| {
                 let by = order(column, a, b, local);

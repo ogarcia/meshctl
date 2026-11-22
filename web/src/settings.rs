@@ -43,7 +43,7 @@ fn is_empty(change: &NodeSettingsChange) -> bool {
 
 /// The page's tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tab {
+pub enum Tab {
     /// Its names, and what it does in the mesh.
     User,
     Lora,
@@ -116,7 +116,9 @@ pub fn SettingsView() -> impl IntoView {
     let notice = RwSignal::new(None::<Result<bool, Failure>>);
     clear_when_synced(live, notice);
     let busy = RwSignal::new(false);
-    let tab = RwSignal::new(Tab::User);
+    // Kept in the page's state, so that it opens where it was left, or where
+    // a shortcut to a tab asks.
+    let tab = live.settings_tab;
 
     let ready = move || {
         live.status

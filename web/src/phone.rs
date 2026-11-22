@@ -30,6 +30,20 @@ fn tab_of(page: Page) -> Page {
     }
 }
 
+/// The tab the page shown is in: the radio's own page, in More, as its
+/// card there opens it, not in the nodes, which leave it out.
+fn current_tab(live: Live) -> Page {
+    let page = live.page.get();
+    let own = live
+        .status
+        .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+    if page == Page::Node && own.is_some() && live.node.get() == own {
+        Page::More
+    } else {
+        tab_of(page)
+    }
+}
+
 /// Whether a page is a tab's own, which has the radio in its heading, or one
 /// within it, which has the way back.
 pub fn is_tab(page: Page) -> bool {
@@ -59,7 +73,7 @@ pub fn TabBar() -> impl IntoView {
             Page::Packets => t_string!(i18n, page_packets),
             _ => t_string!(i18n, page_more),
         };
-        let on = move || tab_of(live.page.get()) == page;
+        let on = move || current_tab(live) == page;
         view! {
             <button
                 type="button"

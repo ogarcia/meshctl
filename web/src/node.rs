@@ -19,7 +19,7 @@ use leptos::task::spawn_local;
 use leptos_i18n::I18nContext;
 use meshctl_api::{
     ErrorCode, LinkState, NodeCheck, NodeLatest, Pace, Packet, Peer, PositionSource, RadioKind,
-    Request, RequestKind, RequestStatus, Traceroute, TracerouteStatus,
+    Request, RequestKind, RequestStatus, SettingsSection, Traceroute, TracerouteStatus,
 };
 use serde_json::{Map, Value};
 use std::time::Duration;
@@ -108,39 +108,79 @@ fn NodePage(num: u32) -> impl IntoView {
     on_cleanup(move || closing.remove());
     let drawer = RwSignal::new(false);
     let latest = move || live.latest.get().unwrap_or_default();
+    let is_own = Memo::new(move |_| own(live, num));
+    // Two columns, headed by what is looked at most: where it is, and the
+    // routes to it: what comes of its own accord on the left, what is asked
+    // for on the right, the least likely to answer last.
+    let heard = move || {
+        view! {
+            <div class="node-column">
+                {move || {
+                    let latest = latest();
+                    view! {
+                        <PositionSection at=latest.position.as_ref().map(|p| p.at) />
+                        <Device packet=latest.device.clone() />
+                        <Stats packet=latest.local_stats.clone() />
+                    }
+                }}
+            </div>
+            <div class="node-column">
+                <Traces drawer />
+                {move || {
+                    let latest = latest();
+                    view! {
+                        <Identity at=latest.node_info.as_ref().map(|p| p.at) />
+                        <Sensors latest />
+                    }
+                }}
+            </div>
+        }
+        .into_any()
+    };
+    // The radio's own: how meshctl reaches it, the radio itself, where it
+    // is and its settings on the left; how it is, how it hears the mesh and
+    // its sensors on the right, as long as each other. Nothing asked of it,
+    // as it tells it all of its own accord.
+    let mine = move || {
+        view! {
+            <Link />
+            <Radio />
+            {move || {
+                let latest = latest();
+                // Where it is, if it says: a radio with no position has no
+                // place for it here.
+                let placed = latest.position.is_some()
+                    || live
+                        .nodes
+                        .with(|nodes| nodes.get(&num).is_some_and(|n| n.position.is_some()));
+                view! {
+                    {placed.then(|| view! {
+                        <PositionSection at=latest.position.as_ref().map(|p| p.at) />
+                    })}
+                    <Device packet=latest.device.clone() />
+                    <Stats packet=latest.local_stats.clone() />
+                    <Sensors latest own=true />
+                }
+            }}
+            <Shortcuts />
+        }
+        .into_any()
+    };
     view! {
-        <div class="node-page">
+        <div class="node-page" class:own-page=is_own>
             <Checks />
             <Tiles num />
-            // Two columns, headed by what is looked at most: where it is, and
-            // the routes to it: what comes of its own accord on the left, what
-            // is asked for on the right, the least likely to answer last.
-            <div class="node-sections">
-                <div class="node-column">
-                    {move || {
-                        let latest = latest();
-                        view! {
-                            <PositionSection at=latest.position.as_ref().map(|p| p.at) />
-                            <Device packet=latest.device.clone() />
-                            <Stats packet=latest.local_stats.clone() />
-                        }
-                    }}
-                </div>
-                <div class="node-column">
-                    <Traces drawer />
-                    {move || {
-                        let latest = latest();
-                        view! {
-                            <Identity at=latest.node_info.as_ref().map(|p| p.at) />
-                            <Sensors latest />
-                        }
-                    }}
-                </div>
+            <div class="node-sections" class:balanced=is_own>
+                {move || if is_own.get() { mine() } else { heard() }}
             </div>
             // Eye-catching, but long: below what is looked at most.
-            <crate::charts::Telemetry num />
-            <TracesDrawer open=drawer />
-            <RequestsDrawer />
+            {move || view! { <crate::charts::Telemetry num own=is_own.get() /> }}
+            {move || {
+                (!is_own.get()).then(|| view! {
+                    <TracesDrawer open=drawer />
+                    <RequestsDrawer />
+                })
+            }}
             <Problem />
         </div>
     }
@@ -376,23 +416,26 @@ fn Tiles(num: u32) -> impl IntoView {
     move || {
         let node = node()?;
         let local = local();
-        let heard = node.last_heard.map(|at| {
+        // Of the radio's own, when it was heard and how are no news.
+        let heard = node.last_heard.filter(|_| !local).map(|at| {
             view! {
                 <Tile label=t!(i18n, nodes_heard).into_any() value=ago(live.now.get(), at) />
             }
         });
         // Heard through others, the signal is the last relay's: only said
         // when it is the node's own.
-        let reach = reach_words(i18n, &node, local).map(|words| {
-            let signal = node
-                .snr
-                .filter(|_| !local && !node.via_mqtt && node.hops_away == Some(0))
-                .map(|snr| match node.rssi {
-                    Some(rssi) => format!("SNR {snr:.1} dB · RSSI {rssi} dBm"),
-                    None => format!("SNR {snr:.1} dB"),
-                });
-            view! { <Tile label=t!(i18n, nodes_reach).into_any() value=words sub=signal /> }
-        });
+        let reach = reach_words(i18n, &node, local)
+            .filter(|_| !local)
+            .map(|words| {
+                let signal = node
+                    .snr
+                    .filter(|_| !local && !node.via_mqtt && node.hops_away == Some(0))
+                    .map(|snr| match node.rssi {
+                        Some(rssi) => format!("SNR {snr:.1} dB · RSSI {rssi} dBm"),
+                        None => format!("SNR {snr:.1} dB"),
+                    });
+                view! { <Tile label=t!(i18n, nodes_reach).into_any() value=words sub=signal /> }
+            });
         let voltage = node.voltage.map(|v| format!("{v:.2} V"));
         let power = match node.battery_level {
             Some(level) if level > 100 => Some(view! {
@@ -425,7 +468,24 @@ fn Tiles(num: u32) -> impl IntoView {
                 />
             }
         });
-        Some(view! { <div class="node-figures">{heard} {reach} {power} {busy}</div> })
+        // The radio's own: how many of the nodes it knows are online, as its
+        // stats last said.
+        let online = local
+            .then(|| {
+                let latest = live.latest.get()?;
+                let stats = object(latest.local_stats.as_ref(), Some("local_stats"))?;
+                let online = number(&stats, "num_online_nodes").unwrap_or_default();
+                let total = number(&stats, "num_total_nodes").unwrap_or_default();
+                Some(view! {
+                    <Tile
+                        label=t!(i18n, stats_online).into_any()
+                        value=format!("{online:.0}")
+                        sub=Some(t_string!(i18n, own_online_of).replace("{total}", &format!("{total:.0}")))
+                    />
+                })
+            })
+            .flatten();
+        Some(view! { <div class="node-figures">{heard} {reach} {online} {power} {busy}</div> })
     }
 }
 
@@ -700,6 +760,147 @@ fn nothing(i18n: I18nContext<Locale>) -> impl IntoView {
     view! { <p class="nothing">{t!(i18n, node_never)}</p> }
 }
 
+/// How meshctl reaches the radio: its link and since when, where it is, and
+/// what kind it is.
+#[component]
+fn Link() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let body = move || {
+        let radio = live.selected_radio()?;
+        let link = live
+            .status
+            .with(|s| s.as_ref().map(|s| s.link))
+            .unwrap_or(radio.link);
+        // Since when it is so, while meshctl runs; when it was last up,
+        // otherwise, for a radio that is not.
+        let since = live.status.with(|s| s.as_ref()?.since);
+        let when = match (link, since, radio.last_connected) {
+            (_, Some(since), _) => Some(t_string!(i18n, own_since).replace(
+                "{ago}",
+                &ago(live.now.get(), u32::try_from(since).unwrap_or_default()),
+            )),
+            (LinkState::Ready, None, _) => None,
+            (_, None, Some(last)) => Some(t_string!(i18n, own_last_connected).replace(
+                "{ago}",
+                &ago(live.now.get(), u32::try_from(last).unwrap_or_default()),
+            )),
+            _ => None,
+        };
+        let kind = match radio.kind {
+            RadioKind::Meshtastic => "Meshtastic",
+            RadioKind::Meshcore => "MeshCore",
+        };
+        Some(view! {
+            <dl class="facts">
+                {fact(
+                    t!(i18n, own_link),
+                    view! {
+                        <span class=move || format!("badge {}", live.link_class(link))>
+                            <crate::app::LinkLabel link=Signal::stored(link) />
+                        </span>
+                        {when.map(|when| view! { <span class="dim since">{when}</span> })}
+                    },
+                )}
+                {fact(t!(i18n, own_kind), kind)}
+                {wide_fact(t!(i18n, own_address), view! { <span class="mono">{radio.address}</span> })}
+            </dl>
+        })
+    };
+    view! {
+        <Section title=t!(i18n, own_connection).into_any()>
+            {body}
+        </Section>
+    }
+}
+
+/// The radio itself, as it told meshctl on connecting: its firmware, its
+/// hardware, what it does in the mesh and where, and its key to share.
+#[component]
+fn Radio() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let body = move || {
+        let local = live.status.with(|s| s.as_ref()?.local.clone())?;
+        let locale = i18n.get_locale();
+        let key = live
+            .nodes
+            .with(|nodes| nodes.get(&asking.num).and_then(|n| n.public_key.clone()));
+        let key = key.map_or_else(
+            || view! { <span class="dim">{t!(i18n, node_key_unknown)}</span> }.into_any(),
+            |key| {
+                let copied = key.clone();
+                view! {
+                    <span class="copyable">
+                        <span class="mono key">{key}</span>
+                        <button
+                            class="icon-button"
+                            title=move || t_string!(i18n, node_key_copy)
+                            aria-label=move || t_string!(i18n, node_key_copy)
+                            inner_html=COPY
+                            on:click=move |_| crate::clipboard::copy(&copied)
+                        ></button>
+                    </span>
+                }
+                .into_any()
+            },
+        );
+        let preset = local.modem_preset.as_deref().map_or_else(
+            || t_string!(i18n, own_custom_lora).to_owned(),
+            |p| crate::names::preset(locale, p),
+        );
+        Some(view! {
+            <dl class="facts">
+                {fact(t!(i18n, nodes_id), view! { <span class="mono">{local.id.clone()}</span> })}
+                {local.firmware_version.clone().map(|v| fact(t!(i18n, own_firmware), view! { <span class="mono">{v}</span> }))}
+                {local.hw_model.as_deref().map(|hw| fact(t!(i18n, nodes_hardware), crate::mesh::model(hw)))}
+                {local.role.as_deref().map(|role| fact(t!(i18n, node_role), crate::names::role(locale, role)))}
+                {local.region.as_deref().map(|region| fact(t!(i18n, own_region), crate::names::region(locale, region)))}
+                {fact(t!(i18n, own_preset), preset)}
+                {wide_fact(t!(i18n, node_public_key), key)}
+                {licensed(live).then(|| fact(t!(i18n, node_licensed), t!(i18n, node_yes)))}
+            </dl>
+        })
+    };
+    view! {
+        <Section title=t!(i18n, own_radio).into_any()>
+            {body}
+        </Section>
+    }
+}
+
+/// Its settings, each tab a click away.
+#[component]
+fn Shortcuts() -> impl IntoView {
+    use crate::settings::Tab;
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let open = move |tab: Tab| {
+        live.settings_tab.set(tab);
+        live.go(crate::app::Page::RadioSettings);
+    };
+    let button = move |tab: Tab| {
+        let label = move || match tab {
+            Tab::User => t_string!(i18n, settings_tab_user),
+            Tab::Lora => t_string!(i18n, settings_tab_lora),
+            Tab::Channels => t_string!(i18n, settings_tab_channels),
+            Tab::Device => t_string!(i18n, settings_tab_device),
+            Tab::Modules => t_string!(i18n, settings_tab_modules),
+        };
+        view! { <button type="button" on:click=move |_| open(tab)>{label}</button> }
+    };
+    view! {
+        <Section title=t!(i18n, own_settings).into_any() class="own-shortcuts">
+            <div class="shortcuts">
+                {[Tab::User, Tab::Lora, Tab::Channels, Tab::Device, Tab::Modules]
+                    .into_iter()
+                    .map(button)
+                    .collect_view()}
+            </div>
+        </Section>
+    }
+}
 /// Where the node is, and how well that is known.
 #[component]
 fn PositionSection(at: Option<i64>) -> impl IntoView {
@@ -989,10 +1190,27 @@ fn neighbour_list(
 /// What the node tells only with the sensors or the module for it: always
 /// all three, in the same place, each growing where it is when it tells.
 #[component]
-fn Sensors(latest: NodeLatest) -> impl IntoView {
+fn Sensors(
+    latest: NodeLatest,
+    /// The radio's own node, whose modules are known: only those it has
+    /// on, or that told something, are shown.
+    #[prop(optional)]
+    own: bool,
+) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let at = |packet: &Option<Packet>| packet.as_ref().map(|p| p.at);
+    // Which of them the radio has on, as its settings say: environment,
+    // power, neighbours. Read from what the daemon keeps, nothing asked of
+    // the radio.
+    let enabled = RwSignal::new(None::<[bool; 3]>);
+    if own && let Some(radio) = live.selected.get_untracked() {
+        spawn_local(async move {
+            if let Ok(sections) = daemon::sections(radio).await {
+                enabled.set(Some(modules_on(&sections)));
+            }
+        });
+    }
     // Its words follow the language: built where that is tracked.
     move || {
         // Here, and not as the parts' properties: those are built untracked.
@@ -1000,30 +1218,74 @@ fn Sensors(latest: NodeLatest) -> impl IntoView {
         let power = power_facts(i18n, latest.power.as_ref());
         let neighbours = neighbour_list(i18n, live, latest.neighbors.as_ref());
         let latest = latest.clone();
-        view! {
-            <Section title=t!(i18n, node_sensors).into_any() class="node-sensors">
-                <p class="hint">{t!(i18n, node_sensors_hint)}</p>
-                <Part
-                    kind=RequestKind::EnvironmentTelemetry
-                    title=t!(i18n, node_environment).into_any()
-                    at=at(&latest.environment)
-                    body=environment
-                />
-                <Part
-                    kind=RequestKind::PowerTelemetry
-                    title=t!(i18n, node_power).into_any()
-                    at=at(&latest.power)
-                    body=power
-                />
-                <Part
-                    kind=RequestKind::Neighbors
-                    title=t!(i18n, node_neighbors).into_any()
-                    at=at(&latest.neighbors)
-                    body=neighbours
-                />
-            </Section>
+        // Of a node heard, all of them, as it may answer; of the radio's own,
+        // those that told something or are on.
+        let on = enabled.get();
+        let shown = |index: usize, told: bool| !own || told || on.is_some_and(|on| on[index]);
+        let parts = [
+            shown(0, environment.is_some()),
+            shown(1, power.is_some()),
+            shown(2, neighbours.is_some()),
+        ];
+        if !parts.contains(&true) {
+            return None;
         }
+        Some(view! {
+            <Section title=t!(i18n, node_sensors).into_any() class="node-sensors">
+                <p class="hint">
+                    {if own {
+                        t!(i18n, node_sensors_own_hint).into_any()
+                    } else {
+                        t!(i18n, node_sensors_hint).into_any()
+                    }}
+                </p>
+                {parts[0].then(|| view! {
+                    <Part
+                        kind=RequestKind::EnvironmentTelemetry
+                        title=t!(i18n, node_environment).into_any()
+                        at=at(&latest.environment)
+                        body=environment
+                    />
+                })}
+                {parts[1].then(|| view! {
+                    <Part
+                        kind=RequestKind::PowerTelemetry
+                        title=t!(i18n, node_power).into_any()
+                        at=at(&latest.power)
+                        body=power
+                    />
+                })}
+                {parts[2].then(|| view! {
+                    <Part
+                        kind=RequestKind::Neighbors
+                        title=t!(i18n, node_neighbors).into_any()
+                        at=at(&latest.neighbors)
+                        body=neighbours
+                    />
+                })}
+            </Section>
+        })
     }
+}
+
+/// Which of the sensors and modules a radio has on, as its settings say:
+/// the telemetry module's environment and power measurement, and the
+/// neighbour info module.
+fn modules_on(sections: &[SettingsSection]) -> [bool; 3] {
+    let on = |section: &str, field: &str| {
+        sections
+            .iter()
+            .find(|s| s.id == section)
+            .and_then(|s| s.fields.iter().find(|f| f.name == field))
+            .and_then(|f| f.value.as_ref())
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
+    [
+        on("module.telemetry", "environment_measurement_enabled"),
+        on("module.telemetry", "power_measurement_enabled"),
+        on("module.neighbor_info", "enabled"),
+    ]
 }
 
 /// One of the sensors or modules: its heading as a section's, and what it

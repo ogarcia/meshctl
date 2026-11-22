@@ -23,9 +23,16 @@ const WINDOWS: [u32; 6] = [86_400, 172_800, 259_200, 604_800, 1_209_600, 2_592_0
 /// The while charted when none was chosen: a day.
 const DEFAULT_WINDOW: u32 = 86_400;
 
+/// The shorter whiles the radio's own node has besides: it tells its
+/// telemetry to meshctl every minute.
+const OWN_WINDOWS: [u32; 3] = [900, 3_600, 10_800];
+
 /// How a while is named, short.
 fn window_label(i18n: I18nContext<Locale>, window: u32) -> String {
     match window {
+        900 => "15 min".into(),
+        3_600 => "1 h".into(),
+        10_800 => "3 h".into(),
         86_400 => "24 h".into(),
         172_800 => "48 h".into(),
         259_200 => "3 d".into(),
@@ -36,14 +43,16 @@ fn window_label(i18n: I18nContext<Locale>, window: u32) -> String {
 }
 
 /// The whiles worth offering: up to the first that holds all the history
-/// there is, as a longer one would show the same.
-fn offered(oldest: Option<i64>, now: i64) -> Vec<u32> {
+/// there is, as a longer one would show the same; the radio's own node, the
+/// shorter ones before.
+fn offered(oldest: Option<i64>, now: i64, own: bool) -> Vec<u32> {
     let Some(oldest) = oldest else {
         return Vec::new();
     };
     let age = now - oldest;
     let mut windows = Vec::new();
-    for window in WINDOWS {
+    let shorter = if own { &OWN_WINDOWS[..] } else { &[] };
+    for &window in shorter.iter().chain(WINDOWS.iter()) {
         windows.push(window);
         if i64::from(window) >= age {
             break;
@@ -241,7 +250,12 @@ fn leak(metric: &str) -> &'static str {
 /// A node's telemetry charts, under their choice of while: none when the
 /// node has no history at all.
 #[component]
-pub fn Telemetry(num: u32) -> impl IntoView {
+pub fn Telemetry(
+    num: u32,
+    /// The radio's own node, which has the shorter whiles too.
+    #[prop(optional)]
+    own: bool,
+) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let data = RwSignal::new(None::<NodeTelemetry>);
@@ -255,14 +269,21 @@ pub fn Telemetry(num: u32) -> impl IntoView {
     let window = Memo::new(move |_| {
         let offered = data.with(|d| {
             d.as_ref()
-                .map(|d| offered(d.oldest, i64::from(live.now.get())))
+                .map(|d| offered(d.oldest, i64::from(live.now.get()), own))
                 .unwrap_or_default()
         });
         let chosen = chosen();
         if offered.contains(&chosen) || offered.is_empty() {
             chosen
         } else {
-            offered.last().copied().unwrap_or(chosen)
+            // One it has not, as a quarter of an hour on a node not the
+            // radio's own: the next longer one it has, or its longest.
+            offered
+                .iter()
+                .copied()
+                .find(|&w| w >= chosen)
+                .or_else(|| offered.last().copied())
+                .unwrap_or(chosen)
         }
     });
     // Read again as the while changes, and as the node tells something new,
@@ -291,7 +312,7 @@ pub fn Telemetry(num: u32) -> impl IntoView {
     let windows = Memo::new(move |_| {
         data.with(|d| {
             d.as_ref()
-                .map(|d| offered(d.oldest, i64::from(live.now.get())))
+                .map(|d| offered(d.oldest, i64::from(live.now.get()), own))
                 .unwrap_or_default()
         })
     });
@@ -687,15 +708,21 @@ mod tests {
 
     #[test]
     fn whiles_are_offered_up_to_the_first_that_holds_all() {
-        assert!(offered(None, 1000).is_empty());
+        assert!(offered(None, 1000, false).is_empty());
         // Less than a day: a day, the shortest there is.
-        assert_eq!(offered(Some(1000 - 600), 1000), [86_400]);
+        assert_eq!(offered(Some(1000 - 600), 1000, false), [86_400]);
+        // The radio's own, from a quarter of an hour.
+        assert_eq!(offered(Some(1000 - 600), 1000, true), [900]);
+        assert_eq!(
+            offered(Some(10_000 - 7200), 10_000, true),
+            [900, 3_600, 10_800]
+        );
         // Two days and a half: up to three.
         assert_eq!(
-            offered(Some(1_000_000 - 60 * 3600), 1_000_000),
+            offered(Some(1_000_000 - 60 * 3600), 1_000_000, false),
             [86_400, 172_800, 259_200]
         );
-        assert_eq!(offered(Some(0), 100_000_000).len(), WINDOWS.len());
+        assert_eq!(offered(Some(0), 100_000_000, false).len(), WINDOWS.len());
     }
 
     #[test]

@@ -542,6 +542,7 @@ impl Mesh {
                 return Vec::new();
             }
             state.link = link;
+            state.link_since = Some(now());
             let mut events = vec![Event::Link(link)];
             if link == LinkState::Ready {
                 events.push(Event::Synced);

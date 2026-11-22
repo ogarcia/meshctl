@@ -106,6 +106,8 @@ pub struct Live {
     /// `None` until the daemon has said which radios there are.
     pub radios: RwSignal<Option<Vec<Radio>>>,
     pub selected: RwSignal<Option<RadioId>>,
+    /// The radio settings' tab, kept as it was left or as a shortcut asks.
+    pub settings_tab: RwSignal<crate::settings::Tab>,
     /// What the radios' editor is open on.
     pub radio_editing: RwSignal<Editing>,
     /// Of the selected radio.
@@ -185,6 +187,7 @@ impl Live {
             preferences: RwSignal::new(Preferences::default()),
             radios: RwSignal::new(None),
             selected: RwSignal::new(daemon::last_radio()),
+            settings_tab: RwSignal::new(crate::settings::Tab::User),
             radio_editing: RwSignal::new(Editing::Closed),
             status: RwSignal::new(None),
             nodes: RwSignal::new(BTreeMap::new()),
@@ -753,6 +756,9 @@ impl Live {
                         self.status.update(|status| {
                             if let Some(status) = status {
                                 status.link = link;
+                                // By this browser's clock until it is read
+                                // again, as it is once in sync.
+                                status.since = Some(i64::from(now()));
                             }
                         });
                     }
@@ -1274,7 +1280,14 @@ fn RadioSidebar() -> impl IntoView {
             ),
             Page::Nodes => (
                 t!(i18n, nodes_title).into_any(),
-                Some(Signal::derive(move || live.nodes.with(BTreeMap::len))),
+                // As many as the list has: those heard, not the radio's own.
+                Some(Signal::derive(move || {
+                    let local = live
+                        .status
+                        .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+                    live.nodes
+                        .with(|nodes| nodes.keys().filter(|&&num| Some(num) != local).count())
+                })),
             ),
             _ => (t!(i18n, page_packets).into_any(), None),
         };
@@ -1441,15 +1454,32 @@ pub(crate) fn LocalFoot() -> impl IntoView {
             "avatar"
         }
     };
+    // Its own page, by its avatar and its name, once its node is known.
+    let open_own = move |_| {
+        if let Some(num) = num() {
+            live.open_node(num);
+        }
+    };
+    let own_open = move || {
+        live.page.get() == Page::Node && live.node.get().is_some() && live.node.get() == num()
+    };
     view! {
         <footer class="local-foot">
-            <span class=avatar_class style=move || badge::style(&badge())>
-                {short}
-            </span>
-            <span class="who">
-                <b>{move || name().unwrap_or_else(|| t_string!(i18n, nav_my_node).to_owned())}</b>
-                <span class="mono dim">{detail}</span>
-            </span>
+            <button
+                class="own-node"
+                class:active=own_open
+                disabled=move || num().is_none()
+                title=move || t_string!(i18n, nav_own_node)
+                on:click=open_own
+            >
+                <span class=avatar_class style=move || badge::style(&badge())>
+                    {short}
+                </span>
+                <span class="who">
+                    <b>{move || name().unwrap_or_else(|| t_string!(i18n, nav_my_node).to_owned())}</b>
+                    <span class="mono dim">{detail}</span>
+                </span>
+            </button>
             <button
                 class=class
                 title=move || t_string!(i18n, nav_radio_settings)
@@ -1684,7 +1714,20 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
             // from its page, the chat. On the map its card has both already.
             let action = move || {
                 let page = live.page.get();
-                let chat = (page == Page::Node).then(|| {
+                // Its own node takes no messages from it: its settings instead.
+                let settings = (page == Page::Node && local()).then(|| {
+                    view! {
+                        <button
+                            class="with-icon"
+                            title=move || t_string!(i18n, nav_radio_settings)
+                            on:click=move |_| live.go(Page::RadioSettings)
+                        >
+                            <span class="icon" inner_html=GEAR></span>
+                            <span class="label">{t!(i18n, own_settings)}</span>
+                        </button>
+                    }
+                });
+                let chat = (page == Page::Node && !local()).then(|| {
                     if unmessagable() {
                         view! {
                             <button
@@ -1732,7 +1775,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         </button>
                     }
                 });
-                view! { {history} {profile} {chat} }
+                view! { {history} {profile} {settings} {chat} }
             };
             // Back to where its page was opened from, on its page.
             let back = move || {

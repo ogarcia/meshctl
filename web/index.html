@@ -470,6 +470,24 @@
         background: var(--mc-surface-2);
         border-top: 1px solid var(--mc-border);
       }
+      /* Its avatar and name, a button to its own page. */
+      .local-foot .own-node {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 1;
+        min-width: 0;
+        margin: -6px;
+        padding: 6px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+      }
+      .local-foot .own-node:hover:not(:disabled),
+      .local-foot .own-node.active { background: var(--mc-raised); }
+      .local-foot .own-node:disabled { opacity: 1; cursor: default; }
       .local-foot .who { display: flex; flex-direction: column; flex: 1; min-width: 0; }
       .local-foot .who b { font-size: 13px; }
       .local-foot .who span { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1196,8 +1214,26 @@
         align-items: start;
       }
       .node-column { display: flex; flex-direction: column; min-width: 0; }
+      /* The radio's own page: its sections in two columns as long as each
+         other, whatever each radio has to show; one under the other where
+         two do not fit. */
+      .node-sections.balanced { display: block; column-count: 2; column-gap: 40px; }
+      .node-sections.balanced > .node-section { break-inside: avoid; }
       @media (max-width: 1000px) {
         .node-sections { grid-template-columns: minmax(0, 1fr); }
+        .node-sections.balanced { column-count: 1; }
+      }
+      /* The radio's own page: since when its link is so, beside it. */
+      .facts .since { margin-left: 8px; font-size: 12px; }
+      /* Its settings' tabs, the whole width: five in a row, or three and the
+         last two together under them, where five do not fit. */
+      .own-shortcuts { container: shortcuts / inline-size; }
+      .own-shortcuts .shortcuts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+      .own-shortcuts .shortcuts button { min-width: 0; min-height: 34px; padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      @container shortcuts (max-width: 560px) {
+        .own-shortcuts .shortcuts { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+        .own-shortcuts .shortcuts button { grid-column: span 2; }
+        .own-shortcuts .shortcuts button:nth-child(n + 4) { grid-column: span 3; }
       }
       .node-section {
         break-inside: avoid;
@@ -1338,6 +1374,10 @@
       .facts dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
       .facts .copyable { display: flex; align-items: center; gap: 4px; }
       .facts .copyable .icon-button { width: 28px; height: 28px; }
+      /* A node's key, cut where it must, its button kept beside it: not a
+         channel's key, which stays in one line. */
+      .facts .copyable .key { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+      .facts .copyable .icon-button { flex: none; }
       .facts .copyable .icon-button svg { width: 16px; height: 16px; }
       .facts .key { font-size: 12px; font-weight: 400; word-break: break-all; }
       .node-page button.link {
