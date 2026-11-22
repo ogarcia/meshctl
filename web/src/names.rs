@@ -189,6 +189,21 @@ pub fn role(locale: Locale, code: &str) -> String {
     named(ROLES, locale, code)
 }
 
+/// A role by its name alone, without the code; the code itself when it has
+/// none.
+pub fn role_name(locale: Locale, code: &str) -> String {
+    ROLES
+        .iter()
+        .find(|(known, _, _)| *known == code)
+        .map_or_else(
+            || code.to_owned(),
+            |(_, es, en)| match locale {
+                Locale::es => (*es).to_owned(),
+                Locale::en => (*en).to_owned(),
+            },
+        )
+}
+
 /// A modem preset by the name it goes by everywhere, in no language of its
 /// own, the one the firmware gives an unnamed channel: LongFast. The code
 /// after it only where the name does not say it: LongMod (LONG_MODERATE).

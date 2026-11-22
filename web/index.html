@@ -1005,6 +1005,7 @@
         text-align: left;
       }
       .nodes-table td { padding: 8px 10px; border-bottom: 1px solid var(--mc-border); vertical-align: middle; }
+      .nodes-table tbody tr:last-child td { border-bottom: 0; }
       .nodes-table th .sort {
         display: inline-flex;
         align-items: center;
@@ -1159,6 +1160,13 @@
         padding: 0 4px 18px;
         margin-bottom: 18px;
         border-bottom: 1px solid var(--mc-border);
+      }
+      /* Nothing after the last: no line under it. With no charts, the columns
+         are last, and both end the page side by side. */
+      .node-page > .node-section:last-child,
+      .node-page > .node-sections:last-child > .node-column > .node-section:last-child {
+        margin-bottom: 0;
+        border-bottom: 0;
       }
       .node-section > header,
       .part > header {
@@ -2400,6 +2408,13 @@
         .topbar .actions .with-icon { padding: 0 10px; }
         .topbar .actions .with-icon .label { display: none; }
         .topbar .node-avatar { width: 32px; height: 32px; }
+        /* A role by its name alone: its code where there is room. */
+        .topbar .heading .code { display: none; }
+        /* The columns one under the other: the first's last keeps its line. */
+        .node-page > .node-sections:last-child > .node-column:first-child > .node-section:last-child {
+          margin-bottom: 18px;
+          border-bottom: 1px solid var(--mc-border);
+        }
         /* The nodes, each in two lines: who, and how it is heard, small. */
         .node-tools { flex-direction: column; align-items: stretch; }
         .node-tools .segmented { width: 100%; }
@@ -2414,6 +2429,7 @@
           border-bottom: 1px solid var(--mc-border);
         }
         .nodes-table tr.node-row td { padding: 0; border: 0; }
+        .nodes-table tr.node-row:last-child { border-bottom: 0; }
         .nodes-table tr.node-row td:first-child { flex: 1 1 100%; }
         .nodes-table tr.node-row td:nth-child(2),
         .nodes-table tr.node-row td:nth-child(3),

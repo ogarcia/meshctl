@@ -1446,23 +1446,38 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
             // Elsewhere, how it is reached and when it was last heard.
             let detail = move || {
                 let known = known()?;
-                let mut parts = vec![known.id.clone()];
+                let mut parts: Vec<AnyView> = vec![known.id.clone().into_any()];
                 if live.page.get() == Page::Node {
-                    if let Some(role) = &known.role {
-                        parts.push(crate::names::role(i18n.get_locale(), role));
+                    // Its role by name; its code beside, where there is room.
+                    if let Some(role) = known.role.clone() {
+                        let name = crate::names::role_name(i18n.get_locale(), &role);
+                        parts.push(
+                            view! {
+                                {name}
+                                <span class="code">" (" {role} ")"</span>
+                            }
+                            .into_any(),
+                        );
                     }
                     if let Some(hardware) = &known.hw_model {
-                        parts.push(model(hardware));
+                        parts.push(model(hardware).into_any());
                     }
                 } else {
                     if let Some(reach) = reach_words(i18n, &known, local()) {
-                        parts.push(reach);
+                        parts.push(reach.into_any());
                     }
                     if let Some(heard) = known.last_heard {
-                        parts.push(ago(live.now.get(), heard));
+                        parts.push(ago(live.now.get(), heard).into_any());
                     }
                 }
-                Some(parts.join(" · "))
+                let mut joined = Vec::with_capacity(parts.len() * 2);
+                for (index, part) in parts.into_iter().enumerate() {
+                    if index > 0 {
+                        joined.push(" · ".into_any());
+                    }
+                    joined.push(part);
+                }
+                Some(joined.collect_view())
             };
             let class = move || {
                 let mut class = known().map_or_else(
