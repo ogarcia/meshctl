@@ -12,7 +12,7 @@ use crate::app::Live;
 use crate::chat::title;
 use crate::daemon::{self, Failure, REQUESTS_PAGE, TRACES_PAGE};
 use crate::i18n::{Locale, t, t_string, use_i18n};
-use crate::mesh::{PIN, ago, radius, reach_words};
+use crate::mesh::{PIN, ago, awaiting_clock, radius, reach_words, waited};
 use crate::traces::TraceCard;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -1706,6 +1706,7 @@ fn RequestRow(request: Request) -> impl IntoView {
         .and_then(|payload| serde_json::to_string_pretty(&payload).ok());
     let has_detail = detail.is_some();
     let kind = request.kind;
+    let clock = awaiting_clock(request.status == RequestStatus::Pending);
     view! {
         <li class="request" class:open=move || open.get()>
             <button
@@ -1716,7 +1717,13 @@ fn RequestRow(request: Request) -> impl IntoView {
                 <span class="head">
                     <strong><KindLabel kind /></strong>
                     <span class="when">
-                        "#" {request.channel} " · " {move || ago(live.now.get(), at)}
+                        "#" {request.channel} " · "
+                        {move || {
+                            match clock {
+                                Some(clock) => waited(clock.get(), at),
+                                None => ago(live.now.get(), at),
+                            }
+                        }}
                     </span>
                 </span>
                 {status}

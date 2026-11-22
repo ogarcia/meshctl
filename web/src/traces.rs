@@ -6,7 +6,7 @@
 use crate::app::Live;
 
 use crate::i18n::{Locale, t, t_string, use_i18n};
-use crate::mesh::ago;
+use crate::mesh::{ago, awaiting_clock, waited};
 use leptos::prelude::*;
 use leptos_i18n::I18nContext;
 use meshctl_api::{Hop, Traceroute, TracerouteStatus};
@@ -56,6 +56,7 @@ pub fn TraceCard(traceroute: Traceroute) -> impl IntoView {
     let live = expect_context::<Live>();
     let at = u32::try_from(traceroute.at).unwrap_or_default();
     let target = traceroute.target;
+    let clock = awaiting_clock(traceroute.status == TracerouteStatus::Pending);
     let status = match traceroute.status {
         TracerouteStatus::Pending => view! {
             <span class="badge syncing">{t!(i18n, trace_pending)}</span>
@@ -123,7 +124,16 @@ pub fn TraceCard(traceroute: Traceroute) -> impl IntoView {
                     }}
                 </strong>
                 {status}
-                <span class="dim when">{move || ago(live.now.get(), at)}</span>
+                // Awaited, five seconds at a time up to its timeout; done,
+                // how long ago.
+                <span class="dim when">
+                    {move || {
+                        match clock {
+                            Some(clock) => waited(clock.get(), at),
+                            None => ago(live.now.get(), at),
+                        }
+                    }}
+                </span>
                 {copy}
             </header>
             {routes}

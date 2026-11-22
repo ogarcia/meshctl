@@ -38,8 +38,9 @@ use std::time::Duration;
 /// How long to wait before trying the daemon again.
 const RETRY: Duration = Duration::from_secs(3);
 
-/// How often "heard 5 min ago" is worked out again.
-const CLOCK_TICK: Duration = Duration::from_secs(15);
+/// How often "heard 5 min ago" is worked out again: often enough for what
+/// is awaited to be seen going, five seconds at a time.
+const CLOCK_TICK: Duration = Duration::from_secs(5);
 
 /// How the connection to the daemon is doing, beyond the radios' own links.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -507,6 +507,36 @@ pub fn radius(metres: u32) -> String {
     }
 }
 
+/// How long something has been awaited, five seconds at a time, as the
+/// clock goes: in seconds, and past the minute in minutes and seconds, so
+/// that it is seen going up to its timeout.
+pub fn waited(now: u32, then: u32) -> String {
+    let seconds = now.saturating_sub(then) / 5 * 5;
+    if seconds < 60 {
+        format!("{seconds} s")
+    } else {
+        format!("{} min {:02} s", seconds / 60, seconds % 60)
+    }
+}
+
+/// The time, by the second, for what is awaited: so that it shows going five
+/// seconds after it was asked, and every five after that, on the dot, and
+/// not when the page's own clock, which goes at its own pace, ticks. None
+/// for what is not awaited, which goes by the page's clock. It stops with
+/// whatever made it.
+pub fn awaiting_clock(awaited: bool) -> Option<RwSignal<u32>> {
+    awaited.then(|| {
+        let clock = RwSignal::new(crate::app::now());
+        if let Ok(ticking) = set_interval_with_handle(
+            move || clock.set(crate::app::now()),
+            std::time::Duration::from_secs(1),
+        ) {
+            on_cleanup(move || ticking.clear());
+        }
+        clock
+    })
+}
+
 /// How long ago, in the largest unit that fits. The units are the same in
 /// every language the interface speaks.
 pub fn ago(now: u32, then: u32) -> String {
@@ -521,7 +551,17 @@ pub fn ago(now: u32, then: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::model;
+    use super::{model, waited};
+
+    #[test]
+    fn what_is_awaited_goes_five_seconds_at_a_time() {
+        assert_eq!(waited(1004, 1000), "0 s");
+        assert_eq!(waited(1007, 1000), "5 s");
+        assert_eq!(waited(1059, 1000), "55 s");
+        assert_eq!(waited(1060, 1000), "1 min 00 s");
+        assert_eq!(waited(1088, 1000), "1 min 25 s");
+        assert_eq!(waited(1120, 1000), "2 min 00 s");
+    }
 
     #[test]
     fn models_read_as_people_write_them() {
