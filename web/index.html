@@ -967,6 +967,7 @@
         font-size: 13px;
       }
       .node-checks li span { color: var(--mc-muted); }
+      .node-checks li.info { border-left-color: var(--mc-primary); color: var(--mc-muted); }
       .node-figures {
         display: flex;
         flex-wrap: wrap;
@@ -1002,16 +1003,14 @@
       .figure .bar i { display: block; height: 100%; border-radius: 2px; background: var(--mc-ok); }
       .figure.low .value { color: var(--mc-danger); }
       .figure.low .bar i { background: var(--mc-danger); }
-      .node-columns {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 360px;
-        gap: 0 40px;
-        align-items: start;
+      /* Sections in columns that even themselves out, whatever each holds. */
+      .node-sections { columns: 2 440px; column-gap: 40px; }
+      .node-section {
+        break-inside: avoid;
+        padding: 0 4px 18px;
+        margin-bottom: 18px;
+        border-bottom: 1px solid var(--mc-border);
       }
-      .node-main, .node-side { display: flex; flex-direction: column; min-width: 0; }
-      .node-section { padding: 0 4px 18px; margin-bottom: 18px; border-bottom: 1px solid var(--mc-border); }
-      .node-main > .node-section:last-child,
-      .node-side > .node-section:last-child { border-bottom: 0; }
       .node-section > header {
         display: flex;
         align-items: center;
@@ -1021,7 +1020,76 @@
       }
       .node-section h2 { margin: 0; font-size: 16px; }
       .node-section .when { font-size: 12px; color: var(--mc-muted); }
-      .node-section .ask { margin-left: auto; min-height: 32px; padding: 0 14px; }
+      /* A request's button: on the primary channel, with a menu for another
+         beside it when the channel matters; filling up while the radio keeps
+         from sending the like. */
+      .ask-split { position: relative; display: inline-flex; margin-left: auto; }
+      .ask-split .ask {
+        position: relative;
+        overflow: hidden;
+        min-height: 32px;
+        padding: 0 14px;
+      }
+      .ask-split .ask.split { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+      .ask-split .caret {
+        display: flex;
+        align-items: center;
+        padding: 0 6px;
+        margin-left: -1px;
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+      }
+      .ask-split .caret svg { width: 16px; height: 16px; transition: transform 0.15s; }
+      .ask-split.open .caret svg { transform: rotate(180deg); }
+      .ask-split .fill {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        height: 3px;
+        background: var(--mc-primary);
+        transition: width 1s linear;
+      }
+      .ask-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        right: 0;
+        z-index: 30;
+        display: flex;
+        flex-direction: column;
+        min-width: 240px;
+        padding: 6px;
+        border: 1px solid var(--mc-border);
+        border-radius: 10px;
+        background: var(--mc-surface);
+        box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+      }
+      .ask-menu p { margin: 4px 8px 6px; font-size: 12px; color: var(--mc-muted); }
+      .ask-menu button {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        text-align: left;
+      }
+      .ask-menu button:hover { background: var(--mc-raised); }
+      .ask-menu .slot { min-width: 16px; color: var(--mc-muted); font-variant-numeric: tabular-nums; }
+      /* Why a request was not sent, over the page for a while. */
+      .toast {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        z-index: 50;
+        max-width: 420px;
+        padding: 10px 14px;
+        border-left: 3px solid var(--mc-warn);
+        border-radius: 8px;
+        background: var(--mc-surface);
+        box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+        font-size: 13px;
+      }
       .node-section .quiet,
       .node-section .hint,
       .node-section .nothing { margin: 0 0 8px; font-size: 13px; color: var(--mc-muted); }
@@ -1033,22 +1101,13 @@
         gap: 12px 24px;
         margin: 0;
       }
-      .node-side .facts { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+      .facts .wide { grid-column: 1 / -1; }
       .facts dt { font-size: 12px; color: var(--mc-muted); }
       .facts dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
       .facts .copyable { display: flex; align-items: center; gap: 4px; }
       .facts .copyable .icon-button { width: 28px; height: 28px; }
       .facts .copyable .icon-button svg { width: 16px; height: 16px; }
       .facts .key { font-size: 12px; font-weight: 400; word-break: break-all; }
-      .node-asking .channel { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-      .node-asking .channel span { font-size: 12px; color: var(--mc-muted); }
-      .node-asking .channel select { flex: 1; min-width: 0; }
-      .node-asking .paces { list-style: none; margin: 0; padding: 0; font-size: 13px; }
-      .node-asking .paces li { padding: 6px 10px; border-radius: 8px; background: var(--mc-soft); }
-      .node-asking .paces li + li { margin-top: 4px; }
-      .node-asking .paces:empty { display: none; }
-      .node-asking .error { margin: 8px 0 0; font-size: 12px; color: var(--mc-muted); }
-      .node-asking .error:empty { display: none; }
       .node-more ul { list-style: none; margin: 0; padding: 0; }
       .node-more li {
         display: flex;
@@ -1060,7 +1119,6 @@
       .node-more .what { display: flex; flex-direction: column; gap: 2px; font-weight: 600; }
       .node-more .why { font-size: 12px; font-weight: 400; color: var(--mc-muted); }
       .node-more .why:empty { display: none; }
-      .node-more .ask { margin-left: auto; min-height: 32px; padding: 0 14px; }
       .node-page button.link {
         padding: 0;
         border: 0;
@@ -1075,10 +1133,6 @@
       .neighbours .snr { margin-left: auto; color: var(--mc-muted); font-variant-numeric: tabular-nums; }
       .node-traces .trace { padding: 4px 0 10px; border-bottom: 0; }
       .node-traces .all { font-size: 13px; }
-      @media (max-width: 1100px) {
-        .node-columns { grid-template-columns: minmax(0, 1fr); }
-        .node-side { order: -1; }
-      }
       /* A drawer over the page's side, for a list too long for the page. */
       .drawer-shade { position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / 35%); }
       .drawer {

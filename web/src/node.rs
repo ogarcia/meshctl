@@ -11,7 +11,6 @@
 use crate::app::Live;
 use crate::chat::title;
 use crate::daemon::{self, Failure, TRACES_PAGE};
-use crate::empty::EmptyState;
 use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::mesh::{ago, radius, reach_words};
 use crate::traces::TraceCard;
@@ -27,14 +26,49 @@ use std::time::Duration;
 
 const COPY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/copy.svg");
 
-/// What the open node's requests go by: the node, the channel they go on,
-/// and a clock by the second for how long the radio keeps from sending.
+/// What the open node's requests go by: the node, and a clock by the second
+/// for how long the radio keeps from sending.
 #[derive(Clone, Copy)]
 struct Asking {
     num: u32,
-    channel: RwSignal<u32>,
     clock: RwSignal<u32>,
 }
+
+/// What a button of the page sends: a request of a kind, or a traceroute.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asked {
+    Request(RequestKind),
+    Trace,
+}
+
+impl Asked {
+    fn pace(self) -> Option<Pace> {
+        match self {
+            Self::Request(kind) => kind.pace(),
+            Self::Trace => Some(Pace::Traceroute),
+        }
+    }
+
+    /// Whether the radio sends it encrypted to the node's own key when it
+    /// knows it, whatever the channel: not node info, positions nor
+    /// traceroutes, which go on the channel always.
+    fn private(self) -> bool {
+        matches!(
+            self,
+            Self::Request(
+                RequestKind::DeviceTelemetry
+                    | RequestKind::EnvironmentTelemetry
+                    | RequestKind::PowerTelemetry
+                    | RequestKind::LocalStats
+                    | RequestKind::Neighbors
+            )
+        )
+    }
+}
+
+/// Which button's channel menu is open, if any.
+#[derive(Clone, Copy)]
+struct OpenMenu(RwSignal<Option<Asked>>);
 
 #[component]
 pub fn NodeView() -> impl IntoView {
@@ -51,47 +85,72 @@ fn NodePage(num: u32) -> impl IntoView {
     {
         on_cleanup(move || ticking.clear());
     }
-    provide_context(Asking {
-        num,
-        channel: RwSignal::new(0),
-        clock,
-    });
+    provide_context(Asking { num, clock });
+    // One channel menu open at a time, closed by a click anywhere else.
+    let menu = RwSignal::new(None::<Asked>);
+    provide_context(OpenMenu(menu));
+    let closing = window_event_listener(leptos::ev::click, move |_| menu.set(None));
+    on_cleanup(move || closing.remove());
     let drawer = RwSignal::new(false);
     let latest = move || live.latest.get().unwrap_or_default();
     view! {
         <div class="node-page">
             <Checks />
             <Tiles num />
-            <div class="node-columns">
-                <div class="node-main">
-                    {move || {
-                        let latest = latest();
-                        view! {
-                            <Device packet=latest.device.clone() />
-                            <Environment packet=latest.environment.clone() />
-                            <PowerSection packet=latest.power.clone() />
-                            <Stats packet=latest.local_stats.clone() />
-                            <Neighbors packet=latest.neighbors.clone() />
-                        }
-                    }}
-                    <Traces drawer />
-                </div>
-                <aside class="node-side">
-                    <AskPanel />
-                    {move || {
-                        let latest = latest();
-                        view! {
-                            <PositionSection at=latest.position.as_ref().map(|p| p.at) />
-                            <Identity at=latest.node_info.as_ref().map(|p| p.at) />
-                            <More latest />
-                        }
-                    }}
-                </aside>
+            // In columns that even themselves out, however much or little
+            // the node told.
+            <div class="node-sections">
+                {move || {
+                    let latest = latest();
+                    view! {
+                        <PositionSection at=latest.position.as_ref().map(|p| p.at) />
+                        <Identity at=latest.node_info.as_ref().map(|p| p.at) />
+                        <Device packet=latest.device.clone() />
+                        <Stats packet=latest.local_stats.clone() />
+                        <Environment packet=latest.environment.clone() />
+                        <PowerSection packet=latest.power.clone() />
+                        <Neighbors packet=latest.neighbors.clone() />
+                    }
+                }}
+                <Traces drawer />
+                {move || view! { <More latest=latest() /> }}
             </div>
             <TracesDrawer open=drawer />
+            <Problem />
         </div>
     }
 }
+
+/// Why the last request or traceroute was not sent, over the page for a
+/// while, so that nothing moves for it.
+#[component]
+fn Problem() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    Effect::new(move |_| {
+        if live.ask_error.get().is_some() {
+            set_timeout(move || live.ask_error.set(None), PROBLEM_SHOWN);
+        }
+    });
+    move || {
+        live.ask_error.get().map(|failure| {
+            let text = match failure {
+                Failure::Rejected(ErrorCode::TooSoon) => t!(i18n, ask_too_soon).into_any(),
+                Failure::Rejected(ErrorCode::InvalidChannel) => {
+                    t!(i18n, ask_invalid_channel).into_any()
+                }
+                Failure::Rejected(ErrorCode::RadioNotConnected) => {
+                    t!(i18n, node_not_connected).into_any()
+                }
+                _ => t!(i18n, error_failed).into_any(),
+            };
+            view! { <div class="toast" role="status">{text}</div> }
+        })
+    }
+}
+
+/// How long a request's problem stays over the page.
+const PROBLEM_SHOWN: Duration = Duration::from_secs(6);
 
 fn connected(live: Live) -> bool {
     live.status
@@ -144,14 +203,39 @@ fn fact(label: impl IntoView, value: impl IntoView) -> impl IntoView {
     }
 }
 
-/// What is amiss with the node, over all the rest.
+/// A fact too long to share its row, as a key.
+fn wide_fact(label: impl IntoView, value: impl IntoView) -> impl IntoView {
+    view! {
+        <div class="wide">
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+        </div>
+    }
+}
+
+/// What is amiss with the node, over all the rest; and, before it, why it
+/// may not be asked for anything, or may not answer.
 #[component]
 fn Checks() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
     move || {
         let checks = live.checks.get();
-        (!checks.is_empty()).then(|| {
+        let note = if !supported(live) {
+            Some(t!(i18n, meshcore_not_yet).into_any())
+        } else if !connected(live) {
+            Some(t!(i18n, node_not_connected).into_any())
+        } else if live
+            .nodes
+            .with(|nodes| nodes.get(&asking.num).is_some_and(|n| n.via_mqtt))
+        {
+            Some(t!(i18n, node_mqtt_hint).into_any())
+        } else {
+            None
+        };
+        (note.is_some() || !checks.is_empty()).then(|| {
+            let note = note.map(|note| view! { <li class="info">{note}</li> });
             let items = checks
                 .into_iter()
                 .map(|check| {
@@ -192,7 +276,7 @@ fn Checks() -> impl IntoView {
                     }
                 })
                 .collect_view();
-            view! { <ul class="node-checks">{items}</ul> }
+            view! { <ul class="node-checks">{note} {items}</ul> }
         })
     }
 }
@@ -295,8 +379,7 @@ fn Tile(
 fn Section(
     title: AnyView,
     #[prop(default = None)] at: Option<i64>,
-    #[prop(default = None)] ask: Option<RequestKind>,
-    #[prop(optional)] trace: bool,
+    #[prop(default = None)] asked: Option<Asked>,
     #[prop(optional)] class: &'static str,
     children: Children,
 ) -> impl IntoView {
@@ -306,89 +389,161 @@ fn Section(
         let at = u32::try_from(at).unwrap_or_default();
         move || t_string!(i18n, node_ago).replace("{ago}", &ago(live.now.get(), at))
     });
+    let quiet = match asked {
+        Some(Asked::Request(kind)) => Some(view! { <Quiet kind /> }),
+        _ => None,
+    };
     view! {
         <section class=format!("node-section {class}")>
             <header>
                 <h2>{title}</h2>
                 {when.map(|when| view! { <span class="when">{when}</span> })}
-                {ask.map(|kind| view! { <AskButton kind /> })}
-                {trace.then(|| view! { <TraceButton /> })}
+                {asked.map(|asked| view! { <AskButton asked /> })}
             </header>
-            {ask.map(|kind| view! { <Quiet kind /> })}
+            {quiet}
             {children()}
         </section>
     }
 }
 
-/// Asks the node for a kind of thing; off while the radio keeps from
-/// sending it, or the last one is still waiting.
+/// Asks the node for something, on the primary channel; beside it, when
+/// the channel matters, a menu to send it on another. Off while the radio
+/// keeps from sending the like, which it fills up the while; or while the
+/// last one waits for its answer.
 #[component]
-fn AskButton(kind: RequestKind) -> impl IntoView {
+fn AskButton(asked: Asked) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let asking = expect_context::<Asking>();
-    let pending = move || {
-        live.requests.with(|requests| {
+    let OpenMenu(menu) = expect_context::<OpenMenu>();
+    let pending = move || match asked {
+        Asked::Request(kind) => live.requests.with(|requests| {
             requests.iter().any(|r| {
                 r.node == asking.num && r.kind == kind && r.status == RequestStatus::Pending
             })
-        })
-    };
-    let paced = move || {
-        kind.pace()
-            .is_some_and(|pace| live.wait(pace, asking.clock.get()) > 0)
-    };
-    move || {
-        supported(live).then(|| {
-            view! {
-                <button
-                    class="ask"
-                    disabled=move || !connected(live) || pending() || paced()
-                    on:click=move |_| live.ask(asking.num, kind, asking.channel.get_untracked())
-                >
-                    {move || {
-                        if pending() {
-                            t_string!(i18n, node_asking).to_owned()
-                        } else {
-                            t_string!(i18n, node_ask_button).to_owned()
-                        }
-                    }}
-                </button>
-            }
-        })
-    }
-}
-
-/// Traces the route to the node.
-#[component]
-fn TraceButton() -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let asking = expect_context::<Asking>();
-    let pending = move || {
-        live.traceroutes.with(|traces| {
+        }),
+        Asked::Trace => live.traceroutes.with(|traces| {
             traces
                 .iter()
                 .any(|t| t.target == asking.num && t.status == TracerouteStatus::Pending)
+        }),
+    };
+    let wait = move || {
+        asked
+            .pace()
+            .map_or(0, |pace| live.wait(pace, asking.clock.get()))
+    };
+    let off = move || !connected(live) || pending() || wait() > 0;
+    let send = move |channel: u32| match asked {
+        Asked::Request(kind) => live.ask(asking.num, kind, channel),
+        Asked::Trace => live.trace(asking.num, channel),
+    };
+    let channels = move || {
+        live.channels.with(|channels| {
+            channels
+                .iter()
+                .filter(|c| c.role != "DISABLED")
+                .map(|c| c.index)
+                .collect::<Vec<_>>()
         })
     };
-    let paced = move || live.wait(Pace::Traceroute, asking.clock.get()) > 0;
+    // The channel matters unless it goes encrypted to the node's own key.
+    let by_channel = move || {
+        !asked.private()
+            || live.nodes.with(|nodes| {
+                nodes
+                    .get(&asking.num)
+                    .is_none_or(|node| node.public_key.is_none() || node.licensed)
+            })
+    };
+    let has_menu = move || by_channel() && channels().len() > 1;
+    let open = move || menu.get() == Some(asked);
+    let label = move || {
+        if pending() {
+            t_string!(i18n, node_asking).to_owned()
+        } else if asked == Asked::Trace {
+            t_string!(i18n, node_trace_button).to_owned()
+        } else {
+            t_string!(i18n, node_ask_button).to_owned()
+        }
+    };
+    // How long the radio keeps from sending it: said on hovering, shown as
+    // the button filling up.
+    let paced = move || {
+        let wait = wait();
+        let pace = asked.pace().filter(|_| wait > 0)?;
+        let text = match pace {
+            Pace::Position => t_string!(i18n, node_pace_position),
+            Pace::Telemetry => t_string!(i18n, node_pace_telemetry),
+            Pace::Traceroute => t_string!(i18n, node_pace_traceroute),
+        }
+        .replace("{n}", &wait.to_string());
+        let interval = u32::try_from(pace.interval()).unwrap_or(1).max(1);
+        let filled = 100 - wait.min(interval) * 100 / interval;
+        Some((text, filled))
+    };
     move || {
         supported(live).then(|| {
             view! {
-                <button
-                    class="ask"
-                    disabled=move || !connected(live) || pending() || paced()
-                    on:click=move |_| live.trace(asking.num, asking.channel.get_untracked())
-                >
+                <span class="ask-split" class:open=open>
+                    <button
+                        class="ask"
+                        class:split=has_menu
+                        disabled=off
+                        title=move || paced().map(|(text, _)| text)
+                        on:click=move |_| send(0)
+                    >
+                        {label}
+                        {move || {
+                            paced()
+                                .map(|(_, filled)| {
+                                    view! { <i class="fill" style=format!("width: {filled}%")></i> }
+                                })
+                        }}
+                    </button>
                     {move || {
-                        if pending() {
-                            t_string!(i18n, node_asking).to_owned()
-                        } else {
-                            t_string!(i18n, node_trace_button).to_owned()
-                        }
+                        has_menu()
+                            .then(|| {
+                                view! {
+                                    <button
+                                        class="ask caret"
+                                        disabled=off
+                                        aria-haspopup="menu"
+                                        aria-expanded=move || open().to_string()
+                                        title=move || t_string!(i18n, node_channel_choose)
+                                        aria-label=move || t_string!(i18n, node_channel_choose)
+                                        on:click=move |ev| {
+                                            ev.stop_propagation();
+                                            menu.update(|m| {
+                                                *m = if *m == Some(asked) { None } else { Some(asked) };
+                                            });
+                                        }
+                                    >
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M6 9l6 6l6 -6"></path>
+                                        </svg>
+                                    </button>
+                                }
+                            })
                     }}
-                </button>
+                    <Show when=open>
+                        <div class="ask-menu" role="menu" on:click=|ev| ev.stop_propagation()>
+                            <p>{t!(i18n, node_channel_menu)}</p>
+                            <For each=channels key=|index| *index let:index>
+                                <button
+                                    role="menuitem"
+                                    on:click=move |_| {
+                                        menu.set(None);
+                                        send(index);
+                                    }
+                                >
+                                    <span class="slot">{index}</span>
+                                    {move || title(live, Peer::Channel { channel: index })}
+                                </button>
+                            </For>
+                        </div>
+                    </Show>
+                </span>
             }
         })
     }
@@ -428,118 +583,6 @@ fn Quiet(kind: RequestKind) -> impl IntoView {
                 .replace("{left}", &ago(window, since));
             view! { <p class="quiet">{text}</p> }
         })
-    }
-}
-
-/// What the node's requests go on, how long the radio keeps from sending
-/// each paced kind, and why the last one was not sent: in one place, for
-/// every button of the page.
-#[component]
-fn AskPanel() -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let asking = expect_context::<Asking>();
-    let channels = move || {
-        live.channels.with(|channels| {
-            channels
-                .iter()
-                .filter(|c| c.role != "DISABLED")
-                .map(|c| c.index)
-                .collect::<Vec<_>>()
-        })
-    };
-    let node = move || live.nodes.with(|nodes| nodes.get(&asking.num).cloned());
-    // Whether what goes to it alone goes encrypted to it, or on the channel.
-    let key_hint = move || {
-        let node = node()?;
-        Some(if node.licensed {
-            t!(i18n, node_licensed_hint).into_any()
-        } else if node.public_key.is_some() {
-            t!(i18n, node_pki_hint).into_any()
-        } else {
-            t!(i18n, node_no_key_hint).into_any()
-        })
-    };
-    let mqtt = move || {
-        node()
-            .is_some_and(|n| n.via_mqtt)
-            .then(|| view! { <p class="hint">{t!(i18n, node_mqtt_hint)}</p> })
-    };
-    let paces = move || {
-        let now = asking.clock.get();
-        [Pace::Position, Pace::Telemetry, Pace::Traceroute]
-            .into_iter()
-            .filter_map(|pace| {
-                let wait = live.wait(pace, now);
-                (wait > 0).then(|| {
-                    let text = match pace {
-                        Pace::Position => t_string!(i18n, node_pace_position),
-                        Pace::Telemetry => t_string!(i18n, node_pace_telemetry),
-                        Pace::Traceroute => t_string!(i18n, node_pace_traceroute),
-                    }
-                    .replace("{n}", &wait.to_string());
-                    view! { <li>{text}</li> }
-                })
-            })
-            .collect_view()
-    };
-    let problem = move || {
-        if !connected(live) {
-            return Some(t!(i18n, node_not_connected).into_any());
-        }
-        live.ask_error.get().map(|failure| match failure {
-            Failure::Rejected(ErrorCode::TooSoon) => t!(i18n, ask_too_soon).into_any(),
-            Failure::Rejected(ErrorCode::InvalidChannel) => {
-                t!(i18n, ask_invalid_channel).into_any()
-            }
-            Failure::Rejected(ErrorCode::RadioNotConnected) => {
-                t!(i18n, node_not_connected).into_any()
-            }
-            _ => t!(i18n, error_failed).into_any(),
-        })
-    };
-
-    view! {
-        <Show
-            when=move || supported(live)
-            fallback=move || {
-                view! {
-                    <EmptyState
-                        icon=crate::empty::SETTINGS_OFF
-                        title=t!(i18n, empty_meshcore_title).into_any()
-                        text=t!(i18n, meshcore_not_yet).into_any()
-                        compact=true
-                    />
-                }
-            }
-        >
-            <Section title=t!(i18n, node_requests_title).into_any() class="node-asking">
-                <label class="channel">
-                    <span>{t!(i18n, node_channel)}</span>
-                    <select on:change=move |ev| {
-                        if let Ok(index) = event_target_value(&ev).parse() {
-                            asking.channel.set(index);
-                        }
-                    }>
-                        <For each=channels key=|index| *index let:index>
-                            <option
-                                value=index.to_string()
-                                selected=move || asking.channel.get() == index
-                            >
-                                {move || {
-                                    format!("{index} · {}", title(live, Peer::Channel { channel: index }))
-                                }}
-                            </option>
-                        </For>
-                    </select>
-                </label>
-                <p class="hint">{t!(i18n, node_channel_hint)}</p>
-                <p class="hint">{key_hint}</p>
-                {mqtt}
-                <ul class="paces">{paces}</ul>
-                <p class="error">{problem}</p>
-            </Section>
-        </Show>
     }
 }
 
@@ -593,7 +636,7 @@ fn PositionSection(at: Option<i64>) -> impl IntoView {
         .into_any()
     };
     view! {
-        <Section title=t!(i18n, node_position).into_any() at ask=Some(RequestKind::Position)>
+        <Section title=t!(i18n, node_position).into_any() at asked=Some(Asked::Request(RequestKind::Position))>
             {body}
         </Section>
     }
@@ -627,16 +670,26 @@ fn Identity(at: Option<i64>) -> impl IntoView {
             }
             None => view! { <span class="dim">{t!(i18n, node_key_unknown)}</span> }.into_any(),
         };
+        // How what is for it alone reaches it: telemetry and neighbours
+        // asked, and messages to it.
+        let direct = if node.licensed {
+            t!(i18n, node_direct_licensed).into_any()
+        } else if node.public_key.is_some() {
+            t!(i18n, node_direct_pki).into_any()
+        } else {
+            t!(i18n, node_direct_channel).into_any()
+        };
         Some(view! {
             <dl class="facts">
                 {fact(t!(i18n, nodes_id), view! { <span class="mono">{node.id.clone()}</span> })}
-                {fact(t!(i18n, node_public_key), key)}
+                {wide_fact(t!(i18n, node_public_key), key)}
+                {wide_fact(t!(i18n, node_direct), direct)}
                 {node.licensed.then(|| fact(t!(i18n, node_licensed), t!(i18n, node_yes)))}
             </dl>
         })
     };
     view! {
-        <Section title=t!(i18n, node_identity).into_any() at ask=Some(RequestKind::NodeInfo)>
+        <Section title=t!(i18n, node_identity).into_any() at asked=Some(Asked::Request(RequestKind::NodeInfo))>
             {body}
         </Section>
     }
@@ -673,7 +726,7 @@ fn Device(packet: Option<Packet>) -> impl IntoView {
         None => nothing(i18n).into_any(),
     };
     view! {
-        <Section title=t!(i18n, node_device).into_any() at ask=Some(RequestKind::DeviceTelemetry)>
+        <Section title=t!(i18n, node_device).into_any() at asked=Some(Asked::Request(RequestKind::DeviceTelemetry))>
             {body}
         </Section>
     }
@@ -751,7 +804,7 @@ fn Environment(packet: Option<Packet>) -> impl IntoView {
         <Section
             title=t!(i18n, node_environment).into_any()
             at
-            ask=Some(RequestKind::EnvironmentTelemetry)
+            asked=Some(Asked::Request(RequestKind::EnvironmentTelemetry))
         >
             <dl class="facts">{facts}</dl>
         </Section>
@@ -779,7 +832,7 @@ fn PowerSection(packet: Option<Packet>) -> impl IntoView {
         })
         .collect_view();
     Some(view! {
-        <Section title=t!(i18n, node_power).into_any() at ask=Some(RequestKind::PowerTelemetry)>
+        <Section title=t!(i18n, node_power).into_any() at asked=Some(Asked::Request(RequestKind::PowerTelemetry))>
             <dl class="facts">{facts}</dl>
         </Section>
     })
@@ -821,7 +874,7 @@ fn Stats(packet: Option<Packet>) -> impl IntoView {
         None => nothing(i18n).into_any(),
     };
     view! {
-        <Section title=t!(i18n, node_stats).into_any() at ask=Some(RequestKind::LocalStats)>
+        <Section title=t!(i18n, node_stats).into_any() at asked=Some(Asked::Request(RequestKind::LocalStats))>
             {body}
         </Section>
     }
@@ -877,7 +930,7 @@ fn Neighbors(packet: Option<Packet>) -> impl IntoView {
         view! { <ul class="neighbours">{rows}</ul> }.into_any()
     };
     Some(view! {
-        <Section title=t!(i18n, node_neighbors).into_any() at ask=Some(RequestKind::Neighbors)>
+        <Section title=t!(i18n, node_neighbors).into_any() at asked=Some(Asked::Request(RequestKind::Neighbors))>
             {body}
         </Section>
     })
@@ -931,7 +984,7 @@ fn More(latest: NodeLatest) -> impl IntoView {
                         <KindLabel kind />
                         <span class="why">{why}</span>
                     </span>
-                    <AskButton kind />
+                    <AskButton asked=Asked::Request(kind) />
                 </li>
             }
         })
@@ -969,7 +1022,7 @@ fn Traces(drawer: RwSignal<bool>) -> impl IntoView {
             .with(|traces| traces.iter().find(|t| t.target == asking.num).cloned())
     };
     view! {
-        <Section title=t!(i18n, node_traces).into_any() trace=true class="node-traces">
+        <Section title=t!(i18n, node_traces).into_any() asked=Some(Asked::Trace) class="node-traces">
             {move || match last() {
                 Some(traceroute) => view! {
                     <TraceCard traceroute />
