@@ -29,28 +29,28 @@ pub fn PreferencesView() -> impl IntoView {
 
     let themes = [Theme::System, Theme::Light, Theme::Dark].map(|theme| {
         let label = move || match theme {
-            Theme::System => t!(i18n, theme_system).into_any(),
-            Theme::Light => t!(i18n, theme_light).into_any(),
-            Theme::Dark => t!(i18n, theme_dark).into_any(),
+            Theme::System => t_string!(i18n, theme_system).to_string(),
+            Theme::Light => t_string!(i18n, theme_light).to_string(),
+            Theme::Dark => t_string!(i18n, theme_dark).to_string(),
         };
         let pick = choose(Box::new(move |p| p.theme = theme));
         (
             Signal::derive(move || current().theme == theme),
             Box::new(pick) as Box<dyn Fn() + Send + Sync>,
-            label.into_any(),
+            Signal::derive(label),
         )
     });
     let maps = [MapTheme::Page, MapTheme::Light, MapTheme::Dark].map(|map| {
         let label = move || match map {
-            MapTheme::Page => t!(i18n, map_page).into_any(),
-            MapTheme::Light => t!(i18n, map_light).into_any(),
-            MapTheme::Dark => t!(i18n, map_dark).into_any(),
+            MapTheme::Page => t_string!(i18n, map_page).to_string(),
+            MapTheme::Light => t_string!(i18n, map_light).to_string(),
+            MapTheme::Dark => t_string!(i18n, map_dark).to_string(),
         };
         let pick = choose(Box::new(move |p| p.map_theme = map));
         (
             Signal::derive(move || current().map_theme == map),
             Box::new(pick) as Box<dyn Fn() + Send + Sync>,
-            label.into_any(),
+            Signal::derive(label),
         )
     });
     // The accent: amber, the only one there is yet; the others, to come,
@@ -140,13 +140,17 @@ fn Row(title: AnyView, hint: AnyView, children: Children) -> impl IntoView {
 }
 
 /// One option: whether it is the one chosen, choosing it, and its name.
-pub type Choice = (Signal<bool>, Box<dyn Fn() + Send + Sync>, AnyView);
+pub type Choice = (Signal<bool>, Box<dyn Fn() + Send + Sync>, Signal<String>);
 
-/// A few options, of which one is chosen, under a pill that slides to it.
+/// A few options, of which one is chosen, under a pill that slides to it:
+/// each as wide as its word, the room left shared out. Its word again, in
+/// bold and unseen, keeps it as wide chosen as not.
 pub fn pills(options: Vec<Choice>) -> impl IntoView {
     let n = options.len();
     let ons: Vec<Signal<bool>> = options.iter().map(|(on, _, _)| *on).collect();
-    let at = move || ons.iter().position(|on| on.get()).unwrap_or(0);
+    let at = Memo::new(move |_| ons.iter().position(|on| on.get()).unwrap_or(0));
+    let strip = NodeRef::<leptos::html::Div>::new();
+    let pill = slide(strip, at);
     let buttons = options
         .into_iter()
         .map(|(on, pick, label)| {
@@ -154,22 +158,77 @@ pub fn pills(options: Vec<Choice>) -> impl IntoView {
                 <button
                     type="button"
                     role="radio"
+                    data-label=move || label.get()
                     class:on=move || on.get()
                     aria-checked=move || on.get().to_string()
                     on:click=move |_| pick()
                 >
-                    {label}
+                    {move || label.get()}
                 </button>
             }
         })
         .collect_view();
     view! {
         <div
-            class="segmented pref-control"
+            class="segmented fitted pref-control"
             role="radiogroup"
-            style=move || format!("--n: {n}; --at: {}", at())
+            node_ref=strip
+            style=move || format!("--n: {n}; --at: {}; {}", at.get(), pill.get())
         >
             {buttons}
         </div>
     }
+}
+
+/// Where the pill of a strip of options goes and how wide, as the one at
+/// `at` is laid out (`--x` and `--w`, for its style): measured again as it
+/// is another, as the language changes, and as the strip changes size: the
+/// window's, its fonts loaded, or shown after being hidden, when it was
+/// measured as nothing.
+pub fn slide(strip: NodeRef<leptos::html::Div>, at: Memo<usize>) -> RwSignal<String> {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+    let i18n = use_i18n();
+    let pill = RwSignal::new(String::new());
+    let resized = RwSignal::new(0u32);
+    // What watches its size, and what it calls, kept to be let go with it.
+    let watch = StoredValue::new_local(None::<(web_sys::ResizeObserver, Closure<dyn FnMut()>)>);
+    Effect::new(move |_| {
+        let Some(strip) = strip.get() else { return };
+        if watch.with_value(Option::is_some) {
+            return;
+        }
+        let call = Closure::<dyn FnMut()>::new(move || resized.update(|n| *n += 1));
+        if let Ok(observer) = web_sys::ResizeObserver::new(call.as_ref().unchecked_ref()) {
+            observer.observe(&strip);
+            watch.set_value(Some((observer, call)));
+        }
+    });
+    on_cleanup(move || {
+        watch.update_value(|w| {
+            if let Some((observer, _)) = w.take() {
+                observer.disconnect();
+            }
+        });
+    });
+    Effect::new(move |_| {
+        let at = at.get();
+        let _ = i18n.get_locale();
+        resized.track();
+        let Some(strip) = strip.get() else { return };
+        request_animation_frame(move || {
+            let option = strip
+                .children()
+                .item(at as u32)
+                .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok());
+            if let Some(option) = option {
+                pill.set(format!(
+                    "--x: {}px; --w: {}px",
+                    option.offset_left(),
+                    option.offset_width()
+                ));
+            }
+        });
+    });
+    pill
 }

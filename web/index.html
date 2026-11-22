@@ -694,6 +694,8 @@
       .phone-list .item .chevron { width: 18px; height: 18px; color: var(--mc-muted); }
       .phone-list .empty { margin: 4px 12px; }
       .phone-list .local-foot { border: 1px solid var(--mc-border); border-radius: 12px; margin-bottom: 8px; }
+      /* In More, its settings are the row under it: no button for them here. */
+      .phone-list .local-foot .settings { display: none; }
       /* Pages. */
       .card {
         background: var(--mc-surface);
@@ -814,23 +816,19 @@
         gap: 16px;
       }
       /*
-       * The tabs each as wide as its word, the room left shared out, and the
-       * pill where the one picked is and as wide, as measured (--x, --w):
+       * Options each as wide as its word, the room left shared out, and the
+       * pill where the one chosen is and as wide, as measured (--x, --w):
        * until it is, as any other pill.
        */
-      .segmented.settings-tabs {
-        align-self: center;
-        width: 100%;
-        max-width: 640px;
-        grid-template-columns: repeat(var(--n), auto);
-      }
-      .segmented.settings-tabs::before {
+      .segmented.fitted { grid-template-columns: repeat(var(--n), auto); }
+      .settings-tabs { align-self: center; width: 100%; max-width: 640px; }
+      .segmented.fitted::before {
         left: 0;
         width: var(--w, calc((100% - 6px) / var(--n, 3)));
         transform: translateX(var(--x, calc(3px + var(--at, 0) * 100%)));
         transition: transform 0.2s ease, width 0.2s ease;
       }
-      .segmented.settings-tabs button {
+      .segmented.fitted button {
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -839,7 +837,7 @@
         white-space: nowrap;
       }
       /* Its word in bold, unseen, that keeps it as wide picked as not. */
-      .settings-tabs button::before {
+      .segmented.fitted button::before {
         content: attr(data-label);
         height: 0;
         overflow: hidden;
@@ -2553,6 +2551,9 @@
         .ask-split .ask { min-height: 42px; }
         .topbar .actions .with-icon { min-width: 44px; justify-content: center; }
         .segmented button { min-height: 38px; }
+        /* A colour to pick: round, a finger wide, not stretched to its height. */
+        .swatch { min-height: 0; }
+        .accents .swatch { width: 40px; height: 40px; }
         .ask-menu button { min-height: 44px; }
         /* A mark that is a button: its finger's room, not its look. */
         .nodes-table .mark.to-map { padding: 10px; margin: -10px -10px -10px -6px; }

@@ -493,10 +493,9 @@ fn FieldInput(
                             as Box<dyn Fn() + Send + Sync>
                     };
                     let (code, field_id) = (code.clone(), field_id.clone());
-                    let label = view! {
-                        {move || crate::fields::choice(i18n.get_locale(), &field_id, &code)}
-                    }
-                    .into_any();
+                    let label = Signal::derive(move || {
+                        crate::fields::choice(i18n.get_locale(), &field_id, &code).to_string()
+                    });
                     (on, pick, label)
                 })
                 .collect();

@@ -22,7 +22,6 @@ use meshctl_api::{
     RegionLimits, SettingsSection,
 };
 use std::collections::BTreeMap;
-use wasm_bindgen::JsCast;
 
 /// What changed between the settings read and the ones in the form. The
 /// channels are not in it: each is saved on its own, from its editor.
@@ -293,35 +292,13 @@ pub fn SettingsView() -> impl IntoView {
             }
         })
         .collect_view();
-    let at = move || TABS.iter().position(|t| *t == tab.get()).unwrap_or(0);
+    let at = Memo::new(move |_| TABS.iter().position(|t| *t == tab.get()).unwrap_or(0));
 
     // Each tab as wide as its word, the room left shared out: the pill goes
     // where the one picked is and as wide, measured once it is laid out, as
     // the tab, the language or the window change.
     let strip = NodeRef::<leptos::html::Div>::new();
-    let pill = RwSignal::new(String::new());
-    let resized = RwSignal::new(0u32);
-    let resizing = window_event_listener(leptos::ev::resize, move |_| resized.update(|n| *n += 1));
-    on_cleanup(move || resizing.remove());
-    Effect::new(move |_| {
-        let at = at();
-        let _ = i18n.get_locale();
-        resized.track();
-        let Some(strip) = strip.get() else { return };
-        request_animation_frame(move || {
-            let tab = strip
-                .children()
-                .item(at as u32)
-                .and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok());
-            if let Some(tab) = tab {
-                pill.set(format!(
-                    "--x: {}px; --w: {}px",
-                    tab.offset_left(),
-                    tab.offset_width()
-                ));
-            }
-        });
-    });
+    let pill = crate::preferences::slide(strip, at);
 
     // Built again only as the tab changes, not as anything in it is typed.
     let has_draft = Memo::new(move |_| draft.with(Option::is_some));
@@ -407,10 +384,10 @@ pub fn SettingsView() -> impl IntoView {
         >
             <div class="node-settings">
                 <div
-                    class="segmented settings-tabs"
+                    class="segmented fitted settings-tabs"
                     role="tablist"
                     node_ref=strip
-                    style=move || format!("--n: {}; --at: {}; {}", TABS.len(), at(), pill.get())
+                    style=move || format!("--n: {}; --at: {}; {}", TABS.len(), at.get(), pill.get())
                 >
                     {tabs.clone()}
                 </div>
@@ -707,7 +684,7 @@ fn LoraTab(draft: Draft) -> impl IntoView {
             (
                 Signal::derive(move || spread_factor.get() == sf),
                 Box::new(move || set_spread_factor(sf)) as Box<dyn Fn() + Send + Sync>,
-                sf.to_string().into_any(),
+                Signal::stored(sf.to_string()),
             )
         })
         .collect::<Vec<_>>();
@@ -716,7 +693,7 @@ fn LoraTab(draft: Draft) -> impl IntoView {
             (
                 Signal::derive(move || coding_rate.get() == cr),
                 Box::new(move || set_coding_rate(cr)) as Box<dyn Fn() + Send + Sync>,
-                format!("4/{cr}").into_any(),
+                Signal::stored(format!("4/{cr}")),
             )
         })
         .collect::<Vec<_>>();

@@ -215,15 +215,15 @@ fn NodeList() -> impl IntoView {
         .into_iter()
         .map(|this| {
             let label = move || match this {
-                Reach::All => t!(i18n, nodes_all).into_any(),
-                Reach::Direct => t!(i18n, nodes_direct).into_any(),
-                Reach::Mesh => t!(i18n, nodes_mesh).into_any(),
-                Reach::Mqtt => "MQTT".into_any(),
+                Reach::All => t_string!(i18n, nodes_all).to_string(),
+                Reach::Direct => t_string!(i18n, nodes_direct).to_string(),
+                Reach::Mesh => t_string!(i18n, nodes_mesh).to_string(),
+                Reach::Mqtt => "MQTT".to_owned(),
             };
             (
                 Signal::derive(move || reach.get() == this),
                 Box::new(move || reach.set(this)) as Box<dyn Fn() + Send + Sync>,
-                label.into_any(),
+                Signal::derive(label),
             )
         })
         .collect::<Vec<_>>();
