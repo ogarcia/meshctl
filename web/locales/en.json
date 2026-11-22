@@ -433,5 +433,10 @@
   "window_two_weeks": "2 wk",
   "window_month": "1 mo",
   "chart_hops": "Hops",
-  "chart_more": "Show {n} more"
+  "chart_more": "Show {n} more",
+  "back_nodes": "Back to the nodes",
+  "back_map": "Back to the map",
+  "back_chat": "Back to the chat",
+  "back_packets": "Back to Live",
+  "back_node": "Back to {name}"
 }

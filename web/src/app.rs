@@ -49,6 +49,17 @@ pub enum Daemon {
     NeedsToken,
 }
 
+/// Where a node's page was opened from, to go back to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Back {
+    Page(Page),
+    /// Another node's page, as through its neighbours.
+    Node(u32),
+}
+
+/// How many steps back are kept: enough for any walk through neighbours.
+const BACK_KEPT: usize = 20;
+
 /// Which page is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -111,6 +122,8 @@ pub struct Live {
     pub packets: RwSignal<Vec<Packet>>,
     /// The node whose page is open, if any.
     pub node: RwSignal<Option<u32>>,
+    /// Where the open node's page was opened from, the latest last.
+    pub back: RwSignal<Vec<Back>>,
     /// The node picked on the map, if any.
     pub map_pick: RwSignal<Option<u32>>,
     /// The node whose last traced route the map shows, if any.
@@ -152,6 +165,7 @@ impl Live {
             traceroutes: RwSignal::new(Vec::new()),
             packets: RwSignal::new(Vec::new()),
             node: RwSignal::new(None),
+            back: RwSignal::new(Vec::new()),
             map_pick: RwSignal::new(None),
             map_route: RwSignal::new(None),
             requests: RwSignal::new(Vec::new()),
@@ -168,10 +182,26 @@ impl Live {
     pub fn go(self, page: Page) {
         self.page.set(page);
         self.menu.set(false);
+        // A page gone to anew: nothing to go back to from it.
+        self.back.set(Vec::new());
+    }
+
+    /// Goes back to where the open node's page was opened from: another
+    /// node's page, or a page; the nodes list when nothing is known.
+    pub fn go_back(self) {
+        let mut back = self.back.get_untracked();
+        match back.pop().unwrap_or(Back::Page(Page::Nodes)) {
+            Back::Node(node) => {
+                self.show_node(node);
+                self.back.set(back);
+            }
+            Back::Page(page) => self.go(page),
+        }
     }
 
     pub fn select(self, radio: RadioId) {
         daemon::set_last_radio(radio);
+        self.back.set(Vec::new());
         // What there is of the last one goes: nothing of it is shown as the
         // new one's while that is read.
         self.loaded.set(None);
@@ -289,6 +319,25 @@ impl Live {
 
     /// Opens a node's page.
     pub fn open_node(self, node: u32) {
+        // Where it is opened from, to go back to; the same page again is
+        // nowhere new.
+        let from = match self.page.get_untracked() {
+            Page::Node => self.node.get_untracked().map(Back::Node),
+            page => Some(Back::Page(page)),
+        };
+        let mut back = self.back.get_untracked();
+        if from != Some(Back::Node(node)) {
+            back.extend(from);
+        }
+        if back.len() > BACK_KEPT {
+            back.remove(0);
+        }
+        self.show_node(node);
+        self.back.set(back);
+    }
+
+    /// Shows a node's page, and reads what it shows.
+    fn show_node(self, node: u32) {
         self.node.set(Some(node));
         self.requests.set(Vec::new());
         self.latest.set(None);
@@ -1435,7 +1484,39 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 });
                 view! { {profile} {chat} }
             };
+            // Back to where its page was opened from, on its page.
+            let back = move || {
+                (live.page.get() == Page::Node).then(|| {
+                    let label = move || {
+                        let to = live
+                            .back
+                            .with(|back| back.last().copied())
+                            .unwrap_or(Back::Page(Page::Nodes));
+                        match to {
+                            Back::Node(other) => t_string!(i18n, back_node)
+                                .replace("{name}", &title(live, Peer::Node { node: other })),
+                            Back::Page(Page::Map) => t_string!(i18n, back_map).to_owned(),
+                            Back::Page(Page::Chat) => t_string!(i18n, back_chat).to_owned(),
+                            Back::Page(Page::Packets) => t_string!(i18n, back_packets).to_owned(),
+                            Back::Page(_) => t_string!(i18n, back_nodes).to_owned(),
+                        }
+                    };
+                    view! {
+                        <button
+                            class="icon-button back"
+                            title=label
+                            aria-label=label
+                            on:click=move |_| live.go_back()
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 12h14M5 12l6 6M5 12l6 -6"></path>
+                            </svg>
+                        </button>
+                    }
+                })
+            };
             view! {
+                {back}
                 <span class=class>{move || badge::fit(&short_name(live, node))}</span>
                 <div class="heading">
                     <h1>
