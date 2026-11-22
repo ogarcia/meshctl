@@ -10,10 +10,10 @@ use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
     BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkState,
-    MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeCheck, NodeSettings,
-    NodeSettingsChange, Pace, Packet, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
-    Request, RequestKind, SectionSecret, SettingsApplied, SettingsSection, SightingId, Status,
-    Traceroute, Waits,
+    MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeCheck, NodeLatest,
+    NodeSettings, NodeSettingsChange, Pace, Packet, Peer, Preferences, Radio, RadioId, RadioKind,
+    RadioSettings, Request, RequestKind, SectionSecret, SettingsApplied, SettingsSection,
+    SightingId, Status, Traceroute, TracerouteId, Waits,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -91,6 +91,11 @@ const SHARED_KEY_WINDOW: i64 = 7 * 24 * 3600;
 /// How many of a node's latest node infos are looked into for more than
 /// one key or hardware model.
 const NODE_INFOS_CHECKED: u32 = 50;
+
+/// How many of a node's latest telemetry packets are looked into for the
+/// latest of each kind: one it sends seldom, as power, may be further back
+/// than its device telemetry goes.
+const TELEMETRY_LOOKED_INTO: u32 = 500;
 
 /// Why a request was not sent.
 #[derive(Debug)]
@@ -663,6 +668,79 @@ impl Radios {
         }))
     }
 
+    /// What a node a radio knows of last told of each kind: `None` if there
+    /// is no such radio, or it knows of no such node.
+    pub async fn latest(&self, id: RadioId, num: u32) -> Result<Option<NodeLatest>> {
+        use meshctl_proto::meshtastic::{PortNum, Telemetry, telemetry};
+        use prost::Message;
+
+        let Some(mesh) = self.mesh(id) else {
+            return Ok(None);
+        };
+        if !mesh.read(|state| state.nodes.contains_key(&num)) {
+            return Ok(None);
+        }
+        let last = |portnum: PortNum| async move {
+            let sightings = self
+                .store
+                .latest_payloads(id, num, portnum as i32, 1)
+                .await?;
+            Ok::<_, anyhow::Error>(sightings.first().map(|(sighting, _)| *sighting))
+        };
+        let mut sightings = [
+            last(PortNum::NodeinfoApp).await?,
+            last(PortNum::PositionApp).await?,
+            None,
+            None,
+            None,
+            None,
+            last(PortNum::NeighborinfoApp).await?,
+        ];
+        // Telemetry of every kind comes on one port: the latest of each.
+        for (sighting, payload) in self
+            .store
+            .latest_payloads(id, num, PortNum::TelemetryApp as i32, TELEMETRY_LOOKED_INTO)
+            .await?
+        {
+            let slot = match Telemetry::decode(payload.as_slice())
+                .ok()
+                .and_then(|t| t.variant)
+            {
+                Some(telemetry::Variant::DeviceMetrics(_)) => 2,
+                Some(telemetry::Variant::EnvironmentMetrics(_)) => 3,
+                Some(telemetry::Variant::PowerMetrics(_)) => 4,
+                Some(telemetry::Variant::LocalStats(_)) => 5,
+                _ => continue,
+            };
+            sightings[slot].get_or_insert(sighting);
+            if sightings[2..6].iter().all(Option::is_some) {
+                break;
+            }
+        }
+        let mut packets = Vec::with_capacity(sightings.len());
+        for sighting in sightings {
+            packets.push(match sighting {
+                Some(sighting) => self
+                    .store
+                    .sighting(sighting)
+                    .await?
+                    .map(crate::packets::packet),
+                None => None,
+            });
+        }
+        let mut packets = packets.into_iter();
+        let mut next = || packets.next().flatten();
+        Ok(Some(NodeLatest {
+            node_info: next(),
+            position: next(),
+            device: next(),
+            environment: next(),
+            power: next(),
+            local_stats: next(),
+            neighbors: next(),
+        }))
+    }
+
     /// What is amiss with a node a radio knows of, found in what it sent:
     /// `None` if there is no such radio, or it knows of no such node.
     pub async fn checks(&self, id: RadioId, num: u32) -> Result<Option<Vec<NodeCheck>>> {
@@ -713,7 +791,7 @@ impl Radios {
             .latest_payloads(id, num, PortNum::NodeinfoApp as i32, NODE_INFOS_CHECKED)
             .await?
             .iter()
-            .filter_map(|payload| User::decode(payload.as_slice()).ok())
+            .filter_map(|(_, payload)| User::decode(payload.as_slice()).ok())
             .collect();
         let keys = crate::keys::tell_apart(users.iter().map(|user| user.public_key.as_slice()));
         if keys.len() > 1 {
@@ -981,12 +1059,13 @@ impl Radios {
         &self,
         id: RadioId,
         node: Option<u32>,
+        before: Option<TracerouteId>,
         limit: u32,
     ) -> Result<Option<Vec<Traceroute>>> {
         if self.mesh(id).is_none() {
             return Ok(None);
         }
-        Ok(Some(self.store.traceroutes(id, node, limit).await?))
+        Ok(Some(self.store.traceroutes(id, node, before, limit).await?))
     }
 
     /// The packets a radio heard, the newest first, or `None` if there is no

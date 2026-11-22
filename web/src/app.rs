@@ -27,9 +27,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
 use meshctl_api::{
-    Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, NewRequest, Node, Pace,
-    Packet, Peer, Preferences, Radio, RadioId, RadioKind, Request, RequestKind, RequestStatus,
-    Status, Theme, Traceroute, TracerouteStatus,
+    Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, NewRequest, Node,
+    NodeCheck, NodeLatest, Pace, Packet, Peer, Preferences, Radio, RadioId, RadioKind, Request,
+    RequestKind, RequestStatus, Status, Theme, Traceroute, TracerouteStatus,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
@@ -117,6 +117,10 @@ pub struct Live {
     pub map_route: RwSignal<Option<u32>>,
     /// What the open node was asked for, the newest first.
     pub requests: RwSignal<Vec<Request>>,
+    /// What the open node last told of each kind.
+    pub latest: RwSignal<Option<NodeLatest>>,
+    /// What is amiss with the open node.
+    pub checks: RwSignal<Vec<NodeCheck>>,
     /// Why the last request or traceroute was not sent.
     pub ask_error: RwSignal<Option<Failure>>,
     /// When, by this browser's clock, the selected radio sends each paced
@@ -151,6 +155,8 @@ impl Live {
             map_pick: RwSignal::new(None),
             map_route: RwSignal::new(None),
             requests: RwSignal::new(Vec::new()),
+            latest: RwSignal::new(None),
+            checks: RwSignal::new(Vec::new()),
             ask_error: RwSignal::new(None),
             ready: RwSignal::new(HashMap::new()),
             synced: RwSignal::new(0),
@@ -285,6 +291,8 @@ impl Live {
     pub fn open_node(self, node: u32) {
         self.node.set(Some(node));
         self.requests.set(Vec::new());
+        self.latest.set(None);
+        self.checks.set(Vec::new());
         self.ask_error.set(None);
         self.go(Page::Node);
         let Some(radio) = self.selected.get_untracked() else {
@@ -299,6 +307,32 @@ impl Live {
             }
         });
         self.read_waits(radio);
+        self.read_latest(radio, node);
+        self.read_checks(radio, node);
+    }
+
+    /// Reads what the open node last told of each kind.
+    fn read_latest(self, radio: RadioId, node: u32) {
+        spawn_local(async move {
+            if let Ok(latest) = daemon::node_latest(radio, node).await
+                && self.node.get_untracked() == Some(node)
+                && self.selected.get_untracked() == Some(radio)
+            {
+                self.latest.set(Some(latest));
+            }
+        });
+    }
+
+    /// Reads what is amiss with the open node.
+    fn read_checks(self, radio: RadioId, node: u32) {
+        spawn_local(async move {
+            if let Ok(checks) = daemon::node_checks(radio, node).await
+                && self.node.get_untracked() == Some(node)
+                && self.selected.get_untracked() == Some(radio)
+            {
+                self.checks.set(checks);
+            }
+        });
     }
 
     /// Reads how long the radio takes to send each paced kind again.
@@ -581,6 +615,19 @@ impl Live {
                     Ok(())
                 }
                 ServerMessage::Packet { radio, packet } if self.is_selected(radio) => {
+                    // Something new from the open node that its page shows.
+                    if self.node.get_untracked() == Some(packet.from) {
+                        match packet.port.as_deref() {
+                            Some("NODEINFO_APP") => {
+                                self.read_latest(radio, packet.from);
+                                self.read_checks(radio, packet.from);
+                            }
+                            Some("POSITION_APP" | "TELEMETRY_APP" | "NEIGHBORINFO_APP") => {
+                                self.read_latest(radio, packet.from);
+                            }
+                            _ => {}
+                        }
+                    }
                     self.packets.update(|packets| {
                         packets.insert(0, packet);
                         packets.truncate(KEPT);

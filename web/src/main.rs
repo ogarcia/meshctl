@@ -7,6 +7,7 @@ mod app;
 mod badge;
 mod channel_settings;
 mod chat;
+mod clipboard;
 mod daemon;
 mod emoji;
 mod empty;

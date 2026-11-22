@@ -199,6 +199,36 @@ pub async fn requests(radio: RadioId, node: u32) -> Result<Vec<meshctl_api::Requ
     get(&format!("/radios/{radio}/requests?node={node}&limit=50")).await
 }
 
+/// What a node last told a radio of each kind.
+pub async fn node_latest(radio: RadioId, node: u32) -> Result<meshctl_api::NodeLatest, Failure> {
+    get(&format!("/radios/{radio}/nodes/{node}/latest")).await
+}
+
+/// What is amiss with a node a radio knows of.
+pub async fn node_checks(
+    radio: RadioId,
+    node: u32,
+) -> Result<Vec<meshctl_api::NodeCheck>, Failure> {
+    get(&format!("/radios/{radio}/nodes/{node}/checks")).await
+}
+
+/// A page of the traceroutes to a node, the newest first: those before one,
+/// for older pages.
+pub async fn traceroutes_to(
+    radio: RadioId,
+    node: u32,
+    before: Option<meshctl_api::TracerouteId>,
+) -> Result<Vec<Traceroute>, Failure> {
+    let before = before.map_or_else(String::new, |id| format!("&before={id}"));
+    get(&format!(
+        "/radios/{radio}/traceroutes?node={node}&limit={TRACES_PAGE}{before}"
+    ))
+    .await
+}
+
+/// How many traceroutes a page of a node's has.
+pub const TRACES_PAGE: usize = 20;
+
 /// How long until a radio sends each paced kind of thing again.
 pub async fn waits(radio: RadioId) -> Result<meshctl_api::Waits, Failure> {
     get(&format!("/radios/{radio}/waits")).await

@@ -461,17 +461,17 @@ impl Store {
         Ok(rows.into_iter().map(NodeRow::node).collect())
     }
 
-    /// What the latest packets a radio heard from a node on a port carry,
-    /// the latest first, up to so many.
+    /// The latest packets a radio heard from a node on a port, each as its
+    /// hearing and what it carries, the latest first, up to so many.
     pub async fn latest_payloads(
         &self,
         radio: RadioId,
         from: u32,
         portnum: i32,
         limit: u32,
-    ) -> Result<Vec<Vec<u8>>> {
-        Ok(sqlx::query_scalar(
-            "SELECT p.payload FROM packet p JOIN packet_seen s ON s.packet = p.id
+    ) -> Result<Vec<(SightingId, Vec<u8>)>> {
+        Ok(sqlx::query_as(
+            "SELECT s.id, p.payload FROM packet p JOIN packet_seen s ON s.packet = p.id
             WHERE s.radio_id = ? AND p.from_num = ? AND p.portnum = ?
             ORDER BY p.at DESC, p.id DESC LIMIT ?",
         )
@@ -1030,16 +1030,19 @@ impl Store {
         &self,
         radio: RadioId,
         node: Option<u32>,
+        before: Option<TracerouteId>,
         limit: u32,
     ) -> Result<Vec<Traceroute>> {
         let rows: Vec<TracerouteRow> = sqlx::query_as(
             "SELECT * FROM traceroute
-            WHERE radio_id = ? AND (? IS NULL OR target = ?)
+            WHERE radio_id = ? AND (? IS NULL OR target = ?) AND (? IS NULL OR id < ?)
             ORDER BY id DESC LIMIT ?",
         )
         .bind(radio)
         .bind(node.map(i64::from))
         .bind(node.map(i64::from))
+        .bind(before)
+        .bind(before)
         .bind(limit)
         .fetch_all(&self.pool)
         .await?;
@@ -1695,10 +1698,23 @@ mod tests {
         assert_eq!(expired[0].id, third.id);
         assert_eq!(expired[0].error.as_deref(), Some("TIMEOUT"));
 
-        let to_nine = store.traceroutes(radio, Some(9), 50).await.unwrap();
+        let to_nine = store.traceroutes(radio, Some(9), None, 50).await.unwrap();
         let ids: Vec<_> = to_nine.iter().map(|t| t.id).collect();
         assert_eq!(ids, [second.id, first.id]);
-        assert_eq!(store.traceroutes(radio, None, 50).await.unwrap().len(), 3);
+        assert_eq!(
+            store
+                .traceroutes(radio, None, None, 50)
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
+        // A page of them, before one: the older ones.
+        let older = store
+            .traceroutes(radio, Some(9), Some(second.id), 50)
+            .await
+            .unwrap();
+        assert_eq!(older.iter().map(|t| t.id).collect::<Vec<_>>(), [first.id]);
     }
 
     #[tokio::test]

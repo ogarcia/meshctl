@@ -454,6 +454,28 @@ pub struct Node {
     pub channel_utilization: Option<f32>,
 }
 
+/// What a node last told of each kind, as the radio heard it: whether it
+/// sent it of its own accord or answering a request. None of a kind it
+/// never sent, or not since it was last heard of.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeLatest {
+    /// Who it is.
+    pub node_info: Option<Packet>,
+    pub position: Option<Packet>,
+    /// Its battery, voltage, how busy it hears the channel, how much it
+    /// sends and how long it has been on.
+    pub device: Option<Packet>,
+    /// What its environment sensors read.
+    pub environment: Option<Packet>,
+    /// What its power sensors read.
+    pub power: Option<Packet>,
+    /// How it sees the mesh: nodes online, packets, noise.
+    pub local_stats: Option<Packet>,
+    /// The nodes it hears directly.
+    pub neighbors: Option<Packet>,
+}
+
 /// Something amiss with a node, found in what it sent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

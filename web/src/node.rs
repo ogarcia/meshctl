@@ -1,36 +1,198 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
-//! A node's page: what is known of it, what it can be asked for, and what it
-//! answered, traceroutes among it.
+//! A node's page: how it is doing, what it last told of each kind, each with
+//! the request that asks it again, and the routes traced to it.
+//!
+//! What it is asked for fills the page, not a list of requests: each section
+//! says when its data came, whether sent by the node of its own accord or
+//! answering, and has the button that asks for it anew.
 
 use crate::app::Live;
 use crate::chat::title;
-use crate::daemon::Failure;
+use crate::daemon::{self, Failure, TRACES_PAGE};
 use crate::empty::EmptyState;
-use crate::i18n::{t, t_string, use_i18n};
+use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::mesh::{ago, radius, reach_words};
-use crate::packets::summary;
 use crate::traces::TraceCard;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
+use leptos_i18n::I18nContext;
 use meshctl_api::{
-    ErrorCode, LinkState, Pace, Peer, PositionSource, RadioKind, Request, RequestKind,
-    RequestStatus,
+    ErrorCode, LinkState, NodeCheck, NodeLatest, Pace, Packet, Peer, PositionSource, RadioKind,
+    RequestKind, RequestStatus, Traceroute, TracerouteStatus,
 };
+use serde_json::{Map, Value};
 use std::time::Duration;
+
+const COPY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/copy.svg");
+
+/// What the open node's requests go by: the node, the channel they go on,
+/// and a clock by the second for how long the radio keeps from sending.
+#[derive(Clone, Copy)]
+struct Asking {
+    num: u32,
+    channel: RwSignal<u32>,
+    clock: RwSignal<u32>,
+}
 
 #[component]
 pub fn NodeView() -> impl IntoView {
     let live = expect_context::<Live>();
+    move || live.node.get().map(|num| view! { <NodePage num /> })
+}
+
+#[component]
+fn NodePage(num: u32) -> impl IntoView {
+    let live = expect_context::<Live>();
+    let clock = RwSignal::new(crate::app::now());
+    if let Ok(ticking) =
+        set_interval_with_handle(move || clock.set(crate::app::now()), Duration::from_secs(1))
+    {
+        on_cleanup(move || ticking.clear());
+    }
+    provide_context(Asking {
+        num,
+        channel: RwSignal::new(0),
+        clock,
+    });
+    let drawer = RwSignal::new(false);
+    let latest = move || live.latest.get().unwrap_or_default();
+    view! {
+        <div class="node-page">
+            <Checks />
+            <Tiles num />
+            <div class="node-columns">
+                <div class="node-main">
+                    {move || {
+                        let latest = latest();
+                        view! {
+                            <Device packet=latest.device.clone() />
+                            <Environment packet=latest.environment.clone() />
+                            <PowerSection packet=latest.power.clone() />
+                            <Stats packet=latest.local_stats.clone() />
+                            <Neighbors packet=latest.neighbors.clone() />
+                        }
+                    }}
+                    <Traces drawer />
+                </div>
+                <aside class="node-side">
+                    <AskPanel />
+                    {move || {
+                        let latest = latest();
+                        view! {
+                            <PositionSection at=latest.position.as_ref().map(|p| p.at) />
+                            <Identity at=latest.node_info.as_ref().map(|p| p.at) />
+                            <More latest />
+                        }
+                    }}
+                </aside>
+            </div>
+            <TracesDrawer open=drawer />
+        </div>
+    }
+}
+
+fn connected(live: Live) -> bool {
+    live.status
+        .with(|s| s.as_ref().is_some_and(|s| s.link == LinkState::Ready))
+}
+
+/// Whether the selected radio can ask nodes for anything yet: MeshCore's
+/// requests are still to come.
+fn supported(live: Live) -> bool {
+    live.selected_kind() != Some(RadioKind::Meshcore)
+}
+
+/// The object a packet's payload carries under a key, as telemetry carries
+/// each kind of it; or, with no key, the payload itself.
+fn object(packet: Option<&Packet>, key: Option<&str>) -> Option<Map<String, Value>> {
+    let payload = packet?.payload.as_ref()?;
+    let value = match key {
+        Some(key) => payload.get(key)?,
+        None => payload,
+    };
+    value.as_object().cloned()
+}
+
+fn number(map: &Map<String, Value>, key: &str) -> Option<f64> {
+    map.get(key)?.as_f64()
+}
+
+/// How long, in the two largest units that say it: `3 d 4 h`, `5 h 12 min`.
+fn duration(seconds: u64) -> String {
+    let (days, hours, minutes) = (
+        seconds / 86_400,
+        seconds % 86_400 / 3_600,
+        seconds % 3_600 / 60,
+    );
+    match (days, hours, minutes) {
+        (0, 0, 0) => format!("{seconds} s"),
+        (0, 0, m) => format!("{m} min"),
+        (0, h, m) => format!("{h} h {m} min"),
+        (d, h, _) => format!("{d} d {h} h"),
+    }
+}
+
+/// A fact of a section: what it is, and its value.
+fn fact(label: impl IntoView, value: impl IntoView) -> impl IntoView {
+    view! {
+        <div>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+        </div>
+    }
+}
+
+/// What is amiss with the node, over all the rest.
+#[component]
+fn Checks() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
     move || {
-        live.node.get().map(|num| {
-            view! {
-                <Tiles num />
-                <Position num />
-                <Ask num />
-                <Requests />
-                <Traces num />
-            }
+        let checks = live.checks.get();
+        (!checks.is_empty()).then(|| {
+            let items = checks
+                .into_iter()
+                .map(|check| {
+                    let (heading, text) = match check {
+                        NodeCheck::PublicKeyShared { nodes } => {
+                            let names = nodes
+                                .iter()
+                                .map(|node| title(live, Peer::Node { node: *node }))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            (
+                                t_string!(i18n, check_shared_title).to_owned(),
+                                t_string!(i18n, check_shared_text).replace("{nodes}", &names),
+                            )
+                        }
+                        NodeCheck::PublicKeyConflict { keys } => (
+                            t_string!(i18n, check_conflict_title).to_owned(),
+                            t_string!(i18n, check_conflict_text)
+                                .replace("{n}", &keys.len().to_string()),
+                        ),
+                        NodeCheck::HardwareChanged { models } => (
+                            t_string!(i18n, check_hardware_title).to_owned(),
+                            t_string!(i18n, check_hardware_text).replace(
+                                "{models}",
+                                &models
+                                    .iter()
+                                    .map(|m| crate::mesh::model(m))
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            ),
+                        ),
+                    };
+                    view! {
+                        <li>
+                            <strong>{heading}</strong>
+                            <span>{text}</span>
+                        </li>
+                    }
+                })
+                .collect_view();
+            view! { <ul class="node-checks">{items}</ul> }
         })
     }
 }
@@ -100,7 +262,7 @@ fn Tiles(num: u32) -> impl IntoView {
                 />
             }
         });
-        Some(view! { <div class="node-tiles">{heard} {reach} {power} {busy}</div> })
+        Some(view! { <div class="node-figures">{heard} {reach} {power} {busy}</div> })
     }
 }
 
@@ -115,7 +277,7 @@ fn Tile(
     #[prop(optional)] low: bool,
 ) -> impl IntoView {
     view! {
-        <section class="card tile" class:low=low>
+        <div class="figure" class:low=low>
             <span class="label">{label}</span>
             <span class="value">{value}</span>
             {bar.map(|bar| {
@@ -123,53 +285,160 @@ fn Tile(
                 view! { <span class="bar"><i style=width></i></span> }
             })}
             {sub.map(|sub| view! { <span class="sub">{sub}</span> })}
+        </div>
+    }
+}
+
+/// A part of the page: its title, when what it shows came, and what asks
+/// for it anew.
+#[component]
+fn Section(
+    title: AnyView,
+    #[prop(default = None)] at: Option<i64>,
+    #[prop(default = None)] ask: Option<RequestKind>,
+    #[prop(optional)] trace: bool,
+    #[prop(optional)] class: &'static str,
+    children: Children,
+) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let when = at.map(|at| {
+        let at = u32::try_from(at).unwrap_or_default();
+        move || t_string!(i18n, node_ago).replace("{ago}", &ago(live.now.get(), at))
+    });
+    view! {
+        <section class=format!("node-section {class}")>
+            <header>
+                <h2>{title}</h2>
+                {when.map(|when| view! { <span class="when">{when}</span> })}
+                {ask.map(|kind| view! { <AskButton kind /> })}
+                {trace.then(|| view! { <TraceButton /> })}
+            </header>
+            {ask.map(|kind| view! { <Quiet kind /> })}
+            {children()}
         </section>
     }
 }
 
-/// Where the node is, and how well that is known.
+/// Asks the node for a kind of thing; off while the radio keeps from
+/// sending it, or the last one is still waiting.
 #[component]
-fn Position(num: u32) -> impl IntoView {
+fn AskButton(kind: RequestKind) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let row = |label: AnyView, value: Option<String>| {
-        value.map(|value| view! { <div><dt>{label}</dt><dd>{value}</dd></div> })
+    let asking = expect_context::<Asking>();
+    let pending = move || {
+        live.requests.with(|requests| {
+            requests.iter().any(|r| {
+                r.node == asking.num && r.kind == kind && r.status == RequestStatus::Pending
+            })
+        })
+    };
+    let paced = move || {
+        kind.pace()
+            .is_some_and(|pace| live.wait(pace, asking.clock.get()) > 0)
     };
     move || {
-        let position = live.nodes.with(|nodes| nodes.get(&num)?.position)?;
-        let altitude = position
-            .altitude
-            .map_or_else(String::new, |a| format!(" · {a} m"));
-        let place = format!(
-            "{:.5}, {:.5}{altitude}",
-            position.latitude, position.longitude
-        );
-        let source = position.source.map(|source| {
-            match source {
-                PositionSource::Manual => t_string!(i18n, position_manual),
-                PositionSource::Internal => t_string!(i18n, position_internal),
-                PositionSource::External => t_string!(i18n, position_external),
+        supported(live).then(|| {
+            view! {
+                <button
+                    class="ask"
+                    disabled=move || !connected(live) || pending() || paced()
+                    on:click=move |_| live.ask(asking.num, kind, asking.channel.get_untracked())
+                >
+                    {move || {
+                        if pending() {
+                            t_string!(i18n, node_asking).to_owned()
+                        } else {
+                            t_string!(i18n, node_ask_button).to_owned()
+                        }
+                    }}
+                </button>
             }
-            .to_owned()
-        });
-        Some(view! {
-            <section class="card node-details">
-                <dl>
-                    {row(t!(i18n, node_position).into_any(), Some(place))}
-                    {row(t!(i18n, node_precision).into_any(), position.radius.map(radius))}
-                    {row(t!(i18n, node_source).into_any(), source)}
-                </dl>
-            </section>
         })
     }
 }
 
-/// What the node can be asked for, and on which channel.
+/// Traces the route to the node.
 #[component]
-fn Ask(num: u32) -> impl IntoView {
+fn TraceButton() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let channel = RwSignal::new(0_u32);
+    let asking = expect_context::<Asking>();
+    let pending = move || {
+        live.traceroutes.with(|traces| {
+            traces
+                .iter()
+                .any(|t| t.target == asking.num && t.status == TracerouteStatus::Pending)
+        })
+    };
+    let paced = move || live.wait(Pace::Traceroute, asking.clock.get()) > 0;
+    move || {
+        supported(live).then(|| {
+            view! {
+                <button
+                    class="ask"
+                    disabled=move || !connected(live) || pending() || paced()
+                    on:click=move |_| live.trace(asking.num, asking.channel.get_untracked())
+                >
+                    {move || {
+                        if pending() {
+                            t_string!(i18n, node_asking).to_owned()
+                        } else {
+                            t_string!(i18n, node_trace_button).to_owned()
+                        }
+                    }}
+                </button>
+            }
+        })
+    }
+}
+
+/// That the node answered a kind of request lately, and keeps from
+/// answering it again for a while, whoever asks.
+#[component]
+fn Quiet(kind: RequestKind) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let window: u32 = match kind {
+        RequestKind::NodeInfo => 60,
+        RequestKind::Position | RequestKind::Neighbors => 180,
+        _ => 0,
+    };
+    move || {
+        if window == 0 {
+            return None;
+        }
+        let answered = live.requests.with(|requests| {
+            requests
+                .iter()
+                .filter(|r| {
+                    r.node == asking.num && r.kind == kind && r.status == RequestStatus::Answered
+                })
+                .filter_map(|r| r.answered_at)
+                .max()
+        })?;
+        let answered = u32::try_from(answered).ok()?;
+        let now = asking.clock.get();
+        let since = now.saturating_sub(answered);
+        (since < window).then(|| {
+            let text = t_string!(i18n, node_quiet)
+                .replace("{ago}", &ago(now, answered))
+                .replace("{left}", &ago(window, since));
+            view! { <p class="quiet">{text}</p> }
+        })
+    }
+}
+
+/// What the node's requests go on, how long the radio keeps from sending
+/// each paced kind, and why the last one was not sent: in one place, for
+/// every button of the page.
+#[component]
+fn AskPanel() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
     let channels = move || {
         live.channels.with(|channels| {
             channels
@@ -179,58 +448,43 @@ fn Ask(num: u32) -> impl IntoView {
                 .collect::<Vec<_>>()
         })
     };
-    let connected = move || {
-        live.status
-            .with(|s| s.as_ref().is_some_and(|s| s.link == LinkState::Ready))
-    };
-    let supported = move || live.selected_kind() != Some(RadioKind::Meshcore);
-    let waiting = move |kind: RequestKind| {
-        live.requests.with(|requests| {
-            requests
-                .iter()
-                .any(|r| r.kind == kind && r.status == RequestStatus::Pending)
+    let node = move || live.nodes.with(|nodes| nodes.get(&asking.num).cloned());
+    // Whether what goes to it alone goes encrypted to it, or on the channel.
+    let key_hint = move || {
+        let node = node()?;
+        Some(if node.licensed {
+            t!(i18n, node_licensed_hint).into_any()
+        } else if node.public_key.is_some() {
+            t!(i18n, node_pki_hint).into_any()
+        } else {
+            t!(i18n, node_no_key_hint).into_any()
         })
     };
-    let kinds = [
-        RequestKind::NodeInfo,
-        RequestKind::Position,
-        RequestKind::DeviceTelemetry,
-        RequestKind::EnvironmentTelemetry,
-        RequestKind::PowerTelemetry,
-        RequestKind::LocalStats,
-        RequestKind::Neighbors,
-    ];
-    // A clock of its own, by the second, for how long the radio keeps from
-    // sending what it sent a moment ago.
-    let clock = RwSignal::new(crate::app::now());
-    if let Ok(ticking) =
-        set_interval_with_handle(move || clock.set(crate::app::now()), Duration::from_secs(1))
-    {
-        on_cleanup(move || ticking.clear());
-    }
-    let wait = move |pace: Option<Pace>| pace.map_or(0, |pace| live.wait(pace, clock.get()));
-    let countdown = move |pace: Option<Pace>| {
-        let wait = wait(pace);
-        (wait > 0).then(|| view! { <span class="wait">{format!("{wait} s")}</span> })
+    let mqtt = move || {
+        node()
+            .is_some_and(|n| n.via_mqtt)
+            .then(|| view! { <p class="hint">{t!(i18n, node_mqtt_hint)}</p> })
     };
-    let buttons = move || {
-        kinds
+    let paces = move || {
+        let now = asking.clock.get();
+        [Pace::Position, Pace::Telemetry, Pace::Traceroute]
             .into_iter()
-            .map(|kind| {
-                view! {
-                    <button
-                        disabled=move || !connected() || waiting(kind) || (wait(kind.pace()) > 0)
-                        on:click=move |_| live.ask(num, kind, channel.get_untracked())
-                    >
-                        <KindLabel kind />
-                        {move || countdown(kind.pace())}
-                    </button>
-                }
+            .filter_map(|pace| {
+                let wait = live.wait(pace, now);
+                (wait > 0).then(|| {
+                    let text = match pace {
+                        Pace::Position => t_string!(i18n, node_pace_position),
+                        Pace::Telemetry => t_string!(i18n, node_pace_telemetry),
+                        Pace::Traceroute => t_string!(i18n, node_pace_traceroute),
+                    }
+                    .replace("{n}", &wait.to_string());
+                    view! { <li>{text}</li> }
+                })
             })
             .collect_view()
     };
     let problem = move || {
-        if !connected() {
+        if !connected(live) {
             return Some(t!(i18n, node_not_connected).into_any());
         }
         live.ask_error.get().map(|failure| match failure {
@@ -247,7 +501,7 @@ fn Ask(num: u32) -> impl IntoView {
 
     view! {
         <Show
-            when=supported
+            when=move || supported(live)
             fallback=move || {
                 view! {
                     <EmptyState
@@ -259,37 +513,435 @@ fn Ask(num: u32) -> impl IntoView {
                 }
             }
         >
-            <section class="card node-ask">
-                <h2>{t!(i18n, node_ask)}</h2>
-                <p class="dim">{t!(i18n, node_ask_text)}</p>
+            <Section title=t!(i18n, node_requests_title).into_any() class="node-asking">
                 <label class="channel">
                     <span>{t!(i18n, node_channel)}</span>
                     <select on:change=move |ev| {
                         if let Ok(index) = event_target_value(&ev).parse() {
-                            channel.set(index);
+                            asking.channel.set(index);
                         }
                     }>
                         <For each=channels key=|index| *index let:index>
-                            <option value=index.to_string() selected=move || channel.get() == index>
-                                {move || format!("{index} · {}", title(live, Peer::Channel { channel: index }))}
+                            <option
+                                value=index.to_string()
+                                selected=move || asking.channel.get() == index
+                            >
+                                {move || {
+                                    format!("{index} · {}", title(live, Peer::Channel { channel: index }))
+                                }}
                             </option>
                         </For>
                     </select>
                 </label>
-                <div class="asks">
-                    {buttons}
-                    <button
-                        disabled=move || !connected() || (wait(Some(Pace::Traceroute)) > 0)
-                        on:click=move |_| live.trace(num, channel.get_untracked())
-                    >
-                        {t!(i18n, ask_traceroute)}
-                        {move || countdown(Some(Pace::Traceroute))}
-                    </button>
-                </div>
+                <p class="hint">{t!(i18n, node_channel_hint)}</p>
+                <p class="hint">{key_hint}</p>
+                {mqtt}
+                <ul class="paces">{paces}</ul>
                 <p class="error">{problem}</p>
-            </section>
+            </Section>
         </Show>
     }
+}
+
+/// Nothing of a kind told yet.
+fn nothing(i18n: I18nContext<Locale>) -> impl IntoView {
+    view! { <p class="nothing">{t!(i18n, node_never)}</p> }
+}
+
+/// Where the node is, and how well that is known.
+#[component]
+fn PositionSection(at: Option<i64>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let body = move || {
+        let Some(position) = live
+            .nodes
+            .with(|nodes| nodes.get(&asking.num).and_then(|n| n.position))
+        else {
+            return nothing(i18n).into_any();
+        };
+        let place = format!("{:.5}, {:.5}", position.latitude, position.longitude);
+        let copied = place.clone();
+        let source = position.source.map(|source| match source {
+            PositionSource::Manual => t_string!(i18n, position_manual).to_owned(),
+            PositionSource::Internal => t_string!(i18n, position_internal).to_owned(),
+            PositionSource::External => t_string!(i18n, position_external).to_owned(),
+        });
+        view! {
+            <dl class="facts">
+                {fact(
+                    t!(i18n, node_coordinates),
+                    view! {
+                        <span class="copyable">
+                            <span class="mono">{place}</span>
+                            <button
+                                class="icon-button"
+                                title=move || t_string!(i18n, node_coordinates_copy)
+                                aria-label=move || t_string!(i18n, node_coordinates_copy)
+                                inner_html=COPY
+                                on:click=move |_| crate::clipboard::copy(&copied)
+                            ></button>
+                        </span>
+                    },
+                )}
+                {position.altitude.map(|a| fact(t!(i18n, node_altitude), format!("{a} m")))}
+                {position.radius.map(|r| fact(t!(i18n, node_precision), radius(r)))}
+                {source.map(|s| fact(t!(i18n, node_source), s))}
+            </dl>
+        }
+        .into_any()
+    };
+    view! {
+        <Section title=t!(i18n, node_position).into_any() at ask=Some(RequestKind::Position)>
+            {body}
+        </Section>
+    }
+}
+
+/// Who the node is: its id, its public key, and whether its owner is
+/// licensed. Its names, role and hardware are in the heading.
+#[component]
+fn Identity(at: Option<i64>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let body = move || {
+        let node = live.nodes.with(|nodes| nodes.get(&asking.num).cloned())?;
+        let key = match node.public_key.clone() {
+            Some(key) => {
+                let copied = key.clone();
+                view! {
+                    <span class="copyable">
+                        <span class="mono key">{key}</span>
+                        <button
+                            class="icon-button"
+                            title=move || t_string!(i18n, node_key_copy)
+                            aria-label=move || t_string!(i18n, node_key_copy)
+                            inner_html=COPY
+                            on:click=move |_| crate::clipboard::copy(&copied)
+                        ></button>
+                    </span>
+                }
+                .into_any()
+            }
+            None => view! { <span class="dim">{t!(i18n, node_key_unknown)}</span> }.into_any(),
+        };
+        Some(view! {
+            <dl class="facts">
+                {fact(t!(i18n, nodes_id), view! { <span class="mono">{node.id.clone()}</span> })}
+                {fact(t!(i18n, node_public_key), key)}
+                {node.licensed.then(|| fact(t!(i18n, node_licensed), t!(i18n, node_yes)))}
+            </dl>
+        })
+    };
+    view! {
+        <Section title=t!(i18n, node_identity).into_any() at ask=Some(RequestKind::NodeInfo)>
+            {body}
+        </Section>
+    }
+}
+
+/// What its device telemetry says: its battery, how much it sends, how long
+/// it has been on.
+#[component]
+fn Device(packet: Option<Packet>) -> impl IntoView {
+    let i18n = use_i18n();
+    let at = packet.as_ref().map(|p| p.at);
+    let body = match object(packet.as_ref(), Some("device_metrics")) {
+        Some(metrics) => {
+            let battery = number(&metrics, "battery_level").map(|level| {
+                if level > 100.0 {
+                    t_string!(i18n, power_external).to_owned()
+                } else {
+                    format!("{level:.0} %")
+                }
+            });
+            view! {
+                <dl class="facts">
+                    {battery.map(|b| fact(t!(i18n, node_battery), b))}
+                    {number(&metrics, "voltage").map(|v| fact(t!(i18n, node_voltage), format!("{v:.2} V")))}
+                    {number(&metrics, "channel_utilization")
+                        .map(|c| fact(t!(i18n, node_channel_use), format!("{c:.1} %")))}
+                    {number(&metrics, "air_util_tx").map(|a| fact(t!(i18n, node_air_tx), format!("{a:.1} %")))}
+                    {number(&metrics, "uptime_seconds")
+                        .map(|u| fact(t!(i18n, node_uptime), duration(u as u64)))}
+                </dl>
+            }
+            .into_any()
+        }
+        None => nothing(i18n).into_any(),
+    };
+    view! {
+        <Section title=t!(i18n, node_device).into_any() at ask=Some(RequestKind::DeviceTelemetry)>
+            {body}
+        </Section>
+    }
+}
+
+/// What a value of an environment sensor is, in the interface's words, its
+/// unit and how many decimals it is read with.
+fn environment_field(
+    i18n: I18nContext<Locale>,
+    key: &str,
+) -> Option<(String, &'static str, usize)> {
+    let (label, unit, decimals) = match key {
+        "temperature" => (t_string!(i18n, env_temperature), " °C", 1),
+        "relative_humidity" => (t_string!(i18n, env_humidity), " %", 0),
+        "barometric_pressure" => (t_string!(i18n, env_pressure), " hPa", 1),
+        "gas_resistance" => (t_string!(i18n, env_gas), " MΩ", 2),
+        "iaq" => (t_string!(i18n, env_iaq), "", 0),
+        "lux" => (t_string!(i18n, env_lux), " lx", 0),
+        "uv_lux" => (t_string!(i18n, env_uv_lux), " lx", 1),
+        "wind_speed" => (t_string!(i18n, env_wind_speed), " m/s", 1),
+        "wind_gust" => (t_string!(i18n, env_wind_gust), " m/s", 1),
+        "wind_direction" => (t_string!(i18n, env_wind_direction), "°", 0),
+        "rainfall_1h" => (t_string!(i18n, env_rain_1h), " mm", 1),
+        "rainfall_24h" => (t_string!(i18n, env_rain_24h), " mm", 1),
+        "distance" => (t_string!(i18n, env_distance), " mm", 0),
+        "weight" => (t_string!(i18n, env_weight), " kg", 2),
+        "radiation" => (t_string!(i18n, env_radiation), " µR/h", 2),
+        "soil_moisture" => (t_string!(i18n, env_soil_moisture), " %", 0),
+        "soil_temperature" => (t_string!(i18n, env_soil_temperature), " °C", 1),
+        "voltage" => (t_string!(i18n, env_voltage), " V", 2),
+        "current" => (t_string!(i18n, env_current), " mA", 0),
+        _ => return None,
+    };
+    Some((label.to_owned(), unit, decimals))
+}
+
+/// The order environment values are shown in.
+const ENVIRONMENT_FIELDS: [&str; 19] = [
+    "temperature",
+    "relative_humidity",
+    "barometric_pressure",
+    "gas_resistance",
+    "iaq",
+    "lux",
+    "uv_lux",
+    "wind_speed",
+    "wind_gust",
+    "wind_direction",
+    "rainfall_1h",
+    "rainfall_24h",
+    "distance",
+    "weight",
+    "radiation",
+    "soil_moisture",
+    "soil_temperature",
+    "voltage",
+    "current",
+];
+
+/// What its environment sensors read: only when it ever told.
+#[component]
+fn Environment(packet: Option<Packet>) -> impl IntoView {
+    let i18n = use_i18n();
+    let at = packet.as_ref().map(|p| p.at);
+    let metrics = object(packet.as_ref(), Some("environment_metrics"))?;
+    let facts = ENVIRONMENT_FIELDS
+        .iter()
+        .filter_map(|key| {
+            let value = number(&metrics, key)?;
+            let (label, unit, decimals) = environment_field(i18n, key)?;
+            Some(fact(label, format!("{value:.decimals$}{unit}")))
+        })
+        .collect_view();
+    Some(view! {
+        <Section
+            title=t!(i18n, node_environment).into_any()
+            at
+            ask=Some(RequestKind::EnvironmentTelemetry)
+        >
+            <dl class="facts">{facts}</dl>
+        </Section>
+    })
+}
+
+/// What its power sensors read, channel by channel: only when it ever told.
+#[component]
+fn PowerSection(packet: Option<Packet>) -> impl IntoView {
+    let i18n = use_i18n();
+    let at = packet.as_ref().map(|p| p.at);
+    let metrics = object(packet.as_ref(), Some("power_metrics"))?;
+    let facts = (1..=8)
+        .filter_map(|channel| {
+            let voltage = number(&metrics, &format!("ch{channel}_voltage"));
+            let current = number(&metrics, &format!("ch{channel}_current"));
+            let value = match (voltage, current) {
+                (Some(v), Some(c)) => format!("{v:.2} V · {c:.0} mA"),
+                (Some(v), None) => format!("{v:.2} V"),
+                (None, Some(c)) => format!("{c:.0} mA"),
+                (None, None) => return None,
+            };
+            let label = t_string!(i18n, power_channel).replace("{n}", &channel.to_string());
+            Some(fact(label, value))
+        })
+        .collect_view();
+    Some(view! {
+        <Section title=t!(i18n, node_power).into_any() at ask=Some(RequestKind::PowerTelemetry)>
+            <dl class="facts">{facts}</dl>
+        </Section>
+    })
+}
+
+/// How it sees the mesh.
+#[component]
+fn Stats(packet: Option<Packet>) -> impl IntoView {
+    let i18n = use_i18n();
+    let at = packet.as_ref().map(|p| p.at);
+    let body = match object(packet.as_ref(), Some("local_stats")) {
+        Some(stats) => {
+            // What a protobuf leaves at zero its JSON leaves out.
+            let count = |key: &str| number(&stats, key).unwrap_or_default();
+            let online = t_string!(i18n, stats_online_of)
+                .replace("{online}", &format!("{:.0}", count("num_online_nodes")))
+                .replace("{total}", &format!("{:.0}", count("num_total_nodes")));
+            let counted = |label: String, key: &str| fact(label, format!("{:.0}", count(key)));
+            view! {
+                <dl class="facts">
+                    {fact(t!(i18n, stats_online), online)}
+                    {counted(t_string!(i18n, stats_packets_tx).to_owned(), "num_packets_tx")}
+                    {counted(t_string!(i18n, stats_packets_rx).to_owned(), "num_packets_rx")}
+                    {counted(t_string!(i18n, stats_rx_bad).to_owned(), "num_packets_rx_bad")}
+                    {counted(t_string!(i18n, stats_dupes).to_owned(), "num_rx_dupe")}
+                    {counted(t_string!(i18n, stats_relayed).to_owned(), "num_tx_relay")}
+                    {counted(t_string!(i18n, stats_relay_canceled).to_owned(), "num_tx_relay_canceled")}
+                    {counted(t_string!(i18n, stats_dropped).to_owned(), "num_tx_dropped")}
+                    {number(&stats, "noise_floor")
+                        .map(|n| fact(t!(i18n, stats_noise), format!("{n:.0} dBm")))}
+                    {fact(t!(i18n, node_channel_use), format!("{:.1} %", count("channel_utilization")))}
+                    {fact(t!(i18n, node_air_tx), format!("{:.1} %", count("air_util_tx")))}
+                    {number(&stats, "uptime_seconds")
+                        .map(|u| fact(t!(i18n, node_uptime), duration(u as u64)))}
+                </dl>
+            }
+            .into_any()
+        }
+        None => nothing(i18n).into_any(),
+    };
+    view! {
+        <Section title=t!(i18n, node_stats).into_any() at ask=Some(RequestKind::LocalStats)>
+            {body}
+        </Section>
+    }
+}
+
+/// The nodes it hears directly, each opening its page: only when it ever
+/// told.
+#[component]
+fn Neighbors(packet: Option<Packet>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let at = packet.as_ref().map(|p| p.at);
+    let info = object(packet.as_ref(), None)?;
+    let neighbours: Vec<(u32, Option<f64>)> = info
+        .get("neighbors")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|n| {
+                    let num = u32::try_from(n.get("node_id")?.as_u64()?).ok()?;
+                    Some((num, n.get("snr").and_then(Value::as_f64)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let body = if neighbours.is_empty() {
+        view! { <p class="nothing">{t!(i18n, neighbors_none)}</p> }.into_any()
+    } else {
+        let rows = neighbours
+            .into_iter()
+            .map(|(num, snr)| {
+                // A node the radio does not know of has no page to open.
+                let known = live.nodes.with_untracked(|nodes| nodes.contains_key(&num));
+                let name = move || title(live, Peer::Node { node: num });
+                let who = if known {
+                    view! {
+                        <button class="link" on:click=move |_| live.open_node(num)>
+                            {name}
+                        </button>
+                    }
+                    .into_any()
+                } else {
+                    view! { <span class="mono">{name}</span> }.into_any()
+                };
+                view! {
+                    <li>
+                        {who}
+                        <span class="snr">{snr.map(|s| format!("{s:.1} dB"))}</span>
+                    </li>
+                }
+            })
+            .collect_view();
+        view! { <ul class="neighbours">{rows}</ul> }.into_any()
+    };
+    Some(view! {
+        <Section title=t!(i18n, node_neighbors).into_any() at ask=Some(RequestKind::Neighbors)>
+            {body}
+        </Section>
+    })
+}
+
+/// What the node may answer only if it has the sensors or the module on,
+/// and never told yet: to try, and what came of trying.
+#[component]
+fn More(latest: NodeLatest) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let missing: Vec<RequestKind> = [
+        (
+            RequestKind::EnvironmentTelemetry,
+            latest.environment.is_none(),
+        ),
+        (RequestKind::PowerTelemetry, latest.power.is_none()),
+        (RequestKind::Neighbors, latest.neighbors.is_none()),
+    ]
+    .into_iter()
+    .filter_map(|(kind, missing)| missing.then_some(kind))
+    .collect();
+    if missing.is_empty() || !supported(live) {
+        return None;
+    }
+    // Whether the latest time it was asked it said it has nothing to tell.
+    let refused = move |kind: RequestKind| {
+        live.requests.with(|requests| {
+            requests
+                .iter()
+                .find(|r| r.node == asking.num && r.kind == kind)
+                .is_some_and(|r| {
+                    r.status == RequestStatus::Failed && r.error.as_deref() == Some("NO_RESPONSE")
+                })
+        })
+    };
+    let rows = missing
+        .into_iter()
+        .map(|kind| {
+            let why = move || {
+                refused(kind).then(|| match kind {
+                    RequestKind::EnvironmentTelemetry => t!(i18n, node_no_environment).into_any(),
+                    RequestKind::PowerTelemetry => t!(i18n, node_no_power).into_any(),
+                    _ => t!(i18n, node_no_neighbors).into_any(),
+                })
+            };
+            view! {
+                <li>
+                    <span class="what">
+                        <KindLabel kind />
+                        <span class="why">{why}</span>
+                    </span>
+                    <AskButton kind />
+                </li>
+            }
+        })
+        .collect_view();
+    Some(view! {
+        <Section title=t!(i18n, node_more).into_any() class="node-more">
+            <p class="hint">{t!(i18n, node_more_hint)}</p>
+            <ul>{rows}</ul>
+        </Section>
+    })
 }
 
 #[component]
@@ -306,104 +958,109 @@ fn KindLabel(kind: RequestKind) -> impl IntoView {
     }
 }
 
-/// What the node was asked for, the newest first, and what it answered.
+/// The latest route traced to the node, and the way to all of them.
 #[component]
-fn Requests() -> impl IntoView {
+fn Traces(drawer: RwSignal<bool>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    view! {
-        <Show when=move || live.requests.with(|r| !r.is_empty())>
-            <section class="card node-requests">
-                <h2>{t!(i18n, node_requests)}</h2>
-                <ol>
-                    <For
-                        each=move || live.requests.get()
-                        key=|r| (r.id, r.status)
-                        let:request
-                    >
-                        <RequestRow request />
-                    </For>
-                </ol>
-            </section>
-        </Show>
-    }
-}
-
-#[component]
-fn RequestRow(request: Request) -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let open = RwSignal::new(false);
-    let at = u32::try_from(request.at).unwrap_or_default();
-    let status = match request.status {
-        RequestStatus::Pending => view! {
-            <span class="badge syncing">{t!(i18n, request_pending)}</span>
-        }
-        .into_any(),
-        RequestStatus::Answered => view! {
-            <span class="badge ready">{t!(i18n, request_answered)}</span>
-        }
-        .into_any(),
-        RequestStatus::Failed => {
-            let why = match request.error.as_deref() {
-                Some("TIMEOUT") => t!(i18n, request_timeout).into_any(),
-                Some("NO_RESPONSE") => t!(i18n, request_no_response).into_any(),
-                Some(code) => code.to_owned().into_any(),
-                None => ().into_any(),
-            };
-            view! {
-                <span class="badge radio-down">{t!(i18n, request_failed)} " · " {why}</span>
-            }
-            .into_any()
-        }
-    };
-    let answer = request.answer.clone();
-    let line = answer.as_ref().map(summary);
-    let detail = answer
-        .and_then(|a| a.payload)
-        .and_then(|payload| serde_json::to_string_pretty(&payload).ok());
-    let has_detail = detail.is_some();
-    view! {
-        <li class="request" class:open=move || open.get()>
-            <button
-                class="request-line"
-                disabled=!has_detail
-                on:click=move |_| open.update(|o| *o = !*o)
-            >
-                <strong><KindLabel kind=request.kind /></strong>
-                {status}
-                <span class="summary">{line}</span>
-                <span class="dim when">"#" {request.channel} " · " {move || ago(live.now.get(), at)}</span>
-            </button>
-            <Show when=move || open.get()>
-                <pre class="payload mono">{detail.clone()}</pre>
-            </Show>
-        </li>
-    }
-}
-
-/// The routes traced to the node.
-#[component]
-fn Traces(num: u32) -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let traces = move || {
-        live.traceroutes.with(|traces| {
-            traces
-                .iter()
-                .filter(|t| t.target == num)
-                .cloned()
-                .collect::<Vec<_>>()
-        })
+    let asking = expect_context::<Asking>();
+    let last = move || {
+        live.traceroutes
+            .with(|traces| traces.iter().find(|t| t.target == asking.num).cloned())
     };
     view! {
-        <Show when=move || !traces().is_empty()>
-            <section class="card traces">
-                <h2>{t!(i18n, node_traces)}</h2>
-                <For each=traces key=|t| (t.id, t.status) let:traceroute>
+        <Section title=t!(i18n, node_traces).into_any() trace=true class="node-traces">
+            {move || match last() {
+                Some(traceroute) => view! {
                     <TraceCard traceroute />
-                </For>
-            </section>
+                    <button class="link all" on:click=move |_| drawer.set(true)>
+                        {t!(i18n, traces_all)}
+                    </button>
+                }
+                .into_any(),
+                None => view! { <p class="nothing">{t!(i18n, traces_none)}</p> }.into_any(),
+            }}
+        </Section>
+    }
+}
+
+/// Every route traced to the node, the newest first, a page at a time, in a
+/// drawer over the page's side.
+#[component]
+fn TracesDrawer(open: RwSignal<bool>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let pages = RwSignal::new(Vec::<Traceroute>::new());
+    let more = RwSignal::new(false);
+    let load = move |before| {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        spawn_local(async move {
+            if let Ok(page) = daemon::traceroutes_to(radio, asking.num, before).await {
+                more.set(page.len() == TRACES_PAGE);
+                pages.update(|pages| pages.extend(page));
+            }
+        });
+    };
+    Effect::new(move |_| {
+        if open.get() {
+            pages.set(Vec::new());
+            load(None);
+        }
+    });
+    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            open.set(false);
+        }
+    });
+    on_cleanup(move || escape.remove());
+    let name = move || title(live, Peer::Node { node: asking.num });
+    view! {
+        <Show when=move || open.get()>
+            <div class="drawer-shade" on:click=move |_| open.set(false)></div>
+            <aside class="drawer" role="dialog" aria-modal="true">
+                <header>
+                    <h2>{move || t_string!(i18n, traces_drawer_title).replace("{name}", &name())}</h2>
+                    <button
+                        class="icon-button"
+                        title=move || t_string!(i18n, drawer_close)
+                        aria-label=move || t_string!(i18n, drawer_close)
+                        on:click=move |_| open.set(false)
+                    >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M18 6L6 18M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </header>
+                <div class="drawer-body">
+                    <For each=move || pages.get() key=|t| (t.id, t.status) let:traceroute>
+                        <TraceCard traceroute />
+                    </For>
+                    <Show when=move || more.get()>
+                        <button
+                            class="more"
+                            on:click=move |_| load(pages.with_untracked(|p| p.last().map(|t| t.id)))
+                        >
+                            {t!(i18n, traces_more)}
+                        </button>
+                    </Show>
+                </div>
+            </aside>
         </Show>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::duration;
+
+    #[test]
+    fn durations_read_in_their_two_largest_units() {
+        assert_eq!(duration(42), "42 s");
+        assert_eq!(duration(600), "10 min");
+        assert_eq!(duration(5 * 3600 + 720), "5 h 12 min");
+        assert_eq!(duration(3 * 86_400 + 4 * 3600 + 59), "3 d 4 h");
     }
 }

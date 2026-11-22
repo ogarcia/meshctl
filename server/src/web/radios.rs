@@ -11,8 +11,8 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Channel, Error, ErrorCode, LinkState, MapView, Node, NodeCheck, Radio, RadioId, RadioOrder,
-    RadioSettings, Status,
+    Channel, Error, ErrorCode, LinkState, MapView, Node, NodeCheck, NodeLatest, Radio, RadioId,
+    RadioOrder, RadioSettings, Status,
 };
 use meshctl_core::radio::Mesh;
 use utoipa_axum::router::OpenApiRouter;
@@ -29,6 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(nodes))
         .routes(routes!(node))
         .routes(routes!(checks))
+        .routes(routes!(latest))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -372,6 +373,43 @@ async fn node(
     match mesh.and_then(|mesh| mesh.read(|mesh| mesh.nodes.get(&num).map(convert::node))) {
         Some(node) => Json(node).into_response(),
         None => not_found(),
+    }
+}
+
+/// Node's latest
+///
+/// What a node last told of each kind, as the radio heard it: who it is,
+/// where, its telemetry of each kind and its neighbours, each the packet it
+/// came in, whether sent of its own accord or answering a request.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/nodes/{node}/latest",
+    tag = "nodes",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = String, Path, description = "The node's id or number", example = "!90cda275"),
+    ),
+    responses(
+        (status = 200, description = "The latest of each kind", body = NodeLatest),
+        (status = 400, description = "That is neither a node id nor a number", body = Error),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio, or it knows of no such node", body = Error),
+    )
+)]
+async fn latest(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, String)>,
+) -> Response {
+    let Some(num) = node_num(&node) else {
+        return error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest);
+    };
+    match state.radios.latest(radio, num).await {
+        Ok(Some(latest)) => Json(latest).into_response(),
+        Ok(None) => not_found(),
+        Err(err) => {
+            tracing::error!(error = format_args!("{err:#}"), "node's latest");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 
