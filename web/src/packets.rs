@@ -505,8 +505,8 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
         move || summary(&packet, i18n.get_locale())
     };
     let (hops_away, hop_start, relay) = (packet.hops_away, packet.hop_start, packet.relay_node);
-    // How strong: its SNR, and its RSSI apart, which a narrow row leaves out
-    // beside a kind of a long name.
+    // How strong: its SNR, and its RSSI apart, which a list too narrow for
+    // it in every row leaves out.
     let snr = packet.snr.map(|snr| format!("{snr:.1} dB"));
     let rssi = packet.rssi.map(|rssi| {
         if snr.is_some() {
@@ -515,7 +515,6 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
             format!("{rssi} dBm")
         }
     });
-    let long_kind = port.as_ref().is_some_and(|p| p.chars().count() > 9);
     // Heard by air: in how many hops, and by whom last when it was not
     // straight from its sender.
     let hops = move || match (source, hops_away) {
@@ -567,7 +566,7 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
     };
 
     view! {
-        <li class="packet" class:arrived=fresh class:long-kind=long_kind>
+        <li class="packet" class:arrived=fresh>
             <button class="packet-line" on:click=open>
                 <span class="time mono">{clock(packet.at)}</span>
                 <span class="kind">
