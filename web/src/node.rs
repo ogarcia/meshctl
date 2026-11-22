@@ -163,6 +163,14 @@ fn connected(live: Live) -> bool {
         .with(|s| s.as_ref().is_some_and(|s| s.link == LinkState::Ready))
 }
 
+/// Whether a node is the selected radio's own: it is asked for nothing, as
+/// what it tells comes straight from the radio.
+fn own(live: Live, num: u32) -> bool {
+    live.status
+        .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num))
+        == Some(num)
+}
+
 /// Whether the selected radio can ask nodes for anything yet: MeshCore's
 /// requests are still to come.
 fn supported(live: Live) -> bool {
@@ -473,6 +481,10 @@ fn AskButton(asked: Asked) -> impl IntoView {
     let label = move || {
         if pending() {
             t_string!(i18n, node_asking).to_owned()
+        } else if pressed.get() == Some(asked) && wait() > 0 {
+            // Answered already, but the radio still keeps from sending the
+            // like: the button pressed says so while it fills up.
+            t_string!(i18n, node_waiting).to_owned()
         } else if asked == Asked::Trace {
             t_string!(i18n, node_trace_button).to_owned()
         } else {
@@ -495,7 +507,7 @@ fn AskButton(asked: Asked) -> impl IntoView {
         Some((text, filled))
     };
     move || {
-        supported(live).then(|| {
+        (supported(live) && !own(live, asking.num)).then(|| {
             view! {
                 <span class="ask-split" class:open=open>
                     <button
@@ -975,7 +987,7 @@ fn More(latest: NodeLatest) -> impl IntoView {
     .into_iter()
     .filter_map(|(kind, missing)| missing.then_some(kind))
     .collect();
-    if missing.is_empty() || !supported(live) {
+    if missing.is_empty() || !supported(live) || own(live, asking.num) {
         return None;
     }
     // Whether the latest time it was asked, and it answered or gave up, it
