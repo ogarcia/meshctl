@@ -114,6 +114,8 @@ fn neighbour() -> pb::User {
         short_name: "NBR".into(),
         hw_model: pb::HardwareModel::WismeshTag as i32,
         role: config::device_config::Role::Router as i32,
+        // Made up, as all of it: no private key goes with it.
+        public_key: (1..=32).collect(),
         ..Default::default()
     }
 }

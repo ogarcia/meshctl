@@ -92,6 +92,8 @@ struct NodeRow {
     short_name: Option<String>,
     hw_model: Option<String>,
     role: Option<String>,
+    public_key: Option<Vec<u8>>,
+    licensed: bool,
     latitude: Option<f64>,
     longitude: Option<f64>,
     altitude: Option<i32>,
@@ -117,6 +119,8 @@ impl NodeRow {
             short_name: self.short_name.unwrap_or_default(),
             hw_model: self.hw_model.unwrap_or_default(),
             role: self.role.unwrap_or_default(),
+            public_key: self.public_key.unwrap_or_default(),
+            licensed: self.licensed,
         });
         let position = match (self.latitude, self.longitude) {
             (Some(latitude), Some(longitude)) => Some(Position {
@@ -169,14 +173,16 @@ fn u32_from(value: i64) -> u32 {
 }
 
 const NODE_UPSERT: &str = "INSERT INTO node (radio_id, num, long_name, short_name, hw_model, role,
+        public_key, licensed,
         latitude, longitude, altitude, position_radius, position_source, last_heard, snr, rssi,
         hops_away,
         via_mqtt, favorite,
         battery_level, voltage, channel_utilization)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (radio_id, num) DO UPDATE SET
         long_name = excluded.long_name, short_name = excluded.short_name,
         hw_model = excluded.hw_model, role = excluded.role,
+        public_key = excluded.public_key, licensed = excluded.licensed,
         latitude = excluded.latitude, longitude = excluded.longitude,
         altitude = excluded.altitude, position_radius = excluded.position_radius,
         position_source = excluded.position_source,
@@ -198,6 +204,8 @@ where
         .bind(user.map(|u| &u.short_name))
         .bind(user.map(|u| &u.hw_model))
         .bind(user.map(|u| &u.role))
+        .bind(user.map(|u| &u.public_key).filter(|key| !key.is_empty()))
+        .bind(user.is_some_and(|u| u.licensed))
         .bind(node.position.map(|p| p.latitude))
         .bind(node.position.map(|p| p.longitude))
         .bind(node.position.and_then(|p| p.altitude))
@@ -441,8 +449,8 @@ impl Store {
     /// Every node the radio has heard.
     pub async fn nodes(&self, radio: RadioId) -> Result<Vec<Node>> {
         let rows: Vec<NodeRow> = sqlx::query_as(
-            "SELECT num, long_name, short_name, hw_model, role, latitude, longitude, altitude,
-                position_radius, position_source,
+            "SELECT num, long_name, short_name, hw_model, role, public_key, licensed,
+                latitude, longitude, altitude, position_radius, position_source,
                 last_heard, snr, rssi, hops_away, via_mqtt, favorite, battery_level, voltage,
                 channel_utilization
             FROM node WHERE radio_id = ?",
@@ -1337,6 +1345,8 @@ mod tests {
                 short_name: name[..2].into(),
                 hw_model: "HELTEC_V3".into(),
                 role: "CLIENT".into(),
+                public_key: vec![7; 32],
+                licensed: false,
             }),
             position: Some(Position {
                 latitude: 43.36,

@@ -5,6 +5,8 @@
 //! own types so that either can change without the other having to.
 
 use crate::radios::Change;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use meshctl_api as api;
 use meshctl_core::mesh;
 
@@ -46,6 +48,11 @@ pub fn node(node: &mesh::Node) -> api::Node {
         short_name: user.map(|u| u.short_name.clone()),
         hw_model: user.map(|u| u.hw_model.clone()),
         role: user.map(|u| u.role.clone()),
+        public_key: user
+            .map(|u| &u.public_key)
+            .filter(|key| !key.is_empty())
+            .map(|key| BASE64.encode(key)),
+        licensed: user.is_some_and(|u| u.licensed),
         position: node.position.map(|p| api::Position {
             latitude: p.latitude,
             longitude: p.longitude,

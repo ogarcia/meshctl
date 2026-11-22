@@ -42,6 +42,11 @@ CREATE TABLE node (
     short_name TEXT,
     hw_model TEXT,
     role TEXT,
+    -- Its public key, 32 bytes, as it sends it; NULL when not known.
+    public_key BLOB,
+    -- Whether its owner is a licensed radio amateur, who sends nothing
+    -- encrypted.
+    licensed INTEGER NOT NULL DEFAULT 0,
     latitude REAL,
     longitude REAL,
     altitude INTEGER,

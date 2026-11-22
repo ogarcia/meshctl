@@ -300,6 +300,8 @@ fn node_from(contact: &Contact) -> Node {
             short_name: String::new(),
             hw_model: String::new(),
             role: role_name(contact.kind),
+            public_key: contact.public_key.to_vec(),
+            licensed: false,
         }),
         position: position(contact.lat, contact.lon),
         last_heard: last_heard(contact),

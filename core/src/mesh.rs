@@ -55,6 +55,12 @@ pub struct User {
     pub short_name: String,
     pub hw_model: String,
     pub role: String,
+    /// Its public key, 32 bytes, as it sends it; empty when not known. What
+    /// it is sent to itself goes encrypted to it, whatever the channel.
+    pub public_key: Vec<u8>,
+    /// Whether its owner is a licensed radio amateur: then it sends nothing
+    /// encrypted, to itself either.
+    pub licensed: bool,
 }
 
 /// Where a node says it is, in degrees and metres.
@@ -637,6 +643,8 @@ fn user_from(user: pb::User) -> User {
         short_name: user.short_name,
         hw_model: hw_model_name(user.hw_model),
         role: role_name(user.role),
+        public_key: user.public_key,
+        licensed: user.is_licensed,
     }
 }
 

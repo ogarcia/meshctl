@@ -1681,6 +1681,7 @@ mod tests {
                 short_name: "G3L0".into(),
                 hw_model: "HELTEC_V3".into(),
                 role: "CLIENT".into(),
+                ..Default::default()
             }),
             position: None,
             last_heard: None,

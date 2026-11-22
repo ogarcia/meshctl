@@ -422,6 +422,17 @@ pub struct Node {
     /// Its device role, as the protobufs name it.
     #[cfg_attr(feature = "openapi", schema(example = "ROUTER"))]
     pub role: Option<String>,
+    /// Its public key, in base64, when known. Meshtastic sends a node what
+    /// is for it alone (but node info, positions and traceroutes) encrypted
+    /// to this key, whatever the channel; MeshCore names nodes by it.
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = "K3xOcv5PxFq1aGv0Yd0m9q8tYp2bR8sWkVc4nZ1uJ0E=")
+    )]
+    pub public_key: Option<String>,
+    /// Whether its owner is a licensed radio amateur, who sends nothing
+    /// encrypted and is sent nothing encrypted either.
+    pub licensed: bool,
     pub position: Option<Position>,
     /// When it was last heard, in seconds since the epoch.
     pub last_heard: Option<u32>,
