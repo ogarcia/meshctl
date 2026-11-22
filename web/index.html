@@ -492,7 +492,8 @@
       .page { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
       .topbar {
         display: flex;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        container: topbar / inline-size;
         align-items: center;
         gap: 12px;
         min-height: 53px;
@@ -501,7 +502,11 @@
         border-bottom: 1px solid var(--mc-border);
       }
       .topbar h1 { margin: 0; font-size: 16px; font-weight: 600; }
-      .topbar .heading { display: flex; flex-direction: column; min-width: 0; }
+      /* In one line always: the name cut short before the actions go under. */
+      .topbar .heading { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+      .topbar h1 { min-width: 0; }
+      .topbar h1 .title-text,
+      .topbar .heading > .dim { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .topbar .heading span { font-size: 12px; }
       .topbar .avatar { width: 32px; height: 32px; font-size: 11px; background: var(--mc-near); color: var(--mc-text); }
       .topbar .node-avatar { width: 36px; height: 36px; font-size: 10px; }
@@ -528,7 +533,7 @@
       .topbar .actions .with-icon .icon { display: flex; color: var(--mc-muted); }
       .topbar .actions .primary.with-icon .icon { color: inherit; }
       .topbar .actions .with-icon svg { width: 16px; height: 16px; }
-      .topbar .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+      .topbar .actions { flex: none; display: flex; flex-wrap: nowrap; gap: 8px; margin-left: auto; }
       .topbar .actions button { min-height: 34px; font-weight: 600; white-space: nowrap; }
       .menu-toggle { display: none; }
       /* On a wide screen the map goes without the bar over it, as its nodes'
@@ -2437,21 +2442,21 @@
       .emoji-grid p { grid-column: 1 / -1; margin: 8px 0; }
 
       /*
-       * A phone, last: over the rules of each page above, at the same weight.
+       * A heading short of room, by its own width and not the screen's (a
+       * phone, or a narrow window beside the bars): the actions as icons, a
+       * role by its name alone, the code only where there is room.
        */
-      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
-        /* The heading in one line: the name cut short, the actions as icons. */
-        .topbar { flex-wrap: nowrap; }
-        .topbar .heading { flex: 1; min-width: 0; }
-        .topbar h1 { min-width: 0; }
-        .topbar h1 .title-text,
-        .topbar .heading > .dim { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .topbar .actions { flex-wrap: nowrap; gap: 6px; }
+      @container topbar (max-width: 640px) {
+        .topbar .actions { gap: 6px; }
         .topbar .actions .with-icon { padding: 0 10px; }
         .topbar .actions .with-icon .label { display: none; }
         .topbar .node-avatar { width: 32px; height: 32px; }
-        /* A role by its name alone: its code where there is room. */
         .topbar .heading .code { display: none; }
+      }
+      /*
+       * A phone, last: over the rules of each page above, at the same weight.
+       */
+      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
         /* The columns one under the other: the first's last keeps its line. */
         .node-page > .node-sections:last-child > .node-column:first-child > .node-section:last-child {
           margin-bottom: 18px;
@@ -2609,6 +2614,8 @@
         .trace header .copy { width: 44px; height: 44px; }
         .ask-split .ask { min-height: 42px; }
         .topbar .actions .with-icon { min-width: 44px; justify-content: center; }
+        /* Its buttons a finger tall, the heading as tall as the sidebar's. */
+        .topbar { padding-top: 4px; padding-bottom: 4px; }
         .segmented button { min-height: 38px; }
         /* A colour to pick: round, a finger wide, not stretched to its height. */
         .swatch { min-height: 0; }
