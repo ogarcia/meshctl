@@ -43,6 +43,88 @@ extern "C" {
     fn map_view(json: Option<String>);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = resize)]
     fn map_resize();
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = mini)]
+    fn map_mini(element: &web_sys::HtmlElement, json: &str);
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = miniClose)]
+    fn map_mini_close(element: &web_sys::HtmlElement);
+}
+
+/// Where a small map shows a node, and in which colour.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct Spot {
+    lat: f64,
+    lon: f64,
+    radius: Option<u32>,
+    pin: &'static str,
+}
+
+/// A node where it says it is, small, on its page: with the circle of how
+/// far it may be from there, and its pin in the colour of how far it is,
+/// as on the map. A click shows it there, picked.
+#[component]
+pub fn MiniMap(num: u32) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let spot = Memo::new(move |_| {
+        let local = live
+            .status
+            .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+        live.nodes.with(|nodes| {
+            let node = nodes.get(&num)?;
+            let at = node.position?;
+            Some(Spot {
+                lat: at.latitude,
+                lon: at.longitude,
+                radius: at.radius,
+                pin: crate::mesh::pin(node, local == Some(num)),
+            })
+        })
+    });
+    let element = NodeRef::<html::Div>::new();
+    // The element drawn on, to let its map go with it.
+    let drawn = StoredValue::new_local(None::<web_sys::HtmlElement>);
+    Effect::new(move |_| {
+        let (Some(div), Some(spot)) = (element.get(), spot.get()) else {
+            return;
+        };
+        let div: web_sys::HtmlElement = div.into();
+        if let Ok(json) = serde_json::to_string(&spot) {
+            map_mini(&div, &json);
+        }
+        drawn.set_value(Some(div));
+    });
+    on_cleanup(move || {
+        if let Some(div) = drawn.get_value() {
+            map_mini_close(&div);
+        }
+    });
+    let label = move || t_string!(i18n, node_on_map);
+    view! {
+        <div
+            class="mini-map"
+            node_ref=element
+            role="button"
+            tabindex="0"
+            title=label
+            aria-label=label
+            on:click=move |ev| {
+                // OpenStreetMap's credit is a link of its own.
+                let link = ev
+                    .target()
+                    .and_then(|t| wasm_bindgen::JsCast::dyn_into::<web_sys::Element>(t).ok())
+                    .is_some_and(|t| t.closest("a").ok().flatten().is_some());
+                if !link {
+                    live.show_on_map(num);
+                }
+            }
+            on:keydown=move |ev| {
+                if ev.key() == "Enter" || ev.key() == " " {
+                    ev.prevent_default();
+                    live.show_on_map(num);
+                }
+            }
+        ></div>
+    }
 }
 
 /// What the map is given to draw.

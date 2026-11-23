@@ -12,7 +12,7 @@ use crate::app::Live;
 use crate::chat::title;
 use crate::daemon::{self, Failure, REQUESTS_PAGE, TRACES_PAGE};
 use crate::i18n::{Locale, t, t_string, use_i18n};
-use crate::mesh::{PIN, ago, awaiting_clock, radius, reach_words, waited};
+use crate::mesh::{ago, awaiting_clock, radius, reach_words, waited};
 use crate::traces::TraceCard;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -951,13 +951,6 @@ fn PositionSection(at: Option<i64>) -> impl IntoView {
                                 inner_html=COPY
                                 on:click=move |_| crate::clipboard::copy(&copied)
                             ></button>
-                            <button
-                                class="icon-button"
-                                title=move || t_string!(i18n, node_on_map)
-                                aria-label=move || t_string!(i18n, node_on_map)
-                                inner_html=PIN
-                                on:click=move |_| live.show_on_map(asking.num)
-                            ></button>
                         </span>
                     },
                 )}
@@ -968,8 +961,17 @@ fn PositionSection(at: Option<i64>) -> impl IntoView {
         }
         .into_any()
     };
+    // The small map apart from the facts, built once: what it shows changes
+    // with the node, and the map stays.
+    let placed = Memo::new(move |_| {
+        live.nodes
+            .with(|nodes| nodes.get(&asking.num).is_some_and(|n| n.position.is_some()))
+    });
     view! {
         <Section title=t!(i18n, node_position).into_any() at asked=Some(Asked::Request(RequestKind::Position))>
+            <Show when=move || placed.get()>
+                <crate::map::MiniMap num=asking.num />
+            </Show>
             {body}
         </Section>
     }

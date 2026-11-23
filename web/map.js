@@ -693,5 +693,74 @@ window.meshctlMap = (() => {
     if (map) map.invalidateSize();
   }
 
-  return { open, close, nodes, focus, route, stay, reset, resize, view };
+  // The small maps of the nodes' pages, apart from the one map: each where
+  // a node is, still (nothing moves it but the page), with the circle of
+  // how far it may be from there when it says. By their elements.
+  const minis = new Map();
+
+  // Draws a small map on an element, or draws it again: where (lat, lon),
+  // how far it may be from there (radius, in metres, or none) and the
+  // colour of its pin, as one of the interface's (pin).
+  function mini(element, json) {
+    const at = JSON.parse(json);
+    let small = minis.get(element);
+    if (!small) {
+      small = L.map(element, {
+        // In quarters, so that the circle fills it, whatever its size.
+        zoomSnap: 0.25,
+        zoomControl: false,
+        dragging: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        boxZoom: false,
+        keyboard: false,
+        touchZoom: false,
+        tap: false,
+      });
+      small.attributionControl.setPrefix(false);
+      L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(small);
+      small.drawn = L.layerGroup().addTo(small);
+      minis.set(element, small);
+    }
+    // Laid out first: placed by its circle, it has to know its size.
+    requestAnimationFrame(() => {
+      small.invalidateSize();
+      small.drawn.clearLayers();
+      const where = [at.lat, at.lon];
+      // Placed before the circle is drawn: a circle on a map not yet
+      // placed has no bounds to place it by.
+      if (at.radius) {
+        const bounds = L.latLng(where).toBounds(at.radius * 2);
+        small.fitBounds(bounds, { padding: [12, 12], maxZoom: 16, animate: false });
+        L.circle(where, {
+          radius: at.radius,
+          color: color("--mc-primary"),
+          weight: 1.5,
+          fillOpacity: 0.12,
+          interactive: false,
+        }).addTo(small.drawn);
+      } else {
+        small.setView(where, FOCUS_ZOOM, { animate: false });
+      }
+      L.circleMarker(where, {
+        radius: 7,
+        color: color("--mc-surface"),
+        weight: 2,
+        fillColor: color(at.pin),
+        fillOpacity: 1,
+        interactive: false,
+      }).addTo(small.drawn);
+    });
+  }
+
+  // The small map on an element, gone with it.
+  function miniClose(element) {
+    const small = minis.get(element);
+    if (small) {
+      small.remove();
+      minis.delete(element);
+    }
+  }
+
+  return { open, close, nodes, focus, route, stay, reset, resize, view, mini, miniClose };
 })();

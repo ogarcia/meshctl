@@ -1773,6 +1773,19 @@
         pointer-events: none;
       }
       .map-offline .offline-banner { margin: 0; box-shadow: var(--mc-shadow); pointer-events: auto; }
+      /* A node where it is, small, on its page: a click shows it on the map. */
+      .mini-map {
+        height: 180px;
+        margin-bottom: 12px;
+        border: 1px solid var(--mc-border);
+        border-radius: 10px;
+        background: var(--mc-map);
+        cursor: pointer;
+        z-index: 0;
+      }
+      .mini-map:hover { border-color: var(--mc-primary); }
+      .mini-map.leaflet-container, .mini-map .leaflet-interactive { cursor: pointer; }
+      .mini-map .leaflet-control-attribution { font-size: 10px; }
       .map-empty {
         position: absolute;
         top: 12px;

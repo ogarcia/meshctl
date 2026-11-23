@@ -127,6 +127,20 @@ pub fn reach_words(i18n: I18nContext<Locale>, node: &Node, local: bool) -> Optio
     })
 }
 
+/// The colour of a node's pin, as the map draws it: the radio's own, or by
+/// how far it is (those through MQTT as the farthest).
+pub fn pin(node: &Node, local: bool) -> &'static str {
+    if local {
+        return "--mc-pin-local";
+    }
+    match distance(node) {
+        "direct" => "--mc-pin-direct",
+        "near" => "--mc-pin-near",
+        "mid" => "--mc-pin-mid",
+        _ => "--mc-pin-far",
+    }
+}
+
 /// How far a node is, by the classes the map's legend has.
 fn distance(node: &Node) -> &'static str {
     if node.via_mqtt {
