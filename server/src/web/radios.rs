@@ -459,9 +459,11 @@ struct Removal {
 /// Remove node
 ///
 /// Has the radio forget a node: out of its node list until it is heard
-/// again, as out of meshctl's. Nothing goes on the air. With `everything`,
-/// meshctl forgets all it kept of the node besides. Every client hears of
-/// it as `node_removed`, and of the rest as `node_forgotten`.
+/// again. Nothing goes on the air. meshctl keeps it, as `on_radio: false`,
+/// which every client hears of as `node`. With `everything`, meshctl
+/// forgets it and all it kept of it besides, which every client hears of
+/// as `node_removed` and `node_forgotten`; a node the radio is known not to
+/// have is not asked of it.
 #[utoipa::path(
     delete,
     path = "/radios/{radio}/nodes/{node}",

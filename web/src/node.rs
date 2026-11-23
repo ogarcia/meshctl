@@ -324,6 +324,12 @@ fn Checks() -> impl IntoView {
         } else if !connected(live) {
             // Said over the page, as on every other.
             None
+        } else if live.nodes.with(|nodes| {
+            nodes
+                .get(&asking.num)
+                .is_some_and(|n| n.on_radio == Some(false))
+        }) {
+            Some(t!(i18n, node_kept_hint).into_any())
         } else if live
             .nodes
             .with(|nodes| nodes.get(&asking.num).is_some_and(|n| n.via_mqtt))
@@ -1746,13 +1752,21 @@ fn Forget(history: History, reload: Callback<()>) -> impl IntoView {
 fn RemoveDrawer() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
     let title = Signal::derive(move || t_string!(i18n, remove_title).to_owned());
     let problem = RwSignal::new(None::<Failure>);
     let busy = RwSignal::new(false);
     view! {
         <Drawer open=live.removing title>
             <div class="removal">
-                <Removal everything=false busy problem />
+                // Out of the radio, once: then all of it, or nothing.
+                {move || {
+                    let on_radio = live
+                        .nodes
+                        .with(|nodes| nodes.get(&asking.num).and_then(|n| n.on_radio));
+                    (on_radio != Some(false))
+                        .then(|| view! { <Removal everything=false busy problem /> })
+                }}
                 <Removal everything=true busy problem />
                 {move || {
                     problem

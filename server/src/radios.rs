@@ -902,10 +902,13 @@ impl Radios {
         if let Err(err) = mesh.remove_node(num).await {
             return Ok(Err(err));
         }
-        // Out of the list now, rather than once the event is taken: what
-        // comes from it next finds it gone.
-        self.store.remove_node(id, num).await?;
+        // Out of the radio only, it stays here, as the radio no longer
+        // having it. All of it forgotten, out of the list too: now, rather
+        // than once the event is taken, so that what comes from it next
+        // finds it gone.
         if everything {
+            mesh.drop_node(num);
+            self.store.remove_node(id, num).await?;
             self.store.forget_node(id, num).await?;
             let _ = self.changes.send(Change::NodeForgotten(id, num));
         }

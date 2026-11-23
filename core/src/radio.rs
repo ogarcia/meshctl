@@ -451,13 +451,17 @@ impl Mesh {
     }
 
     /// Has the radio forget a node: out of its node list, until it is heard
-    /// again. Nothing goes on the air.
+    /// again. Here it stays, as not in the radio's list. Nothing goes on the
+    /// air; nothing is asked of the radio if it is known not to have it.
     pub async fn remove_node(&self, num: u32) -> Result<(), AdminError> {
         if self.is_meshcore() {
             return Err(AdminError::Unsupported);
         }
-        if !self.read(|state| state.nodes.contains_key(&num)) {
+        let Some(on_radio) = self.read(|state| state.nodes.get(&num).map(|n| n.on_radio)) else {
             return Err(AdminError::UnknownNode);
+        };
+        if on_radio == Some(false) {
+            return Ok(());
         }
         let (me, passkey) = self.passkey().await?;
         if num == me {
@@ -471,6 +475,19 @@ impl Mesh {
             passkey,
         )
         .await?;
+        self.update(|state| match state.nodes.get_mut(&num) {
+            Some(node) => {
+                node.on_radio = Some(false);
+                vec![Event::Node(node.clone())]
+            }
+            None => Vec::new(),
+        });
+        Ok(())
+    }
+
+    /// Lets go of a node here too, as meshctl forgets it: out of the list
+    /// until it is heard again.
+    pub fn drop_node(&self, num: u32) {
         self.update(|state| {
             if state.nodes.remove(&num).is_some() {
                 vec![Event::NodeRemoved(num)]
@@ -478,7 +495,6 @@ impl Mesh {
                 Vec::new()
             }
         });
-        Ok(())
     }
 
     /// Has the radio keep a node from a shared contact: who it is and its
