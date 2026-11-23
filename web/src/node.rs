@@ -105,6 +105,8 @@ fn NodePage(num: u32) -> impl IntoView {
     let drawer = RwSignal::new(false);
     let latest = move || live.latest.get().unwrap_or_default();
     let is_own = Memo::new(move |_| own(live, num));
+    // The page is drawn again for another radio, and so is read once.
+    let meshcore = untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore);
     // Two columns, headed by what is looked at most: where it is, and the
     // routes to it: what comes of its own accord on the left, what is asked
     // for on the right, the least likely to answer last.
@@ -121,7 +123,11 @@ fn NodePage(num: u32) -> impl IntoView {
                 }}
             </div>
             <div class="node-column">
-                <Traces drawer />
+                {if meshcore {
+                    view! { <MeshcorePath /> }.into_any()
+                } else {
+                    view! { <Traces drawer /> }.into_any()
+                }}
                 {move || {
                     let latest = latest();
                     view! {
@@ -168,6 +174,7 @@ fn NodePage(num: u32) -> impl IntoView {
                 }
             }}
             <Shortcuts />
+            {meshcore.then(|| view! { <Advert /> })}
             <Share />
         }
         .into_any()
@@ -963,6 +970,7 @@ fn Shortcuts() -> impl IntoView {
             let label = move || match tab {
                 MeshcoreTab::User => t_string!(i18n, settings_tab_user),
                 MeshcoreTab::Radio => t_string!(i18n, mc_tab_radio),
+                MeshcoreTab::Channels => t_string!(i18n, settings_tab_channels),
                 MeshcoreTab::Advanced => t_string!(i18n, mc_tab_advanced),
             };
             view! {
@@ -1009,6 +1017,118 @@ fn Shortcuts() -> impl IntoView {
         </Section>
     }
     .into_any()
+}
+
+/// The path a MeshCore radio knows to a node: straight, by so many hops, or
+/// none, when what goes to it floods to find one. Reset, it floods again.
+#[component]
+fn MeshcorePath() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let busy = RwSignal::new(false);
+    let outcome = RwSignal::new(None::<Result<(), Failure>>);
+    let node = move || {
+        live.nodes.with(|nodes| {
+            nodes
+                .get(&asking.num)
+                .map(|n| (n.hops_away, n.on_radio != Some(false)))
+        })
+    };
+    let reset = move |_| {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        busy.set(true);
+        outcome.set(None);
+        spawn_local(async move {
+            outcome.set(Some(daemon::reset_path(radio, asking.num).await));
+            busy.set(false);
+        });
+    };
+    let body = move || {
+        let (hops, contact) = node().unwrap_or((None, false));
+        let path = match hops {
+            Some(0) => t_string!(i18n, mc_path_direct).to_owned(),
+            Some(1) => t_string!(i18n, mc_path_hop).to_owned(),
+            Some(n) => t_string!(i18n, chat_hops).replace("{n}", &n.to_string()),
+            None => t_string!(i18n, mc_path_none).to_owned(),
+        };
+        view! {
+            <dl class="facts compact">{wide_fact(t!(i18n, mc_path_known), path)}</dl>
+            <p class="hint dim">
+                {if contact {
+                    t!(i18n, mc_path_hint).into_any()
+                } else {
+                    t!(i18n, mc_path_not_contact).into_any()
+                }}
+            </p>
+            <div class="path-actions">
+                <button
+                    type="button"
+                    disabled=move || busy.get() || !contact || hops.is_none() || !connected(live)
+                    on:click=reset
+                >
+                    {t!(i18n, mc_path_reset)}
+                </button>
+                {move || outcome.get().map(|done| match done {
+                    Ok(()) => view! { <span class="dim">{t!(i18n, mc_path_forgotten)}</span> }.into_any(),
+                    Err(_) => view! { <span class="problem">{t!(i18n, error_failed)}</span> }.into_any(),
+                })}
+            </div>
+        }
+    };
+    view! {
+        <Section title=t!(i18n, mc_path).into_any() class="mc-path">{body}</Section>
+    }
+}
+
+/// The radio says who it is, for others to add it: to those it reaches
+/// straight, or through the repeaters to the whole mesh. It goes on the air.
+#[component]
+fn Advert() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let busy = RwSignal::new(false);
+    let outcome = RwSignal::new(None::<Result<bool, Failure>>);
+    let send = move |flood: bool| {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        busy.set(true);
+        outcome.set(None);
+        spawn_local(async move {
+            let done = daemon::advert(radio, flood).await;
+            outcome.set(Some(done.map(|()| flood)));
+            busy.set(false);
+        });
+    };
+    view! {
+        <Section title=t!(i18n, mc_advert).into_any() class="mc-advert">
+            <p class="hint dim">{t!(i18n, mc_advert_hint)}</p>
+            <div class="path-actions">
+                <button
+                    type="button"
+                    disabled=move || busy.get() || !connected(live)
+                    on:click=move |_| send(false)
+                >
+                    {t!(i18n, mc_advert_nearby)}
+                </button>
+                <button
+                    type="button"
+                    disabled=move || busy.get() || !connected(live)
+                    on:click=move |_| send(true)
+                >
+                    {t!(i18n, mc_advert_flood)}
+                </button>
+                {move || outcome.get().map(|done| match done {
+                    Ok(false) => view! { <span class="dim">{t!(i18n, mc_advert_sent_nearby)}</span> }.into_any(),
+                    Ok(true) => view! { <span class="dim">{t!(i18n, mc_advert_sent_flood)}</span> }.into_any(),
+                    Err(_) => view! { <span class="problem">{t!(i18n, error_failed)}</span> }.into_any(),
+                })}
+            </div>
+        </Section>
+    }
 }
 
 /// A MeshCore radio's figures: its battery and storage, how long it has
@@ -1144,6 +1264,23 @@ fn Share() -> impl IntoView {
 /// link to copy; the QR over the words while they do not fit beside it.
 fn contact_card(link: String, own: bool) -> Option<AnyView> {
     let i18n = use_i18n();
+    // Whose apps open it, as the link itself says.
+    let meshcore = link.starts_with("meshcore://");
+    link_card(link, move || match (own, meshcore) {
+        (true, false) => t!(i18n, own_contact_hint_meshtastic).into_any(),
+        (true, true) => t!(i18n, own_contact_hint_meshcore).into_any(),
+        (false, false) => t!(i18n, node_contact_hint_meshtastic).into_any(),
+        (false, true) => t!(i18n, node_contact_hint_meshcore).into_any(),
+    })
+}
+
+/// A link to share, in a `.contact-share`: its QR beside how to use it and
+/// the link to copy.
+pub(crate) fn link_card(
+    link: String,
+    hint: impl Fn() -> AnyView + Send + Sync + 'static,
+) -> Option<AnyView> {
+    let i18n = use_i18n();
     let svg = qrcode::QrCode::new(link.as_bytes())
         .ok()?
         .render::<qrcode::render::svg::Color>()
@@ -1151,14 +1288,6 @@ fn contact_card(link: String, own: bool) -> Option<AnyView> {
         .dark_color(qrcode::render::svg::Color("#111111"))
         .light_color(qrcode::render::svg::Color("#ffffff"))
         .build();
-    // Whose apps open it, as the link itself says.
-    let meshcore = link.starts_with("meshcore://");
-    let hint = move || match (own, meshcore) {
-        (true, false) => t!(i18n, own_contact_hint_meshtastic).into_any(),
-        (true, true) => t!(i18n, own_contact_hint_meshcore).into_any(),
-        (false, false) => t!(i18n, node_contact_hint_meshtastic).into_any(),
-        (false, true) => t!(i18n, node_contact_hint_meshcore).into_any(),
-    };
     let copied = link.clone();
     Some(
         view! {

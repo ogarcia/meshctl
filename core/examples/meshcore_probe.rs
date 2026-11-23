@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let slots = device.and_then(|d| d.max_channels).unwrap_or(8);
-    for (index, name) in client.channels(slots).await {
+    for (index, name, _) in client.channels(slots).await {
         println!("channel {index}: {name:?}");
     }
     Ok(())

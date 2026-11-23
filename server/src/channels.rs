@@ -113,6 +113,26 @@ fn enabled(channel: &pb::Channel) -> bool {
 }
 
 /// The channels a radio has, in their slots.
+/// A radio's channels, each told by its name and key: a MeshCore radio's by
+/// the name and secret of each slot set, a Meshtastic one's as [`slots`].
+pub fn slots_of(state: &meshctl_core::mesh::MeshState) -> Vec<Slot> {
+    let Some(meshcore) = &state.meshcore_channels else {
+        return slots(&state.settings);
+    };
+    state
+        .channels
+        .values()
+        .filter_map(|channel| {
+            let secret = meshcore.secrets.get(&channel.index)?;
+            Some(Slot {
+                index: channel.index,
+                fingerprint: fingerprint(&channel.name, secret),
+                name: channel.name.clone(),
+            })
+        })
+        .collect()
+}
+
 pub fn slots(settings: &Settings) -> Vec<Slot> {
     (0..SLOTS)
         .filter_map(|index| {

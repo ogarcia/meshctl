@@ -1395,6 +1395,13 @@
         .contact-share .contact { flex-direction: column; align-items: stretch; }
         .contact-share .qr { align-self: center; width: 200px; height: 200px; }
       }
+      /* A MeshCore node's path, and the radio's advert: a word on them,
+         and what can be done, beside how it went. */
+      .mc-path .hint, .mc-advert .hint { margin: 8px 0 0; font-size: 12px; }
+      .mc-advert .hint { margin-top: 0; }
+      .path-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; }
+      .path-actions span { font-size: 13px; }
+      .path-actions .problem { color: var(--mc-danger); }
       .own-shortcuts { container: shortcuts / inline-size; }
       .own-shortcuts .shortcuts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
       .own-shortcuts .shortcuts button { min-width: 0; min-height: 34px; padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3420,8 +3427,9 @@
         padding-top: 16px;
         border-top: 1px solid var(--mc-border);
       }
-      /* All the same width; removing it is apart from the rest, on the left. */
-      .radio-editor .buttons button { min-width: 112px; }
+      /* All the same width, three to a row at most, a third each where the
+         row is narrower; removing it is apart from the rest, on the left. */
+      .radio-editor .buttons button { min-width: min(112px, calc((100% - 16px) / 3)); }
       .radio-editor .buttons .danger { margin-right: auto; }
 
       /* The emoji picker: a search, the groups, and the emojis. */

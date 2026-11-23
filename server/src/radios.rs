@@ -1332,7 +1332,7 @@ impl Radios {
     ) -> Result<SettingsApplied, SettingsFailure> {
         let have = self
             .configurable(id)?
-            .read(|state| crate::channels::slots(&state.settings).len());
+            .read(|state| crate::channels::slots_of(state).len());
         if order.len() != have {
             return Err(SettingsFailure::Invalid("order".to_owned()));
         }
@@ -1349,7 +1349,7 @@ impl Radios {
     ) -> Result<SettingsApplied, SettingsFailure> {
         let have: Vec<u32> = self
             .configurable(id)?
-            .read(|state| crate::channels::slots(&state.settings))
+            .read(crate::channels::slots_of)
             .iter()
             .map(|s| s.index)
             .collect();
@@ -1439,6 +1439,88 @@ impl Radios {
         Ok(())
     }
 
+    /// A MeshCore radio's channels, each by its kind.
+    pub fn meshcore_channels(
+        &self,
+        id: RadioId,
+    ) -> Result<meshctl_api::MeshcoreChannels, SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        mesh.read(crate::meshcore::channels)
+            .ok_or(SettingsFailure::NotConnected)
+    }
+
+    /// Sets a MeshCore radio's channel in a slot: its name, and its secret
+    /// as given, as its name gives it, as it was, or a new one.
+    pub async fn set_meshcore_channel(
+        &self,
+        id: RadioId,
+        index: u32,
+        wanted: &meshctl_api::MeshcoreChannelChange,
+    ) -> Result<(), SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        let (name, secret) = mesh
+            .read(|state| {
+                crate::meshcore::channel_change(state, index, wanted, |secret| {
+                    getrandom::fill(secret).expect("the system has randomness to give");
+                })
+            })
+            .map_err(|why| match why {
+                crate::meshcore::DUPLICATE => SettingsFailure::Duplicate,
+                why => SettingsFailure::Invalid(why.to_owned()),
+            })?;
+        let index = u8::try_from(index).map_err(|_| SettingsFailure::Invalid("index".into()))?;
+        mesh.meshcore_set_channel(index, &name, &secret)
+            .await
+            .map_err(meshcore_failure)?;
+        tracing::info!(radio = id, index, "MeshCore channel set");
+        Ok(())
+    }
+
+    /// Empties a MeshCore radio's channel slot. Its conversation stays,
+    /// as a channel gone.
+    pub async fn remove_meshcore_channel(
+        &self,
+        id: RadioId,
+        index: u32,
+    ) -> Result<(), SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        let set = mesh.read(|state| state.channels.contains_key(&index));
+        if !set {
+            return Err(SettingsFailure::Invalid("index".into()));
+        }
+        let index = u8::try_from(index).map_err(|_| SettingsFailure::Invalid("index".into()))?;
+        mesh.meshcore_set_channel(index, "", &[0; 16])
+            .await
+            .map_err(meshcore_failure)?;
+        tracing::info!(radio = id, index, "MeshCore channel removed");
+        Ok(())
+    }
+
+    /// A MeshCore channel's link, to share it: with its secret.
+    pub fn meshcore_channel_link(
+        &self,
+        id: RadioId,
+        index: u32,
+    ) -> Result<String, SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        mesh.read(|state| crate::meshcore::channel_link(state, index))
+            .ok_or(SettingsFailure::Invalid("index".into()))
+    }
+
+    /// Has a MeshCore radio forget its path to a node.
+    pub async fn reset_path(&self, id: RadioId, num: u32) -> Result<(), SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        mesh.meshcore_reset_path(num)
+            .await
+            .map_err(meshcore_failure)
+    }
+
+    /// Has a MeshCore radio say who it is.
+    pub async fn advert(&self, id: RadioId, flood: bool) -> Result<(), SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        mesh.meshcore_advert(flood).await.map_err(meshcore_failure)
+    }
+
     /// A MeshCore radio's figures, asked for now.
     pub async fn meshcore_status(
         &self,
@@ -1449,17 +1531,54 @@ impl Radios {
         Ok(crate::meshcore::status(status))
     }
 
-    /// What a link holds, against what a Meshtastic radio has and knows.
+    /// What a link holds, against what the radio has and knows: a
+    /// Meshtastic link for a Meshtastic radio, a MeshCore one for MeshCore.
     pub fn read_link(&self, id: RadioId, url: &str) -> Result<LinkContents, LinkFailure> {
+        if self.protocol(id) == Some(Protocol::Meshcore) {
+            let mesh = self.meshcore(id).map_err(LinkFailure::Settings)?;
+            let link = crate::meshcore::parse_link(url).ok_or(LinkFailure::Invalid)?;
+            return Ok(mesh.read(|state| crate::meshcore::link_contents(&link, state)));
+        }
         let mesh = self.configurable(id).map_err(LinkFailure::Settings)?;
         let parsed = crate::links::parse(url).ok_or(LinkFailure::Invalid)?;
         Ok(mesh.read(|state| crate::links::contents(&parsed, &state.settings, &state.nodes)))
+    }
+
+    /// Adds what a MeshCore link holds: a contact the radio keeps, or a
+    /// channel to its first free slot, unless it has it already.
+    async fn add_meshcore_link(&self, id: RadioId, url: &str) -> Result<(), LinkFailure> {
+        let mesh = self.meshcore(id).map_err(LinkFailure::Settings)?;
+        match crate::meshcore::parse_link(url).ok_or(LinkFailure::Invalid)? {
+            crate::meshcore::Link::Contact { key, kind, name } => mesh
+                .meshcore_add_contact(key, kind, &name)
+                .await
+                .map(|_| ())
+                .map_err(LinkFailure::Admin),
+            crate::meshcore::Link::Channel { name, secret } => {
+                let (present, free) = mesh.read(|state| {
+                    (
+                        crate::meshcore::has_channel(state, &name, &secret),
+                        crate::meshcore::free_slot(state),
+                    )
+                });
+                if present {
+                    return Ok(());
+                }
+                let slot = free.ok_or(LinkFailure::NoFreeSlots)?;
+                mesh.meshcore_set_channel(slot, &name, &secret)
+                    .await
+                    .map_err(LinkFailure::Admin)
+            }
+        }
     }
 
     /// Adds what a link holds to a Meshtastic radio: a contact it keeps, or
     /// channels to its free slots, those it has left out. Nothing else of
     /// its settings changes, its LoRa least of all.
     pub async fn add_link(&self, id: RadioId, link: &meshctl_api::Link) -> Result<(), LinkFailure> {
+        if self.protocol(id) == Some(Protocol::Meshcore) {
+            return self.add_meshcore_link(id, &link.url).await;
+        }
         let mesh = self.configurable(id).map_err(LinkFailure::Settings)?;
         match crate::links::parse(&link.url).ok_or(LinkFailure::Invalid)? {
             crate::links::Parsed::Contact(contact) => {
@@ -2026,6 +2145,16 @@ fn thin(points: Vec<TelemetryPoint>, start: i64, end: i64, most: usize) -> Vec<T
 }
 
 /// What a radio refusing a change of settings means for the API.
+/// What a MeshCore radio would not do, as it names it, as a setting it
+/// cannot have; the rest as any radio's.
+fn meshcore_failure(error: AdminError) -> SettingsFailure {
+    match error {
+        AdminError::Refused(why) => SettingsFailure::Invalid(why),
+        AdminError::UnknownNode => SettingsFailure::Invalid("node".into()),
+        other => admin_failure(other),
+    }
+}
+
 fn admin_failure(error: AdminError) -> SettingsFailure {
     match error {
         AdminError::NotConnected => SettingsFailure::NotConnected,
@@ -2077,7 +2206,7 @@ async fn follow_channels(
     id: RadioId,
     mesh: &Mesh,
 ) -> Result<()> {
-    let now = mesh.read(|state| crate::channels::slots(&state.settings));
+    let now = mesh.read(crate::channels::slots_of);
     // A radio always has its primary: none read is nothing read, not every
     // channel gone.
     if now.is_empty() {

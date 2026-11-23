@@ -126,6 +126,19 @@ impl Settings {
     }
 }
 
+/// A MeshCore radio's channels: how many slots it has, and each set one's
+/// 128-bit secret, by its slot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Channels {
+    pub slots: u8,
+    pub secrets: std::collections::BTreeMap<u32, [u8; 16]>,
+}
+
+/// The secret of the channel every MeshCore radio comes with, `Public`.
+pub const PUBLIC_SECRET: [u8; 16] = [
+    0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a, 0xc9, 0xe5, 0xed, 0xba, 0xa1, 0x15, 0xcd, 0x72,
+];
+
 /// A radio's figures, asked for: each as its firmware gives it, none of a
 /// kind it does not.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -385,8 +398,9 @@ impl Client {
         Ok((contacts, latest))
     }
 
-    /// The channels set up in the first `slots` slots.
-    pub async fn channels(&self, slots: u8) -> Vec<(u8, String)> {
+    /// The channels set up in the first `slots` slots, each with its
+    /// secret.
+    pub async fn channels(&self, slots: u8) -> Vec<(u8, String, [u8; 16])> {
         let mut channels = Vec::new();
         for index in 0..slots {
             match self
@@ -395,8 +409,12 @@ impl Client {
                 })
                 .await
             {
-                Ok(Response::ChannelInfo { index, name }) if !name.is_empty() => {
-                    channels.push((index, name));
+                Ok(Response::ChannelInfo {
+                    index,
+                    name,
+                    secret,
+                }) if !name.is_empty() => {
+                    channels.push((index, name, secret));
                 }
                 Ok(Response::ChannelInfo { .. }) => {}
                 // Past the last slot the radio has.
@@ -712,6 +730,130 @@ impl Mesh {
     pub async fn meshcore_status(&self) -> Result<Status, AdminError> {
         self.meshcore_session()?.client.status().await
     }
+
+    /// Has the radio keep a contact, as a link gives it: its key, kind and
+    /// name; no path known, nowhere. Updated if it was one already. Its
+    /// node number.
+    pub async fn meshcore_add_contact(
+        &self,
+        key: [u8; 32],
+        kind: u8,
+        name: &str,
+    ) -> Result<u32, AdminError> {
+        let session = self.meshcore_session()?;
+        let at = now();
+        let contact = Contact {
+            public_key: key,
+            kind,
+            flags: 0,
+            path_len: -1,
+            name: name.to_owned(),
+            last_advert: at,
+            lat: 0,
+            lon: 0,
+            last_modified: at,
+        };
+        session.client.done(command::add_contact(&contact)).await?;
+        remember_keys(&session, std::slice::from_ref(&contact));
+        let node = node_from(&contact);
+        let num = node.num;
+        self.update(|state| {
+            // What was known of it before, where it is above all, stays.
+            let node = match state.nodes.get(&num) {
+                Some(known) => Node {
+                    user: node.user,
+                    on_radio: Some(true),
+                    ..known.clone()
+                },
+                None => node,
+            };
+            state.nodes.insert(num, node.clone());
+            vec![Event::Node(node)]
+        });
+        Ok(num)
+    }
+
+    /// The whole key of a contact, by its node number.
+    fn meshcore_key(&self, session: &Session, num: u32) -> Result<[u8; 32], AdminError> {
+        session
+            .keys
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&num)
+            .copied()
+            .ok_or(AdminError::UnknownNode)
+    }
+
+    /// Has the radio forget a contact. Here it stays, as not in the radio's
+    /// list.
+    pub(crate) async fn meshcore_remove_contact(&self, num: u32) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        if self.read(|state| state.local.as_ref().map(|l| l.num)) == Some(num) {
+            return Err(AdminError::OwnNode);
+        }
+        let key = self.meshcore_key(&session, num)?;
+        session.client.done(command::remove_contact(&key)).await?;
+        session
+            .keys
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&num);
+        self.update(|state| match state.nodes.get_mut(&num) {
+            Some(node) => {
+                node.on_radio = Some(false);
+                vec![Event::Node(node.clone())]
+            }
+            None => Vec::new(),
+        });
+        Ok(())
+    }
+
+    /// Has the radio forget the path to a contact: the next message to it
+    /// floods to find one.
+    pub async fn meshcore_reset_path(&self, num: u32) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        session.client.done(command::reset_path(&key)).await?;
+        self.update(|state| match state.nodes.get_mut(&num) {
+            Some(node) => {
+                node.hops_away = None;
+                vec![Event::Node(node.clone())]
+            }
+            None => Vec::new(),
+        });
+        Ok(())
+    }
+
+    /// Has the radio say who it is: to those it hears directly, or flooded
+    /// to the whole mesh.
+    pub async fn meshcore_advert(&self, flood: bool) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        session.client.done(command::send_advert(flood)).await
+    }
+
+    /// Sets a channel in a slot, or empties it with no name; then reads the
+    /// channels back, told as on syncing.
+    pub async fn meshcore_set_channel(
+        &self,
+        index: u8,
+        name: &str,
+        secret: &[u8; 16],
+    ) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        let slots = self
+            .read(|state| state.meshcore_channels.as_ref().map(|c| c.slots))
+            .ok_or(AdminError::NotConnected)?;
+        session
+            .client
+            .done(command::set_channel(index, name, secret))
+            .await?;
+        let channels = session.client.channels(slots).await;
+        self.update(|state| {
+            put_channels(state, slots, channels);
+            vec![Event::Synced]
+        });
+        Ok(())
+    }
 }
 
 /// Connects to the radio and keeps connected, for as long as the task runs.
@@ -801,21 +943,7 @@ async fn session(
     mesh.update(|state| {
         state.local = Some(local);
         state.meshcore = Some(settings);
-        state.channels = channels
-            .into_iter()
-            .map(|(index, name)| {
-                let index = u32::from(index);
-                let role = if index == 0 { "PRIMARY" } else { "SECONDARY" };
-                (
-                    index,
-                    Channel {
-                        index,
-                        name,
-                        role: role.to_owned(),
-                    },
-                )
-            })
-            .collect();
+        put_channels(state, slots, channels);
         // Nodes heard so far are kept, as with Meshtastic; these join them.
         for node in contacts.iter().map(node_from).chain([me_node]) {
             state.named.insert(node.num);
@@ -910,6 +1038,29 @@ async fn session(
             }
         }
     }
+}
+
+/// A MeshCore radio's channels, as read: their names where every radio's
+/// are, their secrets apart.
+fn put_channels(state: &mut MeshState, slots: u8, channels: Vec<(u8, String, [u8; 16])>) {
+    let mut secrets = std::collections::BTreeMap::new();
+    state.channels = channels
+        .into_iter()
+        .map(|(index, name, secret)| {
+            let index = u32::from(index);
+            secrets.insert(index, secret);
+            let role = if index == 0 { "PRIMARY" } else { "SECONDARY" };
+            (
+                index,
+                Channel {
+                    index,
+                    name,
+                    role: role.to_owned(),
+                },
+            )
+        })
+        .collect();
+    state.meshcore_channels = Some(Channels { slots, secrets });
 }
 
 /// Asks for every queued message until there are none.

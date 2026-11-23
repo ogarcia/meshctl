@@ -84,14 +84,19 @@ pub mod command {
     const GET_CONTACTS: u8 = 0x04;
     const GET_DEVICE_TIME: u8 = 0x05;
     const SET_DEVICE_TIME: u8 = 0x06;
+    const SEND_SELF_ADVERT: u8 = 0x07;
     const SET_ADVERT_NAME: u8 = 0x08;
+    const ADD_UPDATE_CONTACT: u8 = 0x09;
     const SYNC_NEXT_MESSAGE: u8 = 0x0a;
     const SET_RADIO_PARAMS: u8 = 0x0b;
     const SET_RADIO_TX_POWER: u8 = 0x0c;
+    const RESET_PATH: u8 = 0x0d;
     const SET_ADVERT_LATLON: u8 = 0x0e;
+    const REMOVE_CONTACT: u8 = 0x0f;
     const GET_BATT_AND_STORAGE: u8 = 0x14;
     const DEVICE_QUERY: u8 = 0x16;
     const GET_CHANNEL: u8 = 0x1f;
+    const SET_CHANNEL: u8 = 0x20;
     const SET_OTHER_PARAMS: u8 = 0x26;
     const GET_STATS: u8 = 0x38;
     /// Plain text, as opposed to a CLI command or a signed message.
@@ -219,6 +224,65 @@ pub mod command {
             location_policy,
             multi_acks,
         ]
+    }
+
+    /// Adds a contact, or updates the one with its key, laid out as the
+    /// radio lists them: no path known (`path_len` -1) unless one is given.
+    pub fn add_contact(contact: &super::Contact) -> Vec<u8> {
+        let mut payload = vec![ADD_UPDATE_CONTACT];
+        payload.extend_from_slice(&contact.public_key);
+        payload.extend_from_slice(&[
+            contact.kind,
+            contact.flags,
+            contact.path_len.cast_unsigned(),
+        ]);
+        payload.extend_from_slice(&[0; 64]);
+        payload.extend_from_slice(&fixed(&contact.name, 32));
+        payload.extend_from_slice(&contact.last_advert.to_le_bytes());
+        payload.extend_from_slice(&contact.lat.to_le_bytes());
+        payload.extend_from_slice(&contact.lon.to_le_bytes());
+        payload.extend_from_slice(&contact.last_modified.to_le_bytes());
+        payload
+    }
+
+    /// Forgets a contact, by its whole key.
+    pub fn remove_contact(key: &[u8; 32]) -> Vec<u8> {
+        let mut payload = vec![REMOVE_CONTACT];
+        payload.extend_from_slice(key);
+        payload
+    }
+
+    /// Forgets the path to a contact: the next message floods to find one.
+    pub fn reset_path(key: &[u8; 32]) -> Vec<u8> {
+        let mut payload = vec![RESET_PATH];
+        payload.extend_from_slice(key);
+        payload
+    }
+
+    /// The radio says who it is: to those it hears directly, or flooded to
+    /// the whole mesh.
+    pub fn send_advert(flood: bool) -> Vec<u8> {
+        vec![SEND_SELF_ADVERT, u8::from(flood)]
+    }
+
+    /// Sets a channel's slot: its name, up to 31 bytes, and its 128-bit
+    /// secret. An empty name and a secret of zeros empty the slot.
+    pub fn set_channel(index: u8, name: &str, secret: &[u8; 16]) -> Vec<u8> {
+        let mut payload = vec![SET_CHANNEL, index];
+        let mut field = fixed(name, 32);
+        field[31] = 0;
+        payload.extend_from_slice(&field);
+        payload.extend_from_slice(secret);
+        payload
+    }
+
+    /// A text in a fixed field: cut or padded with zeros to `len`.
+    fn fixed(text: &str, len: usize) -> Vec<u8> {
+        let mut field = vec![0u8; len];
+        let bytes = text.as_bytes();
+        let n = bytes.len().min(len);
+        field[..n].copy_from_slice(&bytes[..n]);
+        field
     }
 
     /// Answered with `Battery`.
@@ -370,10 +434,11 @@ pub enum Response {
     ChannelMessage(ChannelMessage),
     NoMoreMessages,
     DeviceInfo(DeviceInfo),
-    /// A channel's slot and name; its secret is not kept.
+    /// A channel's slot, name and secret; both empty for an empty slot.
     ChannelInfo {
         index: u8,
         name: String,
+        secret: [u8; 16],
     },
     /// The radio's clock.
     CurrentTime(u32),
@@ -440,6 +505,7 @@ impl Response {
             0x12 => Self::ChannelInfo {
                 index: *data.first()?,
                 name: text_at(data, 1, 32),
+                secret: bytes_at(data, 33).unwrap_or_default(),
             },
             0x18 => Self::Stats(stats(data)?),
             0x80 => Self::Advert,
@@ -795,7 +861,8 @@ mod tests {
             Response::parse(&channel),
             Some(Response::ChannelInfo {
                 index: 1,
-                name: "galicia".into()
+                name: "galicia".into(),
+                secret: [7; 16]
             })
         );
 
@@ -916,6 +983,34 @@ mod tests {
         );
         assert_eq!(command::set_position(1, -1)[5..], (-1i32).to_le_bytes());
         assert_eq!(command::get_stats(2), [0x38, 2]);
+    }
+
+    #[test]
+    fn contacts_and_channels_are_laid_out_as_the_firmware_reads_them() {
+        let contact = Contact {
+            public_key: [0x50; 32],
+            kind: 2,
+            flags: 0,
+            path_len: -1,
+            name: "Faro".into(),
+            last_advert: 7,
+            lat: 1,
+            lon: -1,
+            last_modified: 9,
+        };
+        let added = command::add_contact(&contact);
+        // As the radio lists it, behind its command: it reads back the same.
+        assert_eq!(added[0], 0x09);
+        let mut listed = vec![0x03];
+        listed.extend_from_slice(&added[1..]);
+        assert_eq!(Response::parse(&listed), Some(Response::Contact(contact)));
+        assert_eq!(command::remove_contact(&[1; 32])[..2], [0x0f, 1]);
+        assert_eq!(command::reset_path(&[1; 32]).len(), 33);
+        assert_eq!(command::send_advert(true), [0x07, 1]);
+        let set = command::set_channel(3, "#galicia", &[9; 16]);
+        assert_eq!((set[0], set[1], set.len()), (0x20, 3, 2 + 32 + 16));
+        assert_eq!(&set[2..10], b"#galicia");
+        assert_eq!(set[33], 0);
     }
 
     #[test]

@@ -477,6 +477,57 @@ pub async fn meshcore_status(radio: RadioId) -> Result<meshctl_api::MeshcoreStat
     get(&format!("/radios/{radio}/meshcore/status")).await
 }
 
+/// A MeshCore radio's channels, by their kind.
+pub async fn meshcore_channels(radio: RadioId) -> Result<meshctl_api::MeshcoreChannels, Failure> {
+    get(&format!("/radios/{radio}/meshcore/channels")).await
+}
+
+/// Puts a channel in a MeshCore radio's slot.
+pub async fn set_meshcore_channel(
+    radio: RadioId,
+    index: u32,
+    change: &meshctl_api::MeshcoreChannelChange,
+) -> Result<(), Failure> {
+    let request = with_token(Request::put(&url(&format!(
+        "/radios/{radio}/meshcore/channels/{index}"
+    ))))
+    .json(change)
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
+/// Empties a MeshCore radio's slot.
+pub async fn remove_meshcore_channel(radio: RadioId, index: u32) -> Result<(), Failure> {
+    let request = with_token(Request::delete(&url(&format!(
+        "/radios/{radio}/meshcore/channels/{index}"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
+/// A MeshCore channel's link, its secret in it.
+pub async fn meshcore_channel_link(
+    radio: RadioId,
+    index: u32,
+) -> Result<meshctl_api::Contact, Failure> {
+    get(&format!("/radios/{radio}/meshcore/channels/{index}/link")).await
+}
+
+/// Has a MeshCore radio forget its path to a node.
+pub async fn reset_path(radio: RadioId, node: u32) -> Result<(), Failure> {
+    let request = with_token(Request::post(&url(&format!(
+        "/radios/{radio}/nodes/{node}/reset-path"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
+/// Has a MeshCore radio say who it is: nearby, or to the whole mesh.
+pub async fn advert(radio: RadioId, flood: bool) -> Result<(), Failure> {
+    let request = with_token(Request::post(&url(&format!("/radios/{radio}/advert"))))
+        .json(&meshctl_api::Advert { flood })
+        .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// What meshctl keeps, and how much room it takes.
 pub async fn kept() -> Result<meshctl_api::Storage, Failure> {
     get("/storage").await

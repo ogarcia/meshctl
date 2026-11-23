@@ -24,7 +24,14 @@
 //!
 //! Its own settings change as the firmware's do, each checked as it checks
 //! them; its clock starts an hour behind, as a radio's does after a power
-//! cut, and goes only forward.
+//! cut, and goes only forward. Contacts are added, removed and their paths
+//! reset; channels set and emptied, each with its secret, `Public` with the
+//! one every radio has; its adverts only printed.
+
+/// The secret of `Public`, every radio's channel.
+const PUBLIC_SECRET: [u8; 16] = [
+    0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a, 0xc9, 0xe5, 0xed, 0xba, 0xa1, 0x15, 0xcd, 0x72,
+];
 
 /// The frequencies, in kHz, on which the firmware lets a client repeat.
 const REPEAT_FREQUENCIES: [u32; 3] = [433_000, 869_495, 918_000];
@@ -90,8 +97,8 @@ struct Radio {
     /// When it started, for its uptime.
     started: u32,
     contacts: Vec<Contact>,
-    /// Each slot's name, empty when unset.
-    channels: Vec<String>,
+    /// Each slot's name and secret, both empty when unset.
+    channels: Vec<(String, [u8; 16])>,
     /// Messages heard, waiting to be pulled, as the frames that carry them.
     queued: VecDeque<Vec<u8>>,
 }
@@ -142,9 +149,9 @@ impl Radio {
             lon,
             last_modified: at - 600,
         };
-        let mut channels = vec![String::new(); usize::from(MAX_CHANNELS)];
-        channels[0] = "Public".into();
-        channels[1] = "galicia".into();
+        let mut channels = vec![(String::new(), [0u8; 16]); usize::from(MAX_CHANNELS)];
+        channels[0] = ("Public".into(), PUBLIC_SECRET);
+        channels[1] = ("galicia".into(), [0x17; 16]);
         Self {
             name: "Fake core".into(),
             lat: 43_362_300,
@@ -264,12 +271,16 @@ fn contact(code: u8, contact: &Contact) -> Vec<u8> {
     frame
 }
 
-fn channel_info(index: u8, name: &str) -> Vec<u8> {
+fn channel_info(index: u8, name: &str, secret: &[u8; 16]) -> Vec<u8> {
     let mut frame = vec![0x12, index];
     frame.extend(field(name, 32));
-    // Its secret, which meshctl does not keep.
-    frame.extend([index.wrapping_mul(17); 16]);
+    frame.extend(secret);
     frame
+}
+
+/// A whole key, from a command's bytes.
+fn key_in(data: &[u8]) -> Option<[u8; 32]> {
+    data.get(..32)?.try_into().ok()
 }
 
 /// A direct message from a contact, in the newer form, with its SNR.
@@ -521,9 +532,85 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         0x1f => {
             let index = data.first().copied().unwrap_or(0);
             match radio.channels.get(usize::from(index)) {
-                Some(name) => vec![channel_info(index, name)],
+                Some((name, secret)) => vec![channel_info(index, name, secret)],
                 None => vec![vec![0x01, 2]],
             }
+        }
+        // SET_CHANNEL: a name of 32 and a secret of 16; only 128 bits.
+        0x20 => {
+            let (Some(&index), Some(name), Some(secret)) =
+                (data.first(), data.get(1..33), data.get(33..49))
+            else {
+                return error(6);
+            };
+            if data.len() >= 1 + 32 + 32 {
+                return error(1);
+            }
+            let Some(slot) = radio.channels.get_mut(usize::from(index)) else {
+                return error(2);
+            };
+            let end = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+            let name = String::from_utf8_lossy(&name[..end]).into_owned();
+            let secret: [u8; 16] = secret.try_into().unwrap_or_default();
+            println!("channel {index}: {name:?}");
+            *slot = (name, secret);
+            ok()
+        }
+        // SEND_SELF_ADVERT: said, to nobody here.
+        0x07 => {
+            let flood = data.first() == Some(&1);
+            println!("advert, {}", if flood { "flooded" } else { "zero hop" });
+            ok()
+        }
+        // ADD_UPDATE_CONTACT: added, or the one with its key updated.
+        0x09 if data.len() >= 32 + 3 + 64 + 32 + 4 => {
+            let Some(key) = key_in(data) else {
+                return error(6);
+            };
+            let name_field = &data[99..131];
+            let end = name_field.iter().position(|&b| b == 0).unwrap_or(32);
+            let at = radio.clock();
+            let contact = Contact {
+                key,
+                kind: data[32],
+                path_len: data[34].cast_signed(),
+                name: String::from_utf8_lossy(&name_field[..end]).into_owned(),
+                last_advert: u32_in(data, 131).unwrap_or(at),
+                lat: i32_in(data, 135).unwrap_or(0),
+                lon: i32_in(data, 139).unwrap_or(0),
+                last_modified: at,
+            };
+            println!("contact {:?} kept", contact.name);
+            if let Some(known) = radio.contacts.iter_mut().find(|c| c.key == key) {
+                *known = contact;
+            } else if radio.contacts.len() < usize::from(MAX_CONTACTS) {
+                radio.contacts.push(contact);
+            } else {
+                return error(3);
+            }
+            ok()
+        }
+        // RESET_PATH
+        0x0d => match key_in(data).and_then(|k| radio.contacts.iter_mut().find(|c| c.key == k)) {
+            Some(contact) => {
+                contact.path_len = -1;
+                println!("path to {:?} forgotten", contact.name);
+                ok()
+            }
+            None => error(2),
+        },
+        // REMOVE_CONTACT
+        0x0f => {
+            let Some(key) = key_in(data) else {
+                return error(2);
+            };
+            let before = radio.contacts.len();
+            radio.contacts.retain(|c| c.key != key);
+            if radio.contacts.len() == before {
+                return error(2);
+            }
+            println!("contact removed");
+            ok()
         }
         // Anything else, not known yet: as the firmware does a command it
         // lacks.
@@ -602,7 +689,7 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             if radio
                 .channels
                 .get(usize::from(slot))
-                .is_none_or(String::is_empty)
+                .is_none_or(|(name, _)| name.is_empty())
             {
                 return format!("no channel in slot {slot}");
             }

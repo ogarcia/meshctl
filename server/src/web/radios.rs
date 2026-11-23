@@ -706,7 +706,7 @@ async fn checks(
 }
 
 /// A node number from an id, `!` and hex digits, or from the number itself.
-fn node_num(id: &str) -> Option<u32> {
+pub(super) fn node_num(id: &str) -> Option<u32> {
     match id.strip_prefix('!') {
         Some(hex) => u32::from_str_radix(hex, 16).ok(),
         None => id.parse().ok(),

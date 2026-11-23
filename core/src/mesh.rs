@@ -346,6 +346,9 @@ pub struct MeshState {
     /// A MeshCore radio's own settings, as it last said them; none for a
     /// Meshtastic one, whose are in `settings`.
     pub meshcore: Option<crate::meshcore::Settings>,
+    /// A MeshCore radio's channels' slots and secrets, their names being in
+    /// `channels`; none for a Meshtastic one.
+    pub meshcore_channels: Option<crate::meshcore::Channels>,
 }
 
 /// The radio's settings, whole and as the protobufs carry them: what changing

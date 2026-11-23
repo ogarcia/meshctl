@@ -21,11 +21,18 @@ pub enum MeshcoreTab {
     User,
     /// How it transmits.
     Radio,
+    /// Its channels, each saved on its own.
+    Channels,
     /// The rest.
     Advanced,
 }
 
-pub const TABS: [MeshcoreTab; 3] = [MeshcoreTab::User, MeshcoreTab::Radio, MeshcoreTab::Advanced];
+pub const TABS: [MeshcoreTab; 4] = [
+    MeshcoreTab::User,
+    MeshcoreTab::Radio,
+    MeshcoreTab::Channels,
+    MeshcoreTab::Advanced,
+];
 
 /// The bandwidths MeshCore radios use, in Hz.
 const BANDWIDTHS: [u32; 10] = [
@@ -42,6 +49,7 @@ fn differs(tab: MeshcoreTab, a: &MeshcoreSettings, b: &MeshcoreSettings) -> bool
                 || a.tx_power != b.tx_power
                 || a.repeat != b.repeat
         }
+        MeshcoreTab::Channels => false,
         MeshcoreTab::Advanced => {
             a.manual_add_contacts != b.manual_add_contacts
                 || a.share_position != b.share_position
@@ -203,6 +211,7 @@ pub fn MeshcoreSettingsView() -> impl IntoView {
             let label = move || match this {
                 MeshcoreTab::User => t_string!(i18n, settings_tab_user).to_string(),
                 MeshcoreTab::Radio => t_string!(i18n, mc_tab_radio).to_string(),
+                MeshcoreTab::Channels => t_string!(i18n, settings_tab_channels).to_string(),
                 MeshcoreTab::Advanced => t_string!(i18n, mc_tab_advanced).to_string(),
             };
             view! {
@@ -245,6 +254,10 @@ pub fn MeshcoreSettingsView() -> impl IntoView {
         match this {
             MeshcoreTab::User => view! { <UserTab draft /> {bar} }.into_any(),
             MeshcoreTab::Radio => view! { <RadioTab draft /> {bar} }.into_any(),
+            // Each channel saved on its own, as it is edited.
+            MeshcoreTab::Channels => {
+                view! { <crate::meshcore_channels::MeshcoreChannelsTab /> }.into_any()
+            }
             MeshcoreTab::Advanced => view! { <AdvancedTab draft /> {bar} }.into_any(),
         }
     };

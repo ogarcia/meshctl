@@ -486,6 +486,63 @@ pub struct MeshcoreSettings {
     pub multi_acks: bool,
 }
 
+/// A MeshCore radio's channels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreChannels {
+    /// How many slots it has, set or not.
+    pub slots: u32,
+    /// Those set, in slot order.
+    pub channels: Vec<MeshcoreChannel>,
+}
+
+/// A MeshCore radio's channel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreChannel {
+    pub index: u32,
+    #[cfg_attr(feature = "openapi", schema(example = "#galicia"))]
+    pub name: String,
+    pub kind: MeshcoreChannelKind,
+}
+
+/// What a MeshCore channel's secret is: the one every radio has, one its
+/// name gives, or one of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MeshcoreChannelKind {
+    /// The `Public` channel every MeshCore radio comes with.
+    Public,
+    /// A `#name`, whose secret is the name's, as the apps make them: anyone
+    /// who knows the name is in.
+    Hashtag,
+    /// One with a secret of its own, to be shared.
+    Private,
+}
+
+/// A MeshCore channel as it is to be.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreChannelChange {
+    /// Up to 31 bytes.
+    #[cfg_attr(feature = "openapi", schema(example = "#galicia"))]
+    pub name: String,
+    /// Its secret, 16 bytes in hex. Left out, a `#name` takes its name's,
+    /// and any other a new random one; a channel kept by its name keeps
+    /// its own.
+    #[serde(default)]
+    pub secret: Option<String>,
+}
+
+/// To whom a radio says who it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Advert {
+    /// Flooded to the whole mesh, rather than to those it hears directly.
+    pub flood: bool,
+}
+
 /// A place, in degrees.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

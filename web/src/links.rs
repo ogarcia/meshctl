@@ -29,13 +29,13 @@ pub enum LinkWant {
 }
 
 /// The action of the list of nodes, in its heading, that adds one from its
-/// link, as the radios' adds a radio: only on a radio it adds to.
+/// link, as the radios' adds a radio: only with a radio picked.
 #[component]
 pub fn AddNodeLink() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     move || {
-        (live.selected_kind() == Some(RadioKind::Meshtastic)).then(|| {
+        live.selected_kind().is_some().then(|| {
             view! {
                 <div class="actions">
                     <button
@@ -95,6 +95,16 @@ fn key_words(i18n: I18nContext<Locale>, key: ChannelKey) -> &'static str {
         ChannelKey::Simple => t_string!(i18n, key_simple),
         ChannelKey::Aes128 => "AES-128",
         ChannelKey::Aes256 => "AES-256",
+    }
+}
+
+/// A channel's name as the list shows it: MeshCore's `#name`s have their
+/// mark already.
+fn channel_name(name: &str) -> String {
+    if name.starts_with('#') {
+        name.to_owned()
+    } else {
+        format!("# {name}")
     }
 }
 
@@ -283,7 +293,7 @@ pub fn LinkAdder() -> impl IntoView {
                         .map(|(at, c)| {
                             view! {
                                 <li class:present=c.present>
-                                    <span class="name">"# " {c.name}</span>
+                                    <span class="name">{channel_name(&c.name)}</span>
                                     <span class="dim">
                                         {key_words(i18n, c.key)}
                                         {c.present.then(|| format!(" · {}", t_string!(i18n, link_present)))}
@@ -390,6 +400,9 @@ pub fn LinkAdder() -> impl IntoView {
 
     move || {
         live.adding_link.get().map(|want| {
+            // Whose apps the links come from, by the radio's kind.
+            let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
+            let apps = if meshcore { "MeshCore" } else { "Meshtastic" };
             view! {
                 <div class="modal-back" on:click=move |_| close()>
                     <div
@@ -414,17 +427,20 @@ pub fn LinkAdder() -> impl IntoView {
                             ></button>
                         </header>
                         <p class="hint dim">
-                            {match want {
-                                LinkWant::Node => t!(i18n, link_hint_node).into_any(),
-                                LinkWant::Channels => t!(i18n, link_hint_channels).into_any(),
-                            }}
+                            {move || match want {
+                                LinkWant::Node => t_string!(i18n, link_hint_node),
+                                LinkWant::Channels => t_string!(i18n, link_hint_channels),
+                            }
+                            .replace("{apps}", apps)}
                         </p>
                         <textarea
                             class="mono"
                             rows="3"
-                            placeholder=match want {
-                                LinkWant::Node => "https://meshtastic.org/v/#…",
-                                LinkWant::Channels => "https://meshtastic.org/e/#…",
+                            placeholder=match (want, meshcore) {
+                                (LinkWant::Node, false) => "https://meshtastic.org/v/#…",
+                                (LinkWant::Channels, false) => "https://meshtastic.org/e/#…",
+                                (LinkWant::Node, true) => "meshcore://contact/add?…",
+                                (LinkWant::Channels, true) => "meshcore://channel/add?…",
                             }
                             prop:value=move || url.get()
                             on:input=move |ev| url.set(event_target_value(&ev))

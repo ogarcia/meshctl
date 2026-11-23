@@ -10,7 +10,10 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, MeshcoreSettings, MeshcoreStatus, RadioId};
+use meshctl_api::{
+    Advert, Contact, Error, ErrorCode, MeshcoreChannelChange, MeshcoreChannels, MeshcoreSettings,
+    MeshcoreStatus, RadioId,
+};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -18,6 +21,206 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(settings, change_settings))
         .routes(routes!(status))
+        .routes(routes!(channels))
+        .routes(routes!(set_channel, remove_channel))
+        .routes(routes!(channel_link))
+        .routes(routes!(reset_path))
+        .routes(routes!(advert))
+}
+
+/// MeshCore channels
+///
+/// A MeshCore radio's channels, each by its kind: `Public`, every radio's;
+/// a `#name`, whose secret its name gives; or one with a secret of its own.
+/// Secrets are never shown here: a channel's link has its own.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/meshcore/channels",
+    tag = "settings",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    responses(
+        (status = 200, description = "The channels", body = MeshcoreChannels),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not a MeshCore radio: `unsupported_kind`", body = Error),
+    )
+)]
+async fn channels(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
+    match state.radios.meshcore_channels(radio) {
+        Ok(channels) => Json(channels).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Set a MeshCore channel
+///
+/// Puts a channel in a slot, a new one or in place of the one there. Its
+/// secret, 16 bytes in hex, or left out: a `#name` takes its name's, and
+/// any other a new random one, unless it keeps the name it had, and with it
+/// its secret. Read back from the radio after, and told as `synced`.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/meshcore/channels/{index}",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("index" = u32, Path, description = "The channel's slot"),
+    ),
+    request_body = MeshcoreChannelChange,
+    responses(
+        (status = 204, description = "Set, and read back"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not a channel the radio can have: `invalid_settings`; the very same as another, name and secret: `duplicate_channel`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn set_channel(
+    State(state): State<AppState>,
+    Path((radio, index)): Path<(RadioId, u32)>,
+    Json(wanted): Json<MeshcoreChannelChange>,
+) -> Response {
+    match state
+        .radios
+        .set_meshcore_channel(radio, index, &wanted)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Remove a MeshCore channel
+///
+/// Empties its slot. Its conversation stays, as a channel gone.
+#[utoipa::path(
+    delete,
+    path = "/radios/{radio}/meshcore/channels/{index}",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("index" = u32, Path, description = "The channel's slot"),
+    ),
+    responses(
+        (status = 204, description = "Removed, and read back"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "No channel in that slot: `invalid_settings`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn remove_channel(
+    State(state): State<AppState>,
+    Path((radio, index)): Path<(RadioId, u32)>,
+) -> Response {
+    match state.radios.remove_meshcore_channel(radio, index).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// MeshCore channel link
+///
+/// A channel's link, as the MeshCore apps read it, its secret in it: to
+/// share it, in a QR or as text.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/meshcore/channels/{index}/link",
+    tag = "secrets",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("index" = u32, Path, description = "The channel's slot"),
+    ),
+    responses(
+        (status = 200, description = "The link", body = Contact),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "No channel in that slot: `invalid_settings`", body = Error),
+    )
+)]
+async fn channel_link(
+    State(state): State<AppState>,
+    Path((radio, index)): Path<(RadioId, u32)>,
+) -> Response {
+    match state.radios.meshcore_channel_link(radio, index) {
+        Ok(url) => Json(Contact { url }).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Reset a node's path
+///
+/// Has a MeshCore radio forget the path it knows to a node: the next message
+/// to it floods to find one. Nothing goes on the air now.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/nodes/{node}/reset-path",
+    tag = "nodes",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = String, Path, description = "The node's id or number", example = "!90cda275"),
+    ),
+    responses(
+        (status = 204, description = "Forgotten"),
+        (status = 400, description = "That is neither a node id nor a number", body = Error),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not a MeshCore radio: `unsupported_kind`; not one of its contacts: `invalid_settings`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn reset_path(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, String)>,
+) -> Response {
+    let Some(num) = super::radios::node_num(&node) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(Error {
+                error: ErrorCode::BadRequest,
+            }),
+        )
+            .into_response();
+    };
+    match state.radios.reset_path(radio, num).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Advertise
+///
+/// Has a MeshCore radio say who it is: to those it hears directly, or with
+/// `flood`, to the whole mesh. This goes on the air.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/advert",
+    tag = "nodes",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = Advert,
+    responses(
+        (status = 204, description = "Sent"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not a MeshCore radio: `unsupported_kind`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn advert(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(advert): Json<Advert>,
+) -> Response {
+    match state.radios.advert(radio, advert.flood).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(failure) => refused(failure),
+    }
 }
 
 /// MeshCore settings

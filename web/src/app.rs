@@ -2070,12 +2070,8 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                     }
                 });
                 // What it was asked for, on its page: in a drawer.
-                // Forgetting it, on a Meshtastic radio: in a drawer, which
-                // says how much.
-                let remove = (page == Page::Node
-                    && !local()
-                    && live.selected_kind() == Some(RadioKind::Meshtastic))
-                .then(|| {
+                // Forgetting it: in a drawer, which says how much.
+                let remove = (page == Page::Node && !local()).then(|| {
                     view! {
                         <button
                             class="icon-button spare"
