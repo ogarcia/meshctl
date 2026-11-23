@@ -9,9 +9,10 @@ use leptos::prelude::*;
 use leptos_i18n::I18nContext;
 use meshctl_api::{Node, NodesColumn as Column, NodesSort, Peer, RadioKind};
 
-/// Whether the selected radio's nodes say how they are powered: MeshCore
-/// contacts say nothing of their battery.
-fn has_power(live: Live) -> bool {
+/// Whether the selected radio is a Meshtastic one, whose nodes say how they
+/// are powered and may come through MQTT: MeshCore contacts say nothing of
+/// their battery, and MeshCore has no MQTT.
+fn is_meshtastic(live: Live) -> bool {
     live.selected_kind() != Some(RadioKind::Meshcore)
 }
 
@@ -172,7 +173,7 @@ fn NodeList() -> impl IntoView {
     let sort = Memo::new(move |_| {
         live.preferences
             .with(|p| p.nodes_sort.map(|s| (s.column, !s.reversed)))
-            .filter(|(column, _)| *column != Column::Power || has_power(live))
+            .filter(|(column, _)| *column != Column::Power || is_meshtastic(live))
     });
 
     // The nodes shown, by their numbers, in their order: only that, so that
@@ -227,22 +228,32 @@ fn NodeList() -> impl IntoView {
     });
     let drawn = move || shown.with(|all| all.iter().take(limit.get()).copied().collect::<Vec<_>>());
     let more = move || shown.with(Vec::len) > limit.get();
-    let reaches = [Reach::All, Reach::Direct, Reach::Mesh, Reach::Mqtt]
-        .into_iter()
-        .map(|this| {
-            let label = move || match this {
-                Reach::All => t_string!(i18n, nodes_all).to_string(),
-                Reach::Direct => t_string!(i18n, nodes_direct).to_string(),
-                Reach::Mesh => t_string!(i18n, nodes_mesh).to_string(),
-                Reach::Mqtt => "MQTT".to_owned(),
-            };
-            (
-                Signal::derive(move || reach.get() == this),
-                Box::new(move || reach.set(this)) as Box<dyn Fn() + Send + Sync>,
-                Signal::derive(label),
-            )
-        })
-        .collect::<Vec<_>>();
+    // MeshCore radios have no MQTT: no filter for it, and all instead of it.
+    let mqtt = Memo::new(move |_| is_meshtastic(live));
+    Effect::new(move |_| {
+        if !mqtt.get() && reach.get_untracked() == Reach::Mqtt {
+            reach.set(Reach::All);
+        }
+    });
+    let reaches = move || {
+        [Reach::All, Reach::Direct, Reach::Mesh, Reach::Mqtt]
+            .into_iter()
+            .filter(|this| *this != Reach::Mqtt || mqtt.get())
+            .map(|this| {
+                let label = move || match this {
+                    Reach::All => t_string!(i18n, nodes_all).to_string(),
+                    Reach::Direct => t_string!(i18n, nodes_direct).to_string(),
+                    Reach::Mesh => t_string!(i18n, nodes_mesh).to_string(),
+                    Reach::Mqtt => "MQTT".to_owned(),
+                };
+                (
+                    Signal::derive(move || reach.get() == this),
+                    Box::new(move || reach.set(this)) as Box<dyn Fn() + Send + Sync>,
+                    Signal::derive(label),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
 
     // A heading that sorts by its column: its most useful way, then the
     // other, then as by default.
@@ -284,7 +295,7 @@ fn NodeList() -> impl IntoView {
     view! {
         <section class="node-list">
             <div class="node-tools">
-                {crate::preferences::pills(reaches)}
+                {move || crate::preferences::pills(reaches())}
                 <div class="node-search">
                     <input
                         type="search"
@@ -301,7 +312,7 @@ fn NodeList() -> impl IntoView {
                         {header(Column::Name, t!(i18n, nodes_name).into_any())}
                         {header(Column::Heard, t!(i18n, nodes_heard).into_any())}
                         {header(Column::Reach, t!(i18n, nodes_reach).into_any())}
-                        {move || has_power(live).then(|| header(Column::Power, t!(i18n, nodes_battery).into_any()))}
+                        {move || is_meshtastic(live).then(|| header(Column::Power, t!(i18n, nodes_battery).into_any()))}
                         {header(Column::Hardware, t!(i18n, nodes_hardware).into_any())}
                         <th></th>
                     </tr>
@@ -423,7 +434,7 @@ fn SortMenu(sort: Memo<Option<(Column, bool)>>) -> impl IntoView {
                 <div class="heading-menu" role="menu" on:click=|ev| ev.stop_propagation()>
                     {columns
                         .into_iter()
-                        .filter(|(column, _)| *column != Some(Column::Power) || has_power(live))
+                        .filter(|(column, _)| *column != Some(Column::Power) || is_meshtastic(live))
                         .map(|(column, label)| item(column, label))
                         .collect_view()}
                 </div>
@@ -611,7 +622,7 @@ fn NodeLine(node: Node, now: RwSignal<u32>) -> impl IntoView {
             </td>
             <td class="heard dim">{move || heard.map(|t| ago(now.get(), t)).unwrap_or_default()}</td>
             <td class="reach">{reach}</td>
-            {has_power(live).then(|| view! { <td class="power-cell">{power}</td> })}
+            {is_meshtastic(live).then(|| view! { <td class="power-cell">{power}</td> })}
             <td class="hardware">
                 <span class="names">
                     <span>{node.hw_model.as_deref().map(model)}</span>
