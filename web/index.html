@@ -3379,6 +3379,8 @@
         padding: 3px 4px;
         overflow-y: auto;
       }
+      /* In a dialog, its scroll bar at the dialog's edge, as every dialog's. */
+      .modal-back > .card > .editor-body { margin: 0 calc(-1 * var(--modal-pad)); padding: 3px var(--modal-pad); }
       .radio-editor .fields,
       .button-look { display: flex; flex-direction: column; gap: 16px; }
       .radio-editor label,
