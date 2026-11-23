@@ -803,5 +803,6 @@
   "regions_answered": "{n} answered",
   "regions_served": "{n} repeaters repeat it; {d} straight",
   "regions_unserved": "No repeater it hears straight repeats #{name}: what it floods will not go past its reach.",
-  "regions_unscoped_unserved": "No repeater it hears straight repeats with no region: what it floods with none will not go past its reach."
+  "regions_unscoped_unserved": "No repeater it hears straight repeats with no region: what it floods with none will not go past its reach.",
+  "nodes_more": "Showing {shown} of {total}…"
 }

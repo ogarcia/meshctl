@@ -803,5 +803,6 @@
   "regions_answered": "Han contestado {n}",
   "regions_served": "La repiten {n} repetidores; {d} directos",
   "regions_unserved": "Ningún repetidor directo repite #{name}: lo que inundes no pasará de tu alcance.",
-  "regions_unscoped_unserved": "Ningún repetidor directo repite sin región: lo que inundes sin región no pasará de tu alcance."
+  "regions_unscoped_unserved": "Ningún repetidor directo repite sin región: lo que inundes sin región no pasará de tu alcance.",
+  "nodes_more": "Mostrando {shown} de {total}…"
 }

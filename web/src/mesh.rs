@@ -168,7 +168,9 @@ fn NodeList() -> impl IntoView {
             .with(|p| p.nodes_sort.map(|s| (s.column, !s.reversed)))
     });
 
-    let shown = move || {
+    // The nodes shown, by their numbers, in their order: only that, so that
+    // what follows moves rows rather than drawing them again.
+    let shown = Memo::new(move |_| {
         let needle = filter.get().to_lowercase();
         let reach = reach.get();
         let local = live
@@ -204,8 +206,20 @@ fn NodeList() -> impl IntoView {
                     .then(a.num.cmp(&b.num))
             }),
         }
-        nodes
-    };
+        nodes.into_iter().map(|node| node.num).collect::<Vec<u32>>()
+    });
+    // How many are drawn: a page at first, and another as the end of the
+    // list comes into view; a page again as what is shown changes.
+    let limit = RwSignal::new(PAGE);
+    Effect::new(move |_| {
+        filter.track();
+        reach.track();
+        sort.track();
+        live.selected.track();
+        limit.set(PAGE);
+    });
+    let drawn = move || shown.with(|all| all.iter().take(limit.get()).copied().collect::<Vec<_>>());
+    let more = move || shown.with(Vec::len) > limit.get();
     let reaches = [Reach::All, Reach::Direct, Reach::Mesh, Reach::Mqtt]
         .into_iter()
         .map(|this| {
@@ -286,9 +300,10 @@ fn NodeList() -> impl IntoView {
                     </tr>
                 </thead>
                 <tbody>
-                    <For each=shown key=|node| format!("{node:?}") let:node>
-                        <NodeRow node now=live.now />
+                    <For each=drawn key=|num| *num let:num>
+                        <NodeRow num now=live.now />
                     </For>
+                    {move || more().then(|| view! { <MoreRows limit total=Signal::derive(move || shown.with(Vec::len)) /> })}
                 </tbody>
             </table>
         </section>
@@ -421,8 +436,73 @@ const DATABASE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline
 pub const PLUG: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plug.svg");
 pub const BATTERY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-2.svg");
 
+/// How many rows of nodes are drawn at a time.
+const PAGE: usize = 100;
+
+/// The end of the rows drawn, while there are more: as it comes into view,
+/// or near, another page is drawn.
 #[component]
-fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
+fn MoreRows(limit: RwSignal<usize>, total: Signal<usize>) -> impl IntoView {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+    let i18n = use_i18n();
+    let end = NodeRef::<leptos::html::Td>::new();
+    let watch =
+        StoredValue::new_local(None::<(web_sys::IntersectionObserver, Closure<dyn FnMut()>)>);
+    Effect::new(move |_| {
+        let Some(element) = end.get() else { return };
+        if watch.with_value(Option::is_some) {
+            return;
+        }
+        let seen = element.clone();
+        let call = Closure::<dyn FnMut()>::new(move || {
+            let near = web_sys::window()
+                .and_then(|w| w.inner_height().ok())
+                .and_then(|h| h.as_f64())
+                .is_some_and(|height| seen.get_bounding_client_rect().top() < height + 600.0);
+            if near {
+                limit.update(|l| *l += PAGE);
+            }
+        });
+        let options = web_sys::IntersectionObserverInit::new();
+        options.set_root_margin("600px");
+        if let Ok(observer) =
+            web_sys::IntersectionObserver::new_with_options(call.as_ref().unchecked_ref(), &options)
+        {
+            observer.observe(&element);
+            watch.set_value(Some((observer, call)));
+        }
+    });
+    on_cleanup(move || {
+        watch.update_value(|w| {
+            if let Some((observer, _)) = w.take() {
+                observer.disconnect();
+            }
+        });
+    });
+    view! {
+        <tr class="more-rows">
+            <td colspan="6" node_ref=end>
+                {move || {
+                    t_string!(i18n, nodes_more)
+                        .replace("{shown}", &limit.get().min(total.get()).to_string())
+                        .replace("{total}", &total.get().to_string())
+                }}
+            </td>
+        </tr>
+    }
+}
+
+/// A node's row, by its number: drawn again only as that node changes.
+#[component]
+fn NodeRow(num: u32, now: RwSignal<u32>) -> impl IntoView {
+    let live = expect_context::<Live>();
+    let node = Memo::new(move |_| live.nodes.with(|nodes| nodes.get(&num).cloned()));
+    move || node.get().map(|node| view! { <NodeLine node now /> })
+}
+
+#[component]
+fn NodeLine(node: Node, now: RwSignal<u32>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let num = node.num;
