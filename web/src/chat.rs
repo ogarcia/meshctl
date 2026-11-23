@@ -23,6 +23,8 @@ const REPLY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/ar
 const PLUS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plus.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
 const TRASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/trash.svg");
+const RESEND: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/repeat.svg");
+const INFO: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/info-circle.svg");
 const COPY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/copy.svg");
 /// How far a message went.
 const CLOCK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/clock.svg");
@@ -166,6 +168,8 @@ struct Thread {
     menu: RwSignal<Option<i64>>,
     /// Which one shows all its reactions, until a click anywhere else.
     every: RwSignal<Option<i64>>,
+    /// Which one has its details open.
+    details: RwSignal<Option<i64>>,
 }
 
 /// Whether the screen is touched rather than pointed at with a mouse.
@@ -207,6 +211,14 @@ fn reply_to(thread: Thread, packet: u32) {
     {
         let _ = field.focus();
     }
+}
+
+/// Sends one's own message again, here: the same text, answering what it
+/// answered, as a new message.
+fn resend(live: Live, peer: Peer, text: String, reply_id: Option<u32>) {
+    spawn_local(async move {
+        let _ = send(live, peer, text, reply_id, false).await;
+    });
 }
 
 /// Forgets a message, once sure: only here, as what went out on the mesh
@@ -291,6 +303,7 @@ pub fn ChatView() -> impl IntoView {
         reacting: RwSignal::new(None),
         menu: RwSignal::new(None),
         every: RwSignal::new(None),
+        details: RwSignal::new(None),
     });
     // A click anywhere else closes the reactions; another conversation
     // starts with nothing answered.
@@ -346,6 +359,7 @@ pub fn ChatView() -> impl IntoView {
                     </div>
                     <Composer peer />
                     <MessageMenu peer />
+                    <MessageDetails peer />
                 }.into_any(),
             }}
         </div>
@@ -362,35 +376,32 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
     let author = (!mine && matches!(peer, Peer::Channel { .. })).then(|| {
         // A sender known only by the name the message gives, as on MeshCore
         // channels, is shown by that name.
+        // As the node becomes known, its names.
         let known = message.from != 0;
-        let name = match (&message.sender_name, known) {
+        let (from, given) = (message.from, message.sender_name.clone());
+        let name = move || match (&given, known) {
             (Some(name), false) => name.clone(),
-            _ => node_name(live, message.from),
+            _ => node_name(live, from),
         };
-        let short = known
-            .then(|| short_name(live, message.from))
-            .filter(|s| !s.is_empty());
+        let short = move || {
+            known
+                .then(|| short_name(live, from))
+                .filter(|s| !s.is_empty())
+                .map(|s| view! { <span class="short">{s}</span> " " })
+        };
         view! {
             <span class="author">
-                {short.map(|s| view! { <span class="short">{s}</span> " " })}
+                {short}
                 {name}
             </span>
         }
     });
-    let reception = (!mine)
-        .then(|| {
-            let mut parts = Vec::new();
-            if message.via_mqtt {
-                parts.push("MQTT".to_owned());
-            } else if let Some(hops) = message.hops_away {
-                parts.push(format!("{hops} ⇢"));
-            }
-            if let Some(snr) = message.snr.filter(|_| message.hops_away == Some(0)) {
-                parts.push(format!("{snr:.1} dB"));
-            }
-            parts.join(" · ")
-        })
-        .filter(|meta| !meta.is_empty());
+    // How it came, in words: through MQTT, directly with its signal, or
+    // through so many hops.
+    let reception = (!mine).then(|| {
+        let (mqtt, hops, snr) = (message.via_mqtt, message.hops_away, message.snr);
+        move || reach(i18n, mqtt, hops, snr)
+    });
     // How far it went, as an icon: waiting, out, received, or not; its words
     // on hovering, and why it failed, when it did.
     let status = message.status;
@@ -527,8 +538,23 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
     // menu instead.
     let actions = view! {
         <div class="answer" on:click=|ev| ev.stop_propagation()>
-            {can_answer
-                .then(|| {
+            {if mine {
+                let (again, answered) = (message.text.clone(), message.reply_id);
+                Some(
+                    view! {
+                        <button
+                            type="button"
+                            class="icon-button"
+                            title=move || t_string!(i18n, chat_resend)
+                            aria-label=move || t_string!(i18n, chat_resend)
+                            inner_html=RESEND
+                            on:click=move |_| resend(live, peer, again.clone(), answered)
+                        ></button>
+                    }
+                    .into_any(),
+                )
+            } else {
+                can_answer.then(|| {
                     view! {
                         <button
                             type="button"
@@ -538,6 +564,13 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
                             inner_html=REPLY
                             on:click=move |_| reply_to(thread, packet)
                         ></button>
+                    }
+                    .into_any()
+                })
+            }}
+            {can_answer
+                .then(|| {
+                    view! {
                         <button
                             type="button"
                             class="icon-button"
@@ -578,7 +611,17 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
                 class=if mine { "bubble mine" } else { "bubble" }
                 class:held=move || thread.menu.get() == Some(id)
                 on:click=move |ev| {
-                    if by_touch() {
+                    // With a mouse, its details; by touch, its menu, which
+                    // has them too.
+                    if !by_touch() {
+                        // Not when text of it was being selected.
+                        let selecting = web_sys::window()
+                            .and_then(|w| w.get_selection().ok().flatten())
+                            .is_some_and(|s| !s.is_collapsed());
+                        if !selecting {
+                            thread.details.set(Some(id));
+                        }
+                    } else {
                         ev.stop_propagation();
                         thread.menu.set(Some(id));
                         // Another one's reactions, all shown, fold.
@@ -593,7 +636,7 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
                 <p>{message.text.clone()}</p>
                 <span class="meta dim">
                     {move || ago(live.now.get(), at)}
-                    {reception.map(|r| format!(" · {r}"))}
+                    {reception.map(|r| move || r().map(|r| format!(" · {r}")))}
                     {mark}
                 </span>
                 {reactions}
@@ -601,6 +644,243 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
             </div>
             {picker}
         </div>
+    }
+}
+
+/// How a message came, in words: through MQTT, directly with its signal,
+/// or through so many hops; none when that is not known.
+fn reach(
+    i18n: I18nContext<Locale>,
+    mqtt: bool,
+    hops: Option<u32>,
+    snr: Option<f32>,
+) -> Option<String> {
+    if mqtt {
+        return Some("MQTT".to_owned());
+    }
+    Some(match hops? {
+        0 => match snr {
+            Some(snr) => format!("{} · {snr:.1} dB", t_string!(i18n, chat_direct)),
+            None => t_string!(i18n, chat_direct).to_owned(),
+        },
+        1 => t_string!(i18n, chat_hop).to_owned(),
+        hops => t_string!(i18n, chat_hops).replace("{n}", &hops.to_string()),
+    })
+}
+
+/// When, as people write it: day, month, year and time to the second.
+fn when(at: i64) -> String {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at as f64 * 1000.0));
+    format!(
+        "{:02}/{:02}/{} {:02}:{:02}:{:02}",
+        date.get_date(),
+        date.get_month() + 1,
+        date.get_full_year(),
+        date.get_hours(),
+        date.get_minutes(),
+        date.get_seconds()
+    )
+}
+
+/// All of a message, over the page: when, from whom and to whom, how far it
+/// went or how it came (out of how many hops it could take, through whom
+/// last, its signal, from the packet that carried it), and its reactions.
+/// Escape, its ✕ or a click off it close it.
+#[component]
+fn MessageDetails(peer: Peer) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let thread = expect_context::<Thread>();
+    let packet = RwSignal::new(None::<meshctl_api::Packet>);
+    Effect::new(move |_| {
+        packet.set(None);
+        let (Some(id), Some(radio)) = (thread.details.get(), live.selected.get_untracked()) else {
+            return;
+        };
+        // What was sent says no more than its status: only what was heard.
+        let heard = live
+            .thread
+            .with_untracked(|t| t.iter().any(|m| m.id == id && !m.outgoing));
+        if !heard {
+            return;
+        }
+        spawn_local(async move {
+            if let Ok(heard) = daemon::message_packet(radio, id).await
+                && thread.details.get_untracked() == Some(id)
+            {
+                packet.set(Some(heard));
+            }
+        });
+    });
+    let escaping = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            thread.details.set(None);
+        }
+    });
+    on_cleanup(move || escaping.remove());
+    let close = move || thread.details.set(None);
+    move || {
+        let id = thread.details.get()?;
+        let message = live
+            .thread
+            .with(|t| t.iter().find(|m| m.id == id).cloned())?;
+        let fact = |term: AnyView, value: AnyView| {
+            view! {
+                <div>
+                    <dt>{term}</dt>
+                    <dd>{value}</dd>
+                </div>
+            }
+        };
+        let from = if message.outgoing {
+            t_string!(i18n, chat_this_radio).to_owned()
+        } else {
+            // By its name and its id; by its id alone while it has no name.
+            let name = author_of(live, &message);
+            let id = format!("!{:08x}", message.from);
+            if message.from == 0 || name == id {
+                name
+            } else {
+                format!("{name} ({id})")
+            }
+        };
+        let status = message.outgoing.then(|| {
+            let words = match message.status {
+                MessageStatus::Sending => t_string!(i18n, chat_sending),
+                MessageStatus::Sent => t_string!(i18n, chat_sent),
+                MessageStatus::Delivered => t_string!(i18n, chat_delivered),
+                _ => t_string!(i18n, chat_failed),
+            };
+            let words = match &message.error {
+                Some(error) => format!("{words}: {error}"),
+                None => words.to_owned(),
+            };
+            fact(t!(i18n, chat_status).into_any(), words.into_any())
+        });
+        // What the packet says: received, how it came; sent, nothing more
+        // than the status says.
+        let heard = move || {
+            let heard = packet.get()?;
+            if message.outgoing {
+                return None;
+            }
+            let hops = (!heard.via_mqtt && heard.hop_start > 0).then(|| {
+                let taken = heard.hop_start.saturating_sub(heard.hop_limit);
+                let of = heard.hop_start.to_string();
+                let words = if taken == 0 {
+                    t_string!(i18n, chat_direct_of).replace("{of}", &of)
+                } else {
+                    t_string!(i18n, chat_hops_of)
+                        .replace("{n}", &taken.to_string())
+                        .replace("{of}", &of)
+                };
+                fact(t!(i18n, chat_hops_taken).into_any(), words.into_any())
+            });
+            let relay = (heard.hop_start > heard.hop_limit && !heard.via_mqtt).then(|| {
+                fact(
+                    t!(i18n, packets_relay).into_any(),
+                    heard
+                        .relay_node
+                        .map_or_else(
+                            || t_string!(i18n, packets_relay_unknown).to_owned(),
+                            |relay| {
+                                // By its name and its byte; by its byte alone
+                                // while it has no name.
+                                let name = crate::packets::relay_name(live, relay);
+                                let byte = format!("··{relay:02x}");
+                                if name == byte {
+                                    name
+                                } else {
+                                    format!("{name} ({byte})")
+                                }
+                            },
+                        )
+                        .into_any(),
+                )
+            });
+            let signal = (!heard.via_mqtt)
+                .then(|| {
+                    let parts: Vec<String> = [
+                        heard.snr.map(|s| format!("SNR {s:.1} dB")),
+                        heard.rssi.map(|r| format!("RSSI {r} dBm")),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                    (!parts.is_empty()).then(|| {
+                        fact(
+                            t!(i18n, chat_signal).into_any(),
+                            parts.join(" · ").into_any(),
+                        )
+                    })
+                })
+                .flatten();
+            let mqtt = heard
+                .via_mqtt
+                .then(|| fact(t!(i18n, chat_via).into_any(), "MQTT".into_any()));
+            Some(view! { {hops} {relay} {signal} {mqtt} })
+        };
+        // Who reacted with what.
+        let reactions = live.thread.with(|t| {
+            t.iter()
+                .filter(|m| {
+                    message.packet_id != 0 && m.emoji && m.reply_id == Some(message.packet_id)
+                })
+                .map(|m| format!("{} {}", m.text, author_of(live, m)))
+                .collect::<Vec<_>>()
+        });
+        let reactions = (!reactions.is_empty()).then(|| {
+            fact(
+                t!(i18n, chat_reactions).into_any(),
+                view! {
+                    <ul class="reacted">
+                        {reactions.into_iter().map(|r| view! { <li>{r}</li> }).collect_view()}
+                    </ul>
+                }
+                .into_any(),
+            )
+        });
+        let packet_id = (message.packet_id != 0).then(|| {
+            fact(
+                t!(i18n, chat_packet).into_any(),
+                view! { <span class="mono">{format!("{:08x}", message.packet_id)}</span> }
+                    .into_any(),
+            )
+        });
+        Some(view! {
+            <div class="modal-back" on:click=move |_| close()>
+                <div
+                    class="card message-details"
+                    role="dialog"
+                    aria-modal="true"
+                    on:click=|ev| ev.stop_propagation()
+                >
+                    <header>
+                        <h2>{t!(i18n, chat_details)}</h2>
+                        <button
+                            class="icon-button"
+                            title=move || t_string!(i18n, drawer_close)
+                            aria-label=move || t_string!(i18n, drawer_close)
+                            inner_html=CLOSE
+                            on:click=move |_| close()
+                        ></button>
+                    </header>
+                    <p class="said">{message.text.clone()}</p>
+                    <dl class="facts compact">
+                        {fact(
+                            if message.outgoing { t!(i18n, chat_sent_at).into_any() } else { t!(i18n, chat_heard_at).into_any() },
+                            when(message.at).into_any(),
+                        )}
+                        {fact(t!(i18n, chat_from).into_any(), from.into_any())}
+                        {fact(t!(i18n, chat_to).into_any(), title(live, peer).into_any())}
+                        {status}
+                        {heard}
+                        {reactions}
+                        {packet_id}
+                    </dl>
+                </div>
+            </div>
+        })
     }
 }
 
@@ -632,8 +912,22 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
                                 }) />
                             }
                         })}
-                    {can_answer
-                        .then(|| {
+                    {if message.outgoing {
+                        let (again, answered) = (message.text.clone(), message.reply_id);
+                        Some(
+                            view! {
+                                <button role="menuitem" on:click=move |_| {
+                                    close();
+                                    resend(live, peer, again.clone(), answered);
+                                }>
+                                    <span class="icon" inner_html=RESEND></span>
+                                    {t!(i18n, chat_resend)}
+                                </button>
+                            }
+                            .into_any(),
+                        )
+                    } else {
+                        can_answer.then(|| {
                             view! {
                                 <button role="menuitem" on:click=move |_| {
                                     close();
@@ -643,13 +937,22 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
                                     {t!(i18n, chat_reply)}
                                 </button>
                             }
-                        })}
+                            .into_any()
+                        })
+                    }}
                     <button role="menuitem" on:click=move |_| {
                         close();
                         crate::clipboard::copy(&text);
                     }>
                         <span class="icon" inner_html=COPY></span>
                         {t!(i18n, chat_copy)}
+                    </button>
+                    <button role="menuitem" on:click=move |_| {
+                        close();
+                        thread.details.set(Some(id));
+                    }>
+                        <span class="icon" inner_html=INFO></span>
+                        {t!(i18n, chat_details)}
                     </button>
                     <button role="menuitem" class="danger-item" on:click=move |_| {
                         close();

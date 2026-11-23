@@ -21,6 +21,9 @@
 //! that play what another app or the mesh would do to it:
 //!
 //! - `hear <slot> <text>`: a node of its mesh sends that on a channel.
+//! - `chat <slot>`: messages on a channel that come every way: directly,
+//!   through some hops of those they could take, through MQTT; and, after a
+//!   client wrote, a reply to its last text and reactions to it.
 //! - `twin <from> <to>`: the channel in one slot is copied into another, the
 //!   very same channel twice, as another app may leave it.
 //! - `off <slot>`: the channel in a slot is switched off.
@@ -84,6 +87,8 @@ struct Radio {
     favorites: std::collections::BTreeSet<u32>,
     /// The nodes a client had it forget: left out of its node list.
     removed: std::collections::BTreeSet<u32>,
+    /// The last text a client sent, for the mesh's examples to answer.
+    last_text: Option<u32>,
 }
 
 /// How the neighbour answers.
@@ -249,6 +254,7 @@ impl Radio {
             paced: BTreeMap::new(),
             favorites: std::collections::BTreeSet::new(),
             removed: std::collections::BTreeSet::new(),
+            last_text: None,
         }
     }
 
@@ -285,6 +291,9 @@ impl Radio {
         // gives it: on a channel, from the radio itself once it hears a
         // neighbour pass it on; to the neighbour, from the neighbour once it
         // has it; to anyone else, after its tries, that nobody answered.
+        if data.portnum == PortNum::TextMessageApp as i32 && data.emoji == 0 {
+            self.last_text = Some(packet.id);
+        }
         if data.portnum == PortNum::TextMessageApp as i32 && packet.want_ack {
             let (error, delay) = if packet.to == NEIGHBOUR || packet.to == u32::MAX {
                 (
@@ -815,6 +824,82 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             };
             let _ = events.send(Event::Heard(packet));
             format!("heard on slot {channel}")
+        }
+        Some("chat") => {
+            let Some(channel) = slot(words.next()) else {
+                return "usage: chat <slot>".into();
+            };
+            // From whom, how far (hops left of those it started with, the
+            // last relay), and what: as many ways as a message comes.
+            struct Example {
+                from: u32,
+                hops: (u32, u32),
+                relay: u32,
+                mqtt: bool,
+                text: &'static str,
+                reply: bool,
+                emoji: bool,
+            }
+            let example = |from, hops, relay, mqtt, text| Example {
+                from,
+                hops,
+                relay,
+                mqtt,
+                text,
+                reply: false,
+                emoji: false,
+            };
+            let mut examples = vec![
+                example(NEIGHBOUR, (3, 3), 0, false, "Hola, te oigo directo"),
+                example(0x0dec_0de6, (2, 3), 0xfe, false, "Por aquí, a un salto"),
+                example(0x0dec_0de7, (0, 3), 0xca, false, "Llego justo: tres saltos de tres"),
+                example(0x0dec_0de8, (5, 7), 0xfe, false, "Dos saltos de siete"),
+                example(0x0dec_0de9, (3, 3), 0, true, "Desde MQTT"),
+            ];
+            let last = radio.lock().unwrap().last_text;
+            if last.is_some() {
+                examples.push(Example {
+                    reply: true,
+                    ..example(NEIGHBOUR, (3, 3), 0, false, "Respondo a lo último que escribiste")
+                });
+                for (from, emoji) in [(NEIGHBOUR, "👍"), (0x0dec_0de6, "❤️")] {
+                    examples.push(Example {
+                        reply: true,
+                        emoji: true,
+                        ..example(from, (2, 3), 0xfe, false, emoji)
+                    });
+                }
+            }
+            let count = examples.len();
+            let events = events.clone();
+            tokio::spawn(async move {
+                for example in examples {
+                    tokio::time::sleep(Duration::from_millis(1_500)).await;
+                    let packet = MeshPacket {
+                        from: example.from,
+                        to: BROADCAST,
+                        channel: channel as u32,
+                        id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                        rx_time: Some(now_secs()),
+                        rx_snr: 2.0 + random(80) as f32 / 10.0,
+                        rx_rssi: Some(-60 - random(40) as i32),
+                        hop_limit: example.hops.0,
+                        hop_start: example.hops.1,
+                        relay_node: example.relay,
+                        via_mqtt: example.mqtt,
+                        payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                            portnum: PortNum::TextMessageApp as i32,
+                            payload: example.text.as_bytes().to_vec(),
+                            reply_id: if example.reply { last.unwrap_or_default() } else { 0 },
+                            emoji: u32::from(example.emoji),
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    };
+                    let _ = events.send(Event::Heard(packet));
+                }
+            });
+            format!("{count} messages on slot {channel}, one every 1.5 s")
         }
         Some("twin") => {
             let (Some(from), Some(to)) = (slot(words.next()), slot(words.next())) else {

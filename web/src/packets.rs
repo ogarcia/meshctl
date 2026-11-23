@@ -479,7 +479,7 @@ fn who(live: Live, num: u32) -> String {
 /// The node that relayed a packet last, by the last byte of its number, as
 /// the firmware tells: by its short name when only one known node ends so,
 /// or only one heard directly does; by the byte otherwise.
-fn relay_name(live: Live, relay: u32) -> String {
+pub fn relay_name(live: Live, relay: u32) -> String {
     live.nodes.with(|nodes| {
         let ending: Vec<_> = nodes.values().filter(|n| n.num & 0xff == relay).collect();
         let direct: Vec<_> = ending.iter().filter(|n| n.hops_away == Some(0)).collect();

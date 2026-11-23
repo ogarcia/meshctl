@@ -2463,6 +2463,19 @@
       .reaction-picker .quick .more svg { width: 18px; height: 18px; }
       .reaction-picker.all { width: 340px; max-width: calc(100vw - 32px); padding: 0; border-radius: 12px; }
       .reaction-picker.all .emoji-picker { max-width: none; border: 0; background: var(--mc-surface); }
+      /* All of a message, over the page. */
+      .message-details { width: 460px; max-width: 100%; max-height: 90vh; overflow-y: auto; padding: 16px 20px 20px; }
+      .message-details header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+      .message-details h2 { margin: 0; font-size: 16px; }
+      .message-details .said {
+        margin: 0 0 16px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--mc-raised);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .message-details .reacted { margin: 0; padding: 0; list-style: none; }
       /* By touch, a message's menu, from below: its reactions, then what
          can be done with it. */
       .sheet-back { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: flex-end; background: rgb(0 0 0 / 45%); }

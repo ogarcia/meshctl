@@ -779,6 +779,29 @@ impl Store {
         self.sighting(seen.last_insert_rowid()).await
     }
 
+    /// How a radio heard, or sent, the packet that carried one of its
+    /// messages: none if it kept no such hearing.
+    pub async fn message_sighting(
+        &self,
+        radio: RadioId,
+        id: MessageId,
+    ) -> Result<Option<PacketRow>> {
+        let seen: Option<(i64,)> = sqlx::query_as(
+            "SELECT s.id FROM message m
+                JOIN packet p ON p.packet_id = m.packet_id AND p.from_num = m.from_num
+                JOIN packet_seen s ON s.packet = p.id AND s.radio_id = m.radio_id
+            WHERE m.radio_id = ? AND m.id = ?",
+        )
+        .bind(radio)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        match seen {
+            Some((seen,)) => self.sighting(seen).await,
+            None => Ok(None),
+        }
+    }
+
     /// A radio's hearing of a packet, with the packet.
     pub async fn sighting(&self, id: SightingId) -> Result<Option<PacketRow>> {
         let row = sqlx::query_as(

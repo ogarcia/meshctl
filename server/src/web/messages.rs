@@ -9,7 +9,9 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Conversation, Error, ErrorCode, Message, MessageId, NewMessage, Peer, RadioId};
+use meshctl_api::{
+    Conversation, Error, ErrorCode, Message, MessageId, NewMessage, Packet, Peer, RadioId,
+};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -26,6 +28,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(conversations))
         .routes(routes!(messages, send))
         .routes(routes!(forget))
+        .routes(routes!(message_packet))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -146,6 +149,36 @@ async fn send(
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidMessage)
         }
         Err(SendFailure::Failed(err)) => failed(&err),
+    }
+}
+
+/// A message's packet
+///
+/// The packet that carried a message, as the radio heard or sent it: how
+/// many hops it came through out of how many it could, the last relay, its
+/// signal. Not for a message whose packet was not kept.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/messages/{id}/packet",
+    tag = "chat",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("id" = MessageId, Path, description = "The message's id"),
+    ),
+    responses(
+        (status = 200, description = "The packet", body = Packet),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio or message, or its packet was not kept", body = Error),
+    )
+)]
+async fn message_packet(
+    State(state): State<AppState>,
+    Path((radio, id)): Path<(RadioId, MessageId)>,
+) -> Response {
+    match state.radios.message_packet(radio, id).await {
+        Ok(Some(packet)) => Json(packet).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(err) => failed(&err),
     }
 }
 

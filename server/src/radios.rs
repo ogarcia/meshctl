@@ -1288,6 +1288,16 @@ impl Radios {
 
     /// The packets a radio heard, the newest first, or `None` if there is no
     /// such radio.
+    /// The packet that carried one of a radio's messages, as the radio heard
+    /// or sent it: `None` if it kept no such hearing.
+    pub async fn message_packet(&self, id: RadioId, message: MessageId) -> Result<Option<Packet>> {
+        Ok(self
+            .store
+            .message_sighting(id, message)
+            .await?
+            .map(crate::packets::packet))
+    }
+
     pub async fn packets(
         &self,
         id: RadioId,

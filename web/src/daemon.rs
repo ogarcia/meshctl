@@ -142,6 +142,14 @@ pub async fn send_message(radio: RadioId, message: &NewMessage) -> Result<Messag
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// The packet that carried a message, as the radio heard or sent it.
+pub async fn message_packet(
+    radio: RadioId,
+    id: meshctl_api::MessageId,
+) -> Result<meshctl_api::Packet, Failure> {
+    get(&format!("/radios/{radio}/messages/{id}/packet")).await
+}
+
 /// Forgets a message the radio keeps, and the reactions to it: only in
 /// meshctl, not on the mesh.
 pub async fn forget_message(radio: RadioId, id: meshctl_api::MessageId) -> Result<(), Failure> {
