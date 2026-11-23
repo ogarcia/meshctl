@@ -13,6 +13,7 @@ use leptos::task::spawn_local;
 use meshctl_api::{
     BROADCAST, ErrorCode, LinkState, Message, MessageStatus, NewMessage, Peer, RadioKind,
 };
+use wasm_bindgen::JsCast;
 
 /// The longest text the daemon takes, in bytes.
 /// What sends a message, as an icon.
@@ -229,6 +230,49 @@ fn Composer(peer: Peer) -> impl IntoView {
             && bytes() <= MAX_TEXT_BYTES
     };
 
+    // As tall as what is written, wrapped even where it has no spaces, up to
+    // a few lines; scrolled within past them. Again as it is emptied.
+    let field = NodeRef::<html::Textarea>::new();
+    Effect::new(move |_| {
+        text.track();
+        field.track();
+        // Measured once the field holds the text, which it takes after this.
+        request_animation_frame(move || {
+            let Some(field) = field.get_untracked() else {
+                return;
+            };
+            let style = web_sys::HtmlElement::style(&field);
+            let _ = style.set_property("height", "auto");
+            let border = field.offset_height() - field.client_height();
+            let _ = style.set_property("height", &format!("{}px", field.scroll_height() + border));
+        });
+    });
+    // By touch the keyboard's return writes a new line, as in the phones'
+    // apps, and the button sends; with a keyboard, return sends, and with
+    // Ctrl or Shift writes a new line.
+    let touch = web_sys::window()
+        .and_then(|w| w.match_media("(pointer: coarse)").ok().flatten())
+        .is_some_and(|m| m.matches());
+    let keydown = move |ev: leptos::ev::KeyboardEvent| {
+        if ev.key() != "Enter" || ev.is_composing() || touch {
+            return;
+        }
+        ev.prevent_default();
+        if ev.ctrl_key() || ev.shift_key() || ev.meta_key() {
+            // As if typed: where the caret is, undone as typing is.
+            let _ = document().dyn_into::<web_sys::HtmlDocument>().map(|d| {
+                d.exec_command_with_show_ui_and_value(
+                    "insertText",
+                    false,
+                    "
+",
+                )
+            });
+        } else if let Some(form) = field.get().and_then(|f| f.form()) {
+            let _ = form.request_submit();
+        }
+    };
+
     let submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let Some(radio) = live.selected.get_untracked() else {
@@ -307,11 +351,14 @@ fn Composer(peer: Peer) -> impl IntoView {
                 })
         }}
         <form class="composer" on:submit=submit>
-            <input
+            <textarea
+                node_ref=field
+                rows="1"
                 placeholder=move || t_string!(i18n, chat_write)
                 prop:value=move || text.get()
                 on:input=move |ev| text.set(event_target_value(&ev))
-            />
+                on:keydown=keydown
+            ></textarea>
             <span class=move || {
                 if bytes() > MAX_TEXT_BYTES { "count over" } else { "count dim" }
             }>{move || format!("{}/{MAX_TEXT_BYTES}", bytes())}</span>

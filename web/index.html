@@ -2396,14 +2396,27 @@
       .composer {
         display: flex;
         gap: 10px;
-        align-items: center;
+        /* What goes with what is written, at its foot, as it grows. */
+        align-items: flex-end;
         flex-wrap: wrap;
         padding: 12px 20px;
         background: var(--mc-surface);
         border-top: 1px solid var(--mc-border);
       }
-      .composer input { flex: 1; min-width: 0; min-height: 40px; }
-      .composer .count { font-size: 12px; font-family: var(--mc-mono); }
+      /* A line tall, growing with what is written up to eight, then
+         scrolled within; long words broken, as nothing runs off its side. */
+      .composer textarea {
+        flex: 1;
+        min-width: 0;
+        min-height: 40px;
+        max-height: calc(8 * 1.45em + 20px);
+        padding: 9px 12px;
+        line-height: 1.45;
+        resize: none;
+        overflow-y: auto;
+        overflow-wrap: anywhere;
+      }
+      .composer .count { font-size: 12px; font-family: var(--mc-mono); line-height: 40px; }
       .composer .count.over { color: var(--mc-danger); }
       .composer button { min-height: 40px; }
       .composer .send { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
@@ -3236,7 +3249,9 @@
         /* Its buttons a finger tall, alone or beside others. */
         .topbar .actions button { min-height: 44px; }
         /* What a message is written in, and its button, a finger tall too. */
-        .composer input, .composer button { min-height: 44px; }
+        .composer textarea, .composer button { min-height: 44px; }
+        .composer textarea { padding: 11px 12px; }
+        .composer .count { line-height: 44px; }
         .segmented button { min-height: 38px; }
         /* A colour to pick: round, a finger wide, not stretched to its height. */
         .swatch { min-height: 0; }
