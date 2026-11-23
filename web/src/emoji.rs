@@ -230,6 +230,37 @@ pub fn EmojiPicker(
         .then_some((FREQUENT, "🕘"))
         .into_iter()
         .chain(GROUPS);
+    // Each group where it was left, and one not seen yet at its top: kept
+    // as the grid is left, put back once it is drawn.
+    let grid = NodeRef::<leptos::html::Div>::new();
+    let scrolls = StoredValue::new(Vec::<(u8, i32)>::new());
+    let scroll_to = move |top: i32| {
+        request_animation_frame(move || {
+            if let Some(grid) = grid.get_untracked() {
+                grid.set_scroll_top(top);
+            }
+        });
+    };
+    let show = move |id: u8| {
+        if let Some(element) = grid.get_untracked()
+            && search.with_untracked(|s| s.trim().is_empty())
+        {
+            let (left, top) = (group.get_untracked(), element.scroll_top());
+            scrolls.update_value(|scrolls| {
+                scrolls.retain(|(g, _)| *g != left);
+                scrolls.push((left, top));
+            });
+        }
+        search.set(String::new());
+        group.set(id);
+        let top = scrolls.with_value(|scrolls| {
+            scrolls
+                .iter()
+                .find(|(g, _)| *g == id)
+                .map_or(0, |(_, top)| *top)
+        });
+        scroll_to(top);
+    };
     let tabs = groups.map(|(id, face)| {
         let on = move || search.with(|s| s.trim().is_empty()) && group.get() == id;
         view! {
@@ -241,8 +272,7 @@ pub fn EmojiPicker(
                 title=move || group_name(id)
                 aria-label=move || group_name(id)
                 on:click=move |_| {
-                    search.set(String::new());
-                    group.set(id);
+                    show(id);
                 }
             >
                 {face}
@@ -278,10 +308,14 @@ pub fn EmojiPicker(
                 type="search"
                 placeholder=move || t_string!(i18n, emoji_search)
                 prop:value=move || search.get()
-                on:input=move |ev| search.set(event_target_value(&ev))
+                on:input=move |ev| {
+                    // What is found, from the first.
+                    search.set(event_target_value(&ev));
+                    scroll_to(0);
+                }
             />
             <div class="emoji-groups" role="tablist">{tabs.collect_view()}</div>
-            <div class="emoji-grid">
+            <div class="emoji-grid" node_ref=grid>
                 {move || match data.get() {
                     None => view! { <p class="dim">{t!(i18n, emoji_loading)}</p> }.into_any(),
                     Some(None) => view! { <p class="dim">{t!(i18n, emoji_failed)}</p> }.into_any(),
