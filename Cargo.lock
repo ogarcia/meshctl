@@ -2510,6 +2510,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "clap",
+ "form_urlencoded",
  "futures-util",
  "getrandom 0.4.3",
  "http-body-util",
@@ -2547,6 +2548,7 @@ dependencies = [
  "leptos_i18n",
  "leptos_i18n_build",
  "meshctl-api",
+ "qrcode",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -3094,6 +3096,12 @@ dependencies = [
  "prost-types",
  "thiserror 2.0.21",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ace1a365f55004297f2cf24acfd96d02966246ca423385273b58a7dc873ee14d"
 
 [[package]]
 name = "quote"

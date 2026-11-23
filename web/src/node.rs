@@ -157,6 +157,7 @@ fn NodePage(num: u32) -> impl IntoView {
                 }
             }}
             <Shortcuts />
+            <Share />
         }
         .into_any()
     };
@@ -917,6 +918,81 @@ fn Shortcuts() -> impl IntoView {
         </Section>
     }
 }
+
+/// The radio's own node to share: a QR its kind's app adds as a contact,
+/// and the same link as text, to copy. Read again as the radio says who it
+/// is, or changes.
+#[component]
+fn Share() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let url = RwSignal::new(None::<String>);
+    // Who the radio is: its id, its names, its key; the link follows them.
+    let who = Memo::new(move |_| {
+        let local = live
+            .status
+            .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num))?;
+        live.nodes.with(|nodes| {
+            nodes.get(&local).map(|n| {
+                (
+                    local,
+                    n.long_name.clone(),
+                    n.short_name.clone(),
+                    n.public_key.clone(),
+                )
+            })
+        })
+    });
+    Effect::new(move |_| {
+        let (Some(radio), Some(_)) = (live.selected.get(), who.get()) else {
+            url.set(None);
+            return;
+        };
+        spawn_local(async move {
+            url.set(daemon::contact(radio).await.ok().map(|c| c.url));
+        });
+    });
+    let meshcore = move || live.selected_kind() == Some(meshctl_api::RadioKind::Meshcore);
+    move || {
+        let link = url.get()?;
+        let code = qrcode::QrCode::new(link.as_bytes()).ok()?;
+        // Dark on light, whatever the theme: as scanners read best.
+        let svg = code
+            .render::<qrcode::render::svg::Color>()
+            .quiet_zone(true)
+            .dark_color(qrcode::render::svg::Color("#111111"))
+            .light_color(qrcode::render::svg::Color("#ffffff"))
+            .build();
+        let copied = link.clone();
+        Some(view! {
+            <Section title=t!(i18n, own_contact).into_any() class="own-contact">
+                <div class="contact">
+                    <div class="qr" role="img" aria-label=move || t_string!(i18n, own_contact_qr) inner_html=svg></div>
+                    <div class="contact-words">
+                        <p class="hint">
+                            {move || if meshcore() {
+                                t!(i18n, own_contact_hint_meshcore).into_any()
+                            } else {
+                                t!(i18n, own_contact_hint_meshtastic).into_any()
+                            }}
+                        </p>
+                        <span class="copyable">
+                            <span class="mono contact-link" title=link.clone()>{link.clone()}</span>
+                            <button
+                                class="icon-button"
+                                title=move || t_string!(i18n, own_contact_copy)
+                                aria-label=move || t_string!(i18n, own_contact_copy)
+                                inner_html=COPY
+                                on:click=move |_| crate::clipboard::copy(&copied)
+                            ></button>
+                        </span>
+                    </div>
+                </div>
+            </Section>
+        })
+    }
+}
+
 /// Where the node is, and how well that is known.
 #[component]
 fn PositionSection(at: Option<i64>) -> impl IntoView {
@@ -1257,7 +1333,11 @@ fn Sensors(
     // power, neighbours. Read from what the daemon keeps, nothing asked of
     // the radio.
     let enabled = RwSignal::new(None::<[bool; 3]>);
-    if own && let Some(radio) = live.selected.get_untracked() {
+    // MeshCore radios have no such settings yet: nothing to ask.
+    if own
+        && live.selected_kind() != Some(meshctl_api::RadioKind::Meshcore)
+        && let Some(radio) = live.selected.get_untracked()
+    {
         spawn_local(async move {
             if let Ok(sections) = daemon::sections(radio).await {
                 enabled.set(Some(modules_on(&sections)));

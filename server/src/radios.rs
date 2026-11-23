@@ -440,6 +440,32 @@ impl Radios {
         }
     }
 
+    /// The link that shares a radio's own node, as its kind's apps read it,
+    /// in a QR or as text; none while it has not said who it is.
+    pub fn contact(&self, id: RadioId, kind: RadioKind) -> Option<String> {
+        self.mesh(id)?.read(|state| {
+            let local = state.local.as_ref()?;
+            let node = state.nodes.get(&local.num).and_then(|n| n.user.as_ref());
+            match kind {
+                RadioKind::Meshtastic => {
+                    let mut owner = state.settings.owner.clone()?;
+                    // Its key as the node list has it, if its owner came
+                    // without.
+                    if owner.public_key.is_empty()
+                        && let Some(user) = node
+                    {
+                        owner.public_key.clone_from(&user.public_key);
+                    }
+                    Some(meshtastic_contact(local.num, owner))
+                }
+                RadioKind::Meshcore => {
+                    let user = node?;
+                    meshcore_contact(&user.long_name, &user.public_key, &user.role)
+                }
+            }
+        })
+    }
+
     /// A radio's link and what it said of itself, if there is such a radio.
     pub fn status(&self, id: RadioId) -> Option<Status> {
         let (local, since) = self.mesh(id)?.read(|state| {
@@ -1728,9 +1754,83 @@ async fn save_all(store: &Store, id: RadioId, mesh: &Mesh) -> Result<()> {
     store.save_sync(id, local.as_ref(), &nodes, now()).await
 }
 
+/// A Meshtastic node to share, as its apps read it: the contact, in
+/// base64url without padding, after `https://meshtastic.org/v/#`.
+fn meshtastic_contact(num: u32, user: meshctl_proto::meshtastic::User) -> String {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use prost::Message;
+    let contact = meshctl_proto::meshtastic::SharedContact {
+        node_num: num,
+        user: Some(user),
+        should_ignore: false,
+        manually_verified: false,
+    };
+    format!(
+        "https://meshtastic.org/v/#{}",
+        URL_SAFE_NO_PAD.encode(contact.encode_to_vec())
+    )
+}
+
+/// A MeshCore node to share, as its apps read it: its name, its key in hex
+/// and its kind (1 a companion, 2 a repeater, 3 a room, 4 a sensor), as
+/// `meshcore://contact/add` asks. None without a whole key.
+fn meshcore_contact(name: &str, key: &[u8], role: &str) -> Option<String> {
+    if key.len() != 32 {
+        return None;
+    }
+    let kind = match role {
+        "REPEATER" => 2,
+        "ROOM" => 3,
+        "SENSOR" => 4,
+        _ => 1,
+    };
+    let key: String = key.iter().map(|b| format!("{b:02x}")).collect();
+    let name: String = form_urlencoded::byte_serialize(name.as_bytes()).collect();
+    Some(format!(
+        "meshcore://contact/add?name={name}&public_key={key}&type={kind}"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_meshtastic_contact_reads_back() {
+        use base64::Engine;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use prost::Message;
+        let user = meshctl_proto::meshtastic::User {
+            id: "!1234abcd".into(),
+            long_name: "Casa".into(),
+            short_name: "CASA".into(),
+            public_key: vec![7; 32],
+            ..Default::default()
+        };
+        let url = meshtastic_contact(0x1234_abcd, user.clone());
+        let encoded = url.strip_prefix("https://meshtastic.org/v/#").unwrap();
+        assert!(!encoded.contains('=') && !encoded.contains('+') && !encoded.contains('/'));
+        let back = meshctl_proto::meshtastic::SharedContact::decode(
+            URL_SAFE_NO_PAD.decode(encoded).unwrap().as_slice(),
+        )
+        .unwrap();
+        assert_eq!(back.node_num, 0x1234_abcd);
+        assert_eq!(back.user, Some(user));
+    }
+
+    #[test]
+    fn a_meshcore_contact_says_its_name_key_and_kind() {
+        let key: Vec<u8> = (0..32).collect();
+        assert_eq!(
+            meshcore_contact("Mi radio", &key, "REPEATER").unwrap(),
+            concat!(
+                "meshcore://contact/add?name=Mi+radio&public_key=",
+                "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f&type=2"
+            )
+        );
+        assert_eq!(meshcore_contact("X", &key[..8], "CHAT"), None);
+    }
 
     fn settings(name: &str, kind: RadioKind, address: &str) -> RadioSettings {
         RadioSettings {

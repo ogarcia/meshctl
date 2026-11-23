@@ -11,8 +11,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Channel, Error, ErrorCode, LinkState, MapView, Node, NodeCheck, NodeFavorite, NodeLatest,
-    NodeTelemetry, Radio, RadioId, RadioOrder, RadioSettings, Status,
+    Channel, Contact, Error, ErrorCode, LinkState, MapView, Node, NodeCheck, NodeFavorite,
+    NodeLatest, NodeTelemetry, Radio, RadioId, RadioOrder, RadioSettings, Status,
 };
 use meshctl_core::radio::{AdminError, Mesh};
 use serde::Deserialize;
@@ -27,6 +27,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(map_view, set_map_view))
         .routes(routes!(get, update, remove))
         .routes(routes!(status))
+        .routes(routes!(contact))
         .routes(routes!(channels))
         .routes(routes!(nodes))
         .routes(routes!(node, remove_node))
@@ -293,6 +294,33 @@ async fn status(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Re
         local: None,
     });
     Json(status).into_response()
+}
+
+/// The radio's contact
+///
+/// A link that shares the radio's own node, as its kind's apps open it: in
+/// a QR, or as text. Not yet while the radio has not said who it is.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/contact",
+    tag = "radios",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    responses(
+        (status = 200, description = "The link", body = Contact),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio, or it has not said who it is yet", body = Error),
+    )
+)]
+async fn contact(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
+    let kind = match state.radios.get(radio).await {
+        Ok(Some(radio)) => radio.kind,
+        Ok(None) => return Missing::NoSuchRadio.into_response(),
+        Err(err) => return Missing::Failed(err).into_response(),
+    };
+    match state.radios.contact(radio, kind) {
+        Some(url) => Json(Contact { url }).into_response(),
+        None => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+    }
 }
 
 /// Channels

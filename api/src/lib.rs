@@ -336,6 +336,20 @@ pub struct Status {
     pub local: Option<LocalNode>,
 }
 
+/// How to share a radio's own node with others: a link its kind's apps
+/// open, in a QR or as text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Contact {
+    /// For Meshtastic, `https://meshtastic.org/v/#` and the contact; for
+    /// MeshCore, `meshcore://contact/add` with its name, key and kind.
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = "https://meshtastic.org/v/#CM2rNBISCglDYXNh")
+    )]
+    pub url: String,
+}
+
 /// The radio meshctl is connected to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

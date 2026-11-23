@@ -28,6 +28,8 @@ prost-reflect = { version = "0.16", features = ["serde"] }
 getrandom = "0.4"
 # Channel keys as the apps show them, given and asked for.
 base64 = "0.22"
+# A MeshCore contact's name in its link, as the apps read it.
+form_urlencoded = "1"
 # Fingerprints of channels, to tell where each went.
 sha2 = "0.10"
 # The interface trunk builds into web/dist. When it has not been built the

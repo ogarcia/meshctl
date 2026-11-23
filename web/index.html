@@ -1276,6 +1276,26 @@
       .facts .since { margin-left: 8px; font-size: 12px; }
       /* Its settings' tabs, the whole width: five in a row, or three and the
          last two together under them, where five do not fit. */
+      /* The radio's contact to share: its QR beside how, and the link. The
+         QR dark on white whatever the theme, as scanners read best. */
+      .own-contact { container: contact / inline-size; }
+      .own-contact .contact { display: flex; align-items: center; gap: 16px; }
+      .own-contact .qr { flex: none; width: 168px; height: 168px; border-radius: 10px; overflow: hidden; background: #fff; }
+      /* Its own fill, none of the icons' stroke, and square modules. */
+      .own-contact .qr svg { display: block; width: 100%; height: 100%; shape-rendering: crispEdges; }
+      .own-contact .qr svg * { stroke: none; }
+      .own-contact .contact-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+      .own-contact .hint { margin: 0; color: var(--mc-muted); font-size: 13px; }
+      .own-contact .copyable { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .own-contact .contact-link { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+      .own-contact .copyable .icon-button { flex: none; }
+      .own-contact .copyable .icon-button svg { width: 16px; height: 16px; }
+      /* The QR over the words, in the middle, while the words do not fit
+         beside it: by the section's own width, a phone's or a column's. */
+      @container contact (max-width: 520px) {
+        .own-contact .contact { flex-direction: column; align-items: stretch; }
+        .own-contact .qr { align-self: center; width: 200px; height: 200px; }
+      }
       .own-shortcuts { container: shortcuts / inline-size; }
       .own-shortcuts .shortcuts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
       .own-shortcuts .shortcuts button { min-width: 0; min-height: 34px; padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
