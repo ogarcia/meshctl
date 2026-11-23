@@ -22,6 +22,9 @@ const SEND: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/sen
 
 const MAX_TEXT_BYTES: usize = 200;
 
+/// How many of the emojis most used the chat offers first: four rows.
+const FREQUENT_SHOWN: usize = 36;
+
 /// From how many bytes a message is near what it takes, and its field says
 /// so.
 const NEAR_TEXT_BYTES: usize = MAX_TEXT_BYTES - 20;
@@ -311,7 +314,45 @@ fn Composer(peer: Peer) -> impl IntoView {
         closing.remove();
         escaping.remove();
     });
+    // The most used, as they were when the emojis opened: what is picked
+    // does not move under the finger, and comes forward the next time. The
+    // common ones after, as many as make four rows.
+    let frequent = RwSignal::new(Vec::<String>::new());
+    let offer = move || {
+        let mut offered = live.emojis.get_untracked().unwrap_or_default();
+        for common in crate::emoji::COMMON {
+            if offered.len() >= FREQUENT_SHOWN {
+                break;
+            }
+            if !offered.iter().any(|e| e == common) {
+                offered.push(common.to_owned());
+            }
+        }
+        offered.truncate(FREQUENT_SHOWN);
+        frequent.set(offered);
+    };
+    Effect::new(move |opened: Option<bool>| {
+        let open = picking.get();
+        if open && opened != Some(true) {
+            offer();
+            if live.emojis.get_untracked().is_none() {
+                spawn_local(async move {
+                    if let Ok(emojis) = daemon::emojis().await {
+                        live.emojis.set(Some(emojis));
+                        offer();
+                    }
+                });
+            }
+        }
+        open
+    });
     let insert = move |emoji: String| {
+        let counted = emoji.clone();
+        spawn_local(async move {
+            if let Ok(emojis) = daemon::use_emoji(&counted).await {
+                live.emojis.set(Some(emojis));
+            }
+        });
         let Some(field) = field.get_untracked() else {
             return;
         };
@@ -468,7 +509,11 @@ fn Composer(peer: Peer) -> impl IntoView {
             </div>
             <Show when=move || picking.get()>
                 <div class="emoji-popover" on:click=|ev| ev.stop_propagation()>
-                    <crate::emoji::EmojiPicker picked=Signal::stored(None::<String>) pick=Callback::new(insert) />
+                    <crate::emoji::EmojiPicker
+                        picked=Signal::stored(None::<String>)
+                        pick=Callback::new(insert)
+                        frequent=Signal::from(frequent)
+                    />
                 </div>
             </Show>
             <span class=move || {

@@ -19,6 +19,16 @@ const DATA: &str = "/emojibase-data-18.0.0";
 /// The most found at once: a search shows the best of them.
 const FOUND_MAX: usize = 160;
 
+/// The tab of the emojis most used, when the picker is given them.
+const FREQUENT: u8 = u8::MAX;
+
+/// What the most used start as, before any is: those most said in a chat,
+/// and the mesh's own.
+pub const COMMON: [&str; 18] = [
+    "👍", "❤️", "😂", "😮", "😢", "🙏", "👋", "🎉", "📡", "✅", "👌", "🔥", "😊", "🤔", "👀", "💪",
+    "🙌", "⚡",
+];
+
 /// The groups shown as tabs, each with the emoji that stands for it.
 /// Emojibase's group 2 (skin tones and hair) is left out: they are parts.
 const GROUPS: [(u8, &str); 9] = [
@@ -134,11 +144,15 @@ pub fn EmojiPicker(
     /// The group it opens on.
     #[prop(default = 0)]
     start: u8,
+    /// The emojis most used, the first ones first: given, a tab of its own,
+    /// the one it opens on.
+    #[prop(optional, into)]
+    frequent: Option<Signal<Vec<String>>>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     // `None` while it is read; `Some(None)` if it could not be.
     let data = RwSignal::new(None::<Option<Arc<Vec<Emoji>>>>);
-    let group = RwSignal::new(start);
+    let group = RwSignal::new(if frequent.is_some() { FREQUENT } else { start });
     let search = RwSignal::new(String::new());
 
     Effect::new(move |_| {
@@ -160,9 +174,15 @@ pub fn EmojiPicker(
         6 => t_string!(i18n, emoji_activities),
         7 => t_string!(i18n, emoji_objects),
         8 => t_string!(i18n, emoji_symbols),
+        FREQUENT => t_string!(i18n, emoji_frequent),
         _ => t_string!(i18n, emoji_flags),
     };
-    let tabs = GROUPS.map(|(id, face)| {
+    let groups = frequent
+        .is_some()
+        .then_some((FREQUENT, "🕘"))
+        .into_iter()
+        .chain(GROUPS);
+    let tabs = groups.map(|(id, face)| {
         let on = move || search.with(|s| s.trim().is_empty()) && group.get() == id;
         view! {
             <button
@@ -189,6 +209,25 @@ pub fn EmojiPicker(
         let needle = search.get();
         if needle.trim().is_empty() {
             let group = group.get();
+            if group == FREQUENT {
+                // Each by its name, if it is one of those known.
+                return frequent
+                    .map(|f| f.get())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|unicode| {
+                        all.iter()
+                            .find(|e| e.unicode == unicode)
+                            .cloned()
+                            .unwrap_or(Emoji {
+                                label: unicode.clone(),
+                                unicode,
+                                group: FREQUENT,
+                                words: String::new(),
+                            })
+                    })
+                    .collect();
+            }
             all.iter().filter(|e| e.group == group).cloned().collect()
         } else {
             find(&all, &needle).into_iter().cloned().collect()
@@ -203,7 +242,7 @@ pub fn EmojiPicker(
                 prop:value=move || search.get()
                 on:input=move |ev| search.set(event_target_value(&ev))
             />
-            <div class="emoji-groups" role="tablist">{tabs.into_iter().collect_view()}</div>
+            <div class="emoji-groups" role="tablist">{tabs.collect_view()}</div>
             <div class="emoji-grid">
                 {move || match data.get() {
                     None => view! { <p class="dim">{t!(i18n, emoji_loading)}</p> }.into_any(),

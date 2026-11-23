@@ -130,6 +130,9 @@ pub struct Live {
     pub channels: RwSignal<Vec<Channel>>,
     /// Of the selected radio.
     pub conversations: RwSignal<Vec<Conversation>>,
+    /// The emojis picked most, as the daemon counts them: none until the
+    /// picker first needs them.
+    pub emojis: RwSignal<Option<Vec<String>>>,
     /// The conversation open in the chat, if any.
     pub open: RwSignal<Option<Peer>>,
     /// The messages of the open conversation, oldest first.
@@ -215,6 +218,7 @@ impl Live {
             loaded: RwSignal::new(None),
             channels: RwSignal::new(Vec::new()),
             conversations: RwSignal::new(Vec::new()),
+            emojis: RwSignal::new(None),
             open: RwSignal::new(None),
             thread: RwSignal::new(Vec::new()),
             traceroutes: RwSignal::new(Vec::new()),

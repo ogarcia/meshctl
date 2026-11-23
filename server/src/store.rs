@@ -319,6 +319,49 @@ impl Store {
         Ok(())
     }
 
+    /// The emojis picked in the interface, the most used first and, among
+    /// as used, the latest: under 'emojis' in the preferences, as JSON.
+    pub async fn emojis(&self) -> Result<Vec<String>> {
+        Ok(ranked(self.emoji_uses().await?))
+    }
+
+    /// Counts an emoji picked at `at` (seconds since the epoch), and gives the
+    /// emojis as [`Self::emojis`] does. Only the most used are kept.
+    pub async fn use_emoji(&self, emoji: &str, at: i64) -> Result<Vec<String>> {
+        let mut uses = self.emoji_uses().await?;
+        match uses.iter_mut().find(|u| u.emoji == emoji) {
+            Some(used) => {
+                used.count += 1;
+                used.last = at;
+            }
+            None => uses.push(EmojiUse {
+                emoji: emoji.to_owned(),
+                count: 1,
+                last: at,
+            }),
+        }
+        sort_uses(&mut uses);
+        uses.truncate(EMOJIS_KEPT);
+        sqlx::query(
+            "INSERT INTO preference (key, value) VALUES ('emojis', ?) \
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(serde_json::to_string(&uses)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(ranked(uses))
+    }
+
+    async fn emoji_uses(&self) -> Result<Vec<EmojiUse>> {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT value FROM preference WHERE key = 'emojis'")
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row
+            .and_then(|(value,)| serde_json::from_str(&value).ok())
+            .unwrap_or_default())
+    }
+
     pub async fn radios(&self) -> Result<Vec<RadioRecord>> {
         let rows: Vec<RadioRow> = sqlx::query_as(
             "SELECT id, name, kind, address, enabled, shown, badge, last_connected FROM radio
@@ -1471,6 +1514,27 @@ pub fn now() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
+/// How many emojis' uses are kept: the most used, beyond those shown.
+const EMOJIS_KEPT: usize = 64;
+
+/// How often an emoji was picked, and when last.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct EmojiUse {
+    emoji: String,
+    count: u32,
+    last: i64,
+}
+
+/// The most used first; among as used, the latest.
+fn sort_uses(uses: &mut [EmojiUse]) {
+    uses.sort_by(|a, b| b.count.cmp(&a.count).then(b.last.cmp(&a.last)));
+}
+
+fn ranked(mut uses: Vec<EmojiUse>) -> Vec<String> {
+    sort_uses(&mut uses);
+    uses.into_iter().map(|u| u.emoji).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1484,6 +1548,20 @@ mod tests {
             shown: true,
             badge: Default::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn emojis_rank_by_use_then_by_the_latest() {
+        let store = Store::in_memory().await;
+        assert!(store.emojis().await.unwrap().is_empty());
+        store.use_emoji("👍", 10).await.unwrap();
+        store.use_emoji("❤️", 20).await.unwrap();
+        store.use_emoji("👍", 30).await.unwrap();
+        store.use_emoji("😂", 40).await.unwrap();
+        // 👍 twice; ❤️ and 😂 once, 😂 the latest.
+        assert_eq!(store.emojis().await.unwrap(), ["👍", "😂", "❤️"]);
+        // Kept apart from the interface's preferences.
+        assert_eq!(store.preferences().await.unwrap(), Preferences::default());
     }
 
     #[tokio::test]

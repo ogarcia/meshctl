@@ -9,12 +9,14 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, Preferences};
+use meshctl_api::{EmojiUsed, Error, ErrorCode, Preferences};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(read, change))
+    OpenApiRouter::new()
+        .routes(routes!(read, change))
+        .routes(routes!(emojis, use_emoji))
 }
 
 fn failed(err: &anyhow::Error) -> Response {
@@ -62,6 +64,64 @@ async fn change(State(state): State<AppState>, Json(preferences): Json<Preferenc
     }
 }
 
+/// The emojis most used
+///
+/// Those picked in the interface, the most used first and, among as used,
+/// the latest: what it offers first.
+#[utoipa::path(
+    get,
+    path = "/preferences/emojis",
+    tag = "preferences",
+    responses(
+        (status = 200, description = "The emojis", body = Vec<String>),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+    )
+)]
+async fn emojis(State(state): State<AppState>) -> Response {
+    match state.radios.emojis().await {
+        Ok(emojis) => Json(emojis).into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Count an emoji used
+///
+/// One more time an emoji was picked. Gives the emojis most used, as they
+/// are now.
+#[utoipa::path(
+    post,
+    path = "/preferences/emojis",
+    tag = "preferences",
+    request_body = EmojiUsed,
+    responses(
+        (status = 200, description = "The emojis, the most used first", body = Vec<String>),
+        (status = 400, description = "That is not an emoji", body = Error),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+    )
+)]
+async fn use_emoji(State(state): State<AppState>, Json(used): Json<EmojiUsed>) -> Response {
+    // An emoji: a few characters, beyond plain text (a keycap has a digit,
+    // and more), none a space or a control.
+    let emoji = used.emoji.trim();
+    if emoji.is_empty()
+        || emoji.len() > 32
+        || emoji.is_ascii()
+        || emoji.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(Error {
+                error: ErrorCode::BadRequest,
+            }),
+        )
+            .into_response();
+    }
+    match state.radios.use_emoji(emoji).await {
+        Ok(emojis) => Json(emojis).into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::radios::Change;
@@ -70,6 +130,34 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode, header};
     use meshctl_api::{Preferences, Theme};
+
+    #[tokio::test]
+    async fn emojis_are_counted_and_only_emojis() {
+        let radios = radios().await;
+        let app = router(AppState {
+            auth: Auth::new(None),
+            radios,
+        });
+        let post = |body: &'static str| {
+            Request::post("/api/v1/preferences/emojis")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap()
+        };
+        let (status, body) = ask(app.clone(), post(r#"{"emoji":"📡"}"#)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json::<Vec<String>>(&body), ["📡"]);
+        for not in [
+            r#"{"emoji":""}"#,
+            r#"{"emoji":"hola"}"#,
+            r#"{"emoji":"👍 👍"}"#,
+        ] {
+            let (status, _) = ask(app.clone(), post(not)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{not}");
+        }
+        let (_, body) = ask(app, get("/api/v1/preferences/emojis")).await;
+        assert_eq!(json::<Vec<String>>(&body), ["📡"]);
+    }
 
     #[tokio::test]
     async fn are_kept_and_told() {

@@ -371,6 +371,23 @@ pub async fn save_preferences(preferences: &Preferences) -> Result<Preferences, 
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// The emojis picked in the interface, the most used first.
+pub async fn emojis() -> Result<Vec<String>, Failure> {
+    get("/preferences/emojis").await
+}
+
+/// Counts an emoji picked; the emojis most used, as they are now.
+pub async fn use_emoji(emoji: &str) -> Result<Vec<String>, Failure> {
+    let used = meshctl_api::EmojiUsed {
+        emoji: emoji.to_owned(),
+    };
+    let request = with_token(Request::post(&url("/preferences/emojis")))
+        .json(&used)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
 /// Adds a radio, or changes one when given its id.
 pub async fn save_radio(
     radio: Option<RadioId>,

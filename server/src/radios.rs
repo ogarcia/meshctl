@@ -1401,6 +1401,16 @@ impl Radios {
         self.store.preferences().await
     }
 
+    /// The emojis picked in the interface, the most used first.
+    pub async fn emojis(&self) -> Result<Vec<String>> {
+        self.store.emojis().await
+    }
+
+    /// Counts an emoji picked, and gives the emojis, the most used first.
+    pub async fn use_emoji(&self, emoji: &str) -> Result<Vec<String>> {
+        self.store.use_emoji(emoji, now()).await
+    }
+
     /// Keeps the interface's preferences, and tells every client.
     pub async fn set_preferences(&self, preferences: Preferences) -> Result<()> {
         self.store.set_preferences(&preferences).await?;

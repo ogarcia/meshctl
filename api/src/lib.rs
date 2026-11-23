@@ -336,6 +336,14 @@ pub struct Status {
     pub local: Option<LocalNode>,
 }
 
+/// An emoji picked in the interface, to count among the most used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EmojiUsed {
+    #[cfg_attr(feature = "openapi", schema(example = "👍"))]
+    pub emoji: String,
+}
+
 /// How to share a radio's own node with others: a link its kind's apps
 /// open, in a QR or as text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
