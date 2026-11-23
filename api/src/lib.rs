@@ -84,6 +84,10 @@ pub enum ErrorCode {
     /// A position more precise than a public channel takes: the radio would
     /// cut it down.
     PublicChannelPrecision,
+    /// Not a link meshctl reads: a Meshtastic contact or channels.
+    InvalidLink,
+    /// The radio has not the free slots the link's channels take.
+    NoFreeSlots,
 }
 
 /// The body of every error the API answers with.
@@ -352,6 +356,92 @@ pub struct ConversationRead {
     #[serde(default)]
     pub node: Option<u32>,
     pub up_to: MessageId,
+}
+
+/// A link to add a node or channels from, as the apps share them: a
+/// Meshtastic contact (`https://meshtastic.org/v/#…`) or channels
+/// (`https://meshtastic.org/e/#…`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Link {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = "https://meshtastic.org/v/#CM2rNBISCglDYXNh")
+    )]
+    pub url: String,
+    /// For channels: added to the free slots, or in place of every one.
+    #[serde(default)]
+    pub mode: LinkMode,
+    /// For channels replacing, whether the link's LoRa settings come too:
+    /// the radio reboots, and hears only those on them.
+    #[serde(default)]
+    pub lora: bool,
+}
+
+/// How a link's channels go to the radio.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum LinkMode {
+    /// To the free slots, those the radio has left out.
+    #[default]
+    Add,
+    /// In place of every one: the first the primary, the slots left over
+    /// emptied.
+    Replace,
+}
+
+/// What a link holds, read before anything is added from it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LinkContents {
+    /// A node, as its node info says it.
+    Contact {
+        node: u32,
+        /// `!` and eight hex digits.
+        id: String,
+        long_name: String,
+        short_name: String,
+        /// As the protobufs name it.
+        hw_model: Option<String>,
+        /// Whether it brings its public key, which private messages take.
+        key: bool,
+        /// Whether the radio knows of it already.
+        known: bool,
+    },
+    /// Channels, each added to a free slot unless the radio has it.
+    Channels {
+        channels: Vec<LinkChannel>,
+        /// How many slots the radio has free.
+        free_slots: u32,
+        /// The modem preset the link's channels are on, by its name, or
+        /// `Custom`; none if it says nothing of it.
+        preset: Option<String>,
+        /// Whether that, or the region, is not the radio's: the channels
+        /// would be heard only by those on the link's settings, which change
+        /// only when asked.
+        lora_differs: bool,
+        /// The region the link's settings are for, as the protobufs name
+        /// it; none if it says none.
+        region: Option<String>,
+        /// Whether the link is meant to replace the radio's channels, as the
+        /// apps share a whole configuration, rather than to add to them.
+        replaces: bool,
+        /// The radio's channels a replacing would take away, by name.
+        removed: Vec<String>,
+    },
+}
+
+/// A channel a link holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LinkChannel {
+    /// Its name; an unnamed one by its preset's.
+    pub name: String,
+    pub key: ChannelKey,
+    /// Whether the radio has it already, name and key.
+    pub present: bool,
 }
 
 /// An emoji picked in the interface, to count among the most used.

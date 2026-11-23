@@ -13,6 +13,7 @@ mod daemon;
 mod emoji;
 mod empty;
 mod fields;
+mod links;
 mod map;
 mod mesh;
 mod names;

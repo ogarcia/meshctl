@@ -12,7 +12,8 @@ use crate::mesh::{Event, LinkState, MeshState};
 use meshctl_proto::meshtastic::{
     AdminMessage, Channel, Config, Data, DeviceMetrics, EnvironmentMetrics, FromRadio, Heartbeat,
     LocalStats, MeshPacket, ModuleConfig, NeighborInfo, PortNum, PowerMetrics, RouteDiscovery,
-    Telemetry, ToRadio, User, admin_message, from_radio, mesh_packet, telemetry, to_radio,
+    SharedContact, Telemetry, ToRadio, User, admin_message, from_radio, mesh_packet, telemetry,
+    to_radio,
 };
 use prost::Message;
 use std::collections::HashMap;
@@ -462,14 +463,67 @@ impl Mesh {
         if num == me {
             return Err(AdminError::OwnNode);
         }
-        let (id, packet) = self.admin(
+        // Forgotten once the radio says so. Until then, nothing here changes,
+        // nor anything kept of it.
+        self.acknowledged(
             me,
             admin_message::PayloadVariant::RemoveByNodenum(num),
             passkey,
-        )?;
-        // Forgotten once the radio says so: it answers what it does on its
-        // own with an acknowledgement, or why not. Until then, nothing here
-        // changes, nor anything kept of it.
+        )
+        .await?;
+        self.update(|state| {
+            if state.nodes.remove(&num).is_some() {
+                vec![Event::NodeRemoved(num)]
+            } else {
+                Vec::new()
+            }
+        });
+        Ok(())
+    }
+
+    /// Has the radio keep a node from a shared contact: who it is and its
+    /// key above all, so that it can be written to privately before it is
+    /// heard. Nothing goes on the air; the node is here once the radio says
+    /// it keeps it.
+    pub async fn add_contact(&self, contact: SharedContact) -> Result<(), AdminError> {
+        if self.is_meshcore() {
+            return Err(AdminError::Unsupported);
+        }
+        let Some(user) = contact.user.clone() else {
+            return Err(AdminError::Refused("NO_USER".into()));
+        };
+        let (me, passkey) = self.passkey().await?;
+        if contact.node_num == me {
+            return Err(AdminError::OwnNode);
+        }
+        let num = contact.node_num;
+        self.acknowledged(
+            me,
+            admin_message::PayloadVariant::AddContact(contact),
+            passkey,
+        )
+        .await?;
+        self.update(|state| {
+            let node = state
+                .nodes
+                .entry(num)
+                .or_insert_with(|| crate::mesh::Node::new(num));
+            node.user = Some(crate::mesh::user_from(user));
+            vec![Event::Node(node.clone())]
+        });
+        Ok(())
+    }
+
+    /// Sends an admin message to the radio and waits for what it says of it:
+    /// it answers what it does on its own with an acknowledgement, or why
+    /// not.
+    async fn acknowledged(
+        &self,
+        me: u32,
+        variant: admin_message::PayloadVariant,
+        passkey: Vec<u8>,
+    ) -> Result<(), AdminError> {
+        let (id, packet) = self.admin(me, variant, passkey)?;
         let mut events = self.subscribe();
         self.send_raw(packet)?;
         let acknowledged = tokio::time::timeout(ADMIN_TIMEOUT, async {
@@ -483,18 +537,10 @@ impl Mesh {
         })
         .await;
         match acknowledged {
-            Ok(Some(None)) => {}
-            Ok(Some(Some(reason))) => return Err(AdminError::Refused(reason)),
-            Ok(None) | Err(_) => return Err(AdminError::NoAnswer),
+            Ok(Some(None)) => Ok(()),
+            Ok(Some(Some(reason))) => Err(AdminError::Refused(reason)),
+            Ok(None) | Err(_) => Err(AdminError::NoAnswer),
         }
-        self.update(|state| {
-            if state.nodes.remove(&num).is_some() {
-                vec![Event::NodeRemoved(num)]
-            } else {
-                Vec::new()
-            }
-        });
-        Ok(())
     }
 
     /// The radio's own number, and the passkey changing it takes, which it

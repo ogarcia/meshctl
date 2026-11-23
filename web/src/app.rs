@@ -174,6 +174,8 @@ pub struct Live {
     pub came_from: RwSignal<Page>,
     /// Whether the open node's removal is offered, in its drawer.
     pub removing: RwSignal<bool>,
+    /// Whether the window to add from a link is open.
+    pub adding_link: RwSignal<Option<crate::links::LinkWant>>,
     /// Whether the open node's requests are shown, in their drawer.
     pub history: RwSignal<bool>,
     /// Whether the radios are shown to switch the selected one, on a phone.
@@ -240,6 +242,7 @@ impl Live {
             came_from: RwSignal::new(Page::Map),
             history: RwSignal::new(false),
             removing: RwSignal::new(false),
+            adding_link: RwSignal::new(None),
             radio_sheet: RwSignal::new(false),
             map_pick: RwSignal::new(None),
             map_focus: RwSignal::new(None),
@@ -1240,6 +1243,7 @@ fn Frame() -> impl IntoView {
             </div>
             <crate::phone::TabBar />
             <crate::phone::RadioSheet />
+            <crate::links::LinkAdder />
         </div>
     }
 }

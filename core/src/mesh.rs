@@ -110,7 +110,7 @@ pub struct Node {
 }
 
 impl Node {
-    fn new(num: u32) -> Self {
+    pub(crate) fn new(num: u32) -> Self {
         Self {
             num,
             user: None,
@@ -645,7 +645,7 @@ fn said(packet: &pb::MeshPacket, now: u32) -> Option<Event> {
     }
 }
 
-fn user_from(user: pb::User) -> User {
+pub(crate) fn user_from(user: pb::User) -> User {
     User {
         long_name: user.long_name,
         short_name: user.short_name,

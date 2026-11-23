@@ -9,12 +9,12 @@
 use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
-    BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkState,
-    MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeCheck, NodeLatest,
-    NodeSettings, NodeSettingsChange, NodeTelemetry, Pace, Packet, PacketFilter, Peer, Preferences,
-    Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind, SectionSecret, SettingsApplied,
-    SettingsSection, SightingId, Status, TelemetryPoint, TelemetrySeries, Traceroute, TracerouteId,
-    Waits,
+    BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkContents,
+    LinkState, MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeCheck,
+    NodeLatest, NodeSettings, NodeSettingsChange, NodeTelemetry, Pace, Packet, PacketFilter, Peer,
+    Preferences, Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind, SectionSecret,
+    SettingsApplied, SettingsSection, SightingId, Status, TelemetryPoint, TelemetrySeries,
+    Traceroute, TracerouteId, Waits,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -138,6 +138,17 @@ impl From<anyhow::Error> for AskFailure {
     fn from(err: anyhow::Error) -> Self {
         Self::Failed(err)
     }
+}
+
+/// Why nothing was added from a link.
+#[derive(Debug)]
+pub enum LinkFailure {
+    /// Not a link meshctl reads.
+    Invalid,
+    /// The radio has not the free slots its channels take.
+    NoFreeSlots,
+    Settings(SettingsFailure),
+    Admin(AdminError),
 }
 
 /// Why a radio's settings were not shown or changed.
@@ -1251,6 +1262,55 @@ impl Radios {
             return Err(SettingsFailure::NotConnected);
         }
         Ok(mesh)
+    }
+
+    /// What a link holds, against what a Meshtastic radio has and knows.
+    pub fn read_link(&self, id: RadioId, url: &str) -> Result<LinkContents, LinkFailure> {
+        let mesh = self.configurable(id).map_err(LinkFailure::Settings)?;
+        let parsed = crate::links::parse(url).ok_or(LinkFailure::Invalid)?;
+        Ok(mesh.read(|state| crate::links::contents(&parsed, &state.settings, &state.nodes)))
+    }
+
+    /// Adds what a link holds to a Meshtastic radio: a contact it keeps, or
+    /// channels to its free slots, those it has left out. Nothing else of
+    /// its settings changes, its LoRa least of all.
+    pub async fn add_link(&self, id: RadioId, link: &meshctl_api::Link) -> Result<(), LinkFailure> {
+        let mesh = self.configurable(id).map_err(LinkFailure::Settings)?;
+        match crate::links::parse(&link.url).ok_or(LinkFailure::Invalid)? {
+            crate::links::Parsed::Contact(contact) => {
+                mesh.add_contact(contact).await.map_err(LinkFailure::Admin)
+            }
+            crate::links::Parsed::Channels(set, _) => {
+                let wanted = match link.mode {
+                    meshctl_api::LinkMode::Add => {
+                        let channels = mesh
+                            .read(|state| crate::links::channel_changes(&set, &state.settings))
+                            .ok_or(LinkFailure::NoFreeSlots)?;
+                        if channels.is_empty() {
+                            return Ok(());
+                        }
+                        NodeSettingsChange {
+                            channels,
+                            ..Default::default()
+                        }
+                    }
+                    // Every one, and the LoRa settings only when asked.
+                    meshctl_api::LinkMode::Replace => NodeSettingsChange {
+                        channels: crate::links::replacing_changes(&set),
+                        lora: if link.lora {
+                            mesh.read(|state| crate::links::lora_settings(&set, &state.settings))
+                        } else {
+                            None
+                        },
+                        ..Default::default()
+                    },
+                };
+                self.change_settings(id, &wanted)
+                    .await
+                    .map(|_| ())
+                    .map_err(LinkFailure::Settings)
+            }
+        }
     }
 
     /// Changes a radio's own settings. Returns whether it reboots to apply

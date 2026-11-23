@@ -142,6 +142,32 @@ pub async fn send_message(radio: RadioId, message: &NewMessage) -> Result<Messag
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// What a link holds, against what the radio has.
+pub async fn read_link(
+    radio: RadioId,
+    address: &str,
+) -> Result<meshctl_api::LinkContents, Failure> {
+    let link = meshctl_api::Link {
+        url: address.to_owned(),
+        mode: meshctl_api::LinkMode::Add,
+        lora: false,
+    };
+    let request = with_token(Request::post(&url(&format!("/radios/{radio}/links/read"))))
+        .json(&link)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// Adds what a link holds to the radio, or for channels puts them in place
+/// of its own, as the link says.
+pub async fn add_link(radio: RadioId, link: &meshctl_api::Link) -> Result<(), Failure> {
+    let request = with_token(Request::post(&url(&format!("/radios/{radio}/links"))))
+        .json(link)
+        .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// Reads a conversation up to a message, never back.
 pub async fn mark_read(
     radio: RadioId,

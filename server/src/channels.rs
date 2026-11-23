@@ -30,7 +30,7 @@ pub struct Slot {
 /// uses it: nothing is ever named this way on the radio, which names an
 /// unnamed channel itself, on the air too.
 #[allow(deprecated)] // A radio may still be set to one.
-fn preset_name(lora: Option<&config::LoRaConfig>) -> &'static str {
+pub fn preset_name(lora: Option<&config::LoRaConfig>) -> &'static str {
     use config::lo_ra_config::ModemPreset as P;
     let Some(lora) = lora else { return "" };
     if !lora.use_preset {

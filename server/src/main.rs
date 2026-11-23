@@ -3,6 +3,7 @@
 
 mod channels;
 mod keys;
+mod links;
 mod lora;
 mod packets;
 mod radios;

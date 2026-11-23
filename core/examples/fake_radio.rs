@@ -93,6 +93,8 @@ struct Radio {
     removed: std::collections::BTreeSet<u32>,
     /// The last text a client sent, for the mesh's examples to answer.
     last_text: Option<u32>,
+    /// Contacts a client added, as nodes it keeps.
+    contacts: BTreeMap<u32, pb::User>,
 }
 
 /// How the neighbour answers.
@@ -270,6 +272,7 @@ impl Radio {
             favorites: std::collections::BTreeSet::new(),
             removed: std::collections::BTreeSet::new(),
             last_text: None,
+            contacts: BTreeMap::new(),
         }
     }
 
@@ -543,6 +546,15 @@ impl Radio {
                 ..Default::default()
             }),
         ];
+        // The contacts added to it, as nodes not heard yet.
+        out.extend(self.contacts.iter().map(|(num, user)| {
+            V::NodeInfo(pb::NodeInfo {
+                num: *num,
+                user: Some(user.clone()),
+                is_favorite: self.favorites.contains(num),
+                ..Default::default()
+            })
+        }));
         // Those it was told to forget, out, until it is restarted.
         out.retain(|v| !matches!(v, V::NodeInfo(n) if self.removed.contains(&n.num)));
         out.extend(self.channels.values().cloned().map(V::Channel));
@@ -605,6 +617,14 @@ impl Radio {
             A::SetFavoriteNode(num) => {
                 println!("favourite: !{num:08x}");
                 self.favorites.insert(num);
+                None
+            }
+            A::AddContact(contact) => {
+                println!("contact: !{:08x}", contact.node_num);
+                if let Some(user) = contact.user {
+                    self.removed.remove(&contact.node_num);
+                    self.contacts.insert(contact.node_num, user);
+                }
                 None
             }
             A::RemoveByNodenum(num) => {

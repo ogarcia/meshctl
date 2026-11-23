@@ -198,6 +198,7 @@ pub fn ChannelsTab(loaded: RwSignal<Option<NodeSettings>>, notice: Notice) -> im
             </For>
             <div class="channel-foot">
                 <p class="hint dim">{t!(i18n, channels_hint)}</p>
+                <crate::links::AddChannelsLink />
                 <button
                     type="button"
                     class="primary add"

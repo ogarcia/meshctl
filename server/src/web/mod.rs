@@ -16,6 +16,7 @@ mod assets;
 mod auth;
 pub mod convert;
 mod events;
+mod links;
 mod messages;
 mod packets;
 mod preferences;
@@ -101,6 +102,7 @@ pub fn router(state: AppState) -> Router {
     let guarded = api::router()
         .merge(radios::router())
         .merge(messages::router())
+        .merge(links::router())
         .merge(traceroutes::router())
         .merge(settings::router())
         .merge(secrets::router())
