@@ -417,6 +417,7 @@ pub const STAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline
 pub const MESSAGE_OFF: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message-off.svg");
 pub const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");
+const DATABASE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/database.svg");
 pub const PLUG: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plug.svg");
 pub const BATTERY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-2.svg");
 
@@ -478,6 +479,9 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
     let favorite = node.favorite;
     let placed = node.position.is_some();
     let unmessagable = node.unmessagable;
+    // Not in the radio's list, as it said when last read in full: meshctl
+    // alone keeps it.
+    let kept = node.on_radio == Some(false);
 
     view! {
         <tr class="node-row" on:click=move |_| live.open_node(num)>
@@ -489,6 +493,7 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
                             <span class="text">{name}</span>
                             {favorite.then(|| view! { <span class="mark star" inner_html=STAR></span> })}
                             {unmessagable.then(|| view! { <span class="mark" title=move || t_string!(i18n, node_unmessagable) inner_html=MESSAGE_OFF></span> })}
+                            {kept.then(|| view! { <span class="mark kept" title=move || t_string!(i18n, node_kept) aria-label=move || t_string!(i18n, node_kept) inner_html=DATABASE></span> })}
                             // Where it is, always the last, to find it in the
                             // same place: to the map, and not to its page as
                             // the rest of the row.

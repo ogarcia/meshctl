@@ -623,6 +623,7 @@
   "node_favorite": "Mark as a favourite",
   "node_unfavorite": "No longer a favourite",
   "node_unmessagable": "Takes no messages",
+  "node_kept": "Only in meshctl: the radio does not have it in its list",
   "chat_unmessagable": "This node tells that nobody reads its messages; it is usually a repeater or a sensor. You can write to it, but most likely nobody will read it.",
   "chat_send_anyway": "Send all the same",
   "chart_title": "Telemetry",

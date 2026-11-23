@@ -182,6 +182,7 @@ pub(crate) mod tests {
                     battery_level: None,
                     voltage: None,
                     channel_utilization: None,
+                    on_radio: None,
                 },
             );
         }

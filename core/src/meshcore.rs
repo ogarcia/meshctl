@@ -314,6 +314,8 @@ fn node_from(contact: &Contact) -> Node {
         battery_level: None,
         voltage: None,
         channel_utilization: None,
+        // A contact is what the radio keeps.
+        on_radio: Some(true),
     }
 }
 
@@ -543,6 +545,7 @@ async fn session(
             .collect();
         // Nodes heard so far are kept, as with Meshtastic; these join them.
         for node in contacts.iter().map(node_from).chain([me_node]) {
+            state.named.insert(node.num);
             state.nodes.insert(node.num, node);
         }
         Vec::new()

@@ -12,7 +12,7 @@ use meshctl_proto::meshtastic::{
     self as pb, HardwareModel, PortNum, config, from_radio, mesh_packet, telemetry,
 };
 use prost::Message;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// How the link to the radio is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -107,6 +107,10 @@ pub struct Node {
     pub voltage: Option<f32>,
     /// How busy it hears the channel, as a percentage of the time.
     pub channel_utilization: Option<f32>,
+    /// Whether the radio has it in its own list, or meshctl alone keeps it,
+    /// as heard before: none until the radio has been read in full since
+    /// meshctl started, as only then is it known.
+    pub on_radio: Option<bool>,
 }
 
 impl Node {
@@ -124,6 +128,7 @@ impl Node {
             battery_level: None,
             voltage: None,
             channel_utilization: None,
+            on_radio: None,
         }
     }
 
@@ -324,6 +329,9 @@ pub struct MeshState {
     pub nodes: BTreeMap<u32, Node>,
     /// The radio's own settings, as it sent them on syncing.
     pub settings: Settings,
+    /// The nodes the radio names while it is read: those it has, once it is
+    /// read in full.
+    pub named: BTreeSet<u32>,
 }
 
 /// The radio's settings, whole and as the protobufs carry them: what changing
@@ -394,6 +402,22 @@ impl Settings {
 }
 
 impl MeshState {
+    /// The link as it goes to `link`, and which nodes the radio has once it
+    /// has said them all: until then, as known before.
+    pub(crate) fn link_to(&mut self, link: LinkState) {
+        match link {
+            LinkState::Syncing => self.named.clear(),
+            LinkState::Ready if self.link == LinkState::Syncing => {
+                let named = std::mem::take(&mut self.named);
+                for node in self.nodes.values_mut() {
+                    node.on_radio = Some(named.contains(&node.num));
+                }
+            }
+            _ => {}
+        }
+        self.link = link;
+    }
+
     /// Takes in a message from the radio received at `now` (seconds since the
     /// epoch) and returns what changed.
     ///
@@ -501,10 +525,17 @@ impl MeshState {
     }
 
     fn node_info(&mut self, info: pb::NodeInfo) -> Node {
+        let syncing = self.link == LinkState::Syncing;
         let node = self
             .nodes
             .entry(info.num)
             .or_insert_with(|| Node::new(info.num));
+        // In the radio's list, as it says.
+        if syncing {
+            self.named.insert(info.num);
+        } else {
+            node.on_radio = Some(true);
+        }
         if let Some(user) = info.user {
             node.user = Some(user_from(user));
         }
@@ -526,10 +557,17 @@ impl MeshState {
 
     fn packet(&mut self, packet: pb::MeshPacket, now: u32) -> Node {
         let ours = self.local.as_ref().is_some_and(|l| l.num == packet.from);
+        let syncing = self.link == LinkState::Syncing;
         let node = self
             .nodes
             .entry(packet.from)
             .or_insert_with(|| Node::new(packet.from));
+        // Heard, the radio keeps it in its list too.
+        if syncing {
+            self.named.insert(packet.from);
+        } else {
+            node.on_radio = Some(true);
+        }
 
         node.last_heard = Some(packet.rx_time.filter(|t| *t > 0).unwrap_or(now));
         node.via_mqtt = packet.via_mqtt;
@@ -886,6 +924,50 @@ mod tests {
         );
         assert!(events.is_empty());
         assert_eq!(state.nodes[&7].last_heard, Some(10));
+    }
+
+    #[test]
+    fn which_nodes_the_radio_has_is_known_once_it_is_read() {
+        // Kept from before: 5, which the radio no longer has, and 7.
+        let mut state = MeshState {
+            link: LinkState::Disconnected,
+            nodes: [5, 7].map(|num| (num, Node::new(num))).into(),
+            ..Default::default()
+        };
+        state.link_to(LinkState::Syncing);
+        state.apply(
+            from_radio(V::NodeInfo(pb::NodeInfo {
+                num: 7,
+                ..Default::default()
+            })),
+            1,
+        );
+        state.apply(
+            from_radio(V::NodeInfo(pb::NodeInfo {
+                num: 9,
+                ..Default::default()
+            })),
+            1,
+        );
+        // Not known while it is read.
+        assert!(state.nodes.values().all(|n| n.on_radio.is_none()));
+        state.link_to(LinkState::Ready);
+        let on_radio = |state: &MeshState, num| state.nodes[&num].on_radio;
+        assert_eq!(
+            [5, 7, 9].map(|num| on_radio(&state, num)),
+            [Some(false), Some(true), Some(true)]
+        );
+        // Heard again, the radio keeps it once more.
+        state.apply(
+            from_radio(V::Packet(packet(5, PortNum::TextMessageApp, vec![]))),
+            2,
+        );
+        assert_eq!(on_radio(&state, 5), Some(true));
+        // A drop and a read cut short leave it as it was known.
+        state.link_to(LinkState::Disconnected);
+        state.link_to(LinkState::Syncing);
+        state.link_to(LinkState::Disconnected);
+        assert_eq!(on_radio(&state, 9), Some(true));
     }
 
     #[test]

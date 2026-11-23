@@ -591,6 +591,11 @@ pub struct Node {
     pub voltage: Option<f32>,
     /// How busy it hears the channel, as a percentage of the time.
     pub channel_utilization: Option<f32>,
+    /// Whether the radio has it in its own list (`false`: meshctl alone
+    /// keeps it, as heard before). None until the radio has been read in
+    /// full since meshctl started, as only then is it known.
+    #[serde(default)]
+    pub on_radio: Option<bool>,
 }
 
 /// What a node last told of each kind, as the radio heard it: whether it

@@ -829,6 +829,7 @@ mod tests {
             battery_level: None,
             voltage: None,
             channel_utilization: None,
+            on_radio: None,
         };
         assert_eq!(heard(&node, &words), "SNR 11.5 dB · RSSI -30 dBm");
         node.hops_away = Some(3);
@@ -893,6 +894,7 @@ mod tests {
             battery_level: Some(80),
             voltage: None,
             channel_utilization: Some(12.5),
+            on_radio: None,
         };
         let labels = FactLabels {
             heard: "heard".into(),

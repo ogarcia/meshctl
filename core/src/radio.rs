@@ -509,6 +509,7 @@ impl Mesh {
                 .entry(num)
                 .or_insert_with(|| crate::mesh::Node::new(num));
             node.user = Some(crate::mesh::user_from(user));
+            node.on_radio = Some(true);
             vec![Event::Node(node.clone())]
         });
         Ok(())
@@ -649,7 +650,7 @@ impl Mesh {
             if state.link == link {
                 return Vec::new();
             }
-            state.link = link;
+            state.link_to(link);
             state.link_since = Some(now());
             let mut events = vec![Event::Link(link)];
             if link == LinkState::Ready {

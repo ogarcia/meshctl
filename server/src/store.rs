@@ -147,6 +147,7 @@ impl NodeRow {
             battery_level: self.battery_level.map(u32_from),
             voltage: self.voltage,
             channel_utilization: self.channel_utilization,
+            on_radio: None,
         }
     }
 }
@@ -1845,6 +1846,7 @@ mod tests {
             battery_level: Some(101),
             voltage: Some(4.2),
             channel_utilization: Some(12.5),
+            on_radio: None,
         }
     }
 

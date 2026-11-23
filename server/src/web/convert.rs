@@ -74,6 +74,7 @@ pub fn node(node: &mesh::Node) -> api::Node {
         battery_level: node.battery_level,
         voltage: node.voltage,
         channel_utilization: node.channel_utilization,
+        on_radio: node.on_radio,
     }
 }
 
