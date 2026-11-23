@@ -425,6 +425,23 @@ async fn expire(store: &Store, changes: &broadcast::Sender<Change>, radio: Radio
 }
 
 /// Whether a radio has a channel in that slot that it uses.
+/// Who wrote a message on a MeshCore radio, as named on a channel: the
+/// radio, for ours.
+fn author(mesh: &Mesh, message: &Message) -> Option<String> {
+    if message.outgoing {
+        mesh.read(|s| s.meshcore.as_ref().map(|m| m.name.clone()))
+    } else {
+        message.sender_name.clone().or_else(|| {
+            mesh.read(|s| {
+                s.nodes
+                    .get(&message.from)
+                    .and_then(|n| n.user.as_ref())
+                    .map(|u| u.long_name.clone())
+            })
+        })
+    }
+}
+
 fn has_channel(mesh: &Mesh, channel: u32) -> bool {
     mesh.read(|state| {
         state
@@ -816,19 +833,7 @@ impl Radios {
                 .message_by_packet(id, answered)
                 .await?
                 .ok_or(SendFailure::Invalid)?;
-            // Who wrote it, as named on a channel.
-            let sender = if target.outgoing {
-                mesh.read(|s| s.meshcore.as_ref().map(|m| m.name.clone()))
-            } else {
-                target.sender_name.clone().or_else(|| {
-                    mesh.read(|s| {
-                        s.nodes
-                            .get(&target.from)
-                            .and_then(|n| n.user.as_ref())
-                            .map(|u| u.long_name.clone())
-                    })
-                })
-            };
+            let sender = author(&mesh, &target);
             let on_channel = to == mesh::BROADCAST;
             if message.emoji {
                 let at = target
@@ -897,6 +902,7 @@ impl Radios {
             reply_id: message.reply_id.filter(|_| !meshcore),
             emoji: message.emoji && !meshcore,
             scope,
+            sent_at: None,
         };
         if self.link(id) != LinkState::Ready {
             return Err(SendFailure::NotConnected);
@@ -944,6 +950,73 @@ impl Radios {
             .ok_or_else(|| anyhow::anyhow!("a packet id was used twice"))?;
         let _ = self.changes.send(Change::Message(id, kept.clone()));
         Ok(kept)
+    }
+
+    /// Sends again one of ours on a MeshCore channel that no repeater was
+    /// heard passing on: the same packet, by the clock it first went by, in
+    /// the region it went in, so that what is heard of it now is told as it.
+    /// Kept as it was; none if there is no such message.
+    pub async fn resend(
+        &self,
+        id: RadioId,
+        message: MessageId,
+    ) -> Result<Option<Message>, SendFailure> {
+        let mesh = self.mesh(id).ok_or(SendFailure::NoSuchRadio)?;
+        let Some(kept) = self.store.radio_message(id, message).await? else {
+            return Ok(None);
+        };
+        let at = kept.sent_at.and_then(|at| u32::try_from(at).ok());
+        let (true, true, Some(at)) = (
+            self.protocol(id) == Some(Protocol::Meshcore),
+            kept.outgoing && kept.to == mesh::BROADCAST,
+            at,
+        ) else {
+            return Err(SendFailure::Invalid);
+        };
+        // Its region by name, or none if it went unscoped.
+        let scope = match kept.scope.as_deref().filter(|s| *s != "?") {
+            Some(name) => mesh::Scope::Region(crate::meshcore::hashtag_secret(name)),
+            None => mesh::Scope::Unscoped,
+        };
+        // A reaction kept as its emoji went as MeshCore One writes it.
+        let text = if kept.emoji {
+            let answered = kept.reply_id.ok_or(SendFailure::Invalid)?;
+            let target = self
+                .store
+                .message_by_packet(id, answered)
+                .await?
+                .ok_or(SendFailure::Invalid)?;
+            let target_at = target
+                .sent_at
+                .and_then(|at| u32::try_from(at).ok())
+                .ok_or(SendFailure::Invalid)?;
+            let sender = author(&mesh, &target).ok_or(SendFailure::Invalid)?;
+            crate::reactions::build(&kept.text, Some(&sender), &target.text, target_at)
+                .ok_or(SendFailure::Invalid)?
+        } else {
+            kept.text.clone()
+        };
+        let outgoing = OutgoingText {
+            to: mesh::BROADCAST,
+            channel: kept.channel,
+            text,
+            reply_id: None,
+            emoji: false,
+            scope: Some(scope),
+            sent_at: Some(at),
+        };
+        if self.link(id) != LinkState::Ready {
+            return Err(SendFailure::NotConnected);
+        }
+        mesh.send_text(&outgoing)
+            .await
+            .map_err(|error| match error {
+                SendError::NotConnected => SendFailure::NotConnected,
+                SendError::BadText | SendError::Refused | SendError::Unsupported => {
+                    SendFailure::Invalid
+                }
+            })?;
+        Ok(Some(kept))
     }
 
     /// The ways a message came, each copy heard: each hop with the nodes its

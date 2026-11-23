@@ -216,6 +216,15 @@ pub async fn forget_message(radio: RadioId, id: meshctl_api::MessageId) -> Resul
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Sends again one of ours on a MeshCore channel no repeater was heard
+/// passing on: the same packet, kept as it was.
+pub async fn resend_message(radio: RadioId, id: meshctl_api::MessageId) -> Result<(), Failure> {
+    let request = with_token(Request::post(&url(&format!(
+        "/radios/{radio}/messages/{id}/resend"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
 pub async fn settings(radio: RadioId) -> Result<NodeSettings, Failure> {
     get(&format!("/radios/{radio}/settings")).await
 }

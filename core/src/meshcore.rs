@@ -879,7 +879,7 @@ impl Session {
     }
 
     async fn send_now(&self, mesh: &Mesh, outgoing: &OutgoingText) -> Result<Sent, SendError> {
-        let stamp = now();
+        let stamp = outgoing.sent_at.unwrap_or_else(now);
         if outgoing.to == BROADCAST {
             let channel = u8::try_from(outgoing.channel).map_err(|_| SendError::Refused)?;
             let answer = self

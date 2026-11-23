@@ -828,5 +828,7 @@
   "route_echoes_one": "Repeated once",
   "route_unplaced": "Not enough of this route's nodes have a known position to show it on the map.",
   "chat_repeaters": "{n} repeaters carried it",
+  "chat_unheard": "No repeater heard it: it can be sent again",
+  "chat_waiting_repeaters": "Sent: waiting to hear a repeater pass it on",
   "chat_reaction_orphan": "reacted to a message not here"
 }

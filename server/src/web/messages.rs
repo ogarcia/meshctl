@@ -32,6 +32,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(forget))
         .routes(routes!(message_packet))
         .routes(routes!(message_routes))
+        .routes(routes!(resend))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -190,6 +191,45 @@ async fn send(
     }
 }
 
+/// Send a message again
+///
+/// Sends again one of ours on a MeshCore channel, as it first went: the same
+/// packet, by the same clock, in the same region. For when no repeater was
+/// heard passing it on (`repeaters` is 0), as nothing else says whether it
+/// went out. It is kept as it was, and what repeaters pass on now arrives as
+/// `message_heard`, as for the first time.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/messages/{id}/resend",
+    tag = "chat",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("id" = MessageId, Path, description = "The message's id"),
+    ),
+    responses(
+        (status = 202, description = "Handed to the radio", body = Message),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio or message", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not ours on a MeshCore channel: `invalid_message`", body = Error),
+    )
+)]
+async fn resend(
+    State(state): State<AppState>,
+    Path((radio, id)): Path<(RadioId, MessageId)>,
+) -> Response {
+    match state.radios.resend(radio, id).await {
+        Ok(Some(message)) => (StatusCode::ACCEPTED, Json(message)).into_response(),
+        Ok(None) | Err(SendFailure::NoSuchRadio) => {
+            error(StatusCode::NOT_FOUND, ErrorCode::NotFound)
+        }
+        Err(SendFailure::NotConnected) => error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
+        Err(SendFailure::Invalid) => {
+            error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidMessage)
+        }
+        Err(SendFailure::Failed(err)) => failed(&err),
+    }
+}
 /// A message's packet
 ///
 /// The packet that carried a message, as the radio heard or sent it: how
@@ -354,6 +394,20 @@ mod tests {
             let (status, answer) = ask(app(None).await, post(body)).await;
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
             assert_eq!(json::<Error>(&answer).error, ErrorCode::InvalidMessage);
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_message_kept_is_sent_again() {
+        let resend = |radio: &str| {
+            Request::post(format!("/api/v1/radios/{radio}/messages/7/resend"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        for radio in [RADIO.to_string(), "99".to_owned()] {
+            let (status, body) = ask(app(None).await, resend(&radio)).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{radio}");
+            assert_eq!(json::<Error>(&body).error, ErrorCode::NotFound);
         }
     }
 }

@@ -828,5 +828,7 @@
   "route_echoes_one": "Repetido una vez",
   "route_unplaced": "No hay bastantes nodos de esta ruta con posición conocida para verla en el mapa.",
   "chat_repeaters": "Lo llevaron {n} repetidores",
+  "chat_unheard": "Ningún repetidor lo oyó: se puede volver a enviar",
+  "chat_waiting_repeaters": "Enviado: a la espera de oír a algún repetidor pasarlo",
   "chat_reaction_orphan": "reaccionó a un mensaje que no está aquí"
 }

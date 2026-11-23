@@ -65,6 +65,10 @@ pub struct OutgoingText {
     /// The region it floods in, for this message alone; none for what the
     /// radio would. Only MeshCore radios have regions.
     pub scope: Option<crate::mesh::Scope>,
+    /// The clock it goes by, for a MeshCore channel message sent again: the
+    /// same packet, so that what repeaters pass on is told as the first;
+    /// none for now.
+    pub sent_at: Option<u32>,
 }
 
 /// Why a text could not be sent.
@@ -1011,6 +1015,7 @@ mod tests {
             reply_id: None,
             emoji: false,
             scope: None,
+            sent_at: None,
         };
         assert_eq!(mesh.send_text(&text).await, Err(SendError::NotConnected));
 

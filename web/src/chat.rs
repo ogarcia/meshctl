@@ -32,6 +32,11 @@ const CLOCK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/cl
 const CHECK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/check.svg");
 const CHECKS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/checks.svg");
 const ALERT: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/alert-triangle.svg");
+const UNHEARD: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/antenna-off.svg");
+
+/// How long, in seconds, ours on a MeshCore channel may go with no repeater
+/// heard passing it on before it is taken as gone nowhere.
+const UNHEARD_AFTER: u32 = 30;
 
 /// The longest text the daemon takes, in bytes.
 const MAX_TEXT_BYTES: usize = 200;
@@ -171,6 +176,62 @@ struct Thread {
     every: RwSignal<Option<i64>>,
     /// Which one has its details open.
     details: RwSignal<Option<i64>>,
+    /// When each of ours on a MeshCore channel was last sent again.
+    retried: RwSignal<std::collections::HashMap<i64, u32>>,
+}
+
+/// What became of ours on a MeshCore channel, which nothing acknowledges:
+/// waited on, heard carried by so many repeaters, or, after a while with
+/// none, taken as gone nowhere.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Carried {
+    Waiting,
+    By(u32),
+    Nowhere,
+}
+
+/// What became of a message, if it is ours on a MeshCore channel: counted
+/// from when it was sent, or sent again.
+fn carried(live: Live, thread: Thread, id: i64) -> Option<Carried> {
+    let meshcore = untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore);
+    let (at, repeaters) = live.thread.with(|t| {
+        t.iter()
+            .find(|m| m.id == id)
+            .filter(|m| {
+                meshcore
+                    && m.outgoing
+                    && m.to == meshctl_api::BROADCAST
+                    && m.status == MessageStatus::Sent
+            })
+            .map(|m| (u32::try_from(m.at).unwrap_or(0), m.repeaters))
+    })?;
+    if repeaters > 0 {
+        return Some(Carried::By(repeaters));
+    }
+    let from = thread
+        .retried
+        .with(|r| r.get(&id).copied())
+        .unwrap_or(at)
+        .max(at);
+    Some(if live.now.get().saturating_sub(from) >= UNHEARD_AFTER {
+        Carried::Nowhere
+    } else {
+        Carried::Waiting
+    })
+}
+
+/// Sends again, the same packet, one of ours on a MeshCore channel taken as
+/// gone nowhere; then waits on it as long again.
+fn send_again(live: Live, thread: Thread, id: i64) {
+    let Some(radio) = live.selected.get_untracked() else {
+        return;
+    };
+    thread
+        .retried
+        .update(|r| _ = r.insert(id, crate::app::now()));
+    spawn_local(async move {
+        let _ = daemon::resend_message(radio, id).await;
+    });
 }
 
 /// Whether the screen is touched rather than pointed at with a mouse.
@@ -437,6 +498,7 @@ pub fn ChatView() -> impl IntoView {
         menu: RwSignal::new(None),
         every: RwSignal::new(None),
         details: RwSignal::new(None),
+        retried: RwSignal::new(std::collections::HashMap::new()),
     });
     // A click anywhere else closes the reactions; another conversation
     // starts with nothing answered.
@@ -781,35 +843,50 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
         let (mqtt, hops, snr) = (message.via_mqtt, message.hops_away, message.snr);
         move || reach(i18n, mqtt, hops, snr)
     });
-    // Ours on a MeshCore channel, which nothing acknowledges: how many
-    // repeaters were heard carrying it, which is how it is known to have
-    // gone out.
-    // Counted as they are heard, after it was drawn.
-    let (said_id, broadcast) = (message.id, message.to == meshctl_api::BROADCAST);
-    let repeaters = move || {
-        live.thread.with(|t| {
-            t.iter()
-                .find(|m| m.id == said_id)
-                .map_or(0, |m| m.repeaters)
-        })
-    };
-    let repeated = (mine && broadcast).then_some(move || {
-        let n = repeaters();
-        (n > 0).then(|| {
-            let words = t_string!(i18n, chat_repeaters).replace("{n}", &n.to_string());
-            view! {
-                <span class="repeated" title=words.clone() aria-label=words>
-                    <span class="mark delivered" inner_html=CHECKS></span>
-                    {n}
-                </span>
-            }
-        })
-    });
+    let thread = expect_context::<Thread>();
+    // Ours on a MeshCore channel, which nothing acknowledges: what became of
+    // it, as heard after it was drawn; drawn anew only when that changes,
+    // not at each tick.
+    let sent_id = message.id;
+    let carried = (mine && message.status == MessageStatus::Sent)
+        .then(|| Memo::new(move |_| carried(live, thread, sent_id)))
+        .filter(|c| c.get_untracked().is_some());
     // How far it went, as an icon: waiting, out, received, or not; its words
-    // on hovering, and why it failed, when it did.
+    // on hovering, and why it failed, when it did. Ours on a MeshCore
+    // channel, out and waited on, then carried by so many repeaters or by
+    // none.
     let status = message.status;
     let error = message.error.clone();
     let mark = (status != MessageStatus::Received).then(|| {
+        if let Some(carried) = carried {
+            return (move || match carried.get() {
+                Some(Carried::By(n)) => {
+                    let words = t_string!(i18n, chat_repeaters).replace("{n}", &n.to_string());
+                    view! {
+                        <span class="repeated" title=words.clone() aria-label=words>
+                            <span class="mark delivered" inner_html=CHECKS></span>
+                            {n}
+                        </span>
+                    }
+                    .into_any()
+                }
+                Some(Carried::Nowhere) => {
+                    let words = t_string!(i18n, chat_unheard);
+                    view! {
+                        <span class="mark unheard" title=words aria-label=words inner_html=UNHEARD></span>
+                    }
+                    .into_any()
+                }
+                _ => {
+                    let words = t_string!(i18n, chat_waiting_repeaters);
+                    view! {
+                        <span class="mark sent" title=words aria-label=words inner_html=CHECK></span>
+                    }
+                    .into_any()
+                }
+            })
+            .into_any();
+        }
         let (icon, class) = match status {
             MessageStatus::Sending => (CLOCK, "pending"),
             MessageStatus::Sent => (CHECK, "sent"),
@@ -831,9 +908,9 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
         view! {
             <span class=format!("mark {class}") title=words.clone() aria-label=words inner_html=icon></span>
         }
+        .into_any()
     });
 
-    let thread = expect_context::<Thread>();
     let id = message.id;
     let packet = message.packet_id;
     // Replies and reactions refer to its packet: one it has, on a radio
@@ -941,7 +1018,28 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
     // menu instead.
     let actions = view! {
         <div class="answer" on:click=|ev| ev.stop_propagation()>
-            {if mine {
+            {if let Some(carried) = carried {
+                // Ours on a MeshCore channel: sent again, the same packet,
+                // only once taken as gone nowhere.
+                Some(
+                    (move || {
+                        (carried.get() == Some(Carried::Nowhere))
+                            .then(|| {
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="icon-button"
+                                        title=move || t_string!(i18n, chat_resend)
+                                        aria-label=move || t_string!(i18n, chat_resend)
+                                        inner_html=RESEND
+                                        on:click=move |_| send_again(live, thread, sent_id)
+                                    ></button>
+                                }
+                            })
+                    })
+                        .into_any(),
+                )
+            } else if mine {
                 let (again, answered, region) =
                     (message.text.clone(), message.reply_id, message.scope.clone());
                 Some(
@@ -1058,7 +1156,6 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                     {reception.map(|r| move || r().map(|r| format!(" · {r}")))}
                     {message.scope.clone().map(|s| format!(" · #{s}"))}
                     {mark}
-                    {repeated}
                 </span>
                 {reactions}
                 {actions}
@@ -1513,6 +1610,9 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
         let packet = message.packet_id;
         let can_answer = packet != 0 && answerable(live);
         let text = message.text.clone();
+        // Ours on a MeshCore channel: sent again, the same packet, only once
+        // taken as gone nowhere; as the menu opened.
+        let carried = untrack(|| carried(live, thread, id));
         Some(view! {
             <div class="sheet-back" on:click=move |_| close()>
                 <div class="message-menu" role="menu" on:click=|ev| ev.stop_propagation()>
@@ -1525,7 +1625,20 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
                                 }) />
                             }
                         })}
-                    {if message.outgoing {
+                    {if let Some(carried) = carried {
+                        (carried == Carried::Nowhere).then(|| {
+                            view! {
+                                <button role="menuitem" on:click=move |_| {
+                                    close();
+                                    send_again(live, thread, id);
+                                }>
+                                    <span class="icon" inner_html=RESEND></span>
+                                    {t!(i18n, chat_resend)}
+                                </button>
+                            }
+                            .into_any()
+                        })
+                    } else if message.outgoing {
                         let (again, answered, region) =
                             (message.text.clone(), message.reply_id, message.scope.clone());
                         Some(

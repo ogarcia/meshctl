@@ -16,6 +16,11 @@
 //! - `hear <slot> <text>`: someone writes that on a channel, as MeshCore
 //!   clients do, `NAME: text`.
 //! - `dm <text>`: Ana, a contact, writes to the radio directly.
+//! - `react <slot> <emoji>`: someone reacts to the latest said on a channel,
+//!   as MeshCore One does; `dmreact <emoji>`, Ana to the latest between her
+//!   and the radio.
+//! - `echoes off`: no repeater is heard passing on what the radio sends on a
+//!   channel, as when none heard it; `echoes on`, two are again.
 //! - `advert`: a contact not known before advertises, and the radio adds it.
 //! - `drop`: the link to every client drops, which reads it all anew.
 //!
@@ -109,6 +114,8 @@ struct Radio {
     said: std::collections::HashMap<u8, (String, String, u32)>,
     /// The latest said between Ana and the radio, and when.
     with_ana: Option<(String, u32)>,
+    /// Whether repeaters are heard passing on what is sent on a channel.
+    echoes: bool,
     /// Its clock, as an offset from the host's: it goes only forward.
     clock_offset: i64,
     /// When it started, for its uptime.
@@ -218,6 +225,7 @@ impl Radio {
             send_scope: None,
             said: std::collections::HashMap::new(),
             with_ana: None,
+            echoes: true,
             clock_offset: -3600,
             started: at,
             contacts: vec![
@@ -554,7 +562,9 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                 let text = String::from_utf8_lossy(text).into_owned();
                 let name = radio.name.clone();
                 radio.said.insert(slot, (name.clone(), text.clone(), at));
-                if let Some((_, secret)) = radio.channels.get(usize::from(slot)) {
+                if let (true, Some((_, secret))) =
+                    (radio.echoes, radio.channels.get(usize::from(slot)))
+                {
                     let payload = raw::seal_channel_text(secret, at, &format!("{name}: {text}"));
                     let first = flooded(raw::PAYLOAD_GRP_TXT, &[key(0x55)], None, &payload);
                     let second = flooded(
@@ -1018,6 +1028,13 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                 let _ = events.send(Event::Push(rx_log(3, -101, &second)));
             });
             format!("{sender} writes on slot {slot}")
+        }
+        Some("echoes") => {
+            radio.echoes = words.next() != Some("off");
+            format!(
+                "repeaters {}",
+                if radio.echoes { "heard" } else { "silent" }
+            )
         }
         Some("react") => {
             let slot = words.next().and_then(|w| w.parse::<u8>().ok());

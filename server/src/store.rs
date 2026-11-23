@@ -1298,6 +1298,17 @@ impl Store {
         Ok(row.map(MessageRow::message))
     }
 
+    /// A radio's message, as now kept.
+    pub async fn radio_message(&self, radio: RadioId, id: MessageId) -> Result<Option<Message>> {
+        let row: Option<MessageRow> =
+            sqlx::query_as("SELECT * FROM message_view WHERE radio_id = ? AND id = ?")
+                .bind(radio)
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(MessageRow::message))
+    }
+
     /// The copies of a message heard, the first first: none if there is no
     /// such message.
     pub async fn routes(&self, radio: RadioId, id: MessageId) -> Result<Option<Vec<RouteRow>>> {
