@@ -108,6 +108,54 @@ fn find<'a>(all: &'a [Emoji], search: &str) -> Vec<&'a Emoji> {
     found
 }
 
+/// Those of the emojis this browser draws: the newest are missing from older
+/// fonts, which show a box instead, or nothing. Each is drawn once, out of
+/// sight, and kept if it comes out in colour, as emojis do and those boxes
+/// do not. A browser with no font of emojis in colour keeps them all.
+fn drawable(all: Vec<Emoji>) -> Vec<Emoji> {
+    use wasm_bindgen::JsCast;
+    const SIZE: u32 = 24;
+    let Some(canvas) = document()
+        .create_element("canvas")
+        .ok()
+        .and_then(|c| c.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+    else {
+        return all;
+    };
+    canvas.set_width(SIZE);
+    canvas.set_height(SIZE);
+    // Read back once per emoji: the browser keeps it where that is fast.
+    let options = web_sys::ContextAttributes2d::new();
+    options.set_will_read_frequently(true);
+    let Some(context) = canvas
+        .get_context_with_context_options("2d", &options)
+        .ok()
+        .flatten()
+        .and_then(|c| c.dyn_into::<web_sys::CanvasRenderingContext2d>().ok())
+    else {
+        return all;
+    };
+    context.set_font(&format!("{}px sans-serif", SIZE - 4));
+    context.set_text_baseline("top");
+    context.set_fill_style_str("#000");
+    let coloured = |emoji: &str| {
+        context.clear_rect(0.0, 0.0, f64::from(SIZE), f64::from(SIZE));
+        let _ = context.fill_text(emoji, 0.0, 2.0);
+        context
+            .get_image_data(0.0, 0.0, f64::from(SIZE), f64::from(SIZE))
+            .map(|image| {
+                image.data().as_chunks::<4>().0.iter().any(|&[r, g, b, a]| {
+                    a > 0 && (r.abs_diff(g) > 24 || g.abs_diff(b) > 24 || r.abs_diff(b) > 24)
+                })
+            })
+            .unwrap_or(true)
+    };
+    if !coloured("😀") {
+        return all;
+    }
+    all.into_iter().filter(|e| coloured(&e.unicode)).collect()
+}
+
 /// The emojis read in a language.
 type Read = (&'static str, Arc<Vec<Emoji>>);
 
@@ -130,7 +178,7 @@ async fn load(language: &'static str) -> Option<Arc<Vec<Emoji>>> {
         .ok()
         .filter(|response| response.ok())?;
     let raw: Vec<Raw> = response.json().await.ok()?;
-    let read = Arc::new(emojis(raw));
+    let read = Arc::new(drawable(emojis(raw)));
     READ.with_borrow_mut(|cache| cache.push((language, read.clone())));
     Some(read)
 }
@@ -210,22 +258,12 @@ pub fn EmojiPicker(
         if needle.trim().is_empty() {
             let group = group.get();
             if group == FREQUENT {
-                // Each by its name, if it is one of those known.
+                // Each by its name; those this browser cannot draw, left out.
                 return frequent
                     .map(|f| f.get())
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|unicode| {
-                        all.iter()
-                            .find(|e| e.unicode == unicode)
-                            .cloned()
-                            .unwrap_or(Emoji {
-                                label: unicode.clone(),
-                                unicode,
-                                group: FREQUENT,
-                                words: String::new(),
-                            })
-                    })
+                    .filter_map(|unicode| all.iter().find(|e| e.unicode == unicode).cloned())
                     .collect();
             }
             all.iter().filter(|e| e.group == group).cloned().collect()
