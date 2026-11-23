@@ -71,19 +71,9 @@ pub fn PreferencesView() -> impl IntoView {
         }
     });
 
-    // A list, for there will be more languages than fit side by side. Each
-    // one in its own words.
-    let language_value = move || match current().language {
-        None => "",
-        Some(Language::En) => "en",
-        Some(Language::Es) => "es",
-    };
+    let language_value = move || language_code(current().language);
     let pick_language = move |ev: leptos::ev::Event| {
-        let language = match event_target_value(&ev).as_str() {
-            "en" => Some(Language::En),
-            "es" => Some(Language::Es),
-            _ => None,
-        };
+        let language = language_of(&event_target_value(&ev));
         choose(Box::new(move |p| p.language = language))();
     };
 
@@ -116,9 +106,7 @@ pub fn PreferencesView() -> impl IntoView {
                 hint=t!(i18n, prefs_language_hint).into_any()
             >
                 <select class="pref-control" prop:value=language_value on:change=pick_language>
-                    <option value="">{t!(i18n, language_browser)}</option>
-                    <option value="en">"English"</option>
-                    <option value="es">"Español"</option>
+                    {language_options()}
                 </select>
             </Row>
         </section>
@@ -177,6 +165,43 @@ pub fn pills(options: Vec<Choice>) -> impl IntoView {
         >
             {buttons}
         </div>
+    }
+}
+
+/// The languages meshctl speaks, each in its own words, by their names:
+/// a list and not pills, for there will be more than fit side by side.
+pub const LANGUAGES: [(Language, &str, &str); 2] = [
+    (Language::En, "en", "English"),
+    (Language::Es, "es", "Español"),
+];
+
+/// A language's value in a list of them; none, the browser's.
+pub fn language_code(language: Option<Language>) -> &'static str {
+    language.map_or("", |language| {
+        LANGUAGES
+            .iter()
+            .find(|(l, _, _)| *l == language)
+            .map_or("", |(_, code, _)| code)
+    })
+}
+
+/// The language of a value in a list of them.
+pub fn language_of(code: &str) -> Option<Language> {
+    LANGUAGES
+        .iter()
+        .find(|(_, c, _)| *c == code)
+        .map(|(l, _, _)| *l)
+}
+
+/// The options of a list of languages: the browser's first, then each.
+pub fn language_options() -> impl IntoView {
+    let i18n = use_i18n();
+    view! {
+        <option value="">{t!(i18n, language_browser)}</option>
+        {LANGUAGES
+            .iter()
+            .map(|(_, code, name)| view! { <option value=*code>{*name}</option> })
+            .collect_view()}
     }
 }
 

@@ -41,7 +41,7 @@ pub enum Section {
 }
 
 /// What a radio is set to, as it is changed.
-fn settings_of(radio: &Radio) -> RadioSettings {
+pub(crate) fn settings_of(radio: &Radio) -> RadioSettings {
     RadioSettings {
         name: radio.name.clone(),
         kind: radio.kind,

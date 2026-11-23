@@ -2326,10 +2326,161 @@
       .composer .error { flex-basis: 100%; margin: 0; color: var(--mc-muted); font-size: 12px; }
       .composer .error:empty { display: none; }
 
-      .welcome { max-width: 560px; }
-      .welcome > p { color: var(--mc-muted); }
-      /* The editor inside the welcome's card is not a card of its own. */
-      .welcome .radio-editor { border: 0; padding: 0; background: none; }
+      /*
+       * The welcome, with no radios yet: the whole screen, without the bars,
+       * the language at the top and, in the middle, one step at a time.
+       */
+      .welcome-screen {
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        padding: 16px;
+        background: var(--mc-page);
+      }
+      .welcome-top { display: flex; justify-content: flex-end; }
+      .welcome-language { position: relative; display: flex; align-items: center; }
+      /* The span, not the svg in it, which has the class "icon" too. */
+      .welcome-language > .icon { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); color: var(--mc-muted); pointer-events: none; }
+      .welcome-language svg { display: block; width: 18px; height: 18px; }
+      .welcome-language select { min-height: 40px; padding-left: 40px; background: var(--mc-surface); }
+      .welcome-body { flex: 1; display: grid; place-items: center; padding: 24px 0 48px; }
+      .welcome-body > * { width: 100%; max-width: 520px; }
+      .welcome-screen h1 { margin: 0; font-size: 24px; line-height: 1.25; }
+      .welcome-screen p { margin: 0; }
+      .welcome-go {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 44px;
+        padding: 0 22px;
+        border-radius: 10px;
+        font-size: 15px;
+      }
+      .welcome-screen span.icon { display: flex; }
+      .welcome-go .icon svg { width: 18px; height: 18px; }
+
+      /* What meshctl is. */
+      .welcome-hello { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+      .welcome-logo { width: 72px; height: 72px; margin-bottom: 4px; stroke: var(--mc-primary); stroke-width: 1.6; }
+      .welcome-hello h1 { font-size: 30px; }
+      .welcome-lead { max-width: 440px; color: var(--mc-muted); font-size: 16px; }
+      .welcome-hello .welcome-go { margin-top: 8px; }
+      .welcome-small { max-width: 400px; color: var(--mc-muted); font-size: 13px; }
+
+      /* The radio: what it is, how it is reached, its address, its name. */
+      .welcome-radio { display: flex; flex-direction: column; gap: 20px; }
+      .welcome-back {
+        align-self: flex-start;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 0 -8px;
+        padding: 4px 0;
+        border: 0;
+        background: none;
+        color: var(--mc-muted);
+      }
+      .welcome-back:hover { color: var(--mc-text); }
+      .welcome-back svg { width: 16px; height: 16px; }
+      .welcome-radio fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+      .welcome-radio legend,
+      .welcome-radio .field > .label {
+        padding: 0;
+        margin-bottom: 8px;
+        color: var(--mc-muted);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .welcome-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .welcome-card {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+        padding: 14px 16px;
+        border-radius: 12px;
+        background: var(--mc-surface);
+        text-align: left;
+      }
+      .welcome-card > .icon { margin-bottom: 6px; color: var(--mc-muted); }
+      .welcome-card .icon svg { width: 22px; height: 22px; }
+      .welcome-card .title { font-size: 15px; font-weight: 600; }
+      .welcome-card .detail { color: var(--mc-muted); font-size: 12px; }
+      .welcome-card.on {
+        border-color: var(--mc-primary);
+        box-shadow: inset 0 0 0 1px var(--mc-primary);
+        background: color-mix(in srgb, var(--mc-primary) 8%, var(--mc-surface));
+      }
+      .welcome-card.on .icon { color: var(--mc-primary); }
+      .welcome-radio .field { display: flex; flex-direction: column; }
+      .welcome-radio .field > .label { display: block; }
+      .welcome-radio .optional { font-weight: 400; }
+      /* 16px: a phone does not zoom in to write in it. */
+      .welcome-radio input { min-height: 44px; font-size: 16px; }
+      .welcome-radio .hint { margin-top: 6px; color: var(--mc-muted); font-size: 12px; }
+      .welcome-radio .error { color: var(--mc-danger); }
+
+      /* The link coming up. */
+      .welcome-linking { display: flex; flex-direction: column; gap: 12px; }
+      .welcome-address { color: var(--mc-muted); overflow-wrap: anywhere; }
+      .welcome-steps {
+        display: grid;
+        gap: 2px;
+        margin: 8px 0 0;
+        padding: 8px;
+        border: 1px solid var(--mc-border);
+        border-radius: 12px;
+        background: var(--mc-surface);
+        list-style: none;
+      }
+      .welcome-steps li { display: flex; align-items: center; gap: 12px; padding: 10px 8px; color: var(--mc-muted); }
+      .welcome-steps li > .icon { flex: none; width: 22px; height: 22px; align-items: center; justify-content: center; }
+      .welcome-steps .icon svg { width: 22px; height: 22px; }
+      .welcome-steps li.later > .icon::before {
+        content: "";
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--mc-border);
+        border-radius: 50%;
+      }
+      .welcome-steps li.done { color: var(--mc-text); }
+      .welcome-steps li.done .icon { color: var(--mc-ok); }
+      .welcome-steps li.now { color: var(--mc-text); font-weight: 600; }
+      .welcome-steps li.now .icon { color: var(--mc-primary); }
+      .welcome-steps li.now .icon svg { animation: welcome-spin 1s linear infinite; }
+      .welcome-steps li.stuck { color: var(--mc-text); font-weight: 600; }
+      .welcome-steps li.stuck .icon { color: var(--mc-warn); }
+      .welcome-steps .count { color: var(--mc-muted); font-weight: 400; }
+      .welcome-steps .count::before { content: " · "; }
+      @keyframes welcome-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        .welcome-steps li.now .icon svg { animation: none; }
+      }
+      .welcome-failed {
+        display: grid;
+        gap: 10px;
+        margin-top: 4px;
+        padding: 16px;
+        border: 1px solid color-mix(in srgb, var(--mc-warn) 45%, var(--mc-border));
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--mc-warn) 8%, var(--mc-surface));
+      }
+      .welcome-failed .what { font-weight: 600; overflow-wrap: anywhere; }
+      .welcome-failed .hint { color: var(--mc-muted); font-size: 13px; }
+      .welcome-failed .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+      .welcome-failed .buttons button { min-height: 40px; padding: 0 16px; border-radius: 10px; }
+      .welcome-failed .link {
+        justify-self: start;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--mc-muted);
+        font-size: 13px;
+        text-decoration: underline;
+      }
+      .welcome-failed .link:hover { color: var(--mc-text); }
 
       /*
        * A radio's button, as the list and the editor show it: the rail's own
@@ -2463,9 +2614,9 @@
       .switch.on span { left: 21px; }
 
       /*
-       * A radio's editor: over the list, in the middle of the window, or on
-       * the welcome page by itself. Its two sections take the same room, so
-       * that going from one to the other moves nothing.
+       * A radio's editor: over the list, in the middle of the window. Its
+       * two sections take the same room, so that going from one to the
+       * other moves nothing.
        */
       .modal-back {
         position: fixed;

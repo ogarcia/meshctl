@@ -20,7 +20,7 @@ use crate::mesh::{MESSAGE_OFF, MeshView, STAR, ago, avatar_class, model, reach_w
 use crate::node::NodeView;
 use crate::packets::{KEPT, PacketsView};
 use crate::preferences::PreferencesView;
-use crate::radios::{Editing, RadioEditor, RadiosView};
+use crate::radios::{Editing, RadiosView};
 use crate::settings::SettingsView;
 use gloo_timers::future::sleep;
 use leptos::prelude::*;
@@ -1047,6 +1047,29 @@ fn Shell() -> impl IntoView {
         });
     });
 
+    // With no radios yet, the welcome, over the whole screen: the bars would
+    // have nothing to hold. It stays while the radio added in it links, and
+    // gives way to meshctl's own settings, which may be gone to before.
+    let welcoming = RwSignal::new(None::<RadioId>);
+    let welcome = Memo::new(move |_| {
+        welcoming.get().is_some()
+            || (live.radios.with(|r| r.as_ref().map(Vec::len)) == Some(0)
+                && live.daemon.get() != Daemon::NeedsToken
+                && !live.page.get().is_meshctl())
+    });
+    move || {
+        if welcome.get() {
+            view! { <crate::welcome::Welcome welcoming /> }.into_any()
+        } else {
+            view! { <Frame /> }.into_any()
+        }
+    }
+}
+
+/// The interface: the two bars aside, or the tabs at the foot, and the page.
+#[component]
+fn Frame() -> impl IntoView {
+    let live = expect_context::<Live>();
     let class = move || {
         if live.menu.get() {
             "app menu-open"
@@ -1106,7 +1129,8 @@ fn Content() -> impl IntoView {
             (_, None, _) => Shown::Nothing,
             (_, _, Page::Preferences) => Shown::Page(Page::Preferences),
             (_, _, Page::Radios) => Shown::Page(Page::Radios),
-            (_, Some(0), _) => Shown::Welcome,
+            // The welcome, over the whole screen, instead.
+            (_, Some(0), _) => Shown::Nothing,
             (_, Some(_), page) => Shown::Page(page),
         }
     });
@@ -1121,7 +1145,6 @@ fn Content() -> impl IntoView {
         }
         .into_any(),
         Shown::Nothing => ().into_any(),
-        Shown::Welcome => view! { <Welcome /> }.into_any(),
         Shown::Page(Page::Preferences) => view! { <PreferencesView /> }.into_any(),
         Shown::Page(Page::Radios) => view! { <RadiosView /> }.into_any(),
         Shown::Page(Page::Map) => view! { <MapView /> }.into_any(),
@@ -1141,7 +1164,6 @@ enum Shown {
     Token,
     Down,
     Nothing,
-    Welcome,
     Page(Page),
 }
 
@@ -1889,19 +1911,6 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
             }
             .into_any()
         }
-    }
-}
-
-/// What a daemon with no radios yet shows.
-#[component]
-fn Welcome() -> impl IntoView {
-    let i18n = use_i18n();
-    view! {
-        <section class="card welcome">
-            <h2>{t!(i18n, welcome_title)}</h2>
-            <p>{t!(i18n, welcome_text)}</p>
-            <RadioEditor id=None />
-        </section>
     }
 }
 

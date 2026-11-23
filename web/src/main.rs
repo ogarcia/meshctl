@@ -24,6 +24,7 @@ mod radios;
 mod sections;
 mod settings;
 mod traces;
+mod welcome;
 
 fn main() {
     console_error_panic_hook::set_once();
