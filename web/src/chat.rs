@@ -1151,13 +1151,16 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                 } else {
                     view! { <p>{said(&message.text, message.reply_id.is_some())}</p> }.into_any()
                 }}
-                <span class="meta dim">
-                    <span title=when(i64::from(at))>{clock(i64::from(at))}</span>
-                    {reception.map(|r| move || r().map(|r| format!(" · {r}")))}
-                    {message.scope.clone().map(|s| format!(" · #{s}"))}
-                    {mark}
-                </span>
-                {reactions}
+                // Its reactions on the line of its time, at the left.
+                <div class="foot">
+                    {reactions}
+                    <span class="meta dim">
+                        <span title=when(i64::from(at))>{clock(i64::from(at))}</span>
+                        {reception.map(|r| move || r().map(|r| format!(" · {r}")))}
+                        {message.scope.clone().map(|s| format!(" · #{s}"))}
+                        {mark}
+                    </span>
+                </div>
                 {actions}
             </div>
             {picker}
@@ -1573,21 +1576,23 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                             on:click=move |_| close()
                         ></button>
                     </header>
-                    <p class="said">{message.text.clone()}</p>
-                    <dl class="facts compact">
-                        {fact(
-                            if message.outgoing { t!(i18n, chat_sent_at).into_any() } else { t!(i18n, chat_heard_at).into_any() },
-                            when(message.at).into_any(),
-                        )}
-                        {fact(t!(i18n, chat_from).into_any(), from.into_any())}
-                        {fact(t!(i18n, chat_to).into_any(), title(live, peer).into_any())}
-                        {status}
-                        {scope_fact}
-                        {heard}
-                        {reactions}
-                        {packet_id}
-                    </dl>
-                    {route_list}
+                    <div class="modal-body">
+                        <p class="said">{message.text.clone()}</p>
+                        <dl class="facts compact">
+                            {fact(
+                                if message.outgoing { t!(i18n, chat_sent_at).into_any() } else { t!(i18n, chat_heard_at).into_any() },
+                                when(message.at).into_any(),
+                            )}
+                            {fact(t!(i18n, chat_from).into_any(), from.into_any())}
+                            {fact(t!(i18n, chat_to).into_any(), title(live, peer).into_any())}
+                            {status}
+                            {scope_fact}
+                            {heard}
+                            {reactions}
+                            {packet_id}
+                        </dl>
+                        {route_list}
+                    </div>
                 </div>
             </div>
         })

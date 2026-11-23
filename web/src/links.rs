@@ -426,27 +426,29 @@ pub fn LinkAdder() -> impl IntoView {
                                 on:click=move |_| close()
                             ></button>
                         </header>
-                        <p class="hint dim">
-                            {move || match want {
-                                LinkWant::Node => t_string!(i18n, link_hint_node),
-                                LinkWant::Channels => t_string!(i18n, link_hint_channels),
-                            }
-                            .replace("{apps}", apps)}
-                        </p>
-                        <textarea
-                            class="mono"
-                            rows="3"
-                            placeholder=match (want, meshcore) {
-                                (LinkWant::Node, false) => "https://meshtastic.org/v/#…",
-                                (LinkWant::Channels, false) => "https://meshtastic.org/e/#…",
-                                (LinkWant::Node, true) => "meshcore://contact/add?…",
-                                (LinkWant::Channels, true) => "meshcore://channel/add?…",
-                            }
-                            prop:value=move || url.get()
-                            on:input=move |ev| url.set(event_target_value(&ev))
-                        ></textarea>
-                        {shown}
-                        {move || problem.get().map(|p| view! { <p class="error">{failure_words(i18n, p)}</p> })}
+                        <div class="modal-body">
+                            <p class="hint dim">
+                                {move || match want {
+                                    LinkWant::Node => t_string!(i18n, link_hint_node),
+                                    LinkWant::Channels => t_string!(i18n, link_hint_channels),
+                                }
+                                .replace("{apps}", apps)}
+                            </p>
+                            <textarea
+                                class="mono"
+                                rows="3"
+                                placeholder=match (want, meshcore) {
+                                    (LinkWant::Node, false) => "https://meshtastic.org/v/#…",
+                                    (LinkWant::Channels, false) => "https://meshtastic.org/e/#…",
+                                    (LinkWant::Node, true) => "meshcore://contact/add?…",
+                                    (LinkWant::Channels, true) => "meshcore://channel/add?…",
+                                }
+                                prop:value=move || url.get()
+                                on:input=move |ev| url.set(event_target_value(&ev))
+                            ></textarea>
+                            {shown}
+                            {move || problem.get().map(|p| view! { <p class="error">{failure_words(i18n, p)}</p> })}
+                        </div>
                         <div class="buttons">
                             <button type="button" on:click=move |_| close()>
                                 {t!(i18n, link_cancel)}

@@ -840,12 +840,12 @@ fn ContentPicker(draft: RwSignal<Draft>, short: Signal<Option<String>>) -> impl 
     });
     let icons = BadgeIcon::ALL.map(|icon| {
         let on = move || draft.with(|d| d.look.mode == Mode::Icon && d.look.icon == icon);
-        let name = badge::icon_name(icon);
+        let name = move || badge::icon_name(icon);
         view! {
             <button
                 type="button"
                 class:on=on
-                title=name.clone()
+                title=name
                 aria-label=name
                 on:click=move |_| {
                     draft.update(|d| {

@@ -651,186 +651,188 @@ fn ChannelEditor(
                         inner_html=CLOSE
                     ></button>
                 </header>
-                <div class="fields">
-                    <label>
-                        <span class="dim">{t!(i18n, channel_name)}</span>
-                        <input
-                            node_ref=name_input
-                            maxlength="11"
-                            placeholder=move || {
-                                format!("{}: {preset}", t_string!(i18n, channel_name_preset))
-                            }
-                            prop:value=move || name.get()
-                            on:input=move |ev| name.set(event_target_value(&ev))
-                        />
-                    </label>
-                    <div class="field">
-                        <span class="dim">{t!(i18n, channel_key)}</span>
-                        {(!adding)
-                            .then(|| {
-                                view! {
-                                    <div class="key-now">
-                                        <span class="key" class:open=!private(current_key)>
-                                            <span
-                                                class="icon"
-                                                inner_html=if private(current_key) { LOCK } else { LOCK_OPEN }
-                                            ></span>
-                                            {move || key_label(i18n, current_key)}
-                                        </span>
-                                        {(current_key != ChannelKey::None)
-                                            .then(|| {
-                                                view! {
-                                                    <button
-                                                        type="button"
-                                                        class="icon-button"
-                                                        class:on=move || secret.with(Option::is_some)
-                                                        title=move || {
-                                                            if secret.with(Option::is_some) {
-                                                                t_string!(i18n, channel_key_hide)
-                                                            } else {
-                                                                t_string!(i18n, channel_key_show)
-                                                            }
-                                                        }
-                                                        aria-label=move || t_string!(i18n, channel_key_show)
-                                                        on:click=reveal
-                                                        inner_html=move || {
-                                                            if secret.with(Option::is_some) { EYE_OFF } else { EYE }
-                                                        }
-                                                    ></button>
-                                                }
-                                            })}
-                                    </div>
-                                        {move || {
-                                            secret
-                                                .get()
-                                                .map(|shown| {
+                <div class="modal-body">
+                    <div class="fields">
+                        <label>
+                            <span class="dim">{t!(i18n, channel_name)}</span>
+                            <input
+                                node_ref=name_input
+                                maxlength="11"
+                                placeholder=move || {
+                                    format!("{}: {preset}", t_string!(i18n, channel_name_preset))
+                                }
+                                prop:value=move || name.get()
+                                on:input=move |ev| name.set(event_target_value(&ev))
+                            />
+                        </label>
+                        <div class="field">
+                            <span class="dim">{t!(i18n, channel_key)}</span>
+                            {(!adding)
+                                .then(|| {
+                                    view! {
+                                        <div class="key-now">
+                                            <span class="key" class:open=!private(current_key)>
+                                                <span
+                                                    class="icon"
+                                                    inner_html=if private(current_key) { LOCK } else { LOCK_OPEN }
+                                                ></span>
+                                                {move || key_label(i18n, current_key)}
+                                            </span>
+                                            {(current_key != ChannelKey::None)
+                                                .then(|| {
                                                     view! {
-                                                        <div class="key-shown">
-                                                        <input
-                                                            node_ref=key_input
-                                                            class="mono key-text"
-                                                            readonly
-                                                            prop:value=shown.key
-                                                            on:focus=move |ev| {
-                                                                let input: web_sys::HtmlInputElement = event_target(&ev);
-                                                                input.select();
-                                                            }
-                                                        />
                                                         <button
                                                             type="button"
                                                             class="icon-button"
-                                                            title=move || t_string!(i18n, channel_key_copy)
-                                                            aria-label=move || t_string!(i18n, channel_key_copy)
-                                                            on:click=copy_key
-                                                            inner_html=move || if copied.get() { CHECK } else { COPY }
+                                                            class:on=move || secret.with(Option::is_some)
+                                                            title=move || {
+                                                                if secret.with(Option::is_some) {
+                                                                    t_string!(i18n, channel_key_hide)
+                                                                } else {
+                                                                    t_string!(i18n, channel_key_show)
+                                                                }
+                                                            }
+                                                            aria-label=move || t_string!(i18n, channel_key_show)
+                                                            on:click=reveal
+                                                            inner_html=move || {
+                                                                if secret.with(Option::is_some) { EYE_OFF } else { EYE }
+                                                            }
                                                         ></button>
-                                                        </div>
                                                     }
-                                                })
-                                        }}
-                                }
-                            })}
-                        <select
-                            prop:value=move || key_code(key.get())
-                            on:change=move |ev| key.set(key_of(&event_target_value(&ev)))
-                        >
-                            {(!adding)
-                                .then(|| {
-                                    view! { <option value="keep">{t!(i18n, channel_key_keep)}</option> }
+                                                })}
+                                        </div>
+                                            {move || {
+                                                secret
+                                                    .get()
+                                                    .map(|shown| {
+                                                        view! {
+                                                            <div class="key-shown">
+                                                            <input
+                                                                node_ref=key_input
+                                                                class="mono key-text"
+                                                                readonly
+                                                                prop:value=shown.key
+                                                                on:focus=move |ev| {
+                                                                    let input: web_sys::HtmlInputElement = event_target(&ev);
+                                                                    input.select();
+                                                                }
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                class="icon-button"
+                                                                title=move || t_string!(i18n, channel_key_copy)
+                                                                aria-label=move || t_string!(i18n, channel_key_copy)
+                                                                on:click=copy_key
+                                                                inner_html=move || if copied.get() { CHECK } else { COPY }
+                                                            ></button>
+                                                            </div>
+                                                        }
+                                                    })
+                                            }}
+                                    }
                                 })}
-                            <option value="new_aes256">{t!(i18n, channel_key_new)} " · AES-256"</option>
-                            <option value="new_aes128">{t!(i18n, channel_key_new)} " · AES-128"</option>
-                            <option value="custom">{t!(i18n, channel_key_custom)}</option>
-                            <option value="default">{t!(i18n, channel_key_default)}</option>
-                            <option value="none">{t!(i18n, key_none)}</option>
-                        </select>
-                        <input
-                            class="mono"
-                            class:gone=move || key.get() != KeyChange::Custom
-                            required=move || key.get() == KeyChange::Custom
-                            placeholder="1PG7OiApB1nwvP+rz05pAQ=="
-                            prop:value=move || custom.get()
-                            on:input=move |ev| custom.set(event_target_value(&ev))
-                        />
-                        <span class="hint dim">
-                            {move || match key.get() {
-                                KeyChange::Custom => t!(i18n, channel_key_custom_hint).into_any(),
-                                KeyChange::Default => t!(i18n, channel_key_default_hint).into_any(),
-                                KeyChange::None => t!(i18n, channel_key_none_hint).into_any(),
-                                _ => ().into_any(),
-                            }}
-                        </span>
-                    </div>
-                    <div class="toggle">
-                        <Switch
-                            on=Signal::derive(move || uplink.get())
-                            label=Signal::derive(move || t_string!(i18n, channel_uplink).to_owned())
-                            flip=move |_| uplink.update(|on| *on = !*on)
-                        />
-                        <span>
-                            {t!(i18n, channel_uplink)}
-                            <span class="dim">{t!(i18n, channel_uplink_hint)}</span>
-                        </span>
-                    </div>
-                    <div class="toggle">
-                        <Switch
-                            on=Signal::derive(move || downlink.get())
-                            label=Signal::derive(move || t_string!(i18n, channel_downlink).to_owned())
-                            flip=move |_| downlink.update(|on| *on = !*on)
-                        />
-                        <span>
-                            {t!(i18n, channel_downlink)}
-                            <span class="dim">{t!(i18n, channel_downlink_hint)}</span>
-                        </span>
-                    </div>
-                    <div class="toggle">
-                        <Switch
-                            on=Signal::derive(move || precision.get() > 0)
-                            label=Signal::derive(move || t_string!(i18n, channel_position).to_owned())
-                            flip=move |_| precision.update(|p| *p = if *p == 0 { FIRST_PRECISION } else { 0 })
-                        />
-                        <span>
-                            {t!(i18n, channel_position)}
-                            <span class="dim">{t!(i18n, channel_position_hint)}</span>
-                        </span>
-                    </div>
-                    <label class="precision" class:gone=move || precision.get() == 0>
-                        <span class="dim">
-                            {t!(i18n, channel_precision)}
-                            <b>{move || precision_label(i18n, precision.get())}</b>
-                        </span>
-                        <input
-                            type="range"
-                            min="0"
-                            max=move || precisions.with(|o| o.len().saturating_sub(1)).to_string()
-                            step="1"
-                            prop:value=move || step().to_string()
-                            on:input=move |ev| {
-                                if let Ok(at) = event_target_value(&ev).parse::<usize>()
-                                    && let Some(bits) = precisions.with_untracked(|o| o.get(at).copied())
-                                {
-                                    precision.set(bits);
+                            <select
+                                prop:value=move || key_code(key.get())
+                                on:change=move |ev| key.set(key_of(&event_target_value(&ev)))
+                            >
+                                {(!adding)
+                                    .then(|| {
+                                        view! { <option value="keep">{t!(i18n, channel_key_keep)}</option> }
+                                    })}
+                                <option value="new_aes256">{t!(i18n, channel_key_new)} " · AES-256"</option>
+                                <option value="new_aes128">{t!(i18n, channel_key_new)} " · AES-128"</option>
+                                <option value="custom">{t!(i18n, channel_key_custom)}</option>
+                                <option value="default">{t!(i18n, channel_key_default)}</option>
+                                <option value="none">{t!(i18n, key_none)}</option>
+                            </select>
+                            <input
+                                class="mono"
+                                class:gone=move || key.get() != KeyChange::Custom
+                                required=move || key.get() == KeyChange::Custom
+                                placeholder="1PG7OiApB1nwvP+rz05pAQ=="
+                                prop:value=move || custom.get()
+                                on:input=move |ev| custom.set(event_target_value(&ev))
+                            />
+                            <span class="hint dim">
+                                {move || match key.get() {
+                                    KeyChange::Custom => t!(i18n, channel_key_custom_hint).into_any(),
+                                    KeyChange::Default => t!(i18n, channel_key_default_hint).into_any(),
+                                    KeyChange::None => t!(i18n, channel_key_none_hint).into_any(),
+                                    _ => ().into_any(),
+                                }}
+                            </span>
+                        </div>
+                        <div class="toggle">
+                            <Switch
+                                on=Signal::derive(move || uplink.get())
+                                label=Signal::derive(move || t_string!(i18n, channel_uplink).to_owned())
+                                flip=move |_| uplink.update(|on| *on = !*on)
+                            />
+                            <span>
+                                {t!(i18n, channel_uplink)}
+                                <span class="dim">{t!(i18n, channel_uplink_hint)}</span>
+                            </span>
+                        </div>
+                        <div class="toggle">
+                            <Switch
+                                on=Signal::derive(move || downlink.get())
+                                label=Signal::derive(move || t_string!(i18n, channel_downlink).to_owned())
+                                flip=move |_| downlink.update(|on| *on = !*on)
+                            />
+                            <span>
+                                {t!(i18n, channel_downlink)}
+                                <span class="dim">{t!(i18n, channel_downlink_hint)}</span>
+                            </span>
+                        </div>
+                        <div class="toggle">
+                            <Switch
+                                on=Signal::derive(move || precision.get() > 0)
+                                label=Signal::derive(move || t_string!(i18n, channel_position).to_owned())
+                                flip=move |_| precision.update(|p| *p = if *p == 0 { FIRST_PRECISION } else { 0 })
+                            />
+                            <span>
+                                {t!(i18n, channel_position)}
+                                <span class="dim">{t!(i18n, channel_position_hint)}</span>
+                            </span>
+                        </div>
+                        <label class="precision" class:gone=move || precision.get() == 0>
+                            <span class="dim">
+                                {t!(i18n, channel_precision)}
+                                <b>{move || precision_label(i18n, precision.get())}</b>
+                            </span>
+                            <input
+                                type="range"
+                                min="0"
+                                max=move || precisions.with(|o| o.len().saturating_sub(1)).to_string()
+                                step="1"
+                                prop:value=move || step().to_string()
+                                on:input=move |ev| {
+                                    if let Ok(at) = event_target_value(&ev).parse::<usize>()
+                                        && let Some(bits) = precisions.with_untracked(|o| o.get(at).copied())
+                                    {
+                                        precision.set(bits);
+                                    }
                                 }
-                            }
-                        />
-                        <span class="ends dim">
-                            <span>{move || precisions.with(|o| o.first().and_then(|&b| precision_label(i18n, b)))}</span>
-                            <span>{move || precisions.with(|o| o.last().and_then(|&b| precision_label(i18n, b)))}</span>
-                        </span>
-                        <span class="hint dim" class:gone=move || !public.get()>
-                            {t!(i18n, channel_public_hint)}
-                        </span>
-                    </label>
-                    <div class="toggle">
-                        <Switch
-                            on=Signal::derive(move || muted.get())
-                            label=Signal::derive(move || t_string!(i18n, channel_muted).to_owned())
-                            flip=move |_| muted.update(|m| *m = !*m)
-                        />
-                        <span>
-                            {t!(i18n, channel_muted)}
-                            <span class="dim">{t!(i18n, channel_muted_hint)}</span>
-                        </span>
+                            />
+                            <span class="ends dim">
+                                <span>{move || precisions.with(|o| o.first().and_then(|&b| precision_label(i18n, b)))}</span>
+                                <span>{move || precisions.with(|o| o.last().and_then(|&b| precision_label(i18n, b)))}</span>
+                            </span>
+                            <span class="hint dim" class:gone=move || !public.get()>
+                                {t!(i18n, channel_public_hint)}
+                            </span>
+                        </label>
+                        <div class="toggle">
+                            <Switch
+                                on=Signal::derive(move || muted.get())
+                                label=Signal::derive(move || t_string!(i18n, channel_muted).to_owned())
+                                flip=move |_| muted.update(|m| *m = !*m)
+                            />
+                            <span>
+                                {t!(i18n, channel_muted)}
+                                <span class="dim">{t!(i18n, channel_muted_hint)}</span>
+                            </span>
+                        </div>
                     </div>
                 </div>
                 <p class="error">{message}</p>

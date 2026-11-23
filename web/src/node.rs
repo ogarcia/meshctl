@@ -1374,7 +1374,7 @@ fn ContactModal(num: u32, open: RwSignal<bool>) -> impl IntoView {
                         on:click=move |_| open.set(false)
                     ></button>
                 </header>
-                {body}
+                <div class="modal-body">{body}</div>
             </div>
         </div>
     }

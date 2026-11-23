@@ -465,109 +465,111 @@ fn ChannelEditor(
                         inner_html=CLOSE
                     ></button>
                 </header>
-                <div class="fields">
-                    <label>
-                        <span class="dim">{t!(i18n, channel_name)}</span>
-                        <input
-                            node_ref=name_input
-                            maxlength="31"
-                            required
-                            placeholder="#galicia"
-                            prop:value=move || name.get()
-                            on:input=move |ev| name.set(event_target_value(&ev))
-                        />
-                        <span class="hint dim">{t!(i18n, mc_channel_name_hint)}</span>
-                    </label>
-                    <div class="field">
-                        <span class="dim">{t!(i18n, channel_key)}</span>
-                        {kind_now}
-                        <Show
-                            when=move || !hashtag.get()
-                            fallback=move || view! { <span class="hint dim">{t!(i18n, mc_secret_hashtag)}</span> }
-                        >
-                            <select
-                                prop:value=move || match secret.get() {
-                                    Secret::Keep => "keep",
-                                    Secret::New => "new",
-                                    Secret::Own => "own",
-                                }
-                                on:change=move |ev| {
-                                    secret.set(match event_target_value(&ev).as_str() {
-                                        "keep" => Secret::Keep,
-                                        "own" => Secret::Own,
-                                        _ => Secret::New,
-                                    });
-                                }
-                            >
-                                {(!adding).then(|| view! { <option value="keep">{t!(i18n, channel_key_keep)}</option> })}
-                                {adding.then(|| view! { <option value="new">{t!(i18n, channel_key_new)}</option> })}
-                                <option value="own">{t!(i18n, channel_key_custom)}</option>
-                            </select>
+                <div class="modal-body">
+                    <div class="fields">
+                        <label>
+                            <span class="dim">{t!(i18n, channel_name)}</span>
                             <input
-                                class="mono"
-                                class:gone=move || secret.get() != Secret::Own
-                                required=move || secret.get() == Secret::Own && !hashtag.get()
-                                maxlength="32"
-                                pattern="[0-9a-fA-F]{32}"
-                                placeholder="8b3387e9c5cdea6ac9e5edbaa115cd72"
-                                prop:value=move || own.get()
-                                on:input=move |ev| own.set(event_target_value(&ev))
+                                node_ref=name_input
+                                maxlength="31"
+                                required
+                                placeholder="#galicia"
+                                prop:value=move || name.get()
+                                on:input=move |ev| name.set(event_target_value(&ev))
                             />
-                            <span class="hint dim" class:gone=move || secret.get() != Secret::Own>
-                                {t!(i18n, mc_secret_own_hint)}
-                            </span>
-                        </Show>
-                    </div>
-                    <div class="field">
-                        <span class="dim">{t!(i18n, mc_channel_scope)}</span>
-                        <input
-                            maxlength="31"
-                            placeholder=move || t_string!(i18n, mc_channel_scope_default)
-                            prop:value=move || region.get()
-                            on:input=move |ev| region.set(event_target_value(&ev))
-                        />
-                        <div class="flag-chips channel-regions">
-                            <button
-                                type="button"
-                                class="choice"
-                                class:on=move || region.with(|r| r.trim().is_empty())
-                                on:click=move |_| region.set(String::new())
+                            <span class="hint dim">{t!(i18n, mc_channel_name_hint)}</span>
+                        </label>
+                        <div class="field">
+                            <span class="dim">{t!(i18n, channel_key)}</span>
+                            {kind_now}
+                            <Show
+                                when=move || !hashtag.get()
+                                fallback=move || view! { <span class="hint dim">{t!(i18n, mc_secret_hashtag)}</span> }
                             >
-                                {t!(i18n, mc_channel_scope_default)}
-                            </button>
-                            <button
-                                type="button"
-                                class="choice"
-                                class:on=move || region.with(|r| r.trim() == "*")
-                                on:click=move |_| region.set("*".to_owned())
-                            >
-                                {t!(i18n, chat_scope_none)}
-                            </button>
-                            {move || {
-                                found
-                                    .get()
-                                    .into_iter()
-                                    .map(|name| {
-                                        let written = format!("#{name}");
-                                        let shown = written.clone();
-                                        let on = written.clone();
-                                        view! {
-                                            <button
-                                                type="button"
-                                                class="choice"
-                                                class:on=move || region.with(|r| r.trim() == on)
-                                                on:click=move |_| region.set(written.clone())
-                                            >
-                                                {shown}
-                                            </button>
-                                        }
-                                    })
-                                    .collect_view()
-                            }}
+                                <select
+                                    prop:value=move || match secret.get() {
+                                        Secret::Keep => "keep",
+                                        Secret::New => "new",
+                                        Secret::Own => "own",
+                                    }
+                                    on:change=move |ev| {
+                                        secret.set(match event_target_value(&ev).as_str() {
+                                            "keep" => Secret::Keep,
+                                            "own" => Secret::Own,
+                                            _ => Secret::New,
+                                        });
+                                    }
+                                >
+                                    {(!adding).then(|| view! { <option value="keep">{t!(i18n, channel_key_keep)}</option> })}
+                                    {adding.then(|| view! { <option value="new">{t!(i18n, channel_key_new)}</option> })}
+                                    <option value="own">{t!(i18n, channel_key_custom)}</option>
+                                </select>
+                                <input
+                                    class="mono"
+                                    class:gone=move || secret.get() != Secret::Own
+                                    required=move || secret.get() == Secret::Own && !hashtag.get()
+                                    maxlength="32"
+                                    pattern="[0-9a-fA-F]{32}"
+                                    placeholder="8b3387e9c5cdea6ac9e5edbaa115cd72"
+                                    prop:value=move || own.get()
+                                    on:input=move |ev| own.set(event_target_value(&ev))
+                                />
+                                <span class="hint dim" class:gone=move || secret.get() != Secret::Own>
+                                    {t!(i18n, mc_secret_own_hint)}
+                                </span>
+                            </Show>
                         </div>
-                        <span class="hint dim">{t!(i18n, mc_channel_scope_hint)}</span>
+                        <div class="field">
+                            <span class="dim">{t!(i18n, mc_channel_scope)}</span>
+                            <input
+                                maxlength="31"
+                                placeholder=move || t_string!(i18n, mc_channel_scope_default)
+                                prop:value=move || region.get()
+                                on:input=move |ev| region.set(event_target_value(&ev))
+                            />
+                            <div class="flag-chips channel-regions">
+                                <button
+                                    type="button"
+                                    class="choice"
+                                    class:on=move || region.with(|r| r.trim().is_empty())
+                                    on:click=move |_| region.set(String::new())
+                                >
+                                    {t!(i18n, mc_channel_scope_default)}
+                                </button>
+                                <button
+                                    type="button"
+                                    class="choice"
+                                    class:on=move || region.with(|r| r.trim() == "*")
+                                    on:click=move |_| region.set("*".to_owned())
+                                >
+                                    {t!(i18n, chat_scope_none)}
+                                </button>
+                                {move || {
+                                    found
+                                        .get()
+                                        .into_iter()
+                                        .map(|name| {
+                                            let written = format!("#{name}");
+                                            let shown = written.clone();
+                                            let on = written.clone();
+                                            view! {
+                                                <button
+                                                    type="button"
+                                                    class="choice"
+                                                    class:on=move || region.with(|r| r.trim() == on)
+                                                    on:click=move |_| region.set(written.clone())
+                                                >
+                                                    {shown}
+                                                </button>
+                                            }
+                                        })
+                                        .collect_view()
+                                }}
+                            </div>
+                            <span class="hint dim">{t!(i18n, mc_channel_scope_hint)}</span>
+                        </div>
+                        {share}
                     </div>
-                    {share}
                 </div>
                 <p class="error">{message}</p>
                 <div class="removing" class:gone=move || !removing.get()>
