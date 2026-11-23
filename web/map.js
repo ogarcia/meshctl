@@ -309,7 +309,10 @@ window.meshctlMap = (() => {
       );
       icon.setAttribute("aria-hidden", "true");
       term.append(icon, fact.label);
-      pair.append(term, element("dd", "", fact.value));
+      const value = element("dd", fact.clamped ? "clamped" : "", fact.value);
+      // Cut at a few lines: whole on hovering.
+      if (fact.clamped) value.title = fact.value;
+      pair.append(term, value);
       facts.append(pair);
     }
     const buttons = element("div", "mc-card-buttons");
@@ -356,7 +359,16 @@ window.meshctlMap = (() => {
     }
     const content = card(picked);
     if (cardPopup && popupFor === picked.num) {
-      cardPopup.setLatLng([picked.lat, picked.lon]).setContent(content);
+      // Drawn again in place, as it is: neither how far it was scrolled nor
+      // where the map was left moves, as setting its content would, and pan
+      // the map to it again. Only where the node is, if it moved.
+      cardPopup.getContent().replaceChildren(...content.childNodes);
+      const at = cardPopup.getLatLng();
+      if (at.lat !== picked.lat || at.lng !== picked.lon) {
+        cardPopup.setLatLng([picked.lat, picked.lon]);
+      } else if (cardPopup._updatePosition) {
+        cardPopup._updatePosition();
+      }
       return;
     }
     // Whatever popup was open closes as this one opens, and that is no
@@ -365,6 +377,9 @@ window.meshctlMap = (() => {
     const popup = L.popup({
       className: "mc-node-popup",
       maxWidth: 320,
+      // Never taller than the map leaves, as on a phone on its side: what
+      // does not fit scrolls within it, the legend under it left clear.
+      maxHeight: Math.max(160, map.getSize().y - 150),
       offset: [0, -6],
       autoPanPadding: [24, 24],
     })
@@ -414,6 +429,10 @@ window.meshctlMap = (() => {
     focusOn = null;
     placed = true;
     map.setView([node.lat, node.lon], Math.max(map.getZoom(), FOCUS_ZOOM), { animate: false });
+    // Its popup, opened before, fitted in again now that it is centred:
+    // over it, it could be left above the map. Once, here; never as it is
+    // only drawn again.
+    if (cardPopup && cardPopup._adjustPan) cardPopup._adjustPan();
   }
 
   function drawMarkers() {

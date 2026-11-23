@@ -625,6 +625,7 @@
   "node_unmessagable": "No acepta mensajes",
   "node_kept": "Solo en meshctl: la radio no lo tiene en su lista",
   "node_kept_hint": "La radio no lo tiene en su lista: solo lo guarda meshctl. Si vuelve a oírse, vuelve a la radio.",
+  "node_status": "Estado",
   "chat_unmessagable": "Este nodo indica que nadie lee sus mensajes; suele ser un repetidor o un sensor. Puedes escribirle, pero probablemente nadie lo lea.",
   "chat_send_anyway": "Enviar igualmente",
   "chart_title": "Telemetría",

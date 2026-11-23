@@ -2486,6 +2486,8 @@ mod tests {
                 voltage: None,
                 channel_utilization: None,
                 on_radio: None,
+                status: None,
+                status_at: None,
             };
             node.user.as_mut().unwrap().long_name = format!("N{num}");
             state.nodes.insert(num, node.clone());
@@ -2575,6 +2577,8 @@ mod tests {
             voltage: None,
             channel_utilization: None,
             on_radio: None,
+            status: None,
+            status_at: None,
         };
         store.save_node(added.id, &faro).await.unwrap();
 
@@ -2616,6 +2620,8 @@ mod tests {
             voltage: None,
             channel_utilization: None,
             on_radio: None,
+            status: None,
+            status_at: None,
         };
         let local = |num| mesh::LocalNode {
             num,

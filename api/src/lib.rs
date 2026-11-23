@@ -676,6 +676,13 @@ pub struct Node {
     /// full since meshctl started, as only then is it known.
     #[serde(default)]
     pub on_radio: Option<bool>,
+    /// What it says of itself, as it last sent it (`NODE_STATUS_APP`); the
+    /// radio's own, as its settings have it.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// When it said it, in seconds since the epoch; none for the radio's own.
+    #[serde(default)]
+    pub status_at: Option<u32>,
 }
 
 /// What a node last told of each kind, as the radio heard it: whether it

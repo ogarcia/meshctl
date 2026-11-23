@@ -819,6 +819,10 @@ pub fn summary(packet: &Packet, locale: Locale) -> String {
             let neighbors = payload["neighbors"].as_array().map_or(0, Vec::len);
             Some(format!("{neighbors} ↔"))
         }
+        "NODE_STATUS_APP" => Some(format!(
+            "«{}»",
+            payload["status"].as_str().unwrap_or_default()
+        )),
         _ => None,
     };
     line.unwrap_or_else(|| {

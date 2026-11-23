@@ -75,6 +75,8 @@ pub fn node(node: &mesh::Node) -> api::Node {
         voltage: node.voltage,
         channel_utilization: node.channel_utilization,
         on_radio: node.on_radio,
+        status: node.status.clone(),
+        status_at: node.status_at,
     }
 }
 

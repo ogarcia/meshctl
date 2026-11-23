@@ -34,6 +34,9 @@
 //! - `drop`: the link to every client drops, which reads it all anew.
 //! - `own`: the radio tells its client its own device telemetry and how it
 //!   hears the mesh, as it does now and then.
+//! - `place`: the neighbour says where it is, as when asked.
+//! - `status <text>`: the neighbour says that of itself, as its status
+//!   message; with no text, nothing.
 //! - `answers always|sometimes|never`: how the neighbour answers. Always is
 //!   within one to six seconds; sometimes, four times in ten not at all and
 //!   otherwise within up to 26 seconds.
@@ -1102,6 +1105,58 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
         Some("drop") => {
             let _ = events.send(Event::Drop);
             "dropped".into()
+        }
+        Some("place") => {
+            // Where it answers it is when asked, of its own accord.
+            let packet = MeshPacket {
+                from: NEIGHBOUR,
+                to: BROADCAST,
+                id: fresh_id(&NEXT_ID),
+                rx_time: Some(now_secs()),
+                rx_snr: 7.5,
+                hop_limit: 3,
+                hop_start: 3,
+                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                    portnum: PortNum::PositionApp as i32,
+                    payload: pb::Position {
+                        latitude_i: Some(404_168_000 + random(2_000) as i32),
+                        longitude_i: Some(-37_038_000 + random(2_000) as i32),
+                        altitude: Some(650 + random(20) as i32),
+                        time: now_secs(),
+                        location_source: pb::position::LocSource::LocInternal as i32,
+                        precision_bits: 32,
+                        ..Default::default()
+                    }
+                    .encode_to_vec(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            let _ = events.send(Event::Heard(packet));
+            "the neighbour says where it is".into()
+        }
+        Some("status") => {
+            let text = words.collect::<Vec<_>>().join(" ");
+            let packet = MeshPacket {
+                from: NEIGHBOUR,
+                to: BROADCAST,
+                id: fresh_id(&NEXT_ID),
+                rx_time: Some(now_secs()),
+                rx_snr: 7.5,
+                hop_limit: 3,
+                hop_start: 3,
+                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                    portnum: PortNum::NodeStatusApp as i32,
+                    payload: pb::StatusMessage {
+                        status: text.clone(),
+                    }
+                    .encode_to_vec(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            let _ = events.send(Event::Heard(packet));
+            format!("the neighbour says «{text}»")
         }
         Some("own") => {
             // As the firmware tells its client now and then: its device

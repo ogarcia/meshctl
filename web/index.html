@@ -926,6 +926,8 @@
       }
       /* Its figures as a node's, four to the width of the page. */
       .data-figures { padding-top: 6px; }
+      /* What a node says of itself, as it says it. */
+      .node-status { font-style: italic; overflow-wrap: anywhere; }
       .data-figures .figure { flex: 1 1 0; min-width: 120px; }
       .data-figures .sub { white-space: nowrap; }
       .pref-control.retention { display: flex; align-items: center; justify-content: flex-end; gap: 10px; width: auto; }
@@ -2090,6 +2092,20 @@
       .map-legend .icon.router { --icon: url(/tabler-icons-3.51.0/icons/outline/building-broadcast-tower.svg); }
       .map-legend .icon.base { --icon: url(/tabler-icons-3.51.0/icons/outline/home-signal.svg); }
       .mc-card { display: grid; gap: 10px; min-width: 260px; }
+      /* Taller than the map leaves, it scrolls: without Leaflet's light lines. */
+      /*
+       * The node's popup scrolls as a whole, when taller than the map leaves:
+       * its padding within, for the scrollbar to run along its edge, and
+       * without Leaflet's light lines.
+       */
+      .mc-node-popup .leaflet-popup-content-wrapper { overflow: hidden; }
+      .mc-node-popup .leaflet-popup-content { margin: 0; }
+      .mc-node-popup .mc-card { padding: 12px 14px; min-width: 288px; }
+      .mc-node-popup .leaflet-popup-scrolled {
+        border: 0;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
+      }
       .mc-card-head { display: flex; align-items: center; gap: 10px; padding-right: 14px; }
       .mc-card-title { display: flex; flex-direction: column; min-width: 0; }
       .mc-card-title strong { font-size: 14px; }
@@ -2107,6 +2123,15 @@
       }
       .mc-card-facts dd { padding-left: 17px; }
       .mc-card-facts .wide { grid-column: 1 / -1; }
+      /* A value that may be long, as a node's status: three lines at most. */
+      .mc-card-facts dd.clamped {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+        line-clamp: 3;
+        overflow: hidden;
+        font-style: italic;
+      }
       .mc-card-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
       .mc-card-buttons { display: flex; gap: 8px; }
       .mc-card-buttons button { flex: 1; min-height: 34px; }

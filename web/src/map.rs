@@ -416,6 +416,8 @@ pub fn MapView() -> impl IntoView {
             role: t_string!(i18n, local_role).to_owned(),
             channel: t_string!(i18n, node_channel_use).to_owned(),
             hardware: t_string!(i18n, local_hardware).to_owned(),
+            status: t_string!(i18n, node_status).to_owned(),
+            ago: t_string!(i18n, node_ago).to_owned(),
         };
         let mut markers: Vec<Marker> = live.nodes.with(|nodes| {
             nodes
@@ -694,17 +696,35 @@ struct FactLabels {
     /// How busy it hears the channel.
     channel: String,
     hardware: String,
+    status: String,
+    /// How long ago, as `{ago}` in it.
+    ago: String,
 }
 
 /// What a node's popup tells: whatever is known of these.
 fn facts(node: &Node, now: u32, labels: &FactLabels) -> Vec<Fact> {
     let mut facts = Vec::new();
+    // What it says of itself first, a row of its own and three lines at
+    // most, as it may be long; when, by its label, which the cut leaves.
+    if let Some(status) = &node.status {
+        let when = node.status_at.map_or_else(String::new, |at| {
+            format!(" · {}", labels.ago.replace("{ago}", &ago(now, at)))
+        });
+        facts.push(Fact {
+            icon: "message",
+            label: format!("{}{when}", labels.status),
+            value: format!("«{status}»"),
+            wide: true,
+            clamped: true,
+        });
+    }
     let mut tell = |icon, label: &String, value| {
         facts.push(Fact {
             icon,
             label: label.clone(),
             value,
             wide: false,
+            clamped: false,
         });
     };
     if let Some(heard) = node.last_heard {
@@ -771,6 +791,7 @@ fn facts(node: &Node, now: u32, labels: &FactLabels) -> Vec<Fact> {
             label: labels.hardware.clone(),
             value: model(hardware),
             wide: true,
+            clamped: false,
         });
     }
     facts
@@ -785,6 +806,8 @@ struct Fact {
     value: String,
     /// Whether it takes the popup's whole width, for a value that may be long.
     wide: bool,
+    /// Whether it is cut at a few lines, whole on hovering.
+    clamped: bool,
 }
 
 #[cfg(test)]
@@ -830,6 +853,8 @@ mod tests {
             voltage: None,
             channel_utilization: None,
             on_radio: None,
+            status: None,
+            status_at: None,
         };
         assert_eq!(heard(&node, &words), "SNR 11.5 dB · RSSI -30 dBm");
         node.hops_away = Some(3);
@@ -895,6 +920,8 @@ mod tests {
             voltage: None,
             channel_utilization: Some(12.5),
             on_radio: None,
+            status: None,
+            status_at: None,
         };
         let labels = FactLabels {
             heard: "heard".into(),
@@ -912,6 +939,8 @@ mod tests {
             role: "role".into(),
             channel: "channel".into(),
             hardware: "hardware".into(),
+            status: "status".into(),
+            ago: "{ago} ago".into(),
         };
         let told = |node: &Node| -> Vec<String> {
             facts(node, 1000, &labels)
@@ -942,5 +971,13 @@ mod tests {
             ..node
         };
         assert_eq!(told(&direct)[1], "signal=6.5 dB");
+
+        // What it says of itself, first and a row of its own, with when.
+        let saying = Node {
+            status: Some("En ruta".into()),
+            status_at: Some(880),
+            ..direct
+        };
+        assert_eq!(told(&saying)[0], "status · 2 min ago=«En ruta» (wide)");
     }
 }

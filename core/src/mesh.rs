@@ -111,6 +111,12 @@ pub struct Node {
     /// as heard before: none until the radio has been read in full since
     /// meshctl started, as only then is it known.
     pub on_radio: Option<bool>,
+    /// What it says of itself, as it last sent it: none when it never did,
+    /// or said nothing.
+    pub status: Option<String>,
+    /// When it said it, in seconds since the epoch; none for the radio's
+    /// own, which its settings say.
+    pub status_at: Option<u32>,
 }
 
 impl Node {
@@ -129,6 +135,8 @@ impl Node {
             voltage: None,
             channel_utilization: None,
             on_radio: None,
+            status: None,
+            status_at: None,
         }
     }
 
@@ -404,6 +412,12 @@ impl Settings {
     }
 }
 
+/// A status as a node says it: none for nothing at all.
+pub fn status_of(status: &str) -> Option<String> {
+    let status = status.trim();
+    (!status.is_empty()).then(|| status.to_owned())
+}
+
 impl MeshState {
     /// The link as it goes to `link`, and which nodes the radio has once it
     /// has said them all: until then, as known before.
@@ -514,7 +528,18 @@ impl MeshState {
             }
             Some(V::ModuleConfig(module)) => {
                 self.settings.keep_module(&module);
-                None
+                // The radio's own status, as its settings have it.
+                match (&module.payload_variant, &self.local) {
+                    (
+                        Some(pb::module_config::PayloadVariant::Statusmessage(status)),
+                        Some(local),
+                    ) => self.nodes.get_mut(&local.num).map(|node| {
+                        node.status = status_of(&status.node_status);
+                        node.status_at = None;
+                        node.clone()
+                    }),
+                    _ => None,
+                }
             }
             Some(V::Channel(channel)) => {
                 let index = u32::try_from(channel.index).unwrap_or_default();
@@ -622,6 +647,12 @@ impl MeshState {
                 Ok(PortNum::NodeinfoApp) => {
                     if let Ok(user) = pb::User::decode(data.payload.as_slice()) {
                         node.user = Some(user_from(user));
+                    }
+                }
+                Ok(PortNum::NodeStatusApp) => {
+                    if let Ok(status) = pb::StatusMessage::decode(data.payload.as_slice()) {
+                        node.status = status_of(&status.status);
+                        node.status_at = node.last_heard;
                     }
                 }
                 Ok(PortNum::PositionApp) => {
@@ -1004,6 +1035,51 @@ mod tests {
         state.link_to(LinkState::Syncing);
         state.link_to(LinkState::Disconnected);
         assert_eq!(on_radio(&state, 9), Some(true));
+    }
+
+    #[test]
+    fn a_node_says_its_status_and_the_radio_its_own() {
+        let mut state = ready();
+        state.local = Some(LocalNode {
+            num: 1,
+            ..Default::default()
+        });
+        let says = |text: &str| {
+            pb::StatusMessage {
+                status: text.into(),
+            }
+            .encode_to_vec()
+        };
+        state.apply(
+            from_radio(V::Packet(packet(
+                7,
+                PortNum::NodeStatusApp,
+                says(" En ruta "),
+            ))),
+            50,
+        );
+        assert_eq!(state.nodes[&7].status.as_deref(), Some("En ruta"));
+        assert_eq!(state.nodes[&7].status_at, Some(50));
+        // Nothing said is no status.
+        state.apply(
+            from_radio(V::Packet(packet(7, PortNum::NodeStatusApp, says("")))),
+            60,
+        );
+        assert_eq!(state.nodes[&7].status, None);
+        // The radio's own, from its settings.
+        state.nodes.insert(1, Node::new(1));
+        state.apply(
+            from_radio(V::ModuleConfig(pb::ModuleConfig {
+                payload_variant: Some(pb::module_config::PayloadVariant::Statusmessage(
+                    pb::module_config::StatusMessageConfig {
+                        node_status: "En casa".into(),
+                    },
+                )),
+            })),
+            70,
+        );
+        assert_eq!(state.nodes[&1].status.as_deref(), Some("En casa"));
+        assert_eq!(state.nodes[&1].status_at, None);
     }
 
     #[test]

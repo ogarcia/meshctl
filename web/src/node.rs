@@ -301,6 +301,27 @@ fn fact(label: impl IntoView, value: impl IntoView) -> impl IntoView {
 }
 
 /// A fact too long to share its row, as a key.
+/// What a node says of itself, as it last said it, and when.
+fn status_fact(live: Live, node: &meshctl_api::Node) -> Option<impl IntoView + use<>> {
+    let i18n = use_i18n();
+    let status = node.status.clone()?;
+    let at = node.status_at;
+    Some(wide_fact(
+        t!(i18n, node_status),
+        view! {
+            <span class="node-status">"«" {status} "»"</span>
+            {at.map(|at| view! {
+                <span class="dim">
+                    " · "
+                    {move || {
+                        t_string!(i18n, node_ago).replace("{ago}", &crate::mesh::ago(live.now.get(), at))
+                    }}
+                </span>
+            })}
+        },
+    ))
+}
+
 fn wide_fact(label: impl IntoView, value: impl IntoView) -> impl IntoView {
     view! {
         <div class="wide">
@@ -877,6 +898,7 @@ fn Radio() -> impl IntoView {
         );
         Some(view! {
             <dl class="facts">
+                {live.nodes.with(|nodes| nodes.get(&local.num).and_then(|own| status_fact(live, own)))}
                 {fact(t!(i18n, nodes_id), view! { <span class="mono">{local.id.clone()}</span> })}
                 {local.firmware_version.clone().map(|v| fact(t!(i18n, own_firmware), view! { <span class="mono">{v}</span> }))}
                 {local.hw_model.as_deref().map(|hw| fact(t!(i18n, nodes_hardware), crate::mesh::model(hw)))}
@@ -1173,6 +1195,7 @@ fn Identity(at: Option<i64>) -> impl IntoView {
         };
         Some(view! {
             <dl class="facts">
+                {status_fact(live, &node)}
                 {fact(t!(i18n, nodes_id), view! { <span class="mono">{node.id.clone()}</span> })}
                 {wide_fact(t!(i18n, node_public_key), key)}
                 {wide_fact(t!(i18n, node_direct), direct)}

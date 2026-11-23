@@ -78,6 +78,7 @@ pub fn read(portnum: i32, payload: &[u8]) -> Option<serde_json::Value> {
         PortNum::StoreForwardApp => "meshtastic.StoreAndForward",
         PortNum::PaxcounterApp => "meshtastic.Paxcount",
         PortNum::MapReportApp => "meshtastic.MapReport",
+        PortNum::NodeStatusApp => "meshtastic.StatusMessage",
         // Administration carries passwords and keys, and stays unread; the
         // rest is opaque, or not worth reading here.
         _ => return None,

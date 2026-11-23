@@ -317,6 +317,8 @@ fn node_from(contact: &Contact) -> Node {
         channel_utilization: None,
         // A contact is what the radio keeps.
         on_radio: Some(true),
+        status: None,
+        status_at: None,
     }
 }
 

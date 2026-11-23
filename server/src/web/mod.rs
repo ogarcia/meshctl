@@ -186,6 +186,8 @@ pub(crate) mod tests {
                     voltage: None,
                     channel_utilization: None,
                     on_radio: None,
+                    status: None,
+                    status_at: None,
                 },
             );
         }

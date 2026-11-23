@@ -151,6 +151,8 @@ impl NodeRow {
             voltage: self.voltage,
             channel_utilization: self.channel_utilization,
             on_radio: None,
+            status: None,
+            status_at: None,
         }
     }
 }
@@ -512,7 +514,32 @@ impl Store {
         .bind(radio)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.into_iter().map(NodeRow::node).collect())
+        let mut nodes: Vec<Node> = rows.into_iter().map(NodeRow::node).collect();
+        // What each said of itself last: always kept, as each node's latest
+        // of each kind is.
+        let said: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(
+            "SELECT p.from_num, p.payload, p.at FROM packet p JOIN packet_seen s ON s.packet = p.id
+            WHERE s.radio_id = ? AND p.portnum = ? ORDER BY p.at, p.id",
+        )
+        .bind(radio)
+        .bind(meshctl_proto::meshtastic::PortNum::NodeStatusApp as i32)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut statuses = HashMap::new();
+        for (from, payload, at) in said {
+            use prost::Message as _;
+            if let Ok(status) = meshctl_proto::meshtastic::StatusMessage::decode(payload.as_slice())
+            {
+                statuses.insert(from, (status.status, at));
+            }
+        }
+        for node in &mut nodes {
+            if let Some((status, at)) = statuses.remove(&i64::from(node.num)) {
+                node.status = meshctl_core::mesh::status_of(&status);
+                node.status_at = u32::try_from(at).ok();
+            }
+        }
+        Ok(nodes)
     }
 
     /// The latest packets a radio heard from a node on a port, each as its
@@ -1855,6 +1882,8 @@ mod tests {
             voltage: Some(4.2),
             channel_utilization: Some(12.5),
             on_radio: None,
+            status: None,
+            status_at: None,
         }
     }
 
