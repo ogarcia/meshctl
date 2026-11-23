@@ -107,6 +107,13 @@ fn NodePage(num: u32) -> impl IntoView {
     let is_own = Memo::new(move |_| own(live, num));
     // The page is drawn again for another radio, and so is read once.
     let meshcore = untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore);
+    // A MeshCore repeater or room says which regions it repeats on.
+    let serves = meshcore
+        && untrack(|| {
+            live.nodes
+                .with(|nodes| nodes.get(&num).and_then(|n| n.role.clone()))
+        })
+        .is_some_and(|role| role == "REPEATER" || role == "ROOM");
     // Two columns, headed by what is looked at most: where it is, and the
     // routes to it: what comes of its own accord on the left, what is asked
     // for on the right, the least likely to answer last.
@@ -124,7 +131,7 @@ fn NodePage(num: u32) -> impl IntoView {
             </div>
             <div class="node-column">
                 {if meshcore {
-                    view! { <MeshcorePath /> }.into_any()
+                    view! { <MeshcorePath /> {serves.then(|| view! { <Regions /> })} }.into_any()
                 } else {
                     view! { <Traces drawer /> }.into_any()
                 }}
@@ -224,6 +231,7 @@ fn Problem() -> impl IntoView {
                 Failure::Rejected(ErrorCode::RadioNotConnected) => {
                     t!(i18n, node_not_connected).into_any()
                 }
+                Failure::Rejected(ErrorCode::NoPath) => t!(i18n, ask_no_path).into_any(),
                 _ => t!(i18n, error_failed).into_any(),
             };
             view! { <div class="toast" role="status">{text}</div> }
@@ -274,6 +282,13 @@ fn needs_key(live: Live, num: u32) -> bool {
 /// requests are still to come.
 fn supported(live: Live) -> bool {
     live.selected_kind() != Some(RadioKind::Meshcore)
+}
+
+/// Whether the selected radio asks nodes for this: a MeshCore radio only
+/// what MeshCore nodes answer, and the other way round.
+fn can_ask(live: Live, asked: Asked) -> bool {
+    let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
+    meshcore == (asked == Asked::Request(RequestKind::Regions))
 }
 
 /// The object a packet's payload carries under a key, as telemetry carries
@@ -658,7 +673,10 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
     // What goes to it alone goes encrypted to its key, whatever the
     // channel, unless the radio's owner is licensed.
     let by_channel = move || !asked.private() || licensed(live);
-    let has_menu = move || by_channel() && channels().len() > 1;
+    // MeshCore's go to the node, on no channel.
+    let has_menu = move || {
+        by_channel() && channels().len() > 1 && asked != Asked::Request(RequestKind::Regions)
+    };
     let open = move || menu.get() == Some(me);
     // Asking, said by the button pressed; by every one that sends it when
     // it was asked from elsewhere.
@@ -699,7 +717,7 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
         Some((text, filled))
     };
     move || {
-        (supported(live) && !own(live, asking.num)).then(|| {
+        (can_ask(live, asked) && !own(live, asking.num)).then(|| {
             view! {
                 <span class="ask-split" class:open=open>
                     <button
@@ -2340,12 +2358,17 @@ fn RequestRow(request: Request) -> impl IntoView {
         }
     };
     let answer = request.answer.clone();
+    let reply = request.reply.clone();
     let line = answer
         .as_ref()
-        .map(|answer| crate::packets::summary(answer, i18n.get_locale_untracked()));
+        .map(|answer| crate::packets::summary(answer, i18n.get_locale_untracked()))
+        .or_else(|| reply.as_ref().map(|reply| reply_summary(i18n, reply)));
     let detail = answer
         .and_then(|a| a.payload)
-        .and_then(|payload| serde_json::to_string_pretty(&payload).ok());
+        .and_then(|payload| serde_json::to_string_pretty(&payload).ok())
+        .or_else(|| reply.and_then(|reply| serde_json::to_string_pretty(&reply).ok()));
+    // MeshCore's go on no channel.
+    let on_channel = request.kind != RequestKind::Regions;
     let has_detail = detail.is_some();
     let kind = request.kind;
     let clock = awaiting_clock(request.status == RequestStatus::Pending);
@@ -2359,7 +2382,7 @@ fn RequestRow(request: Request) -> impl IntoView {
                 <span class="head">
                     <strong><KindLabel kind /></strong>
                     <span class="when">
-                        "#" {request.channel} " · "
+                        {on_channel.then(|| format!("#{} · ", request.channel))}
                         {move || {
                             match clock {
                                 Some(clock) => waited(clock.get(), at),
@@ -2378,6 +2401,101 @@ fn RequestRow(request: Request) -> impl IntoView {
     }
 }
 
+/// What a node answered with no packet, in a line.
+fn reply_summary(
+    i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
+    reply: &meshctl_api::RequestReply,
+) -> String {
+    let meshctl_api::RequestReply::Regions {
+        regions, unscoped, ..
+    } = reply;
+    let mut names: Vec<String> = regions.iter().map(|name| format!("#{name}")).collect();
+    if *unscoped {
+        names.insert(0, t_string!(i18n, regions_unscoped).to_owned());
+    }
+    if names.is_empty() {
+        t_string!(i18n, regions_nothing).to_owned()
+    } else {
+        names.join(", ")
+    }
+}
+
+/// The regions a MeshCore repeater or room repeats on, as it last said:
+/// asked of it, as it says them to no one otherwise.
+#[component]
+fn Regions() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let last = move || {
+        live.requests.with(|requests| {
+            requests
+                .iter()
+                .filter(|r| r.node == asking.num && r.kind == RequestKind::Regions)
+                .filter(|r| r.status == RequestStatus::Answered)
+                .max_by_key(|r| r.answered_at)
+                .and_then(|r| Some((r.reply.clone()?, r.answered_at?)))
+        })
+    };
+    let at = Signal::derive(move || last().map(|(_, at)| at));
+    let body = move || {
+        let Some((
+            meshctl_api::RequestReply::Regions {
+                regions,
+                unscoped,
+                clock,
+            },
+            answered,
+        )) = last()
+        else {
+            return view! { <p class="nothing">{t!(i18n, regions_none)}</p> }.into_any();
+        };
+        let nothing = regions.is_empty() && !unscoped;
+        // How far off its clock was, as it answered.
+        let off = clock.map(|clock| answered - clock);
+        let clock_words = off.map(|off| {
+            if off.abs() < 300 {
+                t_string!(i18n, regions_clock_right).to_owned()
+            } else if off > 0 {
+                t_string!(i18n, regions_clock_behind).replace("{d}", &duration(off.unsigned_abs()))
+            } else {
+                t_string!(i18n, regions_clock_ahead).replace("{d}", &duration(off.unsigned_abs()))
+            }
+        });
+        let skewed = off.is_some_and(|off| off.abs() >= 300);
+        view! {
+            <div class="flag-chips regions">
+                {unscoped.then(|| view! { <span class="choice on">{t!(i18n, regions_unscoped)}</span> })}
+                {regions
+                    .into_iter()
+                    .map(|name| view! { <span class="choice on">"#" {name}</span> })
+                    .collect_view()}
+            </div>
+            {nothing.then(|| view! { <p class="nothing">{t!(i18n, regions_nothing)}</p> })}
+            <p class="hint dim">{t!(i18n, regions_hint)}</p>
+            <dl class="facts compact">
+                {clock_words.map(|words| fact(
+                    t!(i18n, regions_clock),
+                    view! { <span class:warn=skewed>{words}</span> },
+                ))}
+            </dl>
+        }
+        .into_any()
+    };
+    move || {
+        view! {
+            <Section
+                title=t!(i18n, node_regions).into_any()
+                at=at.get()
+                asked=Some(Asked::Request(RequestKind::Regions))
+                class="regions-section"
+            >
+                {body}
+            </Section>
+        }
+    }
+}
+
 /// What a kind of request is called.
 #[component]
 fn KindLabel(kind: RequestKind) -> impl IntoView {
@@ -2390,6 +2508,7 @@ fn KindLabel(kind: RequestKind) -> impl IntoView {
         RequestKind::PowerTelemetry => t!(i18n, ask_power).into_any(),
         RequestKind::LocalStats => t!(i18n, ask_local_stats).into_any(),
         RequestKind::Neighbors => t!(i18n, ask_neighbors).into_any(),
+        RequestKind::Regions => t!(i18n, ask_regions).into_any(),
     }
 }
 

@@ -499,7 +499,9 @@ async fn remove_node(
     {
         Ok(Ok(Some(()))) => StatusCode::NO_CONTENT.into_response(),
         Ok(Ok(None) | Err(AdminError::UnknownNode)) => not_found(),
-        Ok(Err(AdminError::OwnNode)) => error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest),
+        Ok(Err(AdminError::OwnNode | AdminError::NoPath)) => {
+            error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest)
+        }
         Ok(Err(AdminError::NotConnected)) => {
             error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected)
         }
@@ -619,7 +621,9 @@ async fn favorite(
     match state.radios.set_favorite(radio, num, change.favorite).await {
         Ok(Some(())) => StatusCode::NO_CONTENT.into_response(),
         Ok(None) | Err(AdminError::UnknownNode) => not_found(),
-        Err(AdminError::OwnNode) => error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest),
+        Err(AdminError::OwnNode | AdminError::NoPath) => {
+            error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest)
+        }
         Err(AdminError::NotConnected) => error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
         Err(AdminError::Unsupported) => {
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::UnsupportedKind)

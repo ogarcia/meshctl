@@ -41,7 +41,7 @@
   "welcome_wait": "Keep waiting",
   "welcome_enter": "Go in anyway",
   "page_chat": "Chat",
-  "meshcore_not_yet": "MeshCore radios cannot ask nodes for anything yet: telemetry, status and traces will come.",
+  "meshcore_not_yet": "MeshCore radios cannot ask nodes for their telemetry, status or traces yet: they will come.",
   "settings_not_connected": "The radio is not connected. Its settings are read from it, and changed in it, only while it is.",
   "settings_long_name": "Long name",
   "settings_short_name": "Short name",
@@ -784,5 +784,16 @@
   "mc_rx_delay_hint": "The base of the wait before handling what reaches it flooded, 0 to 20. 0 for none.",
   "mc_airtime": "Airtime factor",
   "mc_airtime_hint": "How much of the air it leaves free after sending, against what it took, 0 to 9.",
-  "mc_reorder_failed": "The radio did not take the new order; the channels are back as they were."
+  "mc_reorder_failed": "The radio did not take the new order; the channels are back as they were.",
+  "ask_regions": "Regions",
+  "node_regions": "Regions",
+  "regions_unscoped": "No region",
+  "regions_none": "Not asked yet. It answers only if the request reaches it direct.",
+  "regions_nothing": "It repeats nothing, with a region or without.",
+  "regions_hint": "What is flooded it passes on only in one of these regions; with “No region”, when it carries none.",
+  "regions_clock": "Its clock",
+  "regions_clock_right": "On time",
+  "regions_clock_behind": "{d} behind",
+  "regions_clock_ahead": "{d} ahead",
+  "ask_no_path": "No path to it is known, and these requests go only direct: wait to hear an advert from it."
 }

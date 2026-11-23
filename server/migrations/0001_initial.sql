@@ -258,7 +258,7 @@ CREATE TABLE request (
     radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
     node INTEGER NOT NULL,
     -- node_info, position, device_telemetry, environment_telemetry,
-    -- power_telemetry, local_stats or neighbors.
+    -- power_telemetry, local_stats, neighbors or regions.
     kind TEXT NOT NULL,
     -- The slot it went out on.
     channel INTEGER NOT NULL,
@@ -269,7 +269,9 @@ CREATE TABLE request (
     error TEXT,
     at INTEGER NOT NULL,
     answered_at INTEGER,
-    answer INTEGER REFERENCES packet_seen (id) ON DELETE SET NULL
+    answer INTEGER REFERENCES packet_seen (id) ON DELETE SET NULL,
+    -- What a node that answers with no packet answered, as JSON.
+    reply TEXT
 );
 
 CREATE INDEX request_node ON request (radio_id, node, id);

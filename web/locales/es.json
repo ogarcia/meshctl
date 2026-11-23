@@ -41,7 +41,7 @@
   "welcome_wait": "Seguir esperando",
   "welcome_enter": "Entrar igualmente",
   "page_chat": "Chat",
-  "meshcore_not_yet": "Las radios MeshCore aún no pueden pedir nada a los nodos: telemetría, estado y trazas llegarán más adelante.",
+  "meshcore_not_yet": "Las radios MeshCore aún no pueden pedir a los nodos su telemetría, su estado ni trazas: llegarán más adelante.",
   "settings_not_connected": "La radio no está conectada. Sus ajustes se leen de ella, y se cambian en ella, solo mientras lo está.",
   "settings_long_name": "Nombre largo",
   "settings_short_name": "Nombre corto",
@@ -784,5 +784,16 @@
   "mc_rx_delay_hint": "Base de la espera antes de procesar lo que le llega por inundación, de 0 a 20. 0 sin espera.",
   "mc_airtime": "Factor de tiempo en el aire",
   "mc_airtime_hint": "Cuánto deja libre el aire tras transmitir, en proporción a lo que tardó, de 0 a 9.",
-  "mc_reorder_failed": "La radio no aceptó el nuevo orden; los canales vuelven a como estaban."
+  "mc_reorder_failed": "La radio no aceptó el nuevo orden; los canales vuelven a como estaban.",
+  "ask_regions": "Regiones",
+  "node_regions": "Regiones",
+  "regions_unscoped": "Sin región",
+  "regions_none": "Sin preguntar todavía. Solo contesta si la petición le llega directa.",
+  "regions_nothing": "No repite nada, ni con región ni sin ella.",
+  "regions_hint": "Lo que se inunda solo lo reenvía si va en una de estas regiones; «Sin región», si no lleva ninguna.",
+  "regions_clock": "Su reloj",
+  "regions_clock_right": "En hora",
+  "regions_clock_behind": "Atrasado {d}",
+  "regions_clock_ahead": "Adelantado {d}",
+  "ask_no_path": "No se conoce ruta hasta él, y estas peticiones solo van directas: espera a oír un anuncio suyo."
 }

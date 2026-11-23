@@ -376,6 +376,44 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             });
             vec![sent]
         }
+        // SEND_ANON_REQ: a key, then the request: what it asks, and the way
+        // back. Sent direct on a known path, or flooded without one, which
+        // a repeater does not answer; one with a path answers its regions.
+        0x39 => {
+            let Some(key) = key_in(data) else {
+                return error(6);
+            };
+            let Some(to) = radio.contacts.iter().find(|c| c.key == key).cloned() else {
+                return error(3);
+            };
+            let tag: [u8; 4] = u32::try_from(random(u64::from(u32::MAX)))
+                .unwrap_or(1)
+                .to_le_bytes();
+            let flood = to.path_len < 0;
+            let mut sent = vec![0x06, u8::from(flood)];
+            sent.extend(tag);
+            sent.extend(2_500u32.to_le_bytes());
+            let regions = data.get(32) == Some(&0x01);
+            println!(
+                "anonymous request {:?} to {:?}, {}",
+                data.get(32),
+                to.name,
+                if flood { "flooded" } else { "direct" }
+            );
+            if regions && !flood && matches!(to.kind, 2 | 3) {
+                let events = events.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(600 + random(1_200))).await;
+                    let mut answer = vec![0x8c, 0];
+                    answer.extend(tag);
+                    // A repeater's clock, behind as real ones often are.
+                    answer.extend((now() - 86_400 * 900).to_le_bytes());
+                    answer.extend(b"*,europe,galicia\0\0\0\0");
+                    let _ = events.send(Event::Push(answer));
+                });
+            }
+            vec![sent]
+        }
         // SEND_CHANNEL_TEXT: taken, and nothing ever said of it again.
         0x03 => vec![vec![0x00]],
         // GET_CONTACTS, those changed since a time if one is given.

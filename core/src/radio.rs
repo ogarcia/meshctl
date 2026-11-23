@@ -157,6 +157,8 @@ pub enum AdminError {
     UnknownNode,
     /// The radio's own node, which it cannot forget.
     OwnNode,
+    /// A node the radio knows no path to, for what goes to it only direct.
+    NoPath,
     /// The radio would not do it, and said why, as the protobufs name it.
     Refused(String),
 }

@@ -99,6 +99,7 @@ pub mod command {
     const SET_CHANNEL: u8 = 0x20;
     const SET_OTHER_PARAMS: u8 = 0x26;
     const GET_STATS: u8 = 0x38;
+    const SEND_ANON_REQ: u8 = 0x39;
     const SET_TUNING_PARAMS: u8 = 0x15;
     const GET_TUNING_PARAMS: u8 = 0x2b;
     const SET_AUTOADD_CONFIG: u8 = 0x3a;
@@ -303,6 +304,17 @@ pub mod command {
         vec![GET_STATS, kind]
     }
 
+    /// An anonymous request to a node, by its whole key: no login, and it
+    /// goes direct, on the path the radio knows, or straight to one not a
+    /// contact. Answered with `MessageSent`, whose tag the node's
+    /// `BinaryResponse` carries.
+    pub fn send_anon_request(key: &[u8; 32], data: &[u8]) -> Vec<u8> {
+        let mut payload = vec![SEND_ANON_REQ];
+        payload.extend_from_slice(key);
+        payload.extend_from_slice(data);
+        payload
+    }
+
     /// Answered with `Tuning`.
     pub fn get_tuning() -> Vec<u8> {
         vec![GET_TUNING_PARAMS]
@@ -366,8 +378,12 @@ pub struct Contact {
     /// 1 chat, 2 repeater, 3 room, 4 sensor.
     pub kind: u8,
     pub flags: u8,
-    /// Hops on the path known to it; negative when none is.
+    /// Hops on the path known to it, and each hash's size in its top two
+    /// bits; negative when none is.
     pub path_len: i8,
+    /// The path's hashes, each the start of a repeater's key, from the radio
+    /// out: as many bytes as the path takes.
+    pub path: Vec<u8>,
     pub name: String,
     /// When it last advertised, by its own clock.
     pub last_advert: u32,
@@ -526,6 +542,12 @@ pub enum Response {
     RepeatFrequencies(Vec<(u32, u32)>),
     /// The region what it floods is scoped to, name and key; none if none.
     DefaultScope(Option<(String, [u8; 16])>),
+    /// Pushed: what a node answered a request with, by the tag the request
+    /// went by.
+    BinaryResponse {
+        tag: [u8; 4],
+        data: Vec<u8>,
+    },
     /// Pushed: a contact advertised.
     Advert,
     /// Pushed: the path to a contact changed.
@@ -550,6 +572,7 @@ impl Response {
                 | Self::Ack(_)
                 | Self::MessagesWaiting
                 | Self::NewContact(_)
+                | Self::BinaryResponse { .. }
         ) || matches!(self, Self::Other(code) if *code >= 0x80)
     }
 
@@ -611,6 +634,10 @@ impl Response {
             0x82 => Self::Ack(bytes_at(data, 0)?),
             0x83 => Self::MessagesWaiting,
             0x8a => Self::NewContact(contact(data)?),
+            0x8c => Self::BinaryResponse {
+                tag: bytes_at(data, 1)?,
+                data: data.get(5..).unwrap_or_default().to_vec(),
+            },
             other => Self::Other(other),
         })
     }
@@ -640,6 +667,15 @@ fn text_at(data: &[u8], at: usize, len: usize) -> String {
         .to_owned()
 }
 
+/// How many bytes a path takes, by its length byte: hops times each hash's
+/// size; none when there is no path.
+pub fn path_bytes(path_len: u8) -> usize {
+    if path_len == 0xff {
+        return 0;
+    }
+    usize::from(path_len & 0x3f) * (usize::from(path_len >> 6) + 1)
+}
+
 /// An SNR as the radio packs it, in quarters of a dB.
 fn snr(raw: u8) -> f32 {
     f32::from(raw.cast_signed()) / 4.0
@@ -660,7 +696,10 @@ fn contact(data: &[u8]) -> Option<Contact> {
         kind: data[32],
         flags: data[33],
         path_len: data[34].cast_signed(),
-        // 64 bytes of path at 35, which meshctl does not use.
+        path: data
+            .get(35..35 + path_bytes(data[34]))
+            .unwrap_or_default()
+            .to_vec(),
         name: text_at(data, 99, 32),
         last_advert: u32_at(data, 131)?,
         lat: i32_at(data, 135)?,
@@ -1090,6 +1129,7 @@ mod tests {
             kind: 2,
             flags: 0,
             path_len: -1,
+            path: Vec::new(),
             name: "Faro".into(),
             last_advert: 7,
             lat: 1,

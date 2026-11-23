@@ -174,6 +174,30 @@ pub enum Event {
         request_id: u32,
         passkey: Vec<u8>,
     },
+    /// What a node answered a request with that comes as no packet, as
+    /// MeshCore nodes answer.
+    Reply(Reply),
+}
+
+/// What a node answered a request with, by the id the request went by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reply {
+    pub request_id: u32,
+    /// The node asked, which is who answered.
+    pub from: u32,
+    pub answer: Answer,
+}
+
+/// What a node answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Answer {
+    /// The regions a repeater repeats floods scoped to, by their names, and
+    /// whether it repeats those scoped to none; with its clock.
+    Regions {
+        names: Vec<String>,
+        unscoped: bool,
+        clock: Option<u32>,
+    },
 }
 
 /// What the firmware puts in a route for a hop it could not tell.

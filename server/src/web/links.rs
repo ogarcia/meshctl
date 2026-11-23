@@ -43,7 +43,7 @@ fn failed(failure: LinkFailure) -> Response {
         LinkFailure::Admin(AdminError::Unsupported) => {
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::UnsupportedKind)
         }
-        LinkFailure::Admin(AdminError::OwnNode | AdminError::UnknownNode) => {
+        LinkFailure::Admin(AdminError::OwnNode | AdminError::UnknownNode | AdminError::NoPath) => {
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidLink)
         }
     }

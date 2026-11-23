@@ -5,7 +5,9 @@
 
 use super::{Store, u32_from};
 use anyhow::{Context, Result};
-use meshctl_api::{Pace, RadioId, Request, RequestId, RequestKind, RequestStatus, SightingId};
+use meshctl_api::{
+    Pace, RadioId, Request, RequestId, RequestKind, RequestReply, RequestStatus, SightingId,
+};
 use meshctl_proto::meshtastic::PortNum;
 
 #[derive(sqlx::FromRow)]
@@ -19,6 +21,7 @@ struct RequestRow {
     at: i64,
     answered_at: Option<i64>,
     answer: Option<SightingId>,
+    reply: Option<String>,
 }
 
 fn kind_name(kind: RequestKind) -> &'static str {
@@ -30,6 +33,7 @@ fn kind_name(kind: RequestKind) -> &'static str {
         RequestKind::PowerTelemetry => "power_telemetry",
         RequestKind::LocalStats => "local_stats",
         RequestKind::Neighbors => "neighbors",
+        RequestKind::Regions => "regions",
     }
 }
 
@@ -41,13 +45,15 @@ fn kind_from(name: &str) -> RequestKind {
         "power_telemetry" => RequestKind::PowerTelemetry,
         "local_stats" => RequestKind::LocalStats,
         "neighbors" => RequestKind::Neighbors,
+        "regions" => RequestKind::Regions,
         _ => RequestKind::NodeInfo,
     }
 }
 
-/// The port a request is answered on.
-fn port_of(kind: RequestKind) -> PortNum {
-    match kind {
+/// The port a request is answered on; none for one answered with no
+/// packet.
+fn port_of(kind: RequestKind) -> Option<PortNum> {
+    Some(match kind {
         RequestKind::NodeInfo => PortNum::NodeinfoApp,
         RequestKind::Position => PortNum::PositionApp,
         RequestKind::DeviceTelemetry
@@ -55,7 +61,8 @@ fn port_of(kind: RequestKind) -> PortNum {
         | RequestKind::PowerTelemetry
         | RequestKind::LocalStats => PortNum::TelemetryApp,
         RequestKind::Neighbors => PortNum::NeighborinfoApp,
-    }
+        RequestKind::Regions => return None,
+    })
 }
 
 fn status_from(name: &str) -> RequestStatus {
@@ -82,6 +89,7 @@ impl Store {
             at: row.at,
             answered_at: row.answered_at,
             answer,
+            reply: row.reply.and_then(|json| serde_json::from_str(&json).ok()),
         })
     }
 
@@ -105,7 +113,7 @@ impl Store {
         let row: RequestRow = sqlx::query_as(
             "INSERT INTO request (radio_id, node, kind, channel, packet_id, status, at)
             VALUES (?, ?, ?, ?, ?, 'pending', ?)
-            RETURNING id, node, kind, channel, status, error, at, answered_at, answer",
+            RETURNING id, node, kind, channel, status, error, at, answered_at, answer, reply",
         )
         .bind(radio)
         .bind(i64::from(node))
@@ -133,6 +141,7 @@ impl Store {
             RequestKind::PowerTelemetry,
             RequestKind::LocalStats,
             RequestKind::Neighbors,
+            RequestKind::Regions,
         ]
         .into_iter()
         .filter(|kind| kind.pace() == Some(pace))
@@ -198,13 +207,13 @@ impl Store {
         let Some((id, kind)) = waiting else {
             return Ok(None);
         };
-        if portnum != Some(port_of(kind_from(&kind)) as i32) {
+        if portnum.is_none() || portnum != port_of(kind_from(&kind)).map(|port| port as i32) {
             return Ok(None);
         }
         let row: RequestRow = sqlx::query_as(
             "UPDATE request SET status = 'answered', answered_at = ?, answer = ?
             WHERE id = ?
-            RETURNING id, node, kind, channel, status, error, at, answered_at, answer",
+            RETURNING id, node, kind, channel, status, error, at, answered_at, answer, reply",
         )
         .bind(at)
         .bind(sighting)
@@ -212,6 +221,35 @@ impl Store {
         .fetch_one(&self.pool)
         .await?;
         Ok(Some(self.request_of(row).await?))
+    }
+
+    /// Takes what a node answered with no packet as the answer to the
+    /// request it says it answers, if that is one waiting and the node asked
+    /// sent it.
+    pub async fn reply_request(
+        &self,
+        radio: RadioId,
+        request_id: u32,
+        from: u32,
+        reply: &RequestReply,
+        at: i64,
+    ) -> Result<Option<Request>> {
+        let row: Option<RequestRow> = sqlx::query_as(
+            "UPDATE request SET status = 'answered', answered_at = ?, reply = ?
+            WHERE radio_id = ? AND packet_id = ? AND node = ? AND status = 'pending'
+            RETURNING id, node, kind, channel, status, error, at, answered_at, answer, reply",
+        )
+        .bind(at)
+        .bind(serde_json::to_string(reply)?)
+        .bind(radio)
+        .bind(i64::from(request_id))
+        .bind(i64::from(from))
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(row) => Ok(Some(self.request_of(row).await?)),
+            None => Ok(None),
+        }
     }
 
     /// A request that will not be answered, and why.
@@ -224,7 +262,7 @@ impl Store {
         let row: Option<RequestRow> = sqlx::query_as(
             "UPDATE request SET status = 'failed', error = ?
             WHERE radio_id = ? AND packet_id = ? AND status = 'pending'
-            RETURNING id, node, kind, channel, status, error, at, answered_at, answer",
+            RETURNING id, node, kind, channel, status, error, at, answered_at, answer, reply",
         )
         .bind(error)
         .bind(radio)
@@ -242,7 +280,7 @@ impl Store {
         let rows = sqlx::query_as(
             "UPDATE request SET status = 'failed', error = 'TIMEOUT'
             WHERE radio_id = ? AND status = 'pending' AND at < ?
-            RETURNING id, node, kind, channel, status, error, at, answered_at, answer",
+            RETURNING id, node, kind, channel, status, error, at, answered_at, answer, reply",
         )
         .bind(radio)
         .bind(before)
@@ -261,7 +299,7 @@ impl Store {
     ) -> Result<Vec<Request>> {
         let node = node.map(i64::from);
         let rows = sqlx::query_as(
-            "SELECT id, node, kind, channel, status, error, at, answered_at, answer
+            "SELECT id, node, kind, channel, status, error, at, answered_at, answer, reply
             FROM request
             WHERE radio_id = ? AND (? IS NULL OR node = ?) AND (? IS NULL OR id < ?)
             ORDER BY id DESC LIMIT ?",
@@ -389,6 +427,55 @@ mod tests {
                 .is_asking(1, 0x55, RequestKind::Position)
                 .await
                 .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reply_answers_only_the_request_it_names_from_the_node_asked() {
+        let store = store().await;
+        store
+            .add_request(1, 0x55, RequestKind::Regions, 0, 77, 10)
+            .await
+            .unwrap();
+        let reply = RequestReply::Regions {
+            regions: vec!["europe".into(), "galicia".into()],
+            unscoped: true,
+            clock: Some(1_718_789_276),
+        };
+        assert!(
+            store
+                .reply_request(1, 77, 0x66, &reply, 20)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let answered = store
+            .reply_request(1, 77, 0x55, &reply, 20)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(answered.status, RequestStatus::Answered);
+        assert_eq!(answered.reply, Some(reply.clone()));
+        assert_eq!(
+            store.requests(1, Some(0x55), None, 1).await.unwrap()[0].reply,
+            Some(reply)
+        );
+        // No packet answers it.
+        let heard = store
+            .add_packet(1, &answer(78, 0x55, PortNum::TextMessageApp as i32))
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .add_request(1, 0x55, RequestKind::Regions, 0, 78, 30)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .answer_request(1, 78, 0x55, heard.portnum, heard.id, 31)
+                .await
+                .unwrap()
+                .is_none()
         );
     }
 

@@ -106,7 +106,7 @@ async fn list(
         (status = 401, description = "The access token is missing or wrong", body = Error),
         (status = 404, description = "There is no such radio", body = Error),
         (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
-        (status = 422, description = "Everyone, or the radio itself: `invalid_node`; a channel it does not use: `invalid_channel`; a kind of radio that does not do this yet: `unsupported_kind`", body = Error),
+        (status = 422, description = "Everyone, or the radio itself: `invalid_node`; a channel it does not use: `invalid_channel`; a kind of radio that does not do this yet, or a request it does not make: `unsupported_kind`; a node a MeshCore radio knows no path to: `no_path`", body = Error),
         (status = 429, description = "The same is still waiting for its answer, or the radio sent the like too recently: `too_soon`, with `Retry-After` for the latter", body = Error),
     )
 )]
@@ -129,6 +129,7 @@ async fn ask(
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidChannel)
         }
         Err(AskFailure::Pending) => error(StatusCode::TOO_MANY_REQUESTS, ErrorCode::TooSoon),
+        Err(AskFailure::NoPath) => error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::NoPath),
         Err(AskFailure::TooSoon { wait }) => (
             StatusCode::TOO_MANY_REQUESTS,
             [(header::RETRY_AFTER, wait.max(1).to_string())],

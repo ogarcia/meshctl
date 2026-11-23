@@ -135,6 +135,9 @@ pub enum AskFailure {
     InvalidChannel,
     /// The same was asked of the same node, and is still waiting.
     Pending,
+    /// A node the radio knows no path to, for a request that goes only
+    /// direct.
+    NoPath,
     /// The radio sent the like too recently, and would drop it: so many
     /// seconds more to wait.
     TooSoon {
@@ -283,6 +286,32 @@ async fn keep_packet(
                 i64::from(heard.at),
             )
             .await?
+    {
+        let _ = changes.send(Change::Request(radio, request));
+    }
+    Ok(())
+}
+
+/// Takes what a node answered with no packet as the answer to its request.
+async fn keep_reply(
+    store: &Store,
+    changes: &broadcast::Sender<Change>,
+    radio: RadioId,
+    reply: &mesh::Reply,
+) -> Result<()> {
+    let mesh::Answer::Regions {
+        names,
+        unscoped,
+        clock,
+    } = &reply.answer;
+    let kept = meshctl_api::RequestReply::Regions {
+        regions: names.clone(),
+        unscoped: *unscoped,
+        clock: clock.map(i64::from),
+    };
+    if let Some(request) = store
+        .reply_request(radio, reply.request_id, reply.from, &kept, now())
+        .await?
     {
         let _ = changes.send(Change::Request(radio, request));
     }
@@ -864,17 +893,39 @@ impl Radios {
         if new.node == mesh::BROADCAST || origin == Some(new.node) {
             return Err(AskFailure::InvalidNode);
         }
-        if self.protocol(id) != Some(Protocol::Meshtastic) {
+        // MeshCore radios ask only what MeshCore nodes answer, and the other
+        // way round.
+        let meshcore = self.protocol(id) == Some(Protocol::Meshcore);
+        if meshcore != (new.kind == RequestKind::Regions) {
             return Err(AskFailure::Unsupported);
         }
         if self.link(id) != LinkState::Ready {
             return Err(AskFailure::NotConnected);
         }
-        if !has_channel(&mesh, new.channel) {
+        if !meshcore && !has_channel(&mesh, new.channel) {
             return Err(AskFailure::InvalidChannel);
         }
         if self.store.is_asking(id, new.node, new.kind).await? {
             return Err(AskFailure::Pending);
+        }
+        if meshcore {
+            let tag = mesh
+                .meshcore_ask(new.node, meshctl_core::meshcore::anonymous::REGIONS)
+                .await
+                .map_err(|error| match error {
+                    AdminError::NoPath => AskFailure::NoPath,
+                    AdminError::UnknownNode | AdminError::OwnNode => AskFailure::InvalidNode,
+                    AdminError::Unsupported => AskFailure::Unsupported,
+                    AdminError::NotConnected | AdminError::NoAnswer | AdminError::Refused(_) => {
+                        AskFailure::NotConnected
+                    }
+                })?;
+            let request = self
+                .store
+                .add_request(id, new.node, new.kind, 0, tag, now())
+                .await?;
+            let _ = self.changes.send(Change::Request(id, request.clone()));
+            return Ok(request);
         }
         if let Some(pace) = new.kind.pace() {
             let wait = self.wait(id, pace, now()).await?;
@@ -890,6 +941,7 @@ impl Radios {
             RequestKind::PowerTelemetry => Ask::PowerTelemetry,
             RequestKind::LocalStats => Ask::LocalStats,
             RequestKind::Neighbors => Ask::Neighbors,
+            RequestKind::Regions => return Err(AskFailure::Unsupported),
         };
         let packet_id =
             mesh.send_request(new.node, new.channel, ask)
@@ -2085,6 +2137,7 @@ impl Radios {
                             }
                         })
                     }
+                    Ok(mesh::Event::Reply(reply)) => keep_reply(&store, &changes, id, &reply).await,
                     Ok(mesh::Event::Synced) => {
                         connected = true;
                         match save_all(&store, id, &mesh).await {
@@ -2186,7 +2239,9 @@ fn admin_failure(error: AdminError) -> SettingsFailure {
         AdminError::NoAnswer => SettingsFailure::NoAnswer,
         AdminError::Unsupported => SettingsFailure::Unsupported,
         // Settings name no node.
-        AdminError::UnknownNode | AdminError::OwnNode => SettingsFailure::NotConnected,
+        AdminError::UnknownNode | AdminError::OwnNode | AdminError::NoPath => {
+            SettingsFailure::NotConnected
+        }
         // Settings are not acknowledged, but read back.
         AdminError::Refused(_) => SettingsFailure::NoAnswer,
     }

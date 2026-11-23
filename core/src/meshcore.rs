@@ -623,6 +623,12 @@ fn hops(path_len: u8) -> Option<u32> {
     (path_len != NO_PATH).then_some(u32::from(path_len & 0x3f))
 }
 
+/// A contact's path out: its length byte, and its hashes.
+type Path = (u8, Vec<u8>);
+
+/// A request waiting for its answer: who it went to, and what it asked.
+type Asked = (u32, u8);
+
 /// The open session with a radio: what sending needs.
 #[derive(Clone)]
 pub(crate) struct Session {
@@ -632,6 +638,48 @@ pub(crate) struct Session {
     /// Direct messages waiting for their acknowledgement: the tag the radio
     /// gave, and who they went to.
     pending: Arc<Mutex<HashMap<[u8; 4], u32>>>,
+    /// Every contact's path out, its length byte and its hashes, by its node
+    /// number.
+    paths: Arc<Mutex<HashMap<u32, Path>>>,
+    /// Requests waiting for their answer: the tag the radio gave, who they
+    /// went to and what they asked.
+    asked: Arc<Mutex<HashMap<[u8; 4], Asked>>>,
+}
+
+/// What an anonymous request asks a node for, as the firmware numbers it.
+pub mod anonymous {
+    /// The regions it repeats on.
+    pub const REGIONS: u8 = 0x01;
+}
+
+/// What a node answered a request with, read by what was asked: its first
+/// four bytes are its clock.
+fn answer_of(asked: u8, data: &[u8]) -> Option<crate::mesh::Answer> {
+    let clock = data
+        .get(..4)
+        .and_then(|b| b.try_into().ok())
+        .map(u32::from_le_bytes);
+    match asked {
+        anonymous::REGIONS => {
+            let text = String::from_utf8_lossy(data.get(4..).unwrap_or_default()).into_owned();
+            let mut unscoped = false;
+            let mut names = Vec::new();
+            for name in text.trim_end_matches('\0').split(',') {
+                let name = name.trim_matches(|c: char| c == '\0' || c.is_whitespace());
+                match name {
+                    "" => {}
+                    "*" => unscoped = true,
+                    name => names.push(name.trim_start_matches('#').to_owned()),
+                }
+            }
+            Some(crate::mesh::Answer::Regions {
+                names,
+                unscoped,
+                clock,
+            })
+        }
+        _ => None,
+    }
 }
 
 impl Session {
@@ -856,6 +904,7 @@ impl Mesh {
             kind,
             flags: 0,
             path_len: -1,
+            path: Vec::new(),
             name: name.to_owned(),
             last_advert: at,
             lat: 0,
@@ -931,6 +980,52 @@ impl Mesh {
             None => Vec::new(),
         });
         Ok(())
+    }
+
+    /// Asks a node something with no login, as an anonymous request: it goes
+    /// direct, on the path the radio knows, with the way back in it, as a
+    /// node answers only those. The id it goes by, which its answer comes
+    /// as a [`Event::Reply`] with.
+    pub async fn meshcore_ask(&self, num: u32, kind: u8) -> Result<u32, AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        let (path_len, path) = session
+            .paths
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&num)
+            .cloned()
+            .ok_or(AdminError::UnknownNode)?;
+        if path_len == NO_PATH {
+            return Err(AdminError::NoPath);
+        }
+        // The way back: the same hashes, the other way round.
+        let size = usize::from(path_len >> 6) + 1;
+        let mut request = vec![kind, path_len];
+        for hash in path.chunks(size).rev() {
+            request.extend_from_slice(hash);
+        }
+        let answer = session
+            .client
+            .ask_one(command::send_anon_request(&key, &request), |r| {
+                matches!(r, Response::MessageSent { .. })
+            })
+            .await;
+        let tag = match answer {
+            Ok(Response::MessageSent { tag, .. }) => tag,
+            Ok(Response::Error(code)) => {
+                return Err(AdminError::Refused(error_name(code).to_owned()));
+            }
+            Ok(_) => return Err(AdminError::Refused("UNEXPECTED".to_owned())),
+            Err("the radio did not answer") => return Err(AdminError::NoAnswer),
+            Err(_) => return Err(AdminError::NotConnected),
+        };
+        session
+            .asked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(tag, (num, kind));
+        Ok(u32::from_le_bytes(tag))
     }
 
     /// Has the radio say who it is: to those it hears directly, or flooded
@@ -1083,6 +1178,8 @@ async fn session(
         client: Arc::clone(&client),
         keys: Arc::default(),
         pending: Arc::default(),
+        paths: Arc::default(),
+        asked: Arc::default(),
     };
     let me_node = Node {
         last_heard: Some(now()),
@@ -1092,6 +1189,7 @@ async fn session(
             kind: me.kind,
             flags: 0,
             path_len: 0,
+            path: Vec::new(),
             name: me.name.clone(),
             last_advert: now(),
             lat: me.lat,
@@ -1150,6 +1248,9 @@ async fn session(
                     });
                 }
                 Some(Response::Ack(tag)) => acknowledged(mesh, &session, tag),
+                Some(Response::BinaryResponse { tag, data }) => {
+                    replied(mesh, &session, tag, &data);
+                }
                 Some(_) => {}
             },
             // Every contact again, now and then: those the radio no longer
@@ -1254,9 +1355,38 @@ fn acknowledged(mesh: &Mesh, session: &Session, tag: [u8; 4]) {
 
 fn remember_keys(session: &Session, contacts: &[Contact]) {
     let mut keys = session.keys.lock().unwrap_or_else(|e| e.into_inner());
+    let mut paths = session.paths.lock().unwrap_or_else(|e| e.into_inner());
     for contact in contacts {
-        keys.insert(num_of(&contact.public_key), contact.public_key);
+        let num = num_of(&contact.public_key);
+        keys.insert(num, contact.public_key);
+        paths.insert(
+            num,
+            (contact.path_len.cast_unsigned(), contact.path.clone()),
+        );
     }
+}
+
+/// A node's answer to a request, told if it was asked.
+fn replied(mesh: &Mesh, session: &Session, tag: [u8; 4], data: &[u8]) {
+    let asked = session
+        .asked
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&tag);
+    let Some((from, kind)) = asked else {
+        return;
+    };
+    let Some(answer) = answer_of(kind, data) else {
+        tracing::debug!(from, kind, "unreadable answer");
+        return;
+    };
+    mesh.update(|_| {
+        vec![Event::Reply(crate::mesh::Reply {
+            request_id: u32::from_le_bytes(tag),
+            from,
+            answer,
+        })]
+    });
 }
 
 fn direct(state: &mut MeshState, message: &ContactMessage) -> Vec<Event> {
@@ -1337,6 +1467,7 @@ mod tests {
             kind,
             flags: 0,
             path_len: 2,
+            path: vec![0x11, 0x22],
             name: name.into(),
             last_advert: 1_795_000_000,
             lat: 43_331_140,
@@ -1374,6 +1505,32 @@ mod tests {
         far.path_len = -1;
         assert_eq!(node_from(&far).hops_away, None);
         assert_eq!(hops(NO_PATH), None);
+    }
+
+    #[test]
+    fn regions_read_as_a_repeater_answers_them() {
+        // As StaLocaia answered: its clock, then the names, padded.
+        let mut data = 1_718_789_276u32.to_le_bytes().to_vec();
+        data.extend(b"*,europe,#galicia,\0\0\0\0");
+        assert_eq!(
+            answer_of(anonymous::REGIONS, &data),
+            Some(crate::mesh::Answer::Regions {
+                names: vec!["europe".into(), "galicia".into()],
+                unscoped: true,
+                clock: Some(1_718_789_276),
+            })
+        );
+        // None at all, and what was not asked.
+        let none = 1u32.to_le_bytes();
+        assert_eq!(
+            answer_of(anonymous::REGIONS, &none),
+            Some(crate::mesh::Answer::Regions {
+                names: Vec::new(),
+                unscoped: false,
+                clock: Some(1),
+            })
+        );
+        assert_eq!(answer_of(0x7f, &none), None);
     }
 
     #[test]

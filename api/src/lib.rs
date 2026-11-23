@@ -88,6 +88,10 @@ pub enum ErrorCode {
     InvalidLink,
     /// The radio has not the free slots the link's channels take.
     NoFreeSlots,
+    /// A node the radio knows no path to, for a request that goes only
+    /// direct, as MeshCore's anonymous ones: once its path is known, from
+    /// its advert or a message, it can be asked.
+    NoPath,
 }
 
 /// The body of every error the API answers with.
@@ -1196,6 +1200,10 @@ pub enum RequestKind {
     LocalStats,
     /// The nodes it hears directly. Once in three minutes at most.
     Neighbors,
+    /// The regions a MeshCore repeater or room repeats floods scoped to, and
+    /// whether it repeats those scoped to none: with no login, only direct,
+    /// so to a node the radio knows a path to.
+    Regions,
 }
 
 impl RequestKind {
@@ -1203,7 +1211,7 @@ impl RequestKind {
     /// radio sends it whenever asked.
     pub const fn pace(self) -> Option<Pace> {
         match self {
-            Self::NodeInfo | Self::Neighbors => None,
+            Self::NodeInfo | Self::Neighbors | Self::Regions => None,
             Self::Position => Some(Pace::Position),
             Self::DeviceTelemetry
             | Self::EnvironmentTelemetry
@@ -1303,6 +1311,27 @@ pub struct Request {
     pub answered_at: Option<i64>,
     /// The packet that answered it, as heard.
     pub answer: Option<Packet>,
+    /// What it answered, for a node that answers with no packet, as
+    /// MeshCore nodes do.
+    #[serde(default)]
+    pub reply: Option<RequestReply>,
+}
+
+/// What a node answered a request with, by what it was asked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RequestReply {
+    Regions {
+        /// The regions it repeats floods scoped to, by their names, without
+        /// `#`.
+        #[cfg_attr(feature = "openapi", schema(example = json!(["europe", "galicia"])))]
+        regions: Vec<String>,
+        /// Whether it repeats floods scoped to no region.
+        unscoped: bool,
+        /// Its clock as it answered, in seconds since the epoch.
+        clock: Option<i64>,
+    },
 }
 
 /// Who the radio says it is.
