@@ -396,8 +396,17 @@
       }
       .sidebar-body .empty { margin: 0; padding: 2px 10px; font-size: 12px; }
       /* A radio's pages, over its conversations, which scroll under them. */
-      .sidebar-pages { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-bottom: 1px solid var(--mc-border); }
+      .sidebar-pages { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 8px; }
       .sidebar-pages + .sidebar-body > h2:first-child { margin-top: 6px; }
+      /* A line under the pages only while something of the list is out of
+         view under them: drawn always, and covered by a strip that scrolls
+         with the list, out of the way once it is scrolled. CSS alone, in
+         every browser. */
+      .sidebar-pages + .sidebar-body {
+        background:
+          linear-gradient(var(--mc-surface), var(--mc-surface)) top / 100% 2px no-repeat local,
+          linear-gradient(var(--mc-border), var(--mc-border)) top / 100% 1px no-repeat scroll;
+      }
       .item {
         display: flex;
         align-items: center;
