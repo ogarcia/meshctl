@@ -25,6 +25,7 @@ mod preferences;
 mod radios;
 mod sections;
 mod settings;
+mod storage;
 mod traces;
 mod welcome;
 

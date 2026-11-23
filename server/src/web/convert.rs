@@ -94,6 +94,8 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
         }
         Change::NodeForgotten(radio, node) => ServerMessage::NodeForgotten { radio, node },
         Change::MessagesForgotten(radio, ids) => ServerMessage::MessagesForgotten { radio, ids },
+        Change::Cleaned(cleaned) => ServerMessage::Cleaned { cleaned },
+        Change::Retention(retention) => ServerMessage::Retention { retention },
         Change::ConversationRead { radio, peer, up_to } => {
             ServerMessage::ConversationRead { radio, peer, up_to }
         }

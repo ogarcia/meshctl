@@ -31,6 +31,11 @@ const NAME_MAX: usize = 64;
 /// How many events a slow follower may fall behind before it misses some.
 const EVENT_BACKLOG: usize = 4096;
 
+/// How often what is kept for longer than it is kept is cleaned away.
+const CLEANING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+const DAY: i64 = 24 * 3600;
+
 /// What changed, across every radio.
 #[derive(Debug, Clone)]
 pub enum Change {
@@ -68,6 +73,10 @@ pub enum Change {
         peer: Peer,
         up_to: MessageId,
     },
+    /// What was kept for longer than it is kept, or as asked, cleaned away.
+    Cleaned(meshctl_api::Cleaned),
+    /// How long what meshctl keeps is kept changed.
+    Retention(meshctl_api::Retention),
     /// Events of a radio were lost on their way here.
     Lagged,
 }
@@ -430,7 +439,125 @@ impl Radios {
             let state = radios.stored_state(record.id).await?;
             radios.run(&record, state);
         }
+        radios.keep_clean();
         Ok(radios)
+    }
+
+    /// Cleans away what is kept for longer than it is kept: on starting, and
+    /// once a day, until stopped.
+    fn keep_clean(&self) {
+        let radios = self.clone();
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(CLEANING_INTERVAL);
+            loop {
+                tokio::select! {
+                    _ = every.tick() => {
+                        if let Err(err) = radios.clean().await {
+                            tracing::warn!(error = format_args!("{err:#}"), "cannot clean");
+                        }
+                    }
+                    () = radios.stopped() => return,
+                }
+            }
+        });
+    }
+
+    /// How long what meshctl keeps is kept.
+    pub async fn retention(&self) -> Result<meshctl_api::Retention> {
+        self.store.retention().await
+    }
+
+    /// Changes how long what meshctl keeps is kept, and cleans away at once
+    /// what is now kept for longer.
+    pub async fn set_retention(&self, retention: meshctl_api::Retention) -> Result<()> {
+        self.store.set_retention(&retention).await?;
+        let _ = self.changes.send(Change::Retention(retention));
+        self.clean().await?;
+        Ok(())
+    }
+
+    /// What is kept, and how much room it takes.
+    pub async fn storage(&self) -> Result<meshctl_api::Storage> {
+        self.store.storage().await
+    }
+
+    /// Cleans away what is kept for longer than it is kept: the packets but
+    /// each node's latest of each kind, the messages, and the nodes meshctl
+    /// alone keeps, not heard for so long. Never a node the radio has, nor a
+    /// favourite, nor one it is not known of yet. Every client hears of it
+    /// if anything went.
+    pub async fn clean(&self) -> Result<meshctl_api::Cleaned> {
+        let retention = self.store.retention().await?;
+        let now = now();
+        let before = |days: u32| now - i64::from(days) * DAY;
+        let mut cleaned = meshctl_api::Cleaned::default();
+        if let Some(days) = retention.packets {
+            cleaned.packets = self.store.prune_packets(before(days)).await?;
+        }
+        if let Some(days) = retention.messages {
+            cleaned.messages = self.store.prune_messages(before(days)).await?;
+        }
+        if let Some(days) = retention.nodes {
+            let before = before(days);
+            let meshes: Vec<(RadioId, Mesh)> = self
+                .lock()
+                .iter()
+                .map(|(id, running)| (*id, running.mesh.clone()))
+                .collect();
+            for (id, mesh) in meshes {
+                let old: Vec<u32> = mesh.read(|state| {
+                    state
+                        .nodes
+                        .values()
+                        .filter(|n| n.on_radio == Some(false) && !n.favorite)
+                        .filter(|n| n.last_heard.is_some_and(|at| i64::from(at) < before))
+                        .map(|n| n.num)
+                        .collect()
+                });
+                for num in old {
+                    mesh.drop_node(num);
+                    self.store.remove_node(id, num).await?;
+                    cleaned.nodes += 1;
+                }
+            }
+        }
+        self.cleaned(cleaned).await
+    }
+
+    /// Forgets the conversations of channels no radio has any more.
+    pub async fn forget_gone_channels(&self) -> Result<meshctl_api::Cleaned> {
+        let messages = self.store.forget_gone_channels().await?;
+        self.cleaned(meshctl_api::Cleaned {
+            messages,
+            ..Default::default()
+        })
+        .await
+    }
+
+    /// Forgets the direct conversations with nodes meshctl no longer keeps.
+    pub async fn forget_gone_directs(&self) -> Result<meshctl_api::Cleaned> {
+        let messages = self.store.forget_gone_directs().await?;
+        self.cleaned(meshctl_api::Cleaned {
+            messages,
+            ..Default::default()
+        })
+        .await
+    }
+
+    /// The room freed given back, and every client told, if anything went.
+    async fn cleaned(&self, mut cleaned: meshctl_api::Cleaned) -> Result<meshctl_api::Cleaned> {
+        cleaned.bytes = self.store.reclaim().await?;
+        if cleaned != meshctl_api::Cleaned::default() {
+            tracing::info!(
+                packets = cleaned.packets,
+                nodes = cleaned.nodes,
+                messages = cleaned.messages,
+                bytes = cleaned.bytes,
+                "cleaned"
+            );
+            let _ = self.changes.send(Change::Cleaned(cleaned));
+        }
+        Ok(cleaned)
     }
 
     /// Everything that changes from now on, on every radio.

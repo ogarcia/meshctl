@@ -89,6 +89,8 @@ pub enum Page {
     Preferences,
     /// meshctl's: the radios it connects to.
     Radios,
+    /// meshctl's: what it keeps, and for how long.
+    Data,
     /// On a phone: the selected radio's channels and direct conversations,
     /// which a wider screen has aside.
     Chats,
@@ -100,7 +102,7 @@ pub enum Page {
 impl Page {
     /// Whether it is one of meshctl's own settings, not a radio's.
     fn is_meshctl(self) -> bool {
-        matches!(self, Self::Preferences | Self::Radios)
+        matches!(self, Self::Preferences | Self::Radios | Self::Data)
     }
 }
 
@@ -176,6 +178,9 @@ pub struct Live {
     pub removing: RwSignal<bool>,
     /// Whether the window to add from a link is open.
     pub adding_link: RwSignal<Option<crate::links::LinkWant>>,
+    /// Turned whenever what meshctl keeps was cleaned, or how long it keeps
+    /// it changed: for the Data page to read it again.
+    pub storage_turn: RwSignal<u32>,
     /// Whether the open node's requests are shown, in their drawer.
     pub history: RwSignal<bool>,
     /// Whether the radios are shown to switch the selected one, on a phone.
@@ -243,6 +248,7 @@ impl Live {
             history: RwSignal::new(false),
             removing: RwSignal::new(false),
             adding_link: RwSignal::new(None),
+            storage_turn: RwSignal::new(0),
             radio_sheet: RwSignal::new(false),
             map_pick: RwSignal::new(None),
             map_focus: RwSignal::new(None),
@@ -930,6 +936,15 @@ impl Live {
                 ServerMessage::ConversationRead { radio, .. } if self.is_selected(radio) => {
                     self.refresh_conversations().await
                 }
+                // Cleaned away: what shows what was kept, read again.
+                ServerMessage::Cleaned { .. } => {
+                    self.storage_turn.update(|n| *n += 1);
+                    self.refresh_selected().await
+                }
+                ServerMessage::Retention { .. } => {
+                    self.storage_turn.update(|n| *n += 1);
+                    Ok(())
+                }
                 ServerMessage::MessagesForgotten { radio, ids } if self.is_selected(radio) => {
                     self.thread.update(|t| t.retain(|m| !ids.contains(&m.id)));
                     Ok(())
@@ -1267,6 +1282,7 @@ fn Content() -> impl IntoView {
             (_, None, _) => Shown::Nothing,
             (_, _, Page::Preferences) => Shown::Page(Page::Preferences),
             (_, _, Page::Radios) => Shown::Page(Page::Radios),
+            (_, _, Page::Data) => Shown::Page(Page::Data),
             // The welcome, over the whole screen, instead.
             (_, Some(0), _) => Shown::Nothing,
             (_, Some(_), page) => Shown::Page(page),
@@ -1285,6 +1301,7 @@ fn Content() -> impl IntoView {
         Shown::Nothing => ().into_any(),
         Shown::Page(Page::Preferences) => view! { <PreferencesView /> }.into_any(),
         Shown::Page(Page::Radios) => view! { <RadiosView /> }.into_any(),
+        Shown::Page(Page::Data) => view! { <crate::storage::DataView /> }.into_any(),
         Shown::Page(Page::Map) => view! { <MapView /> }.into_any(),
         Shown::Page(Page::Nodes) => view! { <MeshView /> }.into_any(),
         Shown::Page(Page::Chat) => view! { <ChatView /> }.into_any(),
@@ -1449,6 +1466,7 @@ fn MeshctlSidebar() -> impl IntoView {
         };
         let label = move || match page {
             Page::Preferences => t!(i18n, prefs_title).into_any(),
+            Page::Data => t!(i18n, data_title).into_any(),
             _ => t!(i18n, radios_title).into_any(),
         };
         // The radios' page opens on their list, the editor closed.
@@ -1465,7 +1483,9 @@ fn MeshctlSidebar() -> impl IntoView {
             <h1>"meshctl"</h1>
             <span class="dim">{t!(i18n, nav_meshctl_settings)}</span>
         </header>
-        <div class="sidebar-body">{item(Page::Radios)} {item(Page::Preferences)}</div>
+        <div class="sidebar-body">
+            {item(Page::Radios)} {item(Page::Preferences)} {item(Page::Data)}
+        </div>
     }
 }
 
@@ -1772,6 +1792,13 @@ fn Topbar() -> impl IntoView {
             <div class="heading">
                 <h1>{t!(i18n, prefs_title)}</h1>
                 <span class="dim">{t!(i18n, prefs_text)}</span>
+            </div>
+        }
+        .into_any(),
+        Page::Data => view! {
+            <div class="heading">
+                <h1>{t!(i18n, data_title)}</h1>
+                <span class="dim">{t!(i18n, data_text)}</span>
             </div>
         }
         .into_any(),

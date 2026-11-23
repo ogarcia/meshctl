@@ -444,6 +444,86 @@ pub struct LinkChannel {
     pub present: bool,
 }
 
+/// How long what meshctl keeps is kept, each in days: `null` for ever.
+/// Whatever is left out takes its default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default)]
+pub struct Retention {
+    /// The packets heard: the live view, the charts, what answered a
+    /// request. Each node's latest of each kind stays, however old, and
+    /// the requests and traces go with them.
+    #[cfg_attr(feature = "openapi", schema(example = 30, minimum = 1))]
+    pub packets: Option<u32>,
+    /// The nodes meshctl alone keeps, not heard for so long. Never one the
+    /// radio has, nor a favourite, nor one it is not known of yet.
+    #[cfg_attr(feature = "openapi", schema(example = 90, minimum = 1))]
+    pub nodes: Option<u32>,
+    /// The messages, in channels and direct.
+    #[cfg_attr(feature = "openapi", schema(example = json!(null), minimum = 1))]
+    pub messages: Option<u32>,
+}
+
+impl Default for Retention {
+    fn default() -> Self {
+        Self {
+            packets: Some(30),
+            nodes: Some(90),
+            messages: None,
+        }
+    }
+}
+
+impl Retention {
+    /// The longest a time may be, in days: a hundred years.
+    pub const LONGEST: u32 = 36_500;
+
+    /// Whether every time is one there can be.
+    pub fn valid(&self) -> bool {
+        [self.packets, self.nodes, self.messages]
+            .into_iter()
+            .flatten()
+            .all(|days| (1..=Self::LONGEST).contains(&days))
+    }
+}
+
+/// What meshctl keeps, and how much room it takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Storage {
+    /// The database's size, in bytes, room freed and not given back yet
+    /// left out.
+    pub bytes: u64,
+    pub packets: u64,
+    /// When the oldest packet kept was heard, in seconds since the epoch.
+    pub oldest_packet: Option<i64>,
+    pub messages: u64,
+    pub nodes: u64,
+    /// The messages of channels no radio has any more.
+    pub gone_channels: Gone,
+    /// The direct messages with nodes meshctl no longer keeps.
+    pub gone_directs: Gone,
+}
+
+/// Conversations left behind, and their messages.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Gone {
+    pub conversations: u64,
+    pub messages: u64,
+}
+
+/// What a cleaning took away.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Cleaned {
+    pub packets: u64,
+    pub nodes: u64,
+    pub messages: u64,
+    /// The room given back, in bytes.
+    pub bytes: u64,
+}
+
 /// An emoji picked in the interface, to count among the most used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

@@ -13,12 +13,15 @@ use meshctl_api::{
 };
 use meshctl_core::mesh::{Heard, LocalNode, Node, Position, PositionSource, User};
 use sqlx::SqliteConnection;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{
+    SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
+};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod requests;
+mod retention;
 
 /// A radio's button as stored: NULL for the one every radio has by default.
 fn badge_json(badge: &Badge) -> Result<Option<String>> {
@@ -260,6 +263,9 @@ impl Store {
             .filename(data.join(DATABASE_FILE))
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
+            // What is cleaned away given back to the disk, a little at a
+            // time: set as the database is made.
+            .auto_vacuum(SqliteAutoVacuum::Incremental)
             .foreign_keys(true);
         let pool = SqlitePoolOptions::new()
             .connect_with(options)
@@ -730,11 +736,12 @@ impl Store {
         // decrypt it hears it too.
         sqlx::query(
             "INSERT INTO packet (packet_id, from_num, to_num, portnum, payload, request_id,
-                reply_id, want_response, pki, at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                reply_id, want_response, pki, kind, at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (from_num, packet_id) DO UPDATE SET
                 portnum = excluded.portnum,
                 payload = excluded.payload,
+                kind = excluded.kind,
                 request_id = excluded.request_id,
                 reply_id = excluded.reply_id,
                 want_response = excluded.want_response
@@ -749,6 +756,7 @@ impl Store {
         .bind(heard.reply_id.map(i64::from))
         .bind(heard.want_response)
         .bind(heard.pki)
+        .bind(retention::telemetry_kind(heard.portnum, &heard.payload))
         .bind(i64::from(heard.at))
         .execute(&mut *tx)
         .await?;
@@ -2219,6 +2227,63 @@ mod tests {
                 (Peer::Node { node: 9 }, 3),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn what_was_left_behind_is_told_and_forgotten() {
+        use crate::channels::fingerprint;
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        let slot = |index: u32, name: &str| Slot {
+            index,
+            fingerprint: fingerprint(name, &[1]),
+            name: name.into(),
+        };
+        let on = |packet_id: u32, channel: u32| NewMessageRow {
+            channel,
+            ..text(packet_id, 9, BROADCAST, false)
+        };
+        // A and B, then B taken off the radio, with two messages left.
+        let both = [slot(0, "A"), slot(1, "B")];
+        assert!(store.follow_channels(radio, &both, 10).await.unwrap());
+        for row in [on(1, 0), on(2, 1), on(3, 1)] {
+            store.add_message(radio, &row).await.unwrap();
+        }
+        assert!(store.follow_channels(radio, &both[..1], 20).await.unwrap());
+        // With 5, kept, and with 6, gone: one each way.
+        store.save_node(radio, &node(5, "Faro")).await.unwrap();
+        for row in [
+            text(4, 5, 1, false),
+            text(5, 6, 1, false),
+            text(6, 1, 6, true),
+        ] {
+            store.add_message(radio, &row).await.unwrap();
+        }
+
+        let storage = store.storage().await.unwrap();
+        assert_eq!(storage.messages, 6);
+        assert_eq!(
+            (
+                storage.gone_channels.conversations,
+                storage.gone_channels.messages
+            ),
+            (1, 2)
+        );
+        assert_eq!(
+            (
+                storage.gone_directs.conversations,
+                storage.gone_directs.messages
+            ),
+            (1, 2)
+        );
+        assert_eq!(store.forget_gone_channels().await.unwrap(), 2);
+        assert_eq!(store.forget_gone_directs().await.unwrap(), 2);
+        let storage = store.storage().await.unwrap();
+        assert_eq!(storage.messages, 2);
+        assert_eq!(storage.gone_channels, meshctl_api::Gone::default());
+        assert_eq!(storage.gone_directs, meshctl_api::Gone::default());
+        // Old messages, by when.
+        assert_eq!(store.prune_messages(2).await.unwrap(), 1);
     }
 
     #[tokio::test]

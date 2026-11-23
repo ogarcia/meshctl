@@ -71,6 +71,11 @@ pub enum ServerMessage {
     /// Messages forgotten, as asked of the daemon: one, and the reactions to
     /// it.
     MessagesForgotten { radio: RadioId, ids: Vec<MessageId> },
+    /// What was kept for longer than it is kept, or as asked, cleaned away:
+    /// whatever shows what was kept is to be read again.
+    Cleaned { cleaned: crate::Cleaned },
+    /// How long what meshctl keeps is kept changed.
+    Retention { retention: crate::Retention },
     /// What became of a message sent.
     MessageStatus {
         radio: RadioId,

@@ -454,6 +454,49 @@ pub async fn use_emoji(emoji: &str) -> Result<Vec<String>, Failure> {
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// What meshctl keeps, and how much room it takes.
+pub async fn kept() -> Result<meshctl_api::Storage, Failure> {
+    get("/storage").await
+}
+
+/// How long what meshctl keeps is kept.
+pub async fn retention() -> Result<meshctl_api::Retention, Failure> {
+    get("/storage/retention").await
+}
+
+/// Changes how long what meshctl keeps is kept; the daemon cleans at once.
+pub async fn set_retention(
+    retention: &meshctl_api::Retention,
+) -> Result<meshctl_api::Retention, Failure> {
+    let request = with_token(Request::put(&url("/storage/retention")))
+        .json(retention)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// Asks the daemon for a cleaning without a body, at `path`; what went.
+async fn cleaning(path: &str) -> Result<meshctl_api::Cleaned, Failure> {
+    let request = with_token(Request::post(&url(path)));
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// Cleans away now what is kept for longer than it is kept.
+pub async fn clean() -> Result<meshctl_api::Cleaned, Failure> {
+    cleaning("/storage/clean").await
+}
+
+/// Forgets the conversations of channels no radio has any more.
+pub async fn forget_gone_channels() -> Result<meshctl_api::Cleaned, Failure> {
+    cleaning("/storage/gone-channels").await
+}
+
+/// Forgets the direct conversations with nodes meshctl no longer keeps.
+pub async fn forget_gone_directs() -> Result<meshctl_api::Cleaned, Failure> {
+    cleaning("/storage/gone-directs").await
+}
+
 /// Adds a radio, or changes one when given its id.
 pub async fn save_radio(
     radio: Option<RadioId>,

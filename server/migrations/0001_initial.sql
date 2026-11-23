@@ -211,6 +211,10 @@ CREATE TABLE packet (
     reply_id INTEGER,
     want_response INTEGER NOT NULL DEFAULT 0,
     pki INTEGER NOT NULL DEFAULT 0,
+    -- For telemetry, which kind it carries, as its field in the protobufs
+    -- numbers it (2 device, 3 environment…): the latest of each is kept,
+    -- however old. NULL for any other port.
+    kind INTEGER,
     -- When it was first heard, by any radio.
     at INTEGER NOT NULL
 );
@@ -221,6 +225,8 @@ CREATE INDEX packet_to ON packet (to_num, at);
 -- latest of each kind.
 CREATE INDEX packet_from ON packet (from_num, at);
 CREATE INDEX packet_request ON packet (request_id) WHERE request_id IS NOT NULL;
+-- The oldest heard, to clean away first.
+CREATE INDEX packet_at ON packet (at);
 
 -- Each radio's hearing of a packet. A radio, or a tasticsplitter, replays
 -- packets on reconnecting: the same radio hears a packet once.

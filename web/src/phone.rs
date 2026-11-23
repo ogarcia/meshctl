@@ -26,7 +26,9 @@ fn tab_of(page: Page) -> Page {
         Page::Nodes | Page::Node => Page::Nodes,
         Page::Chats | Page::Chat => Page::Chats,
         Page::Packets => Page::Packets,
-        Page::More | Page::RadioSettings | Page::Preferences | Page::Radios => Page::More,
+        Page::More | Page::RadioSettings | Page::Preferences | Page::Radios | Page::Data => {
+            Page::More
+        }
     }
 }
 
@@ -55,7 +57,7 @@ pub fn is_tab(page: Page) -> bool {
 pub fn back_of(page: Page) -> Option<Page> {
     match page {
         Page::Chat => Some(Page::Chats),
-        Page::RadioSettings | Page::Preferences | Page::Radios => Some(Page::More),
+        Page::RadioSettings | Page::Preferences | Page::Radios | Page::Data => Some(Page::More),
         _ => None,
     }
 }
@@ -304,6 +306,7 @@ pub fn MoreView() -> impl IntoView {
         let label = move || match page {
             Page::RadioSettings => t!(i18n, nav_radio_settings).into_any(),
             Page::Radios => t!(i18n, radios_title).into_any(),
+            Page::Data => t!(i18n, data_title).into_any(),
             _ => t!(i18n, prefs_title).into_any(),
         };
         view! {
@@ -332,6 +335,7 @@ pub fn MoreView() -> impl IntoView {
             <h2>"meshctl"</h2>
             {item(Page::Radios)}
             {item(Page::Preferences)}
+            {item(Page::Data)}
         </div>
     }
 }

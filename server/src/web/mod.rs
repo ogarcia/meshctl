@@ -24,6 +24,7 @@ mod radios;
 mod requests;
 mod secrets;
 mod settings;
+mod storage;
 mod traceroutes;
 
 pub use auth::Auth;
@@ -77,6 +78,7 @@ const SCALAR_HTML: &str = r#"<!doctype html>
         (name = "packets", description = "What each radio hears, as it hears it"),
         (name = "requests", description = "What nodes are asked for, and answer"),
         (name = "preferences", description = "How the interface looks, for every browser"),
+        (name = "storage", description = "What meshctl keeps, and for how long"),
         (name = "events", description = "What changes, as it changes"),
     ),
     components(schemas(
@@ -107,6 +109,7 @@ pub fn router(state: AppState) -> Router {
         .merge(settings::router())
         .merge(secrets::router())
         .merge(preferences::router())
+        .merge(storage::router())
         .merge(packets::router())
         .merge(requests::router())
         .layer(axum::middleware::from_fn_with_state(
