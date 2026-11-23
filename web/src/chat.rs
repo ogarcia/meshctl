@@ -18,6 +18,10 @@ use wasm_bindgen::JsCast;
 /// The longest text the daemon takes, in bytes.
 /// What sends a message, as an icon.
 const SMILE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/mood-smile.svg");
+const CLOCK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/clock.svg");
+const CHECK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/check.svg");
+const CHECKS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/checks.svg");
+const ALERT: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/alert-triangle.svg");
 const SEND: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/send.svg");
 
 const MAX_TEXT_BYTES: usize = 200;
@@ -177,6 +181,7 @@ pub fn ChatView() -> impl IntoView {
 
 #[component]
 fn Bubble(message: Message, peer: Peer) -> impl IntoView {
+    let i18n = use_i18n();
     let live = expect_context::<Live>();
     let at = u32::try_from(message.at).unwrap_or_default();
     let mine = message.outgoing;
@@ -213,14 +218,33 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
             parts.join(" · ")
         })
         .filter(|meta| !meta.is_empty());
-    let (mark, mark_class) = match message.status {
-        MessageStatus::Received => ("", ""),
-        MessageStatus::Sending => ("…", "pending"),
-        MessageStatus::Sent => ("✓", "sent"),
-        MessageStatus::Delivered => ("✓✓", "delivered"),
-        MessageStatus::Failed => ("⚠", "failed"),
-    };
-    let error = message.error.clone().unwrap_or_default();
+    // How far it went, as an icon: waiting, out, received, or not; its words
+    // on hovering, and why it failed, when it did.
+    let status = message.status;
+    let error = message.error.clone();
+    let mark = (status != MessageStatus::Received).then(|| {
+        let (icon, class) = match status {
+            MessageStatus::Sending => (CLOCK, "pending"),
+            MessageStatus::Sent => (CHECK, "sent"),
+            MessageStatus::Delivered => (CHECKS, "delivered"),
+            _ => (ALERT, "failed"),
+        };
+        let words = move || {
+            let words = match status {
+                MessageStatus::Sending => t_string!(i18n, chat_sending),
+                MessageStatus::Sent => t_string!(i18n, chat_sent),
+                MessageStatus::Delivered => t_string!(i18n, chat_delivered),
+                _ => t_string!(i18n, chat_failed),
+            };
+            match &error {
+                Some(error) => format!("{words}: {error}"),
+                None => words.to_owned(),
+            }
+        };
+        view! {
+            <span class=format!("mark {class}") title=words.clone() aria-label=words inner_html=icon></span>
+        }
+    });
 
     view! {
         <div class=if mine { "bubble mine" } else { "bubble" }>
@@ -229,8 +253,7 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
             <span class="meta dim">
                 {move || ago(live.now.get(), at)}
                 {reception.map(|r| format!(" · {r}"))}
-                " "
-                <span class=format!("mark {mark_class}") title=error>{mark}</span>
+                {mark}
             </span>
         </div>
     }

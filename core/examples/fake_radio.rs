@@ -281,6 +281,34 @@ impl Radio {
             println!("port {} sent too soon: dropped", data.portnum);
             return None;
         }
+        // A text that wants an acknowledgement gets one, as the firmware
+        // gives it: on a channel, from the radio itself once it hears a
+        // neighbour pass it on; to the neighbour, from the neighbour once it
+        // has it; to anyone else, after its tries, that nobody answered.
+        if data.portnum == PortNum::TextMessageApp as i32 && packet.want_ack {
+            let (error, delay) = if packet.to == NEIGHBOUR || packet.to == u32::MAX {
+                (
+                    pb::routing::Error::None,
+                    Duration::from_millis(800 + random(1_500)),
+                )
+            } else {
+                (pb::routing::Error::MaxRetransmit, Duration::from_secs(8))
+            };
+            let routing = pb::Routing {
+                variant: Some(pb::routing::Variant::ErrorReason(error as i32)),
+                ..Default::default()
+            };
+            let mut ack = self.reply(packet, PortNum::RoutingApp, routing.encode_to_vec(), 6.0);
+            if packet.to != NEIGHBOUR {
+                ack.from = ME;
+            }
+            println!(
+                "text to !{:08x}: {error:?} in {} ms",
+                packet.to,
+                delay.as_millis()
+            );
+            return Some((delay, ack));
+        }
         if packet.to != NEIGHBOUR || !data.want_response {
             return None;
         }

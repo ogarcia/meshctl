@@ -2374,7 +2374,10 @@
       }
       .bubble p { margin: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
       .bubble .author { font-size: 12px; color: var(--mc-muted); }
-      .bubble .meta { font-size: 11px; display: block; text-align: right; }
+      .bubble .meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: 11px; }
+      .bubble .mark { display: flex; }
+      .bubble .mark svg { width: 14px; height: 14px; }
+      .mark.pending { color: var(--mc-muted); }
       .mark.delivered { color: var(--mc-second); }
       .mark.sent { color: var(--mc-muted); }
       .mark.failed { color: var(--mc-danger); cursor: help; }

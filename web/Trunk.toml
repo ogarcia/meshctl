@@ -12,5 +12,10 @@ addresses = ["127.0.0.1"]
 # everybody's.
 port = 7435
 
+# The events first, a websocket, which the proxy below would not carry.
+[[proxy]]
+backend = "ws://127.0.0.1:7434/api/v1/events"
+ws = true
+
 [[proxy]]
 backend = "http://127.0.0.1:7434/api/"
