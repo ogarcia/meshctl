@@ -823,6 +823,16 @@ window.meshctlMap = (() => {
       } else {
         small.fitBounds(L.latLngBounds(points), { padding: [20, 20], maxZoom: 15, animate: false });
       }
+      // An arrowhead halfway along each stretch, the way it went: its angle
+      // on the screen, so known once the map is placed.
+      const fill = color("--mc-primary");
+      for (let i = 1; i < points.length; i++) {
+        const from = small.latLngToContainerPoint(points[i - 1]);
+        const to = small.latLngToContainerPoint(points[i]);
+        if (from.distanceTo(to) < 24) continue;
+        const angle = (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
+        arrow({ from: points[i - 1], to: points[i], angle }, fill, casing).addTo(small.drawn);
+      }
     });
   }
 
