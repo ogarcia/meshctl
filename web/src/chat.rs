@@ -563,14 +563,6 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
             ></button>
         </div>
     };
-    // With reactions, what can be done with it goes up to its top: at its
-    // foot it would cover them.
-    let reacted = move || {
-        packet != 0
-            && live
-                .thread
-                .with(|t| t.iter().any(|m| m.emoji && m.reply_id == Some(packet)))
-    };
     let picker = move || {
         (thread.reacting.get() == Some(packet))
             .then(|| view! { <ReactionPicker pick=Callback::new(react) /> })
@@ -581,12 +573,10 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
             class="bubble-row"
             class:mine=mine
             class:reacting=move || thread.reacting.get() == Some(packet) && packet != 0
-            class:reacted=reacted
         >
             <div
                 class=if mine { "bubble mine" } else { "bubble" }
                 class:held=move || thread.menu.get() == Some(id)
-                class:reacted=reacted
                 on:click=move |ev| {
                     if by_touch() {
                         ev.stop_propagation();

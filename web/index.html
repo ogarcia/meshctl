@@ -2393,12 +2393,11 @@
       .bubble .answer .icon-button { width: 28px; height: 28px; border: 0; border-radius: 50%; }
       .bubble .answer .icon-button svg { width: 16px; height: 16px; }
       .bubble .answer .icon-button.on { color: var(--mc-primary); }
-      /* With reactions at its foot, up at its top instead, half over its
-         edge, not to cover them; and its emojis over it. */
-      .bubble.reacted .answer { top: -15px; bottom: auto; }
-      .bubble-row.reacted .reaction-picker { top: auto; bottom: calc(100% + 18px); }
       @media (hover: hover) and (pointer: fine) {
         .bubble-row:hover .answer, .bubble-row.reacting .answer { display: flex; }
+        /* The reactions clear of where those buttons show, at their right:
+           they never go under them. */
+        .bubble .reactions { padding-right: 96px; }
       }
       /* Touched, its menu open. */
       .bubble.held { outline: 2px solid var(--mc-primary); outline-offset: 1px; }
