@@ -7,7 +7,13 @@ use crate::app::Live;
 use crate::i18n::{Locale, t, t_string, use_i18n};
 use leptos::prelude::*;
 use leptos_i18n::I18nContext;
-use meshctl_api::{Node, NodesColumn as Column, NodesSort, Peer};
+use meshctl_api::{Node, NodesColumn as Column, NodesSort, Peer, RadioKind};
+
+/// Whether the selected radio's nodes say how they are powered: MeshCore
+/// contacts say nothing of their battery.
+fn has_power(live: Live) -> bool {
+    live.selected_kind() != Some(RadioKind::Meshcore)
+}
 
 #[component]
 pub fn MeshView() -> impl IntoView {
@@ -166,6 +172,7 @@ fn NodeList() -> impl IntoView {
     let sort = Memo::new(move |_| {
         live.preferences
             .with(|p| p.nodes_sort.map(|s| (s.column, !s.reversed)))
+            .filter(|(column, _)| *column != Column::Power || has_power(live))
     });
 
     // The nodes shown, by their numbers, in their order: only that, so that
@@ -294,7 +301,7 @@ fn NodeList() -> impl IntoView {
                         {header(Column::Name, t!(i18n, nodes_name).into_any())}
                         {header(Column::Heard, t!(i18n, nodes_heard).into_any())}
                         {header(Column::Reach, t!(i18n, nodes_reach).into_any())}
-                        {header(Column::Power, t!(i18n, nodes_battery).into_any())}
+                        {move || has_power(live).then(|| header(Column::Power, t!(i18n, nodes_battery).into_any()))}
                         {header(Column::Hardware, t!(i18n, nodes_hardware).into_any())}
                         <th></th>
                     </tr>
@@ -414,7 +421,11 @@ fn SortMenu(sort: Memo<Option<(Column, bool)>>) -> impl IntoView {
             ></button>
             <Show when=move || open.get()>
                 <div class="heading-menu" role="menu" on:click=|ev| ev.stop_propagation()>
-                    {columns.into_iter().map(|(column, label)| item(column, label)).collect_view()}
+                    {columns
+                        .into_iter()
+                        .filter(|(column, _)| *column != Some(Column::Power) || has_power(live))
+                        .map(|(column, label)| item(column, label))
+                        .collect_view()}
                 </div>
             </Show>
         </span>
@@ -598,10 +609,10 @@ fn NodeLine(node: Node, now: RwSignal<u32>) -> impl IntoView {
                     </span>
                 </span>
             </td>
-            <td class="dim">{move || heard.map(|t| ago(now.get(), t)).unwrap_or_default()}</td>
-            <td>{reach}</td>
-            <td>{power}</td>
-            <td>
+            <td class="heard dim">{move || heard.map(|t| ago(now.get(), t)).unwrap_or_default()}</td>
+            <td class="reach">{reach}</td>
+            {has_power(live).then(|| view! { <td class="power-cell">{power}</td> })}
+            <td class="hardware">
                 <span class="names">
                     <span>{node.hw_model.as_deref().map(model)}</span>
                     <span class="dim small">
