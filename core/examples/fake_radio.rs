@@ -32,6 +32,8 @@
 //!   very same channel twice, as another app may leave it.
 //! - `off <slot>`: the channel in a slot is switched off.
 //! - `drop`: the link to every client drops, which reads it all anew.
+//! - `own`: the radio tells its client its own device telemetry and how it
+//!   hears the mesh, as it does now and then.
 //! - `answers always|sometimes|never`: how the neighbour answers. Always is
 //!   within one to six seconds; sometimes, four times in ten not at all and
 //!   otherwise within up to 26 seconds.
@@ -1100,6 +1102,57 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
         Some("drop") => {
             let _ = events.send(Event::Drop);
             "dropped".into()
+        }
+        Some("own") => {
+            // As the firmware tells its client now and then: its device
+            // telemetry, sent to the mesh too, and how it hears it.
+            let now = now_secs();
+            let variants = [
+                pb::telemetry::Variant::DeviceMetrics(pb::DeviceMetrics {
+                    battery_level: Some(20 + random(80) as u32),
+                    voltage: Some(3.5 + random(70) as f32 / 100.0),
+                    channel_utilization: Some(random(200) as f32 / 10.0),
+                    air_util_tx: Some(random(50) as f32 / 10.0),
+                    uptime_seconds: Some(3_600 + random(86_400) as u32),
+                }),
+                pb::telemetry::Variant::LocalStats(pb::LocalStats {
+                    uptime_seconds: 3_600 + random(86_400) as u32,
+                    channel_utilization: random(200) as f32 / 10.0,
+                    air_util_tx: random(50) as f32 / 10.0,
+                    num_packets_tx: 100 + random(900) as u32,
+                    num_packets_rx: 1_000 + random(9_000) as u32,
+                    num_packets_rx_bad: random(50) as u32,
+                    num_online_nodes: 5 + random(30) as u32,
+                    num_total_nodes: 40 + random(60) as u32,
+                    noise_floor: -110 + random(15) as i32,
+                    ..Default::default()
+                }),
+            ];
+            for variant in variants {
+                let to = if matches!(variant, pb::telemetry::Variant::LocalStats(_)) {
+                    ME
+                } else {
+                    BROADCAST
+                };
+                let packet = MeshPacket {
+                    from: ME,
+                    to,
+                    id: fresh_id(&NEXT_ID),
+                    rx_time: Some(now),
+                    payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                        portnum: PortNum::TelemetryApp as i32,
+                        payload: pb::Telemetry {
+                            time: now,
+                            variant: Some(variant),
+                        }
+                        .encode_to_vec(),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                };
+                let _ = events.send(Event::Heard(packet));
+            }
+            "its own telemetry and stats, told".into()
         }
         Some("history") => {
             let Some(hours) = words.next().and_then(|w| w.parse::<u32>().ok()) else {
