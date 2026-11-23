@@ -103,10 +103,27 @@ pub struct Settings {
     pub location_policy: u8,
     /// Extra acknowledgements it sends.
     pub multi_acks: u8,
+    /// How many bytes each hop's hash takes in what it sends, less one;
+    /// none on firmware without it.
+    pub path_hash_mode: Option<u8>,
+    /// Its receive delay base and airtime factor, in thousandths.
+    pub tuning: Option<(u32, u32)>,
+    /// Which kinds of contact it adds by itself while contacts are added by
+    /// hand, and whether it overwrites the oldest, as bits; and up to how far.
+    pub autoadd: Option<(u8, u8)>,
+    /// The frequency ranges it repeats on, in kHz; not changed.
+    pub repeat_frequencies: Vec<(u32, u32)>,
+    /// The region what it floods is scoped to, name and key, or none; none
+    /// at all on firmware without it.
+    pub default_scope: Option<Option<(String, [u8; 16])>>,
 }
 
+/// The frequencies a client repeats on, in kHz, where the radio does not say.
+const REPEAT_FREQUENCIES: [(u32, u32); 3] =
+    [(433_000, 433_000), (869_495, 869_495), (918_000, 918_000)];
+
 impl Settings {
-    fn from(me: &SelfInfo, device: Option<&DeviceInfo>) -> Self {
+    fn from(me: &SelfInfo, device: Option<&DeviceInfo>, extras: Extras) -> Self {
         Self {
             name: me.name.clone(),
             lat: me.lat,
@@ -122,8 +139,29 @@ impl Settings {
             telemetry: me.telemetry,
             location_policy: me.location_policy,
             multi_acks: me.multi_acks,
+            path_hash_mode: device.and_then(|d| d.path_hash_mode),
+            tuning: extras.tuning,
+            autoadd: extras.autoadd,
+            repeat_frequencies: extras
+                .repeat_frequencies
+                .unwrap_or_else(|| REPEAT_FREQUENCIES.to_vec()),
+            default_scope: extras.default_scope,
         }
     }
+}
+
+/// The settings a radio answers each on its own, as it says them; none of
+/// those its firmware does not have.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Extras {
+    /// Its receive delay base and airtime factor, in thousandths.
+    pub tuning: Option<(u32, u32)>,
+    /// Which kinds of contact it adds by itself, as bits, and up to how far.
+    pub autoadd: Option<(u8, u8)>,
+    /// The frequency ranges it repeats on, in kHz.
+    pub repeat_frequencies: Option<Vec<(u32, u32)>>,
+    /// The region what it floods is scoped to, name and key, or none.
+    pub default_scope: Option<Option<(String, [u8; 16])>>,
 }
 
 /// A MeshCore radio's channels: how many slots it has, and each set one's
@@ -362,6 +400,48 @@ impl Client {
             }
         }
         Ok(status)
+    }
+
+    /// The settings it answers each on its own: none of those its firmware
+    /// does not have.
+    pub async fn extras(&self) -> Extras {
+        let mut extras = Extras::default();
+        if let Ok(Response::Tuning {
+            rx_delay,
+            airtime_factor,
+        }) = self
+            .ask_one(command::get_tuning(), |r| {
+                matches!(r, Response::Tuning { .. })
+            })
+            .await
+        {
+            extras.tuning = Some((rx_delay, airtime_factor));
+        }
+        if let Ok(Response::AutoAdd { config, max_hops }) = self
+            .ask_one(command::get_autoadd(), |r| {
+                matches!(r, Response::AutoAdd { .. })
+            })
+            .await
+        {
+            extras.autoadd = Some((config, max_hops));
+        }
+        if let Ok(Response::RepeatFrequencies(ranges)) = self
+            .ask_one(command::get_repeat_frequencies(), |r| {
+                matches!(r, Response::RepeatFrequencies(_))
+            })
+            .await
+        {
+            extras.repeat_frequencies = Some(ranges);
+        }
+        if let Ok(Response::DefaultScope(scope)) = self
+            .ask_one(command::get_default_scope(), |r| {
+                matches!(r, Response::DefaultScope(_))
+            })
+            .await
+        {
+            extras.default_scope = Some(scope);
+        }
+        extras
     }
 
     pub async fn device(&self) -> Option<DeviceInfo> {
@@ -698,6 +778,34 @@ impl Mesh {
                 ))
                 .await?;
         }
+        if let (Some(mode), true) = (
+            wanted.path_hash_mode,
+            wanted.path_hash_mode != current.path_hash_mode,
+        ) {
+            client.done(command::set_path_hash_mode(mode)).await?;
+        }
+        if let (Some((rx_delay, airtime_factor)), true) =
+            (wanted.tuning, wanted.tuning != current.tuning)
+        {
+            client
+                .done(command::set_tuning(rx_delay, airtime_factor))
+                .await?;
+        }
+        if let (Some((config, max_hops)), true) =
+            (wanted.autoadd, wanted.autoadd != current.autoadd)
+        {
+            client.done(command::set_autoadd(config, max_hops)).await?;
+        }
+        if let (Some(scope), true) = (
+            &wanted.default_scope,
+            wanted.default_scope != current.default_scope,
+        ) {
+            client
+                .done(command::set_default_scope(
+                    scope.as_ref().map(|(name, key)| (name.as_str(), key)),
+                ))
+                .await?;
+        }
         self.meshcore_read_back(client).await
     }
 
@@ -705,7 +813,8 @@ impl Mesh {
     async fn meshcore_read_back(&self, client: &Client) -> Result<(), AdminError> {
         let me = client.start().await.map_err(|_| AdminError::NoAnswer)?;
         let device = client.device().await;
-        let settings = Settings::from(&me, device.as_ref());
+        let extras = client.extras().await;
+        let settings = Settings::from(&me, device.as_ref(), extras);
         self.update(|state| {
             if let Some(local) = state.local.as_mut() {
                 describe(local, &settings);
@@ -831,6 +940,56 @@ impl Mesh {
         session.client.done(command::send_advert(flood)).await
     }
 
+    /// Puts the channels in the first slots in the order given, each its
+    /// name and secret, and empties the slots left; only those that change
+    /// are written. Then reads them back, told as on syncing.
+    pub async fn meshcore_reorder_channels(
+        &self,
+        order: &[(String, [u8; 16])],
+    ) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        let (slots, now) = self
+            .read(|state| {
+                let meshcore = state.meshcore_channels.as_ref()?;
+                let now: std::collections::BTreeMap<u32, (String, [u8; 16])> = state
+                    .channels
+                    .values()
+                    .filter_map(|c| {
+                        Some((c.index, (c.name.clone(), *meshcore.secrets.get(&c.index)?)))
+                    })
+                    .collect();
+                Some((meshcore.slots, now))
+            })
+            .ok_or(AdminError::NotConnected)?;
+        let mut wanted: Vec<Option<&(String, [u8; 16])>> = order.iter().map(Some).collect();
+        wanted.resize(usize::from(slots), None);
+        let mut result = Ok(());
+        for (index, channel) in (0..slots).zip(wanted) {
+            let had = now.get(&u32::from(index));
+            if had == channel {
+                continue;
+            }
+            let (name, secret) = channel.map_or(("", &[0; 16]), |(n, s)| (n.as_str(), s));
+            if had.is_none() && name.is_empty() {
+                continue;
+            }
+            result = session
+                .client
+                .done(command::set_channel(index, name, secret))
+                .await;
+            if result.is_err() {
+                break;
+            }
+        }
+        // Read back whatever came of it, all or part.
+        let channels = session.client.channels(slots).await;
+        self.update(|state| {
+            put_channels(state, slots, channels);
+            vec![Event::Synced]
+        });
+        result
+    }
+
     /// Sets a channel in a slot, or empties it with no name; then reads the
     /// channels back, told as on syncing.
     pub async fn meshcore_set_channel(
@@ -896,7 +1055,8 @@ async fn session(
     };
     let device = client.device().await;
     client.keep_time().await;
-    let settings = Settings::from(&me, device.as_ref());
+    let extras = client.extras().await;
+    let settings = Settings::from(&me, device.as_ref(), extras);
     let mut local = LocalNode {
         num: num_of(&me.public_key),
         firmware_version: device.as_ref().and_then(|d| match (&d.version, &d.build) {

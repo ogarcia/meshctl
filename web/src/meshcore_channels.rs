@@ -17,6 +17,9 @@ const LOCK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/loc
 const LOCK_OPEN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/lock-open.svg");
 const PLUS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plus.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
+const GRIP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/grip-vertical.svg");
+const UP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-up.svg");
+const DOWN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 
 /// Which channel is being edited: one there is, or a new one, by its slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,8 +91,53 @@ pub fn MeshcoreChannelsTab() -> impl IntoView {
         live.selected.track();
         reload();
     });
-    let channels =
-        move || loaded.with(|l| l.as_ref().map(|l| l.channels.clone()).unwrap_or_default());
+    // Those it has, in their slots' order, each with its place and how many
+    // there are.
+    let channels = move || {
+        loaded.with(|l| {
+            let have = l.as_ref().map(|l| l.channels.clone()).unwrap_or_default();
+            let count = have.len();
+            have.into_iter()
+                .enumerate()
+                .map(|(at, c)| (at, count, c))
+                .collect::<Vec<_>>()
+        })
+    };
+    // The row being dragged, by its place.
+    let dragging = RwSignal::new(None::<usize>);
+    let problem = RwSignal::new(None::<Failure>);
+    // Moves the channel at one place of the list to another: shown so at
+    // once, sent to the radio, and read back from it.
+    let reorder = move |from: usize, to: usize| {
+        let (Some(radio), Some(now)) = (live.selected.get_untracked(), loaded.get_untracked())
+        else {
+            return;
+        };
+        let mut order: Vec<u32> = now.channels.iter().map(|c| c.index).collect();
+        if from == to || from >= order.len() || to >= order.len() {
+            return;
+        }
+        let moved = order.remove(from);
+        order.insert(to, moved);
+        loaded.update(|l| {
+            if let Some(l) = l {
+                let mut channels = l.channels.clone();
+                let moved = channels.remove(from);
+                channels.insert(to, moved);
+                for (slot, channel) in (0..).zip(channels.iter_mut()) {
+                    channel.index = slot;
+                }
+                l.channels = channels;
+            }
+        });
+        problem.set(None);
+        spawn_local(async move {
+            if let Err(failure) = daemon::reorder_meshcore_channels(radio, &order).await {
+                problem.set(Some(failure));
+                reload();
+            }
+        });
+    };
     // The first slot free, for a new one.
     let free = move || {
         loaded.with(|l| {
@@ -102,11 +150,12 @@ pub fn MeshcoreChannelsTab() -> impl IntoView {
         <section class="channel-list">
             <For
                 each=channels
-                key=|c| format!("{} {} {:?}", c.index, c.name, c.kind)
-                let:channel
+                key=|(at, count, c)| format!("{at} {count} {} {} {:?}", c.index, c.name, c.kind)
+                let:((at, count, channel))
             >
-                <ChannelRow channel editing />
+                <ChannelRow channel at count dragging editing reorder />
             </For>
+            {move || problem.get().map(|_| view! { <p class="error">{t!(i18n, mc_reorder_failed)}</p> })}
             <div class="channel-foot">
                 <p class="hint dim">{t!(i18n, mc_channels_hint)}</p>
                 <crate::links::AddChannelsLink />
@@ -140,12 +189,66 @@ pub fn MeshcoreChannelsTab() -> impl IntoView {
 }
 
 #[component]
-fn ChannelRow(channel: MeshcoreChannel, editing: RwSignal<Editing>) -> impl IntoView {
+fn ChannelRow(
+    channel: MeshcoreChannel,
+    at: usize,
+    count: usize,
+    dragging: RwSignal<Option<usize>>,
+    editing: RwSignal<Editing>,
+    reorder: impl Fn(usize, usize) + Copy + Send + Sync + 'static,
+) -> impl IntoView {
     let i18n = use_i18n();
     let slot = channel.index;
     let kind = channel.kind;
+    let over = RwSignal::new(false);
     view! {
-        <div class="radio-row channel-row">
+        <div
+            class="radio-row channel-row"
+            class:dragging=move || dragging.get() == Some(at)
+            class:over=move || over.get()
+            draggable="true"
+            on:dragstart=move |ev| {
+                if let Some(data) = ev.data_transfer() {
+                    data.set_effect_allowed("move");
+                    // Firefox starts no drag without data.
+                    let _ = data.set_data("text/plain", &at.to_string());
+                }
+                dragging.set(Some(at));
+            }
+            on:dragover=move |ev| {
+                ev.prevent_default();
+                over.set(dragging.get_untracked().is_some_and(|from| from != at));
+            }
+            on:dragleave=move |_| over.set(false)
+            on:drop=move |ev| {
+                ev.prevent_default();
+                over.set(false);
+                if let Some(from) = dragging.get_untracked() {
+                    reorder(from, at);
+                }
+                dragging.set(None);
+            }
+            on:dragend=move |_| dragging.set(None)
+        >
+            <span class="grip" title=move || t_string!(i18n, channel_drag) inner_html=GRIP></span>
+            <span class="moves">
+                <button
+                    type="button"
+                    disabled={at == 0}
+                    title=move || t_string!(i18n, radio_up)
+                    aria-label=move || t_string!(i18n, radio_up)
+                    on:click=move |_| reorder(at, at.saturating_sub(1))
+                    inner_html=UP
+                ></button>
+                <button
+                    type="button"
+                    disabled={at + 1 >= count}
+                    title=move || t_string!(i18n, radio_down)
+                    aria-label=move || t_string!(i18n, radio_down)
+                    on:click=move |_| reorder(at, at + 1)
+                    inner_html=DOWN
+                ></button>
+            </span>
             <button type="button" class="pick" on:click=move |_| editing.set(Editing::Slot(slot))>
                 <span class="channel-mark" inner_html=HASH></span>
                 <span class="who">

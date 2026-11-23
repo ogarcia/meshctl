@@ -496,6 +496,19 @@ pub async fn set_meshcore_channel(
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Puts a MeshCore radio's channels in another order, by their slots now.
+pub async fn reorder_meshcore_channels(radio: RadioId, order: &[u32]) -> Result<(), Failure> {
+    let order = ChannelOrder {
+        order: order.to_vec(),
+    };
+    let request = with_token(Request::put(&url(&format!(
+        "/radios/{radio}/meshcore/channels/order"
+    ))))
+    .json(&order)
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// Empties a MeshCore radio's slot.
 pub async fn remove_meshcore_channel(radio: RadioId, index: u32) -> Result<(), Failure> {
     let request = with_token(Request::delete(&url(&format!(

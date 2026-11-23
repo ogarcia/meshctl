@@ -33,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let device = client.device().await;
     println!("device: {device:?}");
+    println!("extras: {:?}", client.extras().await);
 
     let (contacts, latest) = client.contacts(0).await?;
     println!("{} contacts, latest change {latest}", contacts.len());

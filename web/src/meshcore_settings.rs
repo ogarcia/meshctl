@@ -12,7 +12,9 @@ use crate::radios::Switch;
 use crate::sections::SaveBar;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{ErrorCode, MeshcorePosition, MeshcoreSettings, TelemetryShare};
+use meshctl_api::{
+    ErrorCode, MeshcoreAutoAdd, MeshcorePosition, MeshcoreSettings, MeshcoreTuning, TelemetryShare,
+};
 
 /// Which part of the settings is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +50,7 @@ fn differs(tab: MeshcoreTab, a: &MeshcoreSettings, b: &MeshcoreSettings) -> bool
                 != (b.frequency, b.bandwidth, b.spreading_factor, b.coding_rate)
                 || a.tx_power != b.tx_power
                 || a.repeat != b.repeat
+                || a.default_scope != b.default_scope
         }
         MeshcoreTab::Channels => false,
         MeshcoreTab::Advanced => {
@@ -55,8 +58,41 @@ fn differs(tab: MeshcoreTab, a: &MeshcoreSettings, b: &MeshcoreSettings) -> bool
                 || a.share_position != b.share_position
                 || a.telemetry != b.telemetry
                 || a.multi_acks != b.multi_acks
+                || a.path_hash_bytes != b.path_hash_bytes
+                || a.auto_add != b.auto_add
+                || a.tuning != b.tuning
         }
     }
+}
+
+/// The hop limits offered for auto-add, past straight: the one it has
+/// joins them if it is another.
+const HOPS: [u8; 11] = [1, 2, 3, 4, 5, 6, 7, 8, 16, 32, 63];
+
+/// The frequencies a radio repeats on, as people say them: `433,000,
+/// 869,495 o 918,000`.
+fn frequencies_words(settings: &MeshcoreSettings, or: &str) -> String {
+    let ranges: Vec<String> = settings
+        .repeat_frequencies
+        .iter()
+        .map(|r| {
+            if r.from == r.to {
+                mhz(r.from)
+            } else {
+                format!("{}–{}", mhz(r.from), mhz(r.to))
+            }
+        })
+        .collect();
+    match ranges.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} {or} {last}", rest.join(", ")),
+        Some((last, _)) => last.clone(),
+        None => String::new(),
+    }
+}
+
+/// A number as written, either decimal mark.
+fn decimal(text: &str) -> Option<f64> {
+    text.trim().replace(',', ".").parse().ok()
 }
 
 /// A frequency in kHz, as people write it in MHz.
@@ -355,6 +391,19 @@ fn RadioTab(draft: Draft) -> impl IntoView {
     let (power, set_power) = field(draft, |d| d.tx_power, |d, v| d.tx_power = v);
     let (max_power, _) = field(draft, |d| d.max_tx_power, |_, _: u8| {});
     let (repeat, set_repeat) = field(draft, |d| d.repeat, |d, v| d.repeat = v);
+    let (scopes, _) = field(draft, |d| d.scopes, |_, _: bool| {});
+    let (_, set_scope) = field(
+        draft,
+        |d| d.default_scope.clone(),
+        |d, v| d.default_scope = v,
+    );
+    let (repeat_on, _) = field(draft, move |d| frequencies_words(d, "o"), |_, _: String| {});
+    // The region as written, `#` and all; kept without it.
+    let region = RwSignal::new(
+        draft
+            .with_untracked(|d| d.as_ref().and_then(|d| d.default_scope.clone()))
+            .map_or_else(String::new, |name| format!("#{name}")),
+    );
     // The frequency as written, read into kHz once it is a number.
     let typed = RwSignal::new(mhz(frequency.get_untracked()));
     let bandwidths = move || {
@@ -471,8 +520,28 @@ fn RadioTab(draft: Draft) -> impl IntoView {
                 </span>
             </Row>
             // Only where the firmware has it.
+            <div class:gone=move || !scopes.get()>
+                <Row title=t!(i18n, mc_scope).into_any() hint=t!(i18n, mc_scope_hint).into_any()>
+                    <input
+                        class="pref-control"
+                        maxlength="31"
+                        placeholder="#galicia"
+                        prop:value=move || region.get()
+                        on:input=move |ev| {
+                            let text = event_target_value(&ev);
+                            let name = text.trim();
+                            let name = name.strip_prefix('#').unwrap_or(name).trim();
+                            set_scope((!name.is_empty()).then(|| name.to_owned()));
+                            region.set(text);
+                        }
+                    />
+                </Row>
+            </div>
             <div class:gone=move || repeat.get().is_none()>
-                <Row title=t!(i18n, mc_repeat).into_any() hint=t!(i18n, mc_repeat_hint).into_any()>
+                <Row
+                    title=t!(i18n, mc_repeat).into_any()
+                    hint=view! { {move || t_string!(i18n, mc_repeat_hint).replace("{frequencies}", &repeat_on.get())} }.into_any()
+                >
                     <div class="pref-control switch-control">
                         <Switch
                             on=Signal::derive(move || repeat.get().unwrap_or(false))
@@ -496,6 +565,71 @@ fn AdvancedTab(draft: Draft) -> impl IntoView {
     );
     let (share, set_share) = field(draft, |d| d.share_position, |d, v| d.share_position = v);
     let (acks, set_acks) = field(draft, |d| d.multi_acks, |d, v| d.multi_acks = v);
+    let (hash, set_hash) = field(draft, |d| d.path_hash_bytes, |d, v| d.path_hash_bytes = v);
+    let (add, set_add) = field(draft, |d| d.auto_add, |d, v| d.auto_add = v);
+    let (tuning, set_tuning) = field(draft, |d| d.tuning, |d, v| d.tuning = v);
+    // A change to auto-add, on the one it has.
+    let change_add = move |edit: fn(&mut MeshcoreAutoAdd)| {
+        if let Some(mut now) = add.get_untracked() {
+            edit(&mut now);
+            set_add(Some(now));
+        }
+    };
+    let kind = move |label: fn(leptos_i18n::I18nContext<crate::i18n::Locale>) -> &'static str,
+                     on: fn(&MeshcoreAutoAdd) -> bool,
+                     flip: fn(&mut MeshcoreAutoAdd)| {
+        view! {
+            <button
+                type="button"
+                class="choice"
+                class:on=move || add.get().as_ref().is_some_and(on)
+                on:click=move |_| change_add(flip)
+            >
+                {move || label(i18n)}
+            </button>
+        }
+    };
+    // The hop limits offered, and the one it has if it is another.
+    let hops = move || {
+        let mut all = HOPS.to_vec();
+        if let Some(now) = add.get_untracked().and_then(|a| a.max_hops)
+            && now > 0
+            && !all.contains(&now)
+        {
+            all.push(now);
+            all.sort_unstable();
+        }
+        all
+    };
+    let hops_label = move |n: u8| {
+        if n == 1 {
+            t_string!(i18n, mc_path_hop).to_owned()
+        } else {
+            t_string!(i18n, chat_hops).replace("{n}", &n.to_string())
+        }
+    };
+    // Each tuning figure as written, set once it reads.
+    let rx_delay = RwSignal::new(
+        tuning
+            .get_untracked()
+            .map_or_else(String::new, |t| t.rx_delay.to_string()),
+    );
+    let airtime = RwSignal::new(
+        tuning
+            .get_untracked()
+            .map_or_else(String::new, |t| t.airtime_factor.to_string()),
+    );
+    let put_tuning = move || {
+        if let (Some(rx_delay), Some(airtime_factor)) = (
+            decimal(&rx_delay.get_untracked()),
+            decimal(&airtime.get_untracked()),
+        ) {
+            set_tuning(Some(MeshcoreTuning {
+                rx_delay,
+                airtime_factor,
+            }));
+        }
+    };
     // Who it answers each kind of telemetry to.
     let telemetry = move |get: fn(&MeshcoreSettings) -> TelemetryShare,
                           set: fn(&mut MeshcoreSettings, TelemetryShare)| {
@@ -554,6 +688,57 @@ fn AdvancedTab(draft: Draft) -> impl IntoView {
                     />
                 </div>
             </Row>
+            // Which kinds it adds even so, with contacts added by hand.
+            <div class:gone=move || !manual.get() || add.get().is_none()>
+                <Row title=t!(i18n, mc_autoadd_kinds).into_any() hint=t!(i18n, mc_autoadd_kinds_hint).into_any()>
+                    <div class="pref-control flag-chips">
+                        {kind(|i18n| t_string!(i18n, mc_kind_companions), |a| a.companions, |a| a.companions = !a.companions)}
+                        {kind(|i18n| t_string!(i18n, mc_kind_repeaters), |a| a.repeaters, |a| a.repeaters = !a.repeaters)}
+                        {kind(|i18n| t_string!(i18n, mc_kind_rooms), |a| a.rooms, |a| a.rooms = !a.rooms)}
+                        {kind(|i18n| t_string!(i18n, mc_kind_sensors), |a| a.sensors, |a| a.sensors = !a.sensors)}
+                    </div>
+                </Row>
+            </div>
+            <div class:gone=move || add.get().is_none()>
+                <Row title=t!(i18n, mc_autoadd_hops).into_any() hint=t!(i18n, mc_autoadd_hops_hint).into_any()>
+                    <select
+                        class="pref-control"
+                        on:change=move |ev| {
+                            let value = event_target_value(&ev);
+                            if let Some(mut now) = add.get_untracked() {
+                                now.max_hops = value.parse().ok();
+                                set_add(Some(now));
+                            }
+                        }
+                    >
+                        <option value="any" selected=move || add.get().is_some_and(|a| a.max_hops.is_none())>
+                            {move || t_string!(i18n, mc_hops_any)}
+                        </option>
+                        <option value="0" selected=move || add.get().is_some_and(|a| a.max_hops == Some(0))>
+                            {move || t_string!(i18n, mc_hops_direct)}
+                        </option>
+                        {hops()
+                            .into_iter()
+                            .map(|n| {
+                                view! {
+                                    <option value=n.to_string() selected=move || add.get().is_some_and(|a| a.max_hops == Some(n))>
+                                        {move || hops_label(n)}
+                                    </option>
+                                }
+                            })
+                            .collect_view()}
+                    </select>
+                </Row>
+                <Row title=t!(i18n, mc_overwrite).into_any() hint=t!(i18n, mc_overwrite_hint).into_any()>
+                    <div class="pref-control switch-control">
+                        <Switch
+                            on=Signal::derive(move || add.get().is_some_and(|a| a.overwrite_oldest))
+                            label=Signal::derive(move || t_string!(i18n, mc_overwrite).to_owned())
+                            flip=move |_| change_add(|a| a.overwrite_oldest = !a.overwrite_oldest)
+                        />
+                    </div>
+                </Row>
+            </div>
             <Row title=t!(i18n, mc_share_position).into_any() hint=t!(i18n, mc_share_position_hint).into_any()>
                 <div class="pref-control switch-control">
                     <Switch
@@ -581,6 +766,54 @@ fn AdvancedTab(draft: Draft) -> impl IntoView {
                     />
                 </div>
             </Row>
+            <div class:gone=move || hash.get().is_none()>
+                <Row title=t!(i18n, mc_hash).into_any() hint=t!(i18n, mc_hash_hint).into_any()>
+                    <select
+                        class="pref-control"
+                        on:change=move |ev| set_hash(event_target_value(&ev).parse().ok())
+                    >
+                        {(1..=3u8)
+                            .map(|n| {
+                                view! {
+                                    <option value=n.to_string() selected=move || hash.get() == Some(n)>
+                                        {move || {
+                                            if n == 1 {
+                                                t_string!(i18n, mc_hash_byte).to_owned()
+                                            } else {
+                                                t_string!(i18n, mc_hash_bytes).replace("{n}", &n.to_string())
+                                            }
+                                        }}
+                                    </option>
+                                }
+                            })
+                            .collect_view()}
+                    </select>
+                </Row>
+            </div>
+            <div class:gone=move || tuning.get().is_none()>
+                <Row title=t!(i18n, mc_rx_delay).into_any() hint=t!(i18n, mc_rx_delay_hint).into_any()>
+                    <input
+                        class="pref-control"
+                        inputmode="decimal"
+                        prop:value=move || rx_delay.get()
+                        on:input=move |ev| {
+                            rx_delay.set(event_target_value(&ev));
+                            put_tuning();
+                        }
+                    />
+                </Row>
+                <Row title=t!(i18n, mc_airtime).into_any() hint=t!(i18n, mc_airtime_hint).into_any()>
+                    <input
+                        class="pref-control"
+                        inputmode="decimal"
+                        prop:value=move || airtime.get()
+                        on:input=move |ev| {
+                            airtime.set(event_target_value(&ev));
+                            put_tuning();
+                        }
+                    />
+                </Row>
+            </div>
         </div>
     }
 }

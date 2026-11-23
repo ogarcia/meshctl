@@ -484,6 +484,68 @@ pub struct MeshcoreSettings {
     pub telemetry: MeshcoreTelemetry,
     /// Whether it sends its acknowledgements more than once.
     pub multi_acks: bool,
+    /// How many bytes each hop's hash takes in what it sends: 1 to 3. More
+    /// tell repeaters apart better, and make each hop longer. None on
+    /// firmware without it.
+    #[serde(default)]
+    pub path_hash_bytes: Option<u8>,
+    /// The region what it floods is scoped to, by its name (without `#`),
+    /// heard only by the repeaters that serve it; none floods everywhere.
+    #[serde(default)]
+    pub default_scope: Option<String>,
+    /// Whether its firmware has a default scope; read only.
+    #[serde(default)]
+    pub scopes: bool,
+    /// Which nodes it adds to its contacts by itself; none on firmware
+    /// without it.
+    #[serde(default)]
+    pub auto_add: Option<MeshcoreAutoAdd>,
+    /// How it paces what it passes on; none on firmware without it.
+    #[serde(default)]
+    pub tuning: Option<MeshcoreTuning>,
+    /// The frequencies it can repeat on, in kHz, both ends included; read
+    /// only.
+    #[serde(default)]
+    pub repeat_frequencies: Vec<MeshcoreFrequencies>,
+}
+
+/// Which nodes heard advertising a MeshCore radio adds by itself. While
+/// `manual_add_contacts` is off it adds every kind; on, only those here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreAutoAdd {
+    pub companions: bool,
+    pub repeaters: bool,
+    pub rooms: bool,
+    pub sensors: bool,
+    /// Whether, full, it overwrites the oldest contact that is not a
+    /// favourite.
+    pub overwrite_oldest: bool,
+    /// Up to how many hops away: 0 only those heard straight, up to 63;
+    /// none for any.
+    pub max_hops: Option<u8>,
+}
+
+/// How a MeshCore radio paces what it passes on.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreTuning {
+    /// The base of how long it waits before passing on what it hears: 0
+    /// to 20.
+    #[cfg_attr(feature = "openapi", schema(example = 0.0))]
+    pub rx_delay: f64,
+    /// How much of the air it leaves free after sending, against what it
+    /// took: 0 to 9.
+    #[cfg_attr(feature = "openapi", schema(example = 1.0))]
+    pub airtime_factor: f64,
+}
+
+/// A range of frequencies, in kHz, both ends included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreFrequencies {
+    pub from: u32,
+    pub to: u32,
 }
 
 /// A MeshCore radio's channels.

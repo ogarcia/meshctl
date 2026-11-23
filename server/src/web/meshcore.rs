@@ -11,8 +11,8 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Advert, Contact, Error, ErrorCode, MeshcoreChannelChange, MeshcoreChannels, MeshcoreSettings,
-    MeshcoreStatus, RadioId,
+    Advert, ChannelOrder, Contact, Error, ErrorCode, MeshcoreChannelChange, MeshcoreChannels,
+    MeshcoreSettings, MeshcoreStatus, RadioId,
 };
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -22,6 +22,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(settings, change_settings))
         .routes(routes!(status))
         .routes(routes!(channels))
+        .routes(routes!(reorder_channels))
         .routes(routes!(set_channel, remove_channel))
         .routes(routes!(channel_link))
         .routes(routes!(reset_path))
@@ -49,6 +50,42 @@ pub fn router() -> OpenApiRouter<AppState> {
 async fn channels(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
     match state.radios.meshcore_channels(radio) {
         Ok(channels) => Json(channels).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Reorder MeshCore channels
+///
+/// Puts the radio's channels in another order, given as the slots they have
+/// now, every one once: to the first slots, the rest emptied. Secrets and
+/// all go with each channel, and so does its history in meshctl. Read back
+/// from the radio after, and told as `synced`.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/meshcore/channels/order",
+    tag = "settings",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = ChannelOrder,
+    responses(
+        (status = 204, description = "Reordered, and read back"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not every channel the radio has, once each: `invalid_settings`; not a MeshCore radio: `unsupported_kind`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn reorder_channels(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(order): Json<ChannelOrder>,
+) -> Response {
+    match state
+        .radios
+        .reorder_meshcore_channels(radio, &order.order)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(failure) => refused(failure),
     }
 }

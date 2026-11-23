@@ -99,6 +99,14 @@ pub mod command {
     const SET_CHANNEL: u8 = 0x20;
     const SET_OTHER_PARAMS: u8 = 0x26;
     const GET_STATS: u8 = 0x38;
+    const SET_TUNING_PARAMS: u8 = 0x15;
+    const GET_TUNING_PARAMS: u8 = 0x2b;
+    const SET_AUTOADD_CONFIG: u8 = 0x3a;
+    const GET_AUTOADD_CONFIG: u8 = 0x3b;
+    const GET_ALLOWED_REPEAT_FREQ: u8 = 0x3c;
+    const SET_PATH_HASH_MODE: u8 = 0x3d;
+    const SET_DEFAULT_FLOOD_SCOPE: u8 = 0x3f;
+    const GET_DEFAULT_FLOOD_SCOPE: u8 = 0x40;
     /// Plain text, as opposed to a CLI command or a signed message.
     const TEXT_PLAIN: u8 = 0;
     /// The protocol version the client speaks, which the radio answers to.
@@ -294,6 +302,61 @@ pub mod command {
     pub fn get_stats(kind: u8) -> Vec<u8> {
         vec![GET_STATS, kind]
     }
+
+    /// Answered with `Tuning`.
+    pub fn get_tuning() -> Vec<u8> {
+        vec![GET_TUNING_PARAMS]
+    }
+
+    /// How long it waits before passing on what it hears, as a base, and
+    /// its airtime factor; both in thousandths.
+    pub fn set_tuning(rx_delay: u32, airtime_factor: u32) -> Vec<u8> {
+        let mut payload = vec![SET_TUNING_PARAMS];
+        payload.extend_from_slice(&rx_delay.to_le_bytes());
+        payload.extend_from_slice(&airtime_factor.to_le_bytes());
+        payload
+    }
+
+    /// Answered with `AutoAdd`.
+    pub fn get_autoadd() -> Vec<u8> {
+        vec![GET_AUTOADD_CONFIG]
+    }
+
+    /// Which kinds of contact it adds by itself while contacts are added by
+    /// hand, and whether it overwrites the oldest when full, as bits; and
+    /// up to how far: 0 any, 1 straight, N up to N - 1 hops (64 at most).
+    pub fn set_autoadd(config: u8, max_hops: u8) -> Vec<u8> {
+        vec![SET_AUTOADD_CONFIG, config, max_hops]
+    }
+
+    /// Answered with `RepeatFrequencies`.
+    pub fn get_repeat_frequencies() -> Vec<u8> {
+        vec![GET_ALLOWED_REPEAT_FREQ]
+    }
+
+    /// How many bytes each hop's hash takes in what it sends, less one:
+    /// 0 to 2.
+    pub fn set_path_hash_mode(mode: u8) -> Vec<u8> {
+        vec![SET_PATH_HASH_MODE, 0, mode]
+    }
+
+    /// Answered with `DefaultScope`.
+    pub fn get_default_scope() -> Vec<u8> {
+        vec![GET_DEFAULT_FLOOD_SCOPE]
+    }
+
+    /// The region what it floods is scoped to: its name, up to 30 bytes,
+    /// and its key; or none, flooded with no scope.
+    pub fn set_default_scope(scope: Option<(&str, &[u8; 16])>) -> Vec<u8> {
+        let mut payload = vec![SET_DEFAULT_FLOOD_SCOPE];
+        if let Some((name, key)) = scope {
+            let mut field = fixed(name, 31);
+            field[30] = 0;
+            payload.extend_from_slice(&field);
+            payload.extend_from_slice(key);
+        }
+        payload
+    }
 }
 
 /// A contact the radio keeps.
@@ -449,6 +512,20 @@ pub enum Response {
         total_kb: Option<u32>,
     },
     Stats(Stats),
+    /// Its receive delay base and airtime factor, in thousandths.
+    Tuning {
+        rx_delay: u32,
+        airtime_factor: u32,
+    },
+    /// Which kinds of contact it adds by itself, as bits, and up to how far.
+    AutoAdd {
+        config: u8,
+        max_hops: u8,
+    },
+    /// The frequency ranges it repeats on, in kHz, both ends included.
+    RepeatFrequencies(Vec<(u32, u32)>),
+    /// The region what it floods is scoped to, name and key; none if none.
+    DefaultScope(Option<(String, [u8; 16])>),
     /// Pushed: a contact advertised.
     Advert,
     /// Pushed: the path to a contact changed.
@@ -507,7 +584,28 @@ impl Response {
                 name: text_at(data, 1, 32),
                 secret: bytes_at(data, 33).unwrap_or_default(),
             },
+            0x17 => Self::Tuning {
+                rx_delay: u32_at(data, 0)?,
+                airtime_factor: u32_at(data, 4)?,
+            },
             0x18 => Self::Stats(stats(data)?),
+            0x19 => Self::AutoAdd {
+                config: *data.first()?,
+                max_hops: data.get(1).copied().unwrap_or(0),
+            },
+            0x1a => Self::RepeatFrequencies(
+                data.as_chunks::<8>()
+                    .0
+                    .iter()
+                    .filter_map(|range| Some((u32_at(range, 0)?, u32_at(range, 4)?)))
+                    .collect(),
+            ),
+            0x1c => Self::DefaultScope(
+                (data.len() >= 31 + 16)
+                    .then(|| Some((text_at(data, 0, 31), bytes_at(data, 31)?)))
+                    .flatten()
+                    .filter(|(name, _)| !name.is_empty()),
+            ),
             0x80 => Self::Advert,
             0x81 => Self::PathUpdate,
             0x82 => Self::Ack(bytes_at(data, 0)?),
@@ -1018,5 +1116,61 @@ mod tests {
         assert_eq!(Response::parse(&[]), None);
         assert_eq!(Response::parse(&[0x03, 1, 2, 3]), None);
         assert_eq!(Response::parse(&[0x82, 1]), None);
+    }
+
+    #[test]
+    fn the_settings_each_answered_on_its_own_read_back() {
+        // As a real radio answered them.
+        let mut tuning = vec![0x17];
+        tuning.extend(0u32.to_le_bytes());
+        tuning.extend(1000u32.to_le_bytes());
+        assert_eq!(
+            Response::parse(&tuning),
+            Some(Response::Tuning {
+                rx_delay: 0,
+                airtime_factor: 1000
+            })
+        );
+        assert_eq!(
+            Response::parse(&[0x19, 31, 0]),
+            Some(Response::AutoAdd {
+                config: 31,
+                max_hops: 0
+            })
+        );
+        let mut ranges = vec![0x1a];
+        for khz in [433_000u32, 433_000, 869_495, 869_495] {
+            ranges.extend(khz.to_le_bytes());
+        }
+        assert_eq!(
+            Response::parse(&ranges),
+            Some(Response::RepeatFrequencies(vec![
+                (433_000, 433_000),
+                (869_495, 869_495)
+            ]))
+        );
+        // No scope is the code alone; one, its name in 31 and its key.
+        assert_eq!(Response::parse(&[0x1c]), Some(Response::DefaultScope(None)));
+        let mut scope = vec![0x1c];
+        scope.extend(command::set_default_scope(Some(("galicia", &[7; 16])))[1..].iter());
+        assert_eq!(
+            Response::parse(&scope),
+            Some(Response::DefaultScope(Some(("galicia".into(), [7; 16]))))
+        );
+    }
+
+    #[test]
+    fn the_rest_of_the_settings_are_laid_out_as_the_firmware_reads_them() {
+        assert_eq!(command::set_path_hash_mode(1), [0x3d, 0, 1]);
+        assert_eq!(command::set_autoadd(15, 4), [0x3a, 15, 4]);
+        let tuning = command::set_tuning(2500, 1000);
+        assert_eq!(tuning[0], 0x15);
+        assert_eq!(u32_at(&tuning, 1), Some(2500));
+        assert_eq!(u32_at(&tuning, 5), Some(1000));
+        // A name the firmware takes: under 31 bytes, ended by a zero.
+        let scope = command::set_default_scope(Some((&"x".repeat(40), &[1; 16])));
+        assert_eq!(scope.len(), 1 + 31 + 16);
+        assert_eq!(scope[31], 0);
+        assert_eq!(command::set_default_scope(None), [0x3f]);
     }
 }

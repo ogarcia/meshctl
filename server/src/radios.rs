@@ -1476,6 +1476,36 @@ impl Radios {
         Ok(())
     }
 
+    /// Puts a MeshCore radio's channels in another order: every one it has,
+    /// by its slot now, to the first slots.
+    pub async fn reorder_meshcore_channels(
+        &self,
+        id: RadioId,
+        order: &[u32],
+    ) -> Result<(), SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        let channels = mesh
+            .read(|state| {
+                let meshcore = state.meshcore_channels.as_ref()?;
+                let mut seen = std::collections::BTreeSet::new();
+                let picked: Option<Vec<_>> = order
+                    .iter()
+                    .map(|index| {
+                        let channel = state.channels.get(index)?;
+                        seen.insert(*index).then_some(())?;
+                        Some((channel.name.clone(), *meshcore.secrets.get(index)?))
+                    })
+                    .collect();
+                picked.filter(|p| p.len() == state.channels.len())
+            })
+            .ok_or_else(|| SettingsFailure::Invalid("order".into()))?;
+        mesh.meshcore_reorder_channels(&channels)
+            .await
+            .map_err(meshcore_failure)?;
+        tracing::info!(radio = id, ?order, "MeshCore channels reordered");
+        Ok(())
+    }
+
     /// Empties a MeshCore radio's channel slot. Its conversation stays,
     /// as a channel gone.
     pub async fn remove_meshcore_channel(
@@ -1926,10 +1956,7 @@ impl Radios {
             link: mesh::LinkState::Disconnected,
             ..state
         });
-        let mut tasks = vec![
-            self.forward(id, &mesh),
-            self.persist(id, &mesh, protocol_of(record.settings.kind)),
-        ];
+        let mut tasks = vec![self.forward(id, &mesh), self.persist(id, &mesh)];
         let mut enabled = record.settings.enabled;
         if enabled {
             match validate(&record.settings) {
@@ -1981,7 +2008,7 @@ impl Radios {
     /// Stores what a radio learns as it learns it: each node as it changes,
     /// everything at once when the radio syncs, and when it was last connected
     /// as it drops.
-    fn persist(&self, id: RadioId, mesh: &Mesh, protocol: Protocol) -> JoinHandle<()> {
+    fn persist(&self, id: RadioId, mesh: &Mesh) -> JoinHandle<()> {
         let mut events = mesh.subscribe();
         let mesh = mesh.clone();
         let store = self.store.clone();
@@ -2061,9 +2088,7 @@ impl Radios {
                     Ok(mesh::Event::Synced) => {
                         connected = true;
                         match save_all(&store, id, &mesh).await {
-                            Ok(()) if protocol == Protocol::Meshtastic => {
-                                follow_channels(&store, &changes, id, &mesh).await
-                            }
+                            Ok(()) => follow_channels(&store, &changes, id, &mesh).await,
                             other => other,
                         }
                     }

@@ -6,13 +6,48 @@
 //! so that what it would refuse is said before it is sent.
 
 use meshctl_api::{
-    MeshcorePosition, MeshcoreSettings, MeshcoreStatus, MeshcoreTelemetry, TelemetryShare,
+    MeshcoreAutoAdd, MeshcoreFrequencies, MeshcorePosition, MeshcoreSettings, MeshcoreStatus,
+    MeshcoreTelemetry, MeshcoreTuning, TelemetryShare,
 };
 use meshctl_core::meshcore::Settings;
 use meshctl_core::meshcore::protocol::Stats;
 
-/// The frequencies, in kHz, on which the firmware lets a client repeat.
-const REPEAT_FREQUENCIES: [u32; 3] = [433_000, 869_495, 918_000];
+/// The auto-add bits, as the firmware has them.
+const OVERWRITE_OLDEST: u8 = 1 << 0;
+const COMPANIONS: u8 = 1 << 1;
+const REPEATERS: u8 = 1 << 2;
+const ROOMS: u8 = 1 << 3;
+const SENSORS: u8 = 1 << 4;
+
+fn auto_add((config, max_hops): (u8, u8)) -> MeshcoreAutoAdd {
+    MeshcoreAutoAdd {
+        companions: config & COMPANIONS != 0,
+        repeaters: config & REPEATERS != 0,
+        rooms: config & ROOMS != 0,
+        sensors: config & SENSORS != 0,
+        overwrite_oldest: config & OVERWRITE_OLDEST != 0,
+        // The firmware counts one more: 1 is straight, 0 any.
+        max_hops: max_hops.checked_sub(1),
+    }
+}
+
+fn auto_add_bits(add: &MeshcoreAutoAdd) -> (u8, u8) {
+    let bit = |on: bool, bit: u8| if on { bit } else { 0 };
+    (
+        bit(add.companions, COMPANIONS)
+            | bit(add.repeaters, REPEATERS)
+            | bit(add.rooms, ROOMS)
+            | bit(add.sensors, SENSORS)
+            | bit(add.overwrite_oldest, OVERWRITE_OLDEST),
+        add.max_hops.map_or(0, |hops| hops + 1),
+    )
+}
+
+/// Thousandths, as the radio takes them.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn thousandths(value: f64) -> u32 {
+    (value * 1000.0).round() as u32
+}
 
 fn share(bits: u8) -> TelemetryShare {
     match bits & 0x03 {
@@ -53,6 +88,24 @@ pub fn view(settings: &Settings) -> MeshcoreSettings {
             environment: share(settings.telemetry >> 4),
         },
         multi_acks: settings.multi_acks != 0,
+        path_hash_bytes: settings.path_hash_mode.map(|mode| mode + 1),
+        default_scope: settings
+            .default_scope
+            .as_ref()
+            .and_then(|scope| scope.as_ref().map(|(name, _)| name.clone())),
+        scopes: settings.default_scope.is_some(),
+        auto_add: settings.autoadd.map(auto_add),
+        tuning: settings
+            .tuning
+            .map(|(rx_delay, airtime_factor)| MeshcoreTuning {
+                rx_delay: f64::from(rx_delay) / 1000.0,
+                airtime_factor: f64::from(airtime_factor) / 1000.0,
+            }),
+        repeat_frequencies: settings
+            .repeat_frequencies
+            .iter()
+            .map(|&(from, to)| MeshcoreFrequencies { from, to })
+            .collect(),
     }
 }
 
@@ -99,9 +152,52 @@ pub fn change(current: &Settings, wanted: &MeshcoreSettings) -> Result<Settings,
         (Some(_), Some(wanted_repeat)) => Some(wanted_repeat),
     };
     check(
-        repeat != Some(true) || REPEAT_FREQUENCIES.contains(&wanted.frequency),
+        repeat != Some(true)
+            || current
+                .repeat_frequencies
+                .iter()
+                .any(|&(from, to)| (from..=to).contains(&wanted.frequency)),
         "repeat",
     )?;
+    // Each of the rest only where the firmware has it.
+    let path_hash_mode = match (current.path_hash_mode, wanted.path_hash_bytes) {
+        (Some(_), Some(bytes)) => {
+            check((1..=3).contains(&bytes), "path_hash_bytes")?;
+            Some(bytes - 1)
+        }
+        (now, _) => now,
+    };
+    let tuning = match (current.tuning, wanted.tuning) {
+        (Some(_), Some(t)) => {
+            check(
+                (0.0..=20.0).contains(&t.rx_delay) && (0.0..=9.0).contains(&t.airtime_factor),
+                "tuning",
+            )?;
+            Some((thousandths(t.rx_delay), thousandths(t.airtime_factor)))
+        }
+        (now, _) => now,
+    };
+    let autoadd = match (current.autoadd, wanted.auto_add) {
+        (Some(_), Some(add)) => {
+            check(add.max_hops.is_none_or(|hops| hops <= 63), "auto_add")?;
+            Some(auto_add_bits(&add))
+        }
+        (now, _) => now,
+    };
+    let default_scope = match &current.default_scope {
+        None => None,
+        Some(now) => {
+            let name = wanted.default_scope.as_deref().map(str::trim).unwrap_or("");
+            let name = name.strip_prefix('#').unwrap_or(name).trim();
+            check(name.len() <= 30, "default_scope")?;
+            Some(match now {
+                // The same region keeps its key, its own if it had one.
+                Some((was, key)) if was == name => Some((was.clone(), *key)),
+                _ if name.is_empty() => None,
+                _ => Some((name.to_owned(), hashtag_secret(name))),
+            })
+        }
+    };
     Ok(Settings {
         name: name.to_owned(),
         lat,
@@ -119,6 +215,11 @@ pub fn change(current: &Settings, wanted: &MeshcoreSettings) -> Result<Settings,
             | (bits(wanted.telemetry.environment) << 4),
         location_policy: u8::from(wanted.share_position),
         multi_acks: u8::from(wanted.multi_acks),
+        path_hash_mode,
+        tuning,
+        autoadd,
+        repeat_frequencies: current.repeat_frequencies.clone(),
+        default_scope,
     })
 }
 
@@ -196,6 +297,11 @@ mod tests {
             telemetry: 0b10_01_00,
             location_policy: 1,
             multi_acks: 0,
+            path_hash_mode: Some(1),
+            tuning: Some((0, 1000)),
+            autoadd: Some((31, 0)),
+            repeat_frequencies: vec![(433_000, 433_000), (869_495, 869_495)],
+            default_scope: Some(None),
         }
     }
 
@@ -230,6 +336,21 @@ mod tests {
         );
         // Repeat only on its frequencies.
         assert_eq!(with(|w| w.repeat = Some(true)), Err("repeat".into()));
+        assert_eq!(
+            with(|w| w.path_hash_bytes = Some(4)),
+            Err("path_hash_bytes".into())
+        );
+        assert_eq!(
+            with(|w| w.tuning = Some(MeshcoreTuning {
+                rx_delay: 21.0,
+                airtime_factor: 1.0
+            })),
+            Err("tuning".into())
+        );
+        assert_eq!(
+            with(|w| w.default_scope = Some("a".repeat(31))),
+            Err("default_scope".into())
+        );
         assert!(
             with(|w| {
                 w.repeat = Some(true);
@@ -237,6 +358,23 @@ mod tests {
             })
             .is_ok()
         );
+        // A scope by its name, with or without `#`; its key the name's.
+        let scoped = with(|w| w.default_scope = Some("#galicia".into())).unwrap();
+        assert_eq!(
+            scoped.default_scope,
+            Some(Some(("galicia".into(), hashtag_secret("galicia"))))
+        );
+        assert_eq!(view(&scoped).default_scope.as_deref(), Some("galicia"));
+        // Auto-add as the firmware counts: 0 straight is its 1.
+        let mut add = view(&radio()).auto_add.unwrap();
+        assert_eq!(add.max_hops, None);
+        assert!(add.overwrite_oldest && add.repeaters);
+        add.max_hops = Some(0);
+        add.sensors = false;
+        let mut wanted = view(&radio());
+        wanted.auto_add = Some(add);
+        let added = change(&radio(), &wanted);
+        assert_eq!(added.map(|s| s.autoadd), Ok(Some((15, 1))));
         // Nowhere is no position at all.
         assert_eq!(
             with(|w| w.position = None).map(|s| (s.lat, s.lon)),

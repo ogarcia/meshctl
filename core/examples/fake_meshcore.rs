@@ -26,7 +26,8 @@
 //! them; its clock starts an hour behind, as a radio's does after a power
 //! cut, and goes only forward. Contacts are added, removed and their paths
 //! reset; channels set and emptied, each with its secret, `Public` with the
-//! one every radio has; its adverts only printed.
+//! one every radio has; its adverts only printed. Its tuning, auto-add, path
+//! hash size and default flood scope are kept as the firmware keeps them.
 
 /// The secret of `Public`, every radio's channel.
 const PUBLIC_SECRET: [u8; 16] = [
@@ -92,6 +93,14 @@ struct Radio {
     telemetry: u8,
     location_policy: u8,
     multi_acks: u8,
+    /// Each hop's hash size, less one: 0 to 2.
+    path_hash_mode: u8,
+    /// Its receive delay base and airtime factor, in thousandths.
+    tuning: (u32, u32),
+    /// Which kinds it adds by itself, as bits, and up to how far.
+    autoadd: (u8, u8),
+    /// The region what it floods is scoped to, name and key.
+    default_scope: Option<(String, [u8; 16])>,
     /// Its clock, as an offset from the host's: it goes only forward.
     clock_offset: i64,
     /// When it started, for its uptime.
@@ -175,6 +184,12 @@ impl Radio {
             telemetry: 0,
             location_policy: 1,
             multi_acks: 0,
+            // As a real radio has them: two-byte hashes, every kind added
+            // and the oldest overwritten, no scope.
+            path_hash_mode: 1,
+            tuning: (0, 1000),
+            autoadd: (31, 0),
+            default_scope: None,
             clock_offset: -3600,
             started: at,
             contacts: vec![
@@ -238,7 +253,7 @@ fn device_info(radio: &Radio) -> Vec<u8> {
     frame.extend(field("Fake MeshCore", 40));
     frame.extend(field("v1.18.0-fake", 20));
     // Repeat (v9+) and the path's hash size, less one (v10+).
-    frame.extend([u8::from(radio.repeat), 0]);
+    frame.extend([u8::from(radio.repeat), radio.path_hash_mode]);
     frame
 }
 
@@ -474,6 +489,78 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         }
         // DEVICE_QUERY
         0x16 => vec![device_info(&radio)],
+        // SET_TUNING_PARAMS, in thousandths, kept within the firmware's.
+        0x15 => {
+            let (Some(rx), Some(af)) = (u32_in(data, 0), u32_in(data, 4)) else {
+                return error(6);
+            };
+            radio.tuning = (rx.min(20_000), af.min(9_000));
+            println!("tuning {:?}", radio.tuning);
+            ok()
+        }
+        // GET_TUNING_PARAMS
+        0x2b => {
+            let mut frame = vec![0x17];
+            frame.extend(radio.tuning.0.to_le_bytes());
+            frame.extend(radio.tuning.1.to_le_bytes());
+            vec![frame]
+        }
+        // SET_AUTOADD_CONFIG: hops 64 at most.
+        0x3a if !data.is_empty() => {
+            radio.autoadd.0 = data[0];
+            if let Some(&hops) = data.get(1) {
+                radio.autoadd.1 = hops.min(64);
+            }
+            println!("auto-add {:05b}, hops {}", radio.autoadd.0, radio.autoadd.1);
+            ok()
+        }
+        // GET_AUTOADD_CONFIG
+        0x3b => vec![vec![0x19, radio.autoadd.0, radio.autoadd.1]],
+        // GET_ALLOWED_REPEAT_FREQ
+        0x3c => {
+            let mut frame = vec![0x1a];
+            for khz in REPEAT_FREQUENCIES {
+                frame.extend(khz.to_le_bytes());
+                frame.extend(khz.to_le_bytes());
+            }
+            vec![frame]
+        }
+        // SET_PATH_HASH_MODE: a reserved zero, then 0 to 2.
+        0x3d if data.first() == Some(&0) && data.len() >= 2 => {
+            if data[1] >= 3 {
+                return error(6);
+            }
+            radio.path_hash_mode = data[1];
+            println!("path hashes of {} bytes", data[1] + 1);
+            ok()
+        }
+        // SET_DEFAULT_FLOOD_SCOPE: a name up to 30 bytes and a key, or none.
+        0x3f => {
+            if data.len() >= 31 + 16 {
+                let end = data[..31].iter().position(|&b| b == 0).unwrap_or(31);
+                if end == 0 || end >= 31 {
+                    return error(6);
+                }
+                let name = String::from_utf8_lossy(&data[..end]).into_owned();
+                let key: [u8; 16] = data[31..47].try_into().unwrap_or_default();
+                println!("default scope {name:?}");
+                radio.default_scope = Some((name, key));
+            } else {
+                println!("no default scope");
+                radio.default_scope = None;
+            }
+            ok()
+        }
+        // GET_DEFAULT_FLOOD_SCOPE
+        0x40 => match &radio.default_scope {
+            Some((name, key)) => {
+                let mut frame = vec![0x1c];
+                frame.extend(field(name, 31));
+                frame.extend(key);
+                vec![frame]
+            }
+            None => vec![vec![0x1c]],
+        },
         // SET_OTHER_PARAMS
         0x26 if !data.is_empty() => {
             radio.manual_add = data[0] != 0;
