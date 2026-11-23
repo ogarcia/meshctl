@@ -17,6 +17,7 @@ use wasm_bindgen::JsCast;
 
 /// The longest text the daemon takes, in bytes.
 /// What sends a message, as an icon.
+const SMILE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/mood-smile.svg");
 const SEND: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/send.svg");
 
 const MAX_TEXT_BYTES: usize = 200;
@@ -296,6 +297,50 @@ fn Composer(peer: Peer) -> impl IntoView {
         }
     };
 
+    // The emojis, over the bar: each one picked goes where the caret is,
+    // and they stay open for more, as in the phones' apps. Escape, a click
+    // anywhere else or sending close them.
+    let picking = RwSignal::new(false);
+    let closing = window_event_listener(leptos::ev::click, move |_| picking.set(false));
+    let escaping = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            picking.set(false);
+        }
+    });
+    on_cleanup(move || {
+        closing.remove();
+        escaping.remove();
+    });
+    let insert = move |emoji: String| {
+        let Some(field) = field.get_untracked() else {
+            return;
+        };
+        let value = field.value();
+        // Where the caret is, in the UTF-16 units the field counts in.
+        let at = |units: Option<u32>| {
+            let units = units.unwrap_or(u32::MAX) as usize;
+            let mut counted = 0;
+            value
+                .char_indices()
+                .find(|(_, c)| {
+                    counted += c.len_utf16();
+                    counted > units
+                })
+                .map_or(value.len(), |(at, _)| at)
+        };
+        let (start, end) = (
+            at(field.selection_start().ok().flatten()),
+            at(field.selection_end().ok().flatten()),
+        );
+        let written = format!("{}{emoji}{}", &value[..start], &value[end..]);
+        let caret =
+            u32::try_from(value[..start].encode_utf16().count() + emoji.encode_utf16().count())
+                .unwrap_or_default();
+        field.set_value(&written);
+        text.set(written);
+        let _ = field.set_selection_range(caret, caret);
+    };
+
     let submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let Some(radio) = live.selected.get_untracked() else {
@@ -319,6 +364,7 @@ fn Composer(peer: Peer) -> impl IntoView {
             match daemon::send_message(radio, &message).await {
                 Ok(sent) => {
                     text.set(String::new());
+                    picking.set(false);
                     error.set(None);
                     live.thread.update(|thread| {
                         if !thread.iter().any(|m| m.id == sent.id) {
@@ -406,7 +452,25 @@ fn Composer(peer: Peer) -> impl IntoView {
                         }
                     }
                 ></textarea>
+                <button
+                    type="button"
+                    class="icon-button emoji-toggle"
+                    class:on=move || picking.get()
+                    aria-expanded=move || picking.get().to_string()
+                    title=move || t_string!(i18n, chat_emoji)
+                    aria-label=move || t_string!(i18n, chat_emoji)
+                    inner_html=SMILE
+                    on:click=move |ev| {
+                        ev.stop_propagation();
+                        picking.update(|p| *p = !*p);
+                    }
+                ></button>
             </div>
+            <Show when=move || picking.get()>
+                <div class="emoji-popover" on:click=|ev| ev.stop_propagation()>
+                    <crate::emoji::EmojiPicker picked=Signal::stored(None::<String>) pick=Callback::new(insert) />
+                </div>
+            </Show>
             <span class=move || {
                 if bytes() > MAX_TEXT_BYTES { "count over" } else { "count dim" }
             }>{move || format!("{}/{MAX_TEXT_BYTES}", bytes())}</span>

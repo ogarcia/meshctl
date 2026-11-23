@@ -2405,7 +2405,28 @@
       }
       /* A line tall, growing with what is written up to eight, then
          scrolled within; long words broken, as nothing runs off its side. */
+      .composer { position: relative; }
       .composer .field { position: relative; flex: 1; min-width: 0; display: flex; }
+      /* The emojis' button inside the field, on its right, at its foot. */
+      .composer .emoji-toggle { position: absolute; right: 4px; bottom: 4px; width: 32px; height: 32px; }
+      .composer .emoji-toggle { border: 0; background: none; }
+      .composer .emoji-toggle:hover { color: var(--mc-text); }
+      .composer .emoji-toggle.on { color: var(--mc-primary); }
+      /* The emojis over the bar, on the right, beside their button. */
+      .emoji-popover {
+        position: absolute;
+        right: 20px;
+        bottom: calc(100% + 6px);
+        z-index: 50;
+        width: 360px;
+        max-width: calc(100% - 24px);
+        border-radius: 12px;
+        box-shadow: var(--mc-shadow);
+      }
+      .emoji-popover .emoji-picker { max-width: none; background: var(--mc-surface); }
+      /* Its groups in one row, as wide as it is. */
+      .emoji-popover .emoji-groups { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); }
+      .emoji-popover .emoji-groups button { width: auto; }
       .composer textarea {
         position: relative;
         flex: 1;
@@ -2415,7 +2436,8 @@
         scrollbar-width: none;
         min-height: 40px;
         max-height: calc(8 * 1.45em + 20px);
-        padding: 9px 12px;
+        /* Room on the right for the emojis' button. */
+        padding: 9px 42px 9px 12px;
         line-height: 1.45;
         resize: none;
         overflow-y: auto;
@@ -2427,7 +2449,7 @@
         position: absolute;
         inset: 0;
         overflow: hidden;
-        padding: 9px 12px;
+        padding: 9px 42px 9px 12px;
         border: 1px solid transparent;
         border-radius: 8px;
         background: var(--mc-page);
@@ -3278,7 +3300,9 @@
         .topbar .actions button { min-height: 44px; }
         /* What a message is written in, and its button, a finger tall too. */
         .composer textarea, .composer button { min-height: 44px; }
-        .composer textarea, .composer .backdrop { padding: 11px 12px; }
+        .composer textarea, .composer .backdrop { padding: 11px 42px 11px 12px; }
+        .composer .emoji-toggle { bottom: 6px; }
+        .emoji-popover { right: 8px; left: 8px; width: auto; max-width: none; }
         /* No count: the field says when it is near, and what goes past. */
         .composer .count { display: none; }
         /* Its button round, a finger wide. */

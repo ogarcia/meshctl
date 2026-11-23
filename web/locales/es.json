@@ -78,6 +78,7 @@
   "chat_pick": "Elige un canal o un nodo con el que hablar.",
   "chat_write": "Escribe un mensaje",
   "chat_send": "Enviar",
+  "chat_emoji": "Emoji",
   "chat_not_connected": "La radio no está conectada: los mensajes se pueden leer, no enviar.",
   "chat_invalid": "Ese mensaje no se puede enviar: está vacío o es demasiado largo, o el canal no está en la radio.",
   "radios_title": "Radios",

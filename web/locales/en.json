@@ -78,6 +78,7 @@
   "chat_pick": "Pick a channel or a node to talk to.",
   "chat_write": "Write a message",
   "chat_send": "Send",
+  "chat_emoji": "Emoji",
   "chat_not_connected": "The radio is not connected: messages can be read, not sent.",
   "chat_invalid": "That message cannot be sent: it is empty or too long, or the channel is not on the radio.",
   "radios_title": "Radios",
