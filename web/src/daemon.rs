@@ -509,6 +509,20 @@ pub async fn reorder_meshcore_channels(radio: RadioId, order: &[u32]) -> Result<
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Keeps a MeshCore channel's region, or none for the radio's.
+pub async fn set_channel_scope(
+    radio: RadioId,
+    index: u32,
+    scope: Option<String>,
+) -> Result<(), Failure> {
+    let request = with_token(Request::put(&url(&format!(
+        "/radios/{radio}/meshcore/channels/{index}/scope"
+    ))))
+    .json(&meshctl_api::MeshcoreChannelScope { scope })
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// Empties a MeshCore radio's slot.
 pub async fn remove_meshcore_channel(radio: RadioId, index: u32) -> Result<(), Failure> {
     let request = with_token(Request::delete(&url(&format!(

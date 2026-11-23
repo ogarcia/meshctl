@@ -29,66 +29,65 @@ struct Defaults {
     known: Vec<String>,
 }
 
-/// The region of a MeshCore chat's next message: a button in the field,
-/// whose menu says the one it goes in by default, its channel's or the
-/// radio's, and picks another for it alone, or none. `choice` is that
-/// one, none for the default.
+/// The regions a chat can flood in, read: its channel's, the radio's, and
+/// every one known.
+async fn defaults_of(radio: meshctl_api::RadioId, peer: Peer) -> Defaults {
+    let channels = daemon::meshcore_channels(radio).await.ok();
+    let settings = daemon::meshcore_settings(radio).await.ok();
+    let found = daemon::meshcore_regions(radio).await.ok();
+    let channel = match peer {
+        Peer::Channel { channel } => channels.as_ref().and_then(|c| {
+            c.channels
+                .iter()
+                .find(|c| c.index == channel)
+                .and_then(|c| c.scope.clone())
+        }),
+        Peer::Node { .. } => None,
+    };
+    let radio_default = settings.and_then(|s| s.default_scope);
+    let mut known: Vec<String> = found
+        .map(|f| f.regions.into_iter().map(|r| r.name).collect())
+        .unwrap_or_default();
+    known.extend(
+        channels
+            .into_iter()
+            .flat_map(|c| c.channels)
+            .filter_map(|c| c.scope)
+            .filter(|s| s != "*"),
+    );
+    known.extend(radio_default.clone());
+    let mut seen = std::collections::HashSet::new();
+    known.retain(|name| seen.insert(name.clone()));
+    Defaults {
+        channel,
+        radio: radio_default,
+        known,
+    }
+}
+
+/// A MeshCore channel's own region, in its chat's heading: the one what is
+/// sent on it floods in, picked for good, the radio's by default.
 #[component]
-pub fn ScopePicker(peer: Peer, choice: RwSignal<Option<String>>) -> impl IntoView {
+pub fn ChannelRegion(channel: u32) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let open = RwSignal::new(false);
     let defaults = RwSignal::new(Defaults::default());
-    // Read on showing, and as the radio is read again.
+    let peer = Peer::Channel { channel };
     Effect::new(move |_| {
         live.synced.track();
         let Some(radio) = live.selected.get_untracked() else {
             return;
         };
         spawn_local(async move {
-            let channels = daemon::meshcore_channels(radio).await.ok();
-            let settings = daemon::meshcore_settings(radio).await.ok();
-            let found = daemon::meshcore_regions(radio).await.ok();
-            let channel = match peer {
-                Peer::Channel { channel } => channels.as_ref().and_then(|c| {
-                    c.channels
-                        .iter()
-                        .find(|c| c.index == channel)
-                        .and_then(|c| c.scope.clone())
-                }),
-                Peer::Node { .. } => None,
-            };
-            let radio_default = settings.and_then(|s| s.default_scope);
-            let mut known: Vec<String> = found
-                .map(|f| f.regions.into_iter().map(|r| r.name).collect())
-                .unwrap_or_default();
-            known.extend(
-                channels
-                    .into_iter()
-                    .flat_map(|c| c.channels)
-                    .filter_map(|c| c.scope)
-                    .filter(|s| s != "*"),
-            );
-            known.extend(radio_default.clone());
-            let mut seen = std::collections::HashSet::new();
-            known.retain(|name| seen.insert(name.clone()));
-            defaults.set(Defaults {
-                channel,
-                radio: radio_default,
-                known,
-            });
+            let read = defaults_of(radio, peer).await;
+            if live.selected.get_untracked() == Some(radio) {
+                defaults.set(read);
+            }
         });
     });
     let closing = window_event_listener(leptos::ev::click, move |_| open.set(false));
-    let escaping = window_event_listener(leptos::ev::keydown, move |ev| {
-        if ev.key() == "Escape" {
-            open.set(false);
-        }
-    });
-    on_cleanup(move || {
-        closing.remove();
-        escaping.remove();
-    });
+    on_cleanup(move || closing.remove());
     let words = move |name: &str| {
         if name == "*" {
             t_string!(i18n, chat_scope_none).to_owned()
@@ -96,79 +95,92 @@ pub fn ScopePicker(peer: Peer, choice: RwSignal<Option<String>>) -> impl IntoVie
             format!("#{name}")
         }
     };
-    // What it goes in by default, in words.
-    let default_words = move || {
-        defaults.with(|d| match (&d.channel, &d.radio) {
-            (Some(channel), _) => {
-                t_string!(i18n, chat_scope_channel).replace("{r}", &words(channel))
-            }
-            (None, Some(radio)) => t_string!(i18n, chat_scope_radio).replace("{r}", &words(radio)),
-            (None, None) => {
-                t_string!(i18n, chat_scope_radio).replace("{r}", t_string!(i18n, chat_scope_none))
-            }
+    let radio_words = move || {
+        defaults.with(|d| {
+            t_string!(i18n, chat_scope_radio).replace(
+                "{r}",
+                &d.radio
+                    .as_deref()
+                    .map_or_else(|| t_string!(i18n, chat_scope_none).to_owned(), words),
+            )
         })
     };
-    let title = move || match choice.get() {
-        Some(name) => t_string!(i18n, chat_scope_once_title).replace("{r}", &words(&name)),
-        None => default_words(),
+    // Its own, if it has one; the radio's otherwise, said as such.
+    let label = move || {
+        defaults.with(|d| match &d.channel {
+            Some(own) => words(own),
+            None => t_string!(i18n, mc_channel_scope_default).to_owned(),
+        })
     };
-    let item = move |value: Option<String>, label: Signal<String>| {
+    let title = move || {
+        defaults.with(|d| match &d.channel {
+            Some(own) => t_string!(i18n, chat_scope_channel).replace("{r}", &words(own)),
+            None => radio_words(),
+        })
+    };
+    let pick = move |scope: Option<String>| {
+        open.set(false);
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        defaults.update(|d| d.channel.clone_from(&scope));
+        spawn_local(async move {
+            let _ = daemon::set_channel_scope(radio, channel, scope).await;
+        });
+    };
+    let item = move |value: Option<String>, text: Signal<String>| {
         let on = {
             let value = value.clone();
-            Signal::derive(move || choice.get() == value)
+            Signal::derive(move || defaults.with(|d| d.channel == value))
         };
         view! {
             <button
-                type="button"
                 role="menuitemradio"
                 class:on=on
                 aria-checked=move || on.get().to_string()
-                on:click=move |_| {
-                    choice.set(value.clone());
-                    open.set(false);
-                }
+                on:click=move |_| pick(value.clone())
             >
-                <span class="label">{label}</span>
-                <span class="icon" inner_html=move || if on.get() { CHECK } else { "" }></span>
+                <span class="icon" inner_html=WORLD></span>
+                <span class="label">{text}</span>
+                <span class="check" inner_html=move || if on.get() { CHECK } else { "" }></span>
             </button>
         }
     };
     view! {
-        <button
-            type="button"
-            class="icon-button scope-toggle"
-            class:on=move || choice.get().is_some()
-            aria-haspopup="menu"
-            aria-expanded=move || open.get().to_string()
-            title=title
-            aria-label=title
-            inner_html=WORLD
-            on:click=move |ev| {
-                ev.stop_propagation();
-                open.update(|o| *o = !*o);
-            }
-        ></button>
-        <Show when=move || open.get()>
-            <div class="heading-menu scope-menu" role="menu" on:click=|ev| ev.stop_propagation()>
-                <p class="dim">{t!(i18n, chat_scope_menu)}</p>
-                {item(None, Signal::derive(default_words))}
-                {item(Some("*".to_owned()), Signal::derive(move || t_string!(i18n, chat_scope_none).to_owned()))}
-                // Each other region known: the one it goes in by default is
-                // the first already.
-                {move || {
-                    let (known, usual) =
-                        defaults.with(|d| (d.known.clone(), d.channel.clone().or(d.radio.clone())));
-                    known
-                        .into_iter()
-                        .filter(|name| Some(name) != usual.as_ref())
-                        .map(|name| {
-                            let label = format!("#{name}");
-                            item(Some(name), Signal::derive(move || label.clone()))
-                        })
-                        .collect_view()
-                }}
-            </div>
-        </Show>
+        <span class="channel-region">
+            <button
+                type="button"
+                class="with-icon"
+                class:on=move || open.get()
+                aria-haspopup="menu"
+                aria-expanded=move || open.get().to_string()
+                title=title
+                on:click=move |ev| {
+                    ev.stop_propagation();
+                    open.update(|o| *o = !*o);
+                }
+            >
+                <span class="icon" inner_html=WORLD></span>
+                <span class="label">{label}</span>
+            </button>
+            <Show when=move || open.get()>
+                <div class="heading-menu" role="menu" on:click=|ev| ev.stop_propagation()>
+                    <p class="dim">{t!(i18n, mc_channel_scope_menu)}</p>
+                    {item(None, Signal::derive(radio_words))}
+                    {item(Some("*".to_owned()), Signal::derive(move || t_string!(i18n, chat_scope_none).to_owned()))}
+                    {move || {
+                        defaults
+                            .with(|d| d.known.clone())
+                            .into_iter()
+                            .map(|name| {
+                                let shown = format!("#{name}");
+                                item(Some(name), Signal::derive(move || shown.clone()))
+                            })
+                            .collect_view()
+                    }}
+                </div>
+            </Show>
+        </span>
     }
 }
 

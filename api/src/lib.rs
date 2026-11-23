@@ -623,6 +623,16 @@ pub struct MeshcoreChannel {
     pub scope: Option<String>,
 }
 
+/// A MeshCore channel's region, alone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreChannelScope {
+    /// Without `#`, or `*` for none; left out, the radio's default.
+    #[cfg_attr(feature = "openapi", schema(example = "galicia"))]
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
 /// What a MeshCore channel's secret is: the one every radio has, one its
 /// name gives, or one of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

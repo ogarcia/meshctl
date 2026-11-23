@@ -1406,10 +1406,6 @@ fn Composer(peer: Peer) -> impl IntoView {
     let text = RwSignal::new(String::new());
     let error = RwSignal::new(None::<Failure>);
     let busy = RwSignal::new(false);
-    // The region of the next message alone, on a MeshCore radio: none for
-    // its channel's or the radio's.
-    let scope = RwSignal::new(None::<String>);
-    let meshcore = move || live.selected_kind() == Some(RadioKind::Meshcore);
     let bytes = move || text.with(String::len);
     let over = move || bytes() > MAX_TEXT_BYTES;
     let connected = move || {
@@ -1561,16 +1557,14 @@ fn Composer(peer: Peer) -> impl IntoView {
         }
         let reply_id = thread.replying.get_untracked();
         let written = text.get_untracked();
-        let once = scope.get_untracked().filter(|_| meshcore());
         busy.set(true);
         spawn_local(async move {
-            match send(live, peer, written, reply_id, false, once).await {
+            match send(live, peer, written, reply_id, false, None).await {
                 Ok(()) => {
                     text.set(String::new());
                     picking.set(false);
                     error.set(None);
                     thread.replying.set(None);
-                    scope.set(None);
                 }
                 Err(failure) => error.set(Some(failure)),
             }
@@ -1648,44 +1642,13 @@ fn Composer(peer: Peer) -> impl IntoView {
         }}
         <form class="composer" on:submit=submit>
             {replying}
-            {move || {
-                scope
-                    .get()
-                    .filter(|_| meshcore())
-                    .map(|chosen| {
-                        let words = if chosen == "*" {
-                            t_string!(i18n, chat_scope_none).to_owned()
-                        } else {
-                            format!("#{chosen}")
-                        };
-                        view! {
-                            <div class="replying scope-once">
-                                <span class="icon" inner_html=crate::meshcore_regions::WORLD></span>
-                                <div class="quote">
-                                    <span class="who">{move || t_string!(i18n, chat_scope_once)}</span>
-                                    <span class="what">{words}</span>
-                                </div>
-                                <button
-                                    type="button"
-                                    class="icon-button"
-                                    title=move || t_string!(i18n, chat_scope_back)
-                                    aria-label=move || t_string!(i18n, chat_scope_back)
-                                    inner_html=CLOSE
-                                    on:click=move |_| scope.set(None)
-                                ></button>
-                            </div>
-                        }
-                    })
-            }}
             // Behind what is written, the same text unseen but for what
             // goes past what a message takes, in red: a field cannot colour
             // a part of its own text.
             <div
                 class="field"
                 class:over=over
-                class:scoped=meshcore
             >
-                {move || meshcore().then(|| view! { <crate::meshcore_regions::ScopePicker peer choice=scope /> })}
                 <div class="backdrop" node_ref=backdrop aria-hidden="true">
                     {move || {
                         let (fits, near, over) = text.with(|t| past_limit(t));

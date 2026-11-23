@@ -809,11 +809,8 @@
   "chat_scope_none": "Sin región",
   "chat_scope_channel": "La del canal: {r}",
   "chat_scope_radio": "La de la radio: {r}",
-  "chat_scope_menu": "Región en la que se inunda el próximo mensaje",
-  "chat_scope_once": "Solo este mensaje, en la región",
-  "chat_scope_once_title": "Solo el próximo mensaje: {r}",
-  "chat_scope_back": "Volver a la región de siempre",
   "mc_channel_scope": "Región",
   "mc_channel_scope_default": "La de la radio",
-  "mc_channel_scope_hint": "La región en la que se inunda lo que envías a este canal. La radio no la guarda: la recuerda meshctl, y va en su enlace."
+  "mc_channel_scope_hint": "La región en la que se inunda lo que envías a este canal. La radio no la guarda: la recuerda meshctl, y va en su enlace.",
+  "mc_channel_scope_menu": "Región en la que se inunda lo que envías a este canal"
 }

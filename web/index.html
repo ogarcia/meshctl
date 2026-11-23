@@ -2851,17 +2851,14 @@
       .composer .emoji-toggle { border: 0; background: none; }
       .composer .emoji-toggle:hover { color: var(--mc-text); }
       .composer .emoji-toggle.on { color: var(--mc-primary); }
-      /* On a MeshCore radio, the region's button beside the emojis', and
-         room for both in the field; its menu over them. */
-      .composer .field.scoped textarea { padding-right: 82px; }
-      .composer .scope-toggle { position: absolute; z-index: 1; right: 40px; bottom: 0; width: 40px; height: 40px; border: 0; background: none; }
-      .composer .scope-toggle svg { width: 20px; height: 20px; }
-      .composer .scope-toggle:hover { color: var(--mc-text); }
-      .composer .scope-toggle.on { color: var(--mc-primary); }
-      .composer .scope-menu { position: absolute; right: 0; left: auto; top: auto; bottom: calc(100% + 6px); z-index: 50; min-width: 240px; max-height: 50vh; overflow-y: auto; }
-      .composer .scope-menu > p { margin: 4px 10px 6px; font-size: 12px; }
-      .composer .scope-once .icon { color: var(--mc-primary); }
       .channel-regions { margin-top: 2px; }
+      /* A MeshCore channel's region, in its chat's heading: its menu as the
+         heading's others, each region by the world's icon. */
+      .channel-region { position: relative; }
+      .channel-region .heading-menu { min-width: 240px; max-height: 60vh; overflow-y: auto; }
+      .channel-region .heading-menu > p { margin: 4px 10px 6px; font-size: 12px; text-align: left; }
+      .channel-region .heading-menu .check { display: flex; margin-left: auto; }
+      .channel-region .heading-menu .check svg { width: 16px; height: 16px; }
       /* The emojis over the bar, on the right, beside their button. */
       .emoji-popover {
         position: absolute;

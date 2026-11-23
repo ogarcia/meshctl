@@ -1907,6 +1907,16 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 <h1>{move || title(live, peer)}</h1>
                 <span class="dim">{t!(i18n, nav_channel_slot, index = channel)}</span>
             </div>
+            // A MeshCore channel's region, picked here for good.
+            {move || {
+                (live.selected_kind() == Some(RadioKind::Meshcore)).then(|| {
+                    view! {
+                        <div class="actions">
+                            <crate::meshcore_regions::ChannelRegion channel />
+                        </div>
+                    }
+                })
+            }}
         }
         .into_any(),
         Peer::Node { node } => {

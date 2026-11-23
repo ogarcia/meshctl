@@ -11,8 +11,8 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Advert, ChannelOrder, Contact, Error, ErrorCode, MeshcoreChannelChange, MeshcoreChannels,
-    MeshcoreRegions, MeshcoreSettings, MeshcoreStatus, RadioId,
+    Advert, ChannelOrder, Contact, Error, ErrorCode, MeshcoreChannelChange, MeshcoreChannelScope,
+    MeshcoreChannels, MeshcoreRegions, MeshcoreSettings, MeshcoreStatus, RadioId,
 };
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -25,6 +25,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(reorder_channels))
         .routes(routes!(set_channel, remove_channel))
         .routes(routes!(channel_link))
+        .routes(routes!(channel_scope))
         .routes(routes!(reset_path))
         .routes(routes!(advert))
         .routes(routes!(regions))
@@ -209,6 +210,44 @@ async fn remove_channel(
     Path((radio, index)): Path<(RadioId, u32)>,
 ) -> Response {
     match state.radios.remove_meshcore_channel(radio, index).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Set a MeshCore channel's region
+///
+/// The region what is sent on a channel floods in, or `*` for none, or none
+/// for the radio's default: kept by meshctl for the channel, whichever slot
+/// it is in, as the radio keeps none per channel. Nothing is written to the
+/// radio. Told as `synced`.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/meshcore/channels/{index}/scope",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("index" = u32, Path, description = "The channel's slot"),
+    ),
+    request_body = MeshcoreChannelScope,
+    responses(
+        (status = 204, description = "Kept"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "No channel in that slot, or not a region: `invalid_settings`; not a MeshCore radio: `unsupported_kind`", body = Error),
+    )
+)]
+async fn channel_scope(
+    State(state): State<AppState>,
+    Path((radio, index)): Path<(RadioId, u32)>,
+    Json(wanted): Json<MeshcoreChannelScope>,
+) -> Response {
+    match state
+        .radios
+        .set_meshcore_channel_scope(radio, index, wanted.scope.as_deref())
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(failure) => refused(failure),
     }

@@ -1652,6 +1652,37 @@ impl Radios {
         Ok(())
     }
 
+    /// Keeps the region a MeshCore channel in a slot floods in, or none for
+    /// the radio's default: for the channel, nothing written to the radio.
+    pub async fn set_meshcore_channel_scope(
+        &self,
+        id: RadioId,
+        index: u32,
+        scope: Option<&str>,
+    ) -> Result<(), SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        let scope = match scope {
+            Some(scope) => Some(
+                crate::meshcore::scope_name(scope)
+                    .ok_or_else(|| SettingsFailure::Invalid("scope".into()))?,
+            ),
+            None => None,
+        };
+        let (name, secret) = mesh
+            .read(|state| {
+                let channel = state.channels.get(&index)?;
+                let secret = state.meshcore_channels.as_ref()?.secrets.get(&index)?;
+                Some((channel.name.clone(), *secret))
+            })
+            .ok_or_else(|| SettingsFailure::Invalid("index".into()))?;
+        self.keep_scope(id, &name, &secret, scope.as_deref())
+            .await?;
+        // Whoever shows the channels reads them again.
+        let _ = self.changes.send(Change::Mesh(id, mesh::Event::Synced));
+        tracing::info!(radio = id, index, ?scope, "MeshCore channel's region set");
+        Ok(())
+    }
+
     /// Empties a MeshCore radio's channel slot. Its conversation stays,
     /// as a channel gone.
     pub async fn remove_meshcore_channel(
