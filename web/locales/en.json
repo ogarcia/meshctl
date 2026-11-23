@@ -665,7 +665,7 @@
   "data_packets": "Packets",
   "data_nodes": "Nodes",
   "data_messages": "Messages",
-  "data_since": "the oldest, from {ago} ago",
+  "data_since": "over the last {ago}",
   "data_kept": "How much is kept",
   "data_packets_title": "Packets",
   "data_packets_hint": "What the live view, the charts and the details of messages and requests show. Each node's latest of each kind is always kept, however old.",

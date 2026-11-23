@@ -206,6 +206,20 @@ pub fn DataView() -> impl IntoView {
         }
     };
 
+    // The rows once the times are read: drawn before, their switches would
+    // show off and then slide on. Once, not again as each time changes,
+    // which would lose the field being written in.
+    let loaded = Memo::new(move |_| retention.with(Option::is_some));
+    let rows = move || {
+        loaded.get().then(|| {
+            view! {
+                {row(Kept::Packets)}
+                {row(Kept::Nodes)}
+                {row(Kept::Messages)}
+            }
+        })
+    };
+
     let summary = move || {
         let read = storage.get()?;
         let locale = i18n.get_locale();
@@ -213,26 +227,27 @@ pub fn DataView() -> impl IntoView {
             let now = live.now.get();
             crate::mesh::ago(now, u32::try_from(at).unwrap_or(now))
         });
+        // As a node's figures are drawn.
         Some(view! {
-            <div class="data-summary">
-                <div class="fact">
-                    <span class="dim">{t!(i18n, data_size)}</span>
-                    <b>{size(locale, read.bytes)}</b>
+            <div class="node-figures data-figures">
+                <div class="figure">
+                    <span class="label">{t!(i18n, data_size)}</span>
+                    <span class="value">{size(locale, read.bytes)}</span>
                 </div>
-                <div class="fact">
-                    <span class="dim">{t!(i18n, data_packets)}</span>
-                    <b>{count(locale, read.packets)}</b>
+                <div class="figure">
+                    <span class="label">{t!(i18n, data_packets)}</span>
+                    <span class="value">{count(locale, read.packets)}</span>
                     {since.map(|ago| view! {
-                        <span class="dim small">{t_string!(i18n, data_since).replace("{ago}", &ago)}</span>
+                        <span class="sub">{t_string!(i18n, data_since).replace("{ago}", &ago)}</span>
                     })}
                 </div>
-                <div class="fact">
-                    <span class="dim">{t!(i18n, data_nodes)}</span>
-                    <b>{count(locale, read.nodes)}</b>
+                <div class="figure">
+                    <span class="label">{t!(i18n, data_nodes)}</span>
+                    <span class="value">{count(locale, read.nodes)}</span>
                 </div>
-                <div class="fact">
-                    <span class="dim">{t!(i18n, data_messages)}</span>
-                    <b>{count(locale, read.messages)}</b>
+                <div class="figure">
+                    <span class="label">{t!(i18n, data_messages)}</span>
+                    <span class="value">{count(locale, read.messages)}</span>
                 </div>
             </div>
         })
@@ -242,9 +257,7 @@ pub fn DataView() -> impl IntoView {
         <section class="preferences data">
             {summary}
             <h2>{t!(i18n, data_kept)}</h2>
-            {row(Kept::Packets)}
-            {row(Kept::Nodes)}
-            {row(Kept::Messages)}
+            {rows}
             <div class="data-clean">
                 <span class="dim">{t!(i18n, data_daily)}</span>
                 <button type="button" disabled=move || busy.get() on:click=clean>

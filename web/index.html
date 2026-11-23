@@ -924,11 +924,10 @@
         letter-spacing: 0.06em;
         text-transform: uppercase;
       }
-      .data-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; padding: 6px 4px 4px; }
-      .data-summary .fact { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 10px; background: var(--mc-raised); }
-      .data-summary .fact .dim { font-size: 12px; }
-      .data-summary .fact b { font-size: 20px; font-weight: 600; }
-      .data-summary .fact .small { font-size: 11px; }
+      /* Its figures as a node's, four to the width of the page. */
+      .data-figures { padding-top: 6px; }
+      .data-figures .figure { flex: 1 1 0; min-width: 120px; }
+      .data-figures .sub { white-space: nowrap; }
       .pref-control.retention { display: flex; align-items: center; justify-content: flex-end; gap: 10px; width: auto; }
       .pref-control.retention input { width: 84px; text-align: right; }
       .data-clean { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 4px 4px; }

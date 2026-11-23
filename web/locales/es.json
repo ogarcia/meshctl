@@ -665,7 +665,7 @@
   "data_packets": "Paquetes",
   "data_nodes": "Nodos",
   "data_messages": "Mensajes",
-  "data_since": "el más viejo, de hace {ago}",
+  "data_since": "desde hace {ago}",
   "data_kept": "Cuánto se guarda",
   "data_packets_title": "Paquetes",
   "data_packets_hint": "Lo que se ve en directo, las gráficas y los detalles de mensajes y peticiones. De cada nodo se guarda siempre lo último de cada tipo, por viejo que sea.",

@@ -334,8 +334,8 @@ pub fn MoreView() -> impl IntoView {
             </Show>
             <h2>"meshctl"</h2>
             {item(Page::Radios)}
-            {item(Page::Preferences)}
             {item(Page::Data)}
+            {item(Page::Preferences)}
         </div>
     }
 }

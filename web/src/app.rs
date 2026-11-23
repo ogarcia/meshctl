@@ -1484,7 +1484,7 @@ fn MeshctlSidebar() -> impl IntoView {
             <span class="dim">{t!(i18n, nav_meshctl_settings)}</span>
         </header>
         <div class="sidebar-body">
-            {item(Page::Radios)} {item(Page::Preferences)} {item(Page::Data)}
+            {item(Page::Radios)} {item(Page::Data)} {item(Page::Preferences)}
         </div>
     }
 }
