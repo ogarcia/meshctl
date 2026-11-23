@@ -13,6 +13,7 @@ use leptos_i18n::I18nContext;
 use meshctl_api::{
     BROADCAST, ErrorCode, LinkState, Message, MessageId, MessageStatus, NewMessage, Peer, RadioKind,
 };
+use std::time::Duration;
 use wasm_bindgen::JsCast;
 
 /// What sends a message, as an icon.
@@ -519,29 +520,83 @@ pub fn ChatView() -> impl IntoView {
         shown_now.set(!document().hidden());
     });
     on_cleanup(move || showing.remove());
-    let marked = StoredValue::new(0_i64);
-    Effect::new(move |_| {
-        let reading = live.open.get().is_some() && !away.get() && shown_now.get();
-        live.reading.set(reading);
-        let (Some(peer), Some(radio)) = (live.open.get(), live.selected.get_untracked()) else {
+    // Read as it goes: up to the last message seen whole, while shown; down
+    // at the newest, all of it. Each conversation its own: how far it was
+    // asked to be read, not to ask twice.
+    let marked = StoredValue::new((None::<Peer>, 0_i64));
+    let mark_seen = move || {
+        let (Some(peer), Some(radio), Some(list)) = (
+            live.open.get_untracked(),
+            live.selected.get_untracked(),
+            list.get_untracked(),
+        ) else {
             return;
         };
-        let newest = live.thread.with(|t| t.iter().map(|m| m.id).max());
+        if !shown_now.get_untracked() {
+            return;
+        }
+        let seen = if away.get_untracked() {
+            let bottom = list.get_bounding_client_rect().bottom() + 1.0;
+            let rows = list.query_selector_all(".bubble-row[data-id]").ok();
+            let mut seen = None;
+            for i in 0..rows.as_ref().map_or(0, web_sys::NodeList::length) {
+                let Some(row) = rows
+                    .as_ref()
+                    .and_then(|r| r.item(i))
+                    .and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+                else {
+                    continue;
+                };
+                if row.get_bounding_client_rect().bottom() <= bottom {
+                    let id = row
+                        .get_attribute("data-id")
+                        .and_then(|id| id.parse::<i64>().ok());
+                    seen = seen.max(id);
+                }
+            }
+            seen
+        } else {
+            live.thread.with_untracked(|t| t.iter().map(|m| m.id).max())
+        };
         let read = live.conversations.with_untracked(|c| {
             c.iter()
                 .find(|c| c.peer == peer)
                 .and_then(|c| c.read_up_to)
                 .unwrap_or(0)
         });
-        if let Some(newest) = newest.filter(|n| reading && *n > read.max(marked.get_value())) {
-            marked.set_value(newest);
+        let (asked_for, asked) = marked.get_value();
+        let asked = if asked_for == Some(peer) { asked } else { 0 };
+        if let Some(seen) = seen.filter(|seen| *seen > read.max(asked)) {
+            marked.set_value((Some(peer), seen));
             spawn_local(async move {
-                let _ = daemon::mark_read(radio, peer, newest).await;
+                let _ = daemon::mark_read(radio, peer, seen).await;
             });
         }
+    };
+    // While scrolled, at most every so often.
+    let waiting = StoredValue::new(false);
+    let mark_soon = move || {
+        if !waiting.get_value() {
+            waiting.set_value(true);
+            set_timeout(
+                move || {
+                    waiting.set_value(false);
+                    mark_seen();
+                },
+                Duration::from_millis(400),
+            );
+        }
+    };
+    Effect::new(move |_| {
+        let reading = live.open.get().is_some() && !away.get() && shown_now.get();
+        live.reading.set(reading);
+        live.thread.track();
+        // Once laid out.
+        request_animation_frame(mark_seen);
     });
     on_cleanup(move || live.reading.set(false));
     let scrolled = move |_| {
+        mark_soon();
         let Some(list) = list.get_untracked() else {
             return;
         };
@@ -829,6 +884,7 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
     view! {
         <div
             class="bubble-row"
+            data-id=id
             class:mine=mine
             class:reacting=move || thread.reacting.get() == Some(packet) && packet != 0
         >
