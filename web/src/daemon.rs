@@ -107,6 +107,12 @@ pub async fn contact(radio: RadioId) -> Result<meshctl_api::Contact, Failure> {
     get(&format!("/radios/{radio}/contact")).await
 }
 
+/// The link that shares a node the radio knows of, as its kind's apps open
+/// it.
+pub async fn node_contact(radio: RadioId, node: u32) -> Result<meshctl_api::Contact, Failure> {
+    get(&format!("/radios/{radio}/nodes/{node}/contact")).await
+}
+
 pub async fn nodes(radio: RadioId) -> Result<Vec<Node>, Failure> {
     get(&format!("/radios/{radio}/nodes")).await
 }

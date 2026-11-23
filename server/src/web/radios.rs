@@ -28,6 +28,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get, update, remove))
         .routes(routes!(status))
         .routes(routes!(contact))
+        .routes(routes!(node_contact))
         .routes(routes!(channels))
         .routes(routes!(nodes))
         .routes(routes!(node, remove_node))
@@ -317,7 +318,41 @@ async fn contact(State(state): State<AppState>, Path(radio): Path<RadioId>) -> R
         Ok(None) => return Missing::NoSuchRadio.into_response(),
         Err(err) => return Missing::Failed(err).into_response(),
     };
-    match state.radios.contact(radio, kind) {
+    match state.radios.contact(radio, kind, None) {
+        Some(url) => Json(Contact { url }).into_response(),
+        None => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+    }
+}
+
+/// A node's contact
+///
+/// A link that shares a node the radio knows of, as the radio's kind's apps
+/// open it: in a QR, or as text. Not while the node has not said who it is,
+/// or without its public key.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/nodes/{node}/contact",
+    tag = "nodes",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = u32, Path, description = "The node's number"),
+    ),
+    responses(
+        (status = 200, description = "The link", body = Contact),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio or node, or no key of it yet", body = Error),
+    )
+)]
+async fn node_contact(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, u32)>,
+) -> Response {
+    let kind = match state.radios.get(radio).await {
+        Ok(Some(radio)) => radio.kind,
+        Ok(None) => return Missing::NoSuchRadio.into_response(),
+        Err(err) => return Missing::Failed(err).into_response(),
+    };
+    match state.radios.contact(radio, kind, Some(node)) {
         Some(url) => Json(Contact { url }).into_response(),
         None => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
     }

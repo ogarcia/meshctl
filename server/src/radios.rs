@@ -440,26 +440,35 @@ impl Radios {
         }
     }
 
-    /// The link that shares a radio's own node, as its kind's apps read it,
-    /// in a QR or as text; none while it has not said who it is.
-    pub fn contact(&self, id: RadioId, kind: RadioKind) -> Option<String> {
+    /// The link that shares a node a radio knows of (its own, with none), as
+    /// its kind's apps read it, in a QR or as text; none while the node has
+    /// not said who it is, or without its key.
+    pub fn contact(&self, id: RadioId, kind: RadioKind, node: Option<u32>) -> Option<String> {
         self.mesh(id)?.read(|state| {
-            let local = state.local.as_ref()?;
-            let node = state.nodes.get(&local.num).and_then(|n| n.user.as_ref());
+            let local = state.local.as_ref().map(|l| l.num);
+            let num = node.or(local)?;
+            let user = state.nodes.get(&num).and_then(|n| n.user.as_ref());
             match kind {
                 RadioKind::Meshtastic => {
-                    let mut owner = state.settings.owner.clone()?;
-                    // Its key as the node list has it, if its owner came
-                    // without.
-                    if owner.public_key.is_empty()
-                        && let Some(user) = node
-                    {
-                        owner.public_key.clone_from(&user.public_key);
-                    }
-                    Some(meshtastic_contact(local.num, owner))
+                    // The radio's own, as its owner says, with its key as the
+                    // node list has it if its owner came without; any other,
+                    // as its node info said.
+                    let shared = match state.settings.owner.clone() {
+                        Some(mut owner) if Some(num) == local => {
+                            if owner.public_key.is_empty()
+                                && let Some(user) = user
+                            {
+                                owner.public_key.clone_from(&user.public_key);
+                            }
+                            owner
+                        }
+                        _ => meshtastic_user(num, user?),
+                    };
+                    (!shared.public_key.is_empty() || Some(num) == local)
+                        .then(|| meshtastic_contact(num, shared))
                 }
                 RadioKind::Meshcore => {
-                    let user = node?;
+                    let user = user?;
                     meshcore_contact(&user.long_name, &user.public_key, &user.role)
                 }
             }
@@ -1772,6 +1781,23 @@ fn meshtastic_contact(num: u32, user: meshctl_proto::meshtastic::User) -> String
     )
 }
 
+/// A node's user as Meshtastic's protobufs have it, from what its node info
+/// said: what a contact carries.
+fn meshtastic_user(num: u32, user: &meshctl_core::mesh::User) -> meshctl_proto::meshtastic::User {
+    use meshctl_proto::meshtastic::{HardwareModel, config::device_config::Role};
+    meshctl_proto::meshtastic::User {
+        id: format!("!{num:08x}"),
+        long_name: user.long_name.clone(),
+        short_name: user.short_name.clone(),
+        hw_model: HardwareModel::from_str_name(&user.hw_model).map_or(0, |m| m as i32),
+        role: Role::from_str_name(&user.role).map_or(0, |r| r as i32),
+        public_key: user.public_key.clone(),
+        is_licensed: user.licensed,
+        is_unmessagable: Some(user.unmessagable),
+        ..Default::default()
+    }
+}
+
 /// A MeshCore node to share, as its apps read it: its name, its key in hex
 /// and its kind (1 a companion, 2 a repeater, 3 a room, 4 a sensor), as
 /// `meshcore://contact/add` asks. None without a whole key.
@@ -1817,6 +1843,26 @@ mod tests {
         .unwrap();
         assert_eq!(back.node_num, 0x1234_abcd);
         assert_eq!(back.user, Some(user));
+    }
+
+    #[test]
+    fn a_heard_node_shares_what_its_node_info_said() {
+        use meshctl_proto::meshtastic::{HardwareModel, config::device_config::Role};
+        let heard = meshctl_core::mesh::User {
+            long_name: "Repetidor".into(),
+            short_name: "REP".into(),
+            hw_model: "HELTEC_V3".into(),
+            role: "ROUTER".into(),
+            public_key: vec![9; 32],
+            licensed: false,
+            unmessagable: true,
+        };
+        let user = meshtastic_user(0x0bad_cafe, &heard);
+        assert_eq!(user.id, "!0badcafe");
+        assert_eq!(user.hw_model, HardwareModel::HeltecV3 as i32);
+        assert_eq!(user.role, Role::Router as i32);
+        assert_eq!(user.public_key, vec![9; 32]);
+        assert_eq!(user.is_unmessagable, Some(true));
     }
 
     #[test]

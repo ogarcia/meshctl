@@ -25,6 +25,8 @@ use serde_json::{Map, Value};
 use std::time::Duration;
 
 const COPY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/copy.svg");
+const QR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/qrcode.svg");
+const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
 
 /// What the open node's requests go by: the node, and a clock by the second
 /// for how long the radio keeps from sending.
@@ -952,44 +954,107 @@ fn Share() -> impl IntoView {
             url.set(daemon::contact(radio).await.ok().map(|c| c.url));
         });
     });
-    let meshcore = move || live.selected_kind() == Some(meshctl_api::RadioKind::Meshcore);
     move || {
         let link = url.get()?;
-        let code = qrcode::QrCode::new(link.as_bytes()).ok()?;
-        // Dark on light, whatever the theme: as scanners read best.
-        let svg = code
-            .render::<qrcode::render::svg::Color>()
-            .quiet_zone(true)
-            .dark_color(qrcode::render::svg::Color("#111111"))
-            .light_color(qrcode::render::svg::Color("#ffffff"))
-            .build();
-        let copied = link.clone();
         Some(view! {
-            <Section title=t!(i18n, own_contact).into_any() class="own-contact">
-                <div class="contact">
-                    <div class="qr" role="img" aria-label=move || t_string!(i18n, own_contact_qr) inner_html=svg></div>
-                    <div class="contact-words">
-                        <p class="hint">
-                            {move || if meshcore() {
-                                t!(i18n, own_contact_hint_meshcore).into_any()
-                            } else {
-                                t!(i18n, own_contact_hint_meshtastic).into_any()
-                            }}
-                        </p>
-                        <span class="copyable">
-                            <span class="mono contact-link" title=link.clone()>{link.clone()}</span>
-                            <button
-                                class="icon-button"
-                                title=move || t_string!(i18n, own_contact_copy)
-                                aria-label=move || t_string!(i18n, own_contact_copy)
-                                inner_html=COPY
-                                on:click=move |_| crate::clipboard::copy(&copied)
-                            ></button>
-                        </span>
-                    </div>
-                </div>
+            <Section title=t!(i18n, own_contact).into_any() class="contact-share">
+                {contact_card(link, true)}
             </Section>
         })
+    }
+}
+
+/// A node's contact to share: its QR, dark on light whatever the theme as
+/// scanners read best, beside how to use it (`own`, the radio's) and the
+/// link to copy; the QR over the words while they do not fit beside it.
+fn contact_card(link: String, own: bool) -> Option<AnyView> {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let svg = qrcode::QrCode::new(link.as_bytes())
+        .ok()?
+        .render::<qrcode::render::svg::Color>()
+        .quiet_zone(true)
+        .dark_color(qrcode::render::svg::Color("#111111"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build();
+    let meshcore = live.selected_kind() == Some(meshctl_api::RadioKind::Meshcore);
+    let hint = move || match (own, meshcore) {
+        (true, false) => t!(i18n, own_contact_hint_meshtastic).into_any(),
+        (true, true) => t!(i18n, own_contact_hint_meshcore).into_any(),
+        (false, false) => t!(i18n, node_contact_hint_meshtastic).into_any(),
+        (false, true) => t!(i18n, node_contact_hint_meshcore).into_any(),
+    };
+    let copied = link.clone();
+    Some(
+        view! {
+            <div class="contact">
+                <div class="qr" role="img" aria-label=move || t_string!(i18n, own_contact_qr) inner_html=svg></div>
+                <div class="contact-words">
+                    <p class="hint">{hint}</p>
+                    <span class="copyable">
+                        <span class="mono contact-link" title=link.clone()>{link.clone()}</span>
+                        <button
+                            class="icon-button"
+                            title=move || t_string!(i18n, own_contact_copy)
+                            aria-label=move || t_string!(i18n, own_contact_copy)
+                            inner_html=COPY
+                            on:click=move |_| crate::clipboard::copy(&copied)
+                        ></button>
+                    </span>
+                </div>
+            </div>
+        }
+        .into_any(),
+    )
+}
+
+/// A node's contact to share, over the page: asked of the daemon as it
+/// opens. Escape, its ✕ or a click off it close it.
+#[component]
+fn ContactModal(num: u32, open: RwSignal<bool>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let url = RwSignal::new(None::<Option<String>>);
+    if let Some(radio) = live.selected.get_untracked() {
+        spawn_local(async move {
+            url.set(Some(
+                daemon::node_contact(radio, num).await.ok().map(|c| c.url),
+            ));
+        });
+    }
+    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            open.set(false);
+        }
+    });
+    on_cleanup(move || escape.remove());
+    let name = move || crate::chat::title(live, Peer::Node { node: num });
+    let body = move || match url.get() {
+        None => None,
+        Some(Some(link)) => contact_card(link, false),
+        Some(None) => Some(view! { <p class="dim">{t!(i18n, node_contact_none)}</p> }.into_any()),
+    };
+    view! {
+        <div class="modal-back" on:click=move |_| open.set(false)>
+            <div
+                class="card contact-modal contact-share"
+                role="dialog"
+                aria-modal="true"
+                on:click=|ev| ev.stop_propagation()
+            >
+                <header>
+                    <h2>{move || t_string!(i18n, node_contact_title).replace("{name}", &name())}</h2>
+                    <button
+                        class="icon-button"
+                        title=move || t_string!(i18n, drawer_close)
+                        aria-label=move || t_string!(i18n, drawer_close)
+                        inner_html=CLOSE
+                        on:click=move |_| open.set(false)
+                    ></button>
+                </header>
+                {body}
+            </div>
+        </div>
     }
 }
 
@@ -1060,6 +1125,7 @@ fn Identity(at: Option<i64>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let asking = expect_context::<Asking>();
+    let sharing = RwSignal::new(false);
     let body = move || {
         let node = live.nodes.with(|nodes| nodes.get(&asking.num).cloned())?;
         let key = match node.public_key.clone() {
@@ -1074,6 +1140,15 @@ fn Identity(at: Option<i64>) -> impl IntoView {
                             aria-label=move || t_string!(i18n, node_key_copy)
                             inner_html=COPY
                             on:click=move |_| crate::clipboard::copy(&copied)
+                        ></button>
+                        // Its contact, to add it elsewhere: there is one
+                        // only with its key.
+                        <button
+                            class="icon-button"
+                            title=move || t_string!(i18n, node_contact_show)
+                            aria-label=move || t_string!(i18n, node_contact_show)
+                            inner_html=QR
+                            on:click=move |_| sharing.set(true)
                         ></button>
                     </span>
                 }
@@ -1103,6 +1178,9 @@ fn Identity(at: Option<i64>) -> impl IntoView {
         <Section title=t!(i18n, node_identity).into_any() at asked=Some(Asked::Request(RequestKind::NodeInfo))>
             {body}
         </Section>
+        <Show when=move || sharing.get()>
+            <ContactModal num=asking.num open=sharing />
+        </Show>
     }
 }
 
