@@ -21,6 +21,8 @@
 //! that play what another app or the mesh would do to it:
 //!
 //! - `hear <slot> <text>`: a node of its mesh sends that on a channel.
+//! - `past <slot>`: messages on a channel heard over the last year and
+//!   more, in their order, as days for a conversation to show.
 //! - `chat <slot>`: messages on a channel that come every way: directly,
 //!   through some hops of those they could take, through MQTT; and, after a
 //!   client wrote, a reply to its last text and reactions to it.
@@ -131,6 +133,17 @@ fn neighbour() -> pb::User {
         public_key: (1..=32).collect(),
         ..Default::default()
     }
+}
+
+/// A packet's id from one of the counters, each with its own top byte: the
+/// rest moved on by when this run started, so that a run does not use the
+/// ids of the one before, which a client would take for the same packets
+/// heard again.
+fn fresh_id(counter: &AtomicU32) -> u32 {
+    static SALT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    let salt = *SALT.get_or_init(|| now_secs().wrapping_mul(97) & 0x00ff_ffff);
+    let next = counter.fetch_add(1, Ordering::Relaxed);
+    (next & 0xff00_0000) | (next.wrapping_add(salt) & 0x00ff_ffff)
 }
 
 fn now_secs() -> u32 {
@@ -463,7 +476,7 @@ impl Radio {
             from: NEIGHBOUR,
             to: ME,
             channel: packet.channel,
-            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            id: fresh_id(&NEXT_ID),
             rx_time: Some(now_secs()),
             rx_snr: snr,
             rx_rssi: Some(-60 - random(40) as i32),
@@ -773,7 +786,7 @@ fn history(hours: u32) -> Vec<MeshPacket> {
             packets.push(MeshPacket {
                 from: NEIGHBOUR,
                 to: BROADCAST,
-                id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                id: fresh_id(&NEXT_ID),
                 rx_time: Some(at),
                 rx_snr: snr as f32,
                 rx_rssi: Some(-75 - random(20) as i32),
@@ -811,7 +824,7 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                 from: NEIGHBOUR,
                 to: BROADCAST,
                 channel: channel as u32,
-                id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                id: fresh_id(&NEXT_ID),
                 rx_time: Some(now),
                 hop_limit: 3,
                 hop_start: 3,
@@ -824,6 +837,47 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             };
             let _ = events.send(Event::Heard(packet));
             format!("heard on slot {channel}")
+        }
+        Some("past") => {
+            let Some(channel) = slot(words.next()) else {
+                return "usage: past <slot>".into();
+            };
+            // Days ago, and the hour of that day, as it was heard then.
+            let said = [
+                (400, 9, "Hace más de un año"),
+                (400, 18, "Aquel mismo día, por la tarde"),
+                (20, 11, "Hace unas semanas"),
+                (3, 8, "Hace unos días, por la mañana"),
+                (3, 22, "Ese día, de noche"),
+                (1, 13, "Ayer a mediodía"),
+                (0, 0, "Hoy mismo"),
+            ];
+            let today = now_secs() - now_secs() % 86_400;
+            for (days, hour, text) in said {
+                let at = if days == 0 {
+                    now_secs()
+                } else {
+                    today - days * 86_400 + hour * 3_600 + random(1_800) as u32
+                };
+                let packet = MeshPacket {
+                    from: NEIGHBOUR,
+                    to: BROADCAST,
+                    channel: channel as u32,
+                    id: fresh_id(&NEXT_ID),
+                    rx_time: Some(at),
+                    rx_snr: 6.0,
+                    hop_limit: 3,
+                    hop_start: 3,
+                    payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                        portnum: PortNum::TextMessageApp as i32,
+                        payload: text.as_bytes().to_vec(),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                };
+                let _ = events.send(Event::Heard(packet));
+            }
+            format!("{} messages from the past on slot {channel}", said.len())
         }
         Some("chat") => {
             let Some(channel) = slot(words.next()) else {
@@ -879,7 +933,7 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                         from: example.from,
                         to: BROADCAST,
                         channel: channel as u32,
-                        id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+                        id: fresh_id(&NEXT_ID),
                         rx_time: Some(now_secs()),
                         rx_snr: 2.0 + random(80) as f32 / 10.0,
                         rx_rssi: Some(-60 - random(40) as i32),

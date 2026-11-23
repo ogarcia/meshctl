@@ -6,7 +6,6 @@
 use crate::app::Live;
 use crate::daemon::{self, Failure};
 use crate::i18n::{Locale, t, t_string, use_i18n};
-use crate::mesh::ago;
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -24,6 +23,7 @@ const PLUS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plu
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
 const TRASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/trash.svg");
 const RESEND: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/repeat.svg");
+const DOWN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 const INFO: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/info-circle.svg");
 const COPY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/copy.svg");
 /// How far a message went.
@@ -292,6 +292,97 @@ fn author_of(live: Live, message: &Message) -> String {
     }
 }
 
+/// What a conversation shows: the day, where it changes, and what is said.
+#[derive(Clone)]
+enum Item {
+    /// A day, as [`day_of`] gives it.
+    Day(i64),
+    Said(Message),
+}
+
+impl Item {
+    fn key(&self) -> (i64, i64, MessageStatus) {
+        match self {
+            Self::Day(day) => (*day, 0, MessageStatus::Received),
+            Self::Said(m) => (0, m.id, m.status),
+        }
+    }
+}
+
+/// How far from the newest, in pixels, reads as away from it.
+const AWAY: i32 = 240;
+
+/// The local day something happened, as year, month and day in a number:
+/// 20261123 for 23 November 2026.
+fn day_of(at: i64) -> i64 {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at as f64 * 1000.0));
+    i64::from(date.get_full_year()) * 10_000
+        + i64::from(date.get_month() + 1) * 100
+        + i64::from(date.get_date())
+}
+
+/// The hour and minute of something, as the time a message shows.
+fn clock(at: i64) -> String {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at as f64 * 1000.0));
+    format!("{:02}:{:02}", date.get_hours(), date.get_minutes())
+}
+
+/// A day as a conversation names it: today, yesterday, the day of the week
+/// within a week, the day and month this year, and with the year before.
+fn day_name(i18n: I18nContext<Locale>, day: i64, now: u32) -> String {
+    let (year, month, date) = (day / 10_000, day / 100 % 100, day % 100);
+    let midnight = |y: f64, m: f64, d: f64| {
+        js_sys::Date::new_with_year_month_day(y as u32, m as i32, d as i32)
+    };
+    let then = midnight(year as f64, (month - 1) as f64, date as f64);
+    let today = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(f64::from(now) * 1000.0));
+    let today = midnight(
+        f64::from(today.get_full_year()),
+        f64::from(today.get_month()),
+        f64::from(today.get_date()),
+    );
+    let days = ((today.get_time() - then.get_time()) / 86_400_000.0).round() as i64;
+    let language = match i18n.get_locale() {
+        Locale::es => "es-ES",
+        Locale::en => "en-GB",
+    };
+    let words = |fields: &[(&str, &str)]| {
+        let options = js_sys::Object::new();
+        for (key, value) in fields {
+            let _ = js_sys::Reflect::set(&options, &(*key).into(), &(*value).into());
+        }
+        String::from(then.to_locale_date_string(language, &options))
+    };
+    let named = match days {
+        0 => return t_string!(i18n, chat_today).to_owned(),
+        1 => return t_string!(i18n, chat_yesterday).to_owned(),
+        2..=6 => words(&[("weekday", "long")]),
+        _ if i64::from(today.get_full_year()) == year => {
+            words(&[("day", "numeric"), ("month", "long")])
+        }
+        _ => words(&[("day", "numeric"), ("month", "long"), ("year", "numeric")]),
+    };
+    // "sábado" as a heading is "Sábado".
+    let mut letters = named.chars();
+    letters
+        .next()
+        .map(|first| first.to_uppercase().chain(letters).collect())
+        .unwrap_or_default()
+}
+
+/// Where the day changes, a faint line and the day's name, which follows
+/// the clock: today becomes yesterday at midnight.
+#[component]
+fn DayLine(day: i64) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    view! {
+        <div class="day-line" role="separator">
+            <span>{move || day_name(i18n, day, live.now.get())}</span>
+        </div>
+    }
+}
+
 /// The open conversation. Which ones there are is in the sidebar.
 #[component]
 pub fn ChatView() -> impl IntoView {
@@ -320,41 +411,98 @@ pub fn ChatView() -> impl IntoView {
         state.menu.set(None);
     });
     // A reaction goes under what it reacts to; one to a message not here,
-    // as a message.
+    // as a message. Where the day changes, the day.
     let shown = move || {
         live.thread.with(|thread| {
-            thread
-                .iter()
-                .filter(|m| {
-                    !(m.emoji
-                        && m.reply_id
-                            .is_some_and(|to| thread.iter().any(|t| t.packet_id == to)))
-                })
-                .cloned()
-                .collect::<Vec<_>>()
+            let mut items = Vec::new();
+            let mut last_day = None;
+            for m in thread.iter().filter(|m| {
+                !(m.emoji
+                    && m.reply_id
+                        .is_some_and(|to| thread.iter().any(|t| t.packet_id == to)))
+            }) {
+                let day = day_of(m.at);
+                if last_day != Some(day) {
+                    items.push(Item::Day(day));
+                    last_day = Some(day);
+                }
+                items.push(Item::Said(m.clone()));
+            }
+            items
         })
     };
 
-    // Keep the newest message in view as they come.
+    // Down at the newest as they come, while there: away from it, reading
+    // what came before, the thread stays, and what comes is counted. What
+    // is sent, and another conversation, go down anyway.
+    let away = RwSignal::new(false);
+    let fresh = RwSignal::new(0_usize);
+    let seen = StoredValue::new((None::<Peer>, 0_usize));
+    let to_latest = move |smooth: bool| {
+        if let Some(list) = list.get_untracked() {
+            let options = web_sys::ScrollToOptions::new();
+            options.set_top(f64::from(list.scroll_height()));
+            if smooth {
+                options.set_behavior(web_sys::ScrollBehavior::Smooth);
+            }
+            list.scroll_to_with_scroll_to_options(&options);
+        }
+        fresh.set(0);
+    };
     Effect::new(move |_| {
-        live.thread.track();
-        if let Some(list) = list.get() {
-            list.set_scroll_top(list.scroll_height());
+        let (said, ours) = live.thread.with(|t| {
+            (
+                t.iter().filter(|m| !m.emoji).count(),
+                t.last().is_some_and(|m| m.outgoing),
+            )
+        });
+        let open = live.open.get();
+        list.track();
+        let (before, counted) = seen.get_value();
+        seen.set_value((open, said));
+        let elsewhere = before != open;
+        if elsewhere {
+            away.set(false);
+        }
+        if elsewhere || !away.get_untracked() || ours {
+            request_animation_frame(move || to_latest(false));
+        } else if said > counted {
+            fresh.update(|f| *f += said - counted);
         }
     });
+    let scrolled = move |_| {
+        let Some(list) = list.get_untracked() else {
+            return;
+        };
+        let left = list.scroll_height() - list.scroll_top() - list.client_height();
+        let now_away = left > AWAY;
+        away.set(now_away);
+        if !now_away {
+            fresh.set(0);
+        }
+    };
 
     view! {
         <div class="thread">
             {move || match live.open.get() {
                 None => view! { <p class="empty dim">{t!(i18n, chat_pick)}</p> }.into_any(),
                 Some(peer) => view! {
-                    <div class="messages" node_ref=list>
-                        <For
-                            each=shown
-                            key=|m| (m.id, m.status)
-                            let:message
-                        >
-                            <Bubble message peer />
+                    <Show when=move || away.get()>
+                        <button type="button" class="to-latest" on:click=move |_| to_latest(true)>
+                            <span class="icon" inner_html=DOWN></span>
+                            {move || match fresh.get() {
+                                0 => t_string!(i18n, chat_to_latest).to_owned(),
+                                1 => t_string!(i18n, chat_new_one).to_owned(),
+                                n => t_string!(i18n, chat_new_many).replace("{n}", &n.to_string()),
+                            }}
+                        </button>
+                    </Show>
+                    <div class="messages" node_ref=list on:scroll=scrolled>
+                        <For each=shown key=Item::key let:item>
+                            {match item {
+                                Item::Day(day) => view! { <DayLine day /> }.into_any(),
+                                Item::Said(message) => view! { <Bubble message peer /> }.into_any(),
+                            }}
                         </For>
                     </div>
                     <Composer peer />
@@ -635,7 +783,7 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
                 {quote}
                 <p>{message.text.clone()}</p>
                 <span class="meta dim">
-                    {move || ago(live.now.get(), at)}
+                    <span title=when(i64::from(at))>{clock(i64::from(at))}</span>
                     {reception.map(|r| move || r().map(|r| format!(" · {r}")))}
                     {mark}
                 </span>

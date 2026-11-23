@@ -2362,6 +2362,29 @@
         min-height: 0;
       }
       .thread .empty { margin: auto; }
+      .thread { position: relative; }
+      /* Where the day changes: a faint line, the day in the middle. */
+      .day-line { display: flex; align-items: center; gap: 12px; margin: 6px 0; color: var(--mc-muted); font-size: 12px; }
+      .day-line::before, .day-line::after { content: ""; flex: 1; height: 1px; background: var(--mc-border); }
+      /* Away from the newest, back to it, and how many came meanwhile. */
+      .to-latest {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        z-index: 10;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border: 1px solid var(--mc-border);
+        border-radius: 999px;
+        background: var(--mc-surface);
+        box-shadow: var(--mc-shadow);
+        font-size: 13px;
+        transform: translateX(-50%);
+      }
+      .to-latest .icon { display: flex; }
+      .to-latest svg { width: 16px; height: 16px; }
       .messages {
         flex: 1;
         overflow-y: auto;
