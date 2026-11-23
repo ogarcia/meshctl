@@ -88,6 +88,17 @@ CREATE TABLE channel (
 
 CREATE UNIQUE INDEX channel_fingerprint ON channel (radio_id, fingerprint);
 
+-- A MeshCore channel's region, which what is sent on it floods in, by the
+-- channel's fingerprint: its name, or * for none. The radio keeps none per
+-- channel. Apart from the channels, as one may be kept for a channel before
+-- the radio has it.
+CREATE TABLE channel_scope (
+    radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
+    fingerprint BLOB NOT NULL,
+    scope TEXT NOT NULL,
+    PRIMARY KEY (radio_id, fingerprint)
+);
+
 -- How far each conversation of a radio was read: up to which message, the
 -- newest seen. A channel's, wherever the channel is now; or a node's.
 CREATE TABLE conversation_read (
@@ -141,7 +152,9 @@ CREATE TABLE message (
     snr REAL,
     rssi INTEGER,
     hops_away INTEGER,
-    via_mqtt INTEGER NOT NULL DEFAULT 0
+    via_mqtt INTEGER NOT NULL DEFAULT 0,
+    -- The region it went flooded in, for one sent scoped to one.
+    scope TEXT
 );
 
 -- A packet is heard once: the copies a radio or a tasticsplitter replays on
@@ -160,7 +173,7 @@ SELECT
         m.channel
     ) AS channel,
     m.channel_id, m.text, m.at, m.outgoing, m.status, m.error, m.reply_id,
-    m.emoji, m.snr, m.rssi, m.hops_away, m.via_mqtt
+    m.emoji, m.snr, m.rssi, m.hops_away, m.via_mqtt, m.scope
 FROM message m;
 
 -- The traceroutes each radio sent.

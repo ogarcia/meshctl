@@ -195,7 +195,7 @@ fn react_to(live: Live, peer: Peer, packet: u32, emoji: String) {
         if let Ok(emojis) = daemon::use_emoji(&emoji).await {
             live.emojis.set(Some(emojis));
         }
-        let _ = send(live, peer, emoji, Some(packet), true).await;
+        let _ = send(live, peer, emoji, Some(packet), true, None).await;
     });
 }
 
@@ -215,10 +215,10 @@ fn reply_to(thread: Thread, packet: u32) {
 }
 
 /// Sends one's own message again, here: the same text, answering what it
-/// answered, as a new message.
-fn resend(live: Live, peer: Peer, text: String, reply_id: Option<u32>) {
+/// answered, in the region it went in, as a new message.
+fn resend(live: Live, peer: Peer, text: String, reply_id: Option<u32>, scope: Option<String>) {
     spawn_local(async move {
-        let _ = send(live, peer, text, reply_id, false).await;
+        let _ = send(live, peer, text, reply_id, false, scope).await;
     });
 }
 
@@ -256,6 +256,7 @@ async fn send(
     text: String,
     reply_id: Option<u32>,
     emoji: bool,
+    scope: Option<String>,
 ) -> Result<(), Failure> {
     let radio = live.selected.get_untracked().ok_or(Failure::Unreachable)?;
     let (channel, node) = match peer {
@@ -268,6 +269,7 @@ async fn send(
         node,
         reply_id,
         emoji,
+        scope,
     };
     let sent = daemon::send_message(radio, &message).await?;
     live.thread.update(|thread| {
@@ -484,7 +486,7 @@ pub fn ChatView() -> impl IntoView {
     // on the line where what was not read starts, or at its newest.
     let placed = StoredValue::new(false);
     let to_latest = move |smooth: bool| {
-        if let Some(list) = list.get_untracked() {
+        if let Some(list) = list.try_get_untracked().flatten() {
             let options = web_sys::ScrollToOptions::new();
             options.set_top(f64::from(list.scroll_height()));
             if smooth {
@@ -517,7 +519,7 @@ pub fn ChatView() -> impl IntoView {
                     .query_selector(".messages .unread-line")
                     .ok()
                     .flatten();
-                match (line, list.get_untracked()) {
+                match (line, list.try_get_untracked().flatten()) {
                     (Some(line), Some(list)) => {
                         let line: web_sys::HtmlElement = line.unchecked_into();
                         list.set_scroll_top(line.offset_top() - 12);
@@ -546,7 +548,7 @@ pub fn ChatView() -> impl IntoView {
         let (Some(peer), Some(radio), Some(list)) = (
             live.open.get_untracked(),
             live.selected.get_untracked(),
-            list.get_untracked(),
+            list.try_get_untracked().flatten(),
         ) else {
             return;
         };
@@ -615,7 +617,7 @@ pub fn ChatView() -> impl IntoView {
     on_cleanup(move || live.reading.set(false));
     let scrolled = move |_| {
         mark_soon();
-        let Some(list) = list.get_untracked() else {
+        let Some(list) = list.try_get_untracked().flatten() else {
             return;
         };
         let left = list.scroll_height() - list.scroll_top() - list.client_height();
@@ -886,7 +888,8 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
     let actions = view! {
         <div class="answer" on:click=|ev| ev.stop_propagation()>
             {if mine {
-                let (again, answered) = (message.text.clone(), message.reply_id);
+                let (again, answered, region) =
+                    (message.text.clone(), message.reply_id, message.scope.clone());
                 Some(
                     view! {
                         <button
@@ -895,7 +898,7 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                             title=move || t_string!(i18n, chat_resend)
                             aria-label=move || t_string!(i18n, chat_resend)
                             inner_html=RESEND
-                            on:click=move |_| resend(live, peer, again.clone(), answered)
+                            on:click=move |_| resend(live, peer, again.clone(), answered, region.clone())
                         ></button>
                     }
                     .into_any(),
@@ -988,6 +991,7 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                 <span class="meta dim">
                     <span title=when(i64::from(at))>{clock(i64::from(at))}</span>
                     {reception.map(|r| move || r().map(|r| format!(" · {r}")))}
+                    {message.scope.clone().map(|s| format!(" · #{s}"))}
                     {mark}
                 </span>
                 {reactions}
@@ -1095,6 +1099,11 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                 format!("{name} ({id})")
             }
         };
+        // The region it went flooded in, for one sent scoped to one.
+        let scope_fact = message
+            .scope
+            .clone()
+            .map(|s| fact(t!(i18n, chat_scope).into_any(), format!("#{s}").into_any()));
         let status = message.outgoing.then(|| {
             let words = match message.status {
                 MessageStatus::Sending => t_string!(i18n, chat_sending),
@@ -1225,6 +1234,7 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                         {fact(t!(i18n, chat_from).into_any(), from.into_any())}
                         {fact(t!(i18n, chat_to).into_any(), title(live, peer).into_any())}
                         {status}
+                        {scope_fact}
                         {heard}
                         {reactions}
                         {packet_id}
@@ -1264,12 +1274,13 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
                             }
                         })}
                     {if message.outgoing {
-                        let (again, answered) = (message.text.clone(), message.reply_id);
+                        let (again, answered, region) =
+                            (message.text.clone(), message.reply_id, message.scope.clone());
                         Some(
                             view! {
                                 <button role="menuitem" on:click=move |_| {
                                     close();
-                                    resend(live, peer, again.clone(), answered);
+                                    resend(live, peer, again.clone(), answered, region.clone());
                                 }>
                                     <span class="icon" inner_html=RESEND></span>
                                     {t!(i18n, chat_resend)}
@@ -1395,6 +1406,10 @@ fn Composer(peer: Peer) -> impl IntoView {
     let text = RwSignal::new(String::new());
     let error = RwSignal::new(None::<Failure>);
     let busy = RwSignal::new(false);
+    // The region of the next message alone, on a MeshCore radio: none for
+    // its channel's or the radio's.
+    let scope = RwSignal::new(None::<String>);
+    let meshcore = move || live.selected_kind() == Some(RadioKind::Meshcore);
     let bytes = move || text.with(String::len);
     let over = move || bytes() > MAX_TEXT_BYTES;
     let connected = move || {
@@ -1546,14 +1561,16 @@ fn Composer(peer: Peer) -> impl IntoView {
         }
         let reply_id = thread.replying.get_untracked();
         let written = text.get_untracked();
+        let once = scope.get_untracked().filter(|_| meshcore());
         busy.set(true);
         spawn_local(async move {
-            match send(live, peer, written, reply_id, false).await {
+            match send(live, peer, written, reply_id, false, once).await {
                 Ok(()) => {
                     text.set(String::new());
                     picking.set(false);
                     error.set(None);
                     thread.replying.set(None);
+                    scope.set(None);
                 }
                 Err(failure) => error.set(Some(failure)),
             }
@@ -1631,13 +1648,44 @@ fn Composer(peer: Peer) -> impl IntoView {
         }}
         <form class="composer" on:submit=submit>
             {replying}
+            {move || {
+                scope
+                    .get()
+                    .filter(|_| meshcore())
+                    .map(|chosen| {
+                        let words = if chosen == "*" {
+                            t_string!(i18n, chat_scope_none).to_owned()
+                        } else {
+                            format!("#{chosen}")
+                        };
+                        view! {
+                            <div class="replying scope-once">
+                                <span class="icon" inner_html=crate::meshcore_regions::WORLD></span>
+                                <div class="quote">
+                                    <span class="who">{move || t_string!(i18n, chat_scope_once)}</span>
+                                    <span class="what">{words}</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="icon-button"
+                                    title=move || t_string!(i18n, chat_scope_back)
+                                    aria-label=move || t_string!(i18n, chat_scope_back)
+                                    inner_html=CLOSE
+                                    on:click=move |_| scope.set(None)
+                                ></button>
+                            </div>
+                        }
+                    })
+            }}
             // Behind what is written, the same text unseen but for what
             // goes past what a message takes, in red: a field cannot colour
             // a part of its own text.
             <div
                 class="field"
                 class:over=over
+                class:scoped=meshcore
             >
+                {move || meshcore().then(|| view! { <crate::meshcore_regions::ScopePicker peer choice=scope /> })}
                 <div class="backdrop" node_ref=backdrop aria-hidden="true">
                     {move || {
                         let (fits, near, over) = text.with(|t| past_limit(t));

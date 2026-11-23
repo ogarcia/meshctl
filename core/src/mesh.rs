@@ -179,6 +179,15 @@ pub enum Event {
     Reply(Reply),
 }
 
+/// The region a MeshCore message floods in, for it alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// Scoped to a region, by its key.
+    Region([u8; 16]),
+    /// Scoped to none, whatever the radio's default.
+    Unscoped,
+}
+
 /// What a node answered a request with, by the id the request went by.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reply {

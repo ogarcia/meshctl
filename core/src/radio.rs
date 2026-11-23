@@ -62,6 +62,9 @@ pub struct OutgoingText {
     pub reply_id: Option<u32>,
     /// Whether it is a reaction to `reply_id`: its text an emoji.
     pub emoji: bool,
+    /// The region it floods in, for this message alone; none for what the
+    /// radio would. Only MeshCore radios have regions.
+    pub scope: Option<crate::mesh::Scope>,
 }
 
 /// Why a text could not be sent.
@@ -1003,6 +1006,7 @@ mod tests {
             text: "hola".into(),
             reply_id: None,
             emoji: false,
+            scope: None,
         };
         assert_eq!(mesh.send_text(&text).await, Err(SendError::NotConnected));
 

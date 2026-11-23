@@ -613,9 +613,14 @@ pub struct MeshcoreChannels {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MeshcoreChannel {
     pub index: u32,
-    #[cfg_attr(feature = "openapi", schema(example = "#galicia"))]
+    #[cfg_attr(feature = "openapi", schema(example = "galicia"))]
     pub name: String,
     pub kind: MeshcoreChannelKind,
+    /// The region what is sent on it floods in, without `#`, or `*` for
+    /// none: kept by meshctl, as the radio keeps none per channel. None
+    /// for the radio's default.
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 /// What a MeshCore channel's secret is: the one every radio has, one its
@@ -645,6 +650,10 @@ pub struct MeshcoreChannelChange {
     /// its own.
     #[serde(default)]
     pub secret: Option<String>,
+    /// The region what is sent on it floods in, without `#`, or `*` for
+    /// none; left out, the radio's default.
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 /// To whom a radio says who it is.
@@ -1118,6 +1127,10 @@ pub struct Message {
     pub rssi: Option<i32>,
     pub hops_away: Option<u32>,
     pub via_mqtt: bool,
+    /// The region it went flooded in, without `#`, for one meshctl sent
+    /// through a MeshCore radio scoped to one; none otherwise.
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 /// A message to send: to a channel, or to a node.
@@ -1140,6 +1153,11 @@ pub struct NewMessage {
     /// MeshCore radios, which have no reactions.
     #[serde(default)]
     pub emoji: bool,
+    /// Only on MeshCore radios: the region it floods in, without `#`, or
+    /// `*` for none, for this message alone. Left out, its channel's, or
+    /// the radio's default.
+    #[serde(default)]
+    pub scope: Option<String>,
 }
 
 /// Where messages are exchanged: a channel, or a node.

@@ -101,6 +101,9 @@ struct Radio {
     autoadd: (u8, u8),
     /// The region what it floods is scoped to, name and key.
     default_scope: Option<(String, [u8; 16])>,
+    /// The region what it floods next goes in, as a client set it: none for
+    /// its default.
+    send_scope: Option<SendScope>,
     /// Its clock, as an offset from the host's: it goes only forward.
     clock_offset: i64,
     /// When it started, for its uptime.
@@ -145,7 +148,24 @@ fn key(first: u8) -> [u8; 32] {
     key
 }
 
+/// The region a client set for what the radio floods next.
+#[derive(Clone, Copy)]
+enum SendScope {
+    Key([u8; 16]),
+    Unscoped,
+}
+
 impl Radio {
+    /// The region what it floods now goes in, in words.
+    fn scope_words(&self) -> String {
+        match (&self.send_scope, &self.default_scope) {
+            (Some(SendScope::Key(key)), _) => format!("scoped to key {}", hex_of(&key[..4])),
+            (Some(SendScope::Unscoped), _) => "unscoped".to_owned(),
+            (None, Some((name, _))) => format!("in its default {name:?}"),
+            (None, None) => "unscoped, its default".to_owned(),
+        }
+    }
+
     fn new() -> Self {
         let at = now();
         let contact = |first, kind, path_len, name: &str, lat, lon| Contact {
@@ -190,6 +210,7 @@ impl Radio {
             tuning: (0, 1000),
             autoadd: (31, 0),
             default_scope: None,
+            send_scope: None,
             clock_offset: -3600,
             started: at,
             contacts: vec![
@@ -303,6 +324,11 @@ fn channel_info(index: u8, name: &str, secret: &[u8; 16]) -> Vec<u8> {
     frame
 }
 
+/// Bytes in hex, to say them.
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// A whole key, from a command's bytes.
 fn key_in(data: &[u8]) -> Option<[u8; 32]> {
     data.get(..32)?.try_into().ok()
@@ -340,6 +366,7 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         0x01 => vec![self_info(&radio)],
         // SEND_TEXT: to the contact its key prefix names.
         0x02 => {
+            println!("direct text, {}", radio.scope_words());
             let Some(prefix) = data.get(6..12) else {
                 return vec![vec![0x01, 2]];
             };
@@ -422,8 +449,31 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             }
             vec![sent]
         }
+        // SET_FLOOD_SCOPE_KEY: 0 and a key, 0 alone for its default, 1 for
+        // none at all.
+        0x36 => match data.first() {
+            Some(0) => {
+                radio.send_scope = data
+                    .get(1..17)
+                    .and_then(|k| k.try_into().ok())
+                    .map(SendScope::Key);
+                ok()
+            }
+            Some(1) => {
+                radio.send_scope = Some(SendScope::Unscoped);
+                ok()
+            }
+            _ => error(6),
+        },
         // SEND_CHANNEL_TEXT: taken, and nothing ever said of it again.
-        0x03 => vec![vec![0x00]],
+        0x03 => {
+            println!(
+                "channel text on slot {}, {}",
+                data.get(1).copied().unwrap_or(0),
+                radio.scope_words()
+            );
+            vec![vec![0x00]]
+        }
         // GET_CONTACTS, those changed since a time if one is given.
         0x04 => {
             let since = data

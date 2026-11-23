@@ -100,6 +100,7 @@ pub mod command {
     const SET_OTHER_PARAMS: u8 = 0x26;
     const GET_STATS: u8 = 0x38;
     const SEND_ANON_REQ: u8 = 0x39;
+    const SET_FLOOD_SCOPE_KEY: u8 = 0x36;
     const SET_TUNING_PARAMS: u8 = 0x15;
     const GET_TUNING_PARAMS: u8 = 0x2b;
     const SET_AUTOADD_CONFIG: u8 = 0x3a;
@@ -313,6 +314,22 @@ pub mod command {
         payload.extend_from_slice(key);
         payload.extend_from_slice(data);
         payload
+    }
+
+    /// The region what it floods next is scoped to, by its key, instead of
+    /// its default; with none, back to its default.
+    pub fn set_flood_scope(key: Option<&[u8; 16]>) -> Vec<u8> {
+        let mut payload = vec![SET_FLOOD_SCOPE_KEY, 0];
+        if let Some(key) = key {
+            payload.extend_from_slice(key);
+        }
+        payload
+    }
+
+    /// What it floods next goes scoped to no region, whatever its default
+    /// (v12+).
+    pub fn set_flood_unscoped() -> Vec<u8> {
+        vec![SET_FLOOD_SCOPE_KEY, 1]
     }
 
     /// Answered with `Tuning`.

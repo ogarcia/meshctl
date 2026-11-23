@@ -965,8 +965,8 @@ impl Store {
         let id = sqlx::query(
             "INSERT INTO message (radio_id, packet_id, from_num, sender_name, to_num, channel,
                 channel_id, text, at, outgoing, status, reply_id, emoji, snr, rssi, hops_away,
-                via_mqtt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                via_mqtt, scope)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (radio_id, from_num, packet_id) DO NOTHING",
         )
         .bind(radio)
@@ -986,6 +986,7 @@ impl Store {
         .bind(message.rssi)
         .bind(message.hops_away.map(i64::from))
         .bind(message.via_mqtt)
+        .bind(&message.scope)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -1234,6 +1235,52 @@ impl Store {
     /// Takes a radio's channels as just read: each slot's conversation is
     /// the channel's, wherever it was before, and through its name or key
     /// being changed where it is. Whether any slot has another now.
+    /// The region each of a radio's channels floods in, by the channel: as
+    /// meshctl keeps it, by its fingerprint.
+    pub async fn channel_scopes(&self, radio: RadioId) -> Result<HashMap<Fingerprint, String>> {
+        let rows: Vec<(Vec<u8>, String)> =
+            sqlx::query_as("SELECT fingerprint, scope FROM channel_scope WHERE radio_id = ?")
+                .bind(radio)
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(print, scope)| Some((print.try_into().ok()?, scope)))
+            .collect())
+    }
+
+    /// Keeps the region a channel floods in, by its fingerprint, or none
+    /// for the radio's default: for the channel itself, whichever slot it is
+    /// in, or before it is in any.
+    pub async fn set_channel_scope(
+        &self,
+        radio: RadioId,
+        print: &Fingerprint,
+        scope: Option<&str>,
+    ) -> Result<()> {
+        match scope {
+            Some(scope) => {
+                sqlx::query(
+                    "INSERT INTO channel_scope (radio_id, fingerprint, scope) VALUES (?, ?, ?)
+                    ON CONFLICT (radio_id, fingerprint) DO UPDATE SET scope = excluded.scope",
+                )
+                .bind(radio)
+                .bind(print.as_slice())
+                .bind(scope)
+                .execute(&self.pool)
+                .await?;
+            }
+            None => {
+                sqlx::query("DELETE FROM channel_scope WHERE radio_id = ? AND fingerprint = ?")
+                    .bind(radio)
+                    .bind(print.as_slice())
+                    .execute(&self.pool)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
     pub async fn follow_channels(&self, radio: RadioId, now: &[Slot], at: i64) -> Result<bool> {
         // Taken for writing from the start: it reads, then writes, and a
         // transaction that only then asks to write fails at once if another
@@ -1588,6 +1635,8 @@ pub struct NewMessageRow {
     pub rssi: Option<i32>,
     pub hops_away: Option<u32>,
     pub via_mqtt: bool,
+    /// The region it went flooded in.
+    pub scope: Option<String>,
 }
 
 /// A packet as kept, with one radio's hearing of it.
@@ -1633,6 +1682,7 @@ struct MessageRow {
     rssi: Option<i32>,
     hops_away: Option<i64>,
     via_mqtt: bool,
+    scope: Option<String>,
 }
 
 impl MessageRow {
@@ -1655,6 +1705,7 @@ impl MessageRow {
             rssi: self.rssi,
             hops_away: self.hops_away.map(u32_from),
             via_mqtt: self.via_mqtt,
+            scope: self.scope,
         }
     }
 }
@@ -2034,6 +2085,37 @@ mod tests {
         assert_eq!(count("SELECT count(*) FROM packet_seen").await, 1);
     }
 
+    #[tokio::test]
+    async fn a_channels_region_is_kept_by_the_channel() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        let galicia = crate::channels::fingerprint("galicia", &[1; 16]);
+        let casa = crate::channels::fingerprint("Casa", &[2; 16]);
+        store
+            .set_channel_scope(radio, &galicia, Some("galicia"))
+            .await
+            .unwrap();
+        store
+            .set_channel_scope(radio, &casa, Some("*"))
+            .await
+            .unwrap();
+        // Changed, then taken away: the radio's default again.
+        store
+            .set_channel_scope(radio, &galicia, Some("europe"))
+            .await
+            .unwrap();
+        store.set_channel_scope(radio, &casa, None).await.unwrap();
+        let scopes = store.channel_scopes(radio).await.unwrap();
+        assert_eq!(scopes.len(), 1);
+        assert_eq!(scopes.get(&galicia).map(String::as_str), Some("europe"));
+        // No channel is made of it: no conversation either.
+        let channels: i64 = sqlx::query_scalar("SELECT count(*) FROM channel")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(channels, 0);
+    }
+
     fn text(packet_id: u32, from: u32, to: u32, outgoing: bool) -> NewMessageRow {
         NewMessageRow {
             packet_id,
@@ -2055,6 +2137,7 @@ mod tests {
             rssi: None,
             hops_away: None,
             via_mqtt: false,
+            scope: None,
         }
     }
 

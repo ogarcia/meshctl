@@ -804,5 +804,16 @@
   "regions_served": "{n} repeaters repeat it; {d} straight",
   "regions_unserved": "No repeater it hears straight repeats #{name}: what it floods will not go past its reach.",
   "regions_unscoped_unserved": "No repeater it hears straight repeats with no region: what it floods with none will not go past its reach.",
-  "nodes_more": "Showing {shown} of {total}…"
+  "nodes_more": "Showing {shown} of {total}…",
+  "chat_scope": "Region",
+  "chat_scope_none": "No region",
+  "chat_scope_channel": "The channel's: {r}",
+  "chat_scope_radio": "The radio's: {r}",
+  "chat_scope_menu": "Region the next message floods in",
+  "chat_scope_once": "This message alone, in the region",
+  "chat_scope_once_title": "The next message alone: {r}",
+  "chat_scope_back": "Back to the usual region",
+  "mc_channel_scope": "Region",
+  "mc_channel_scope_default": "The radio's",
+  "mc_channel_scope_hint": "The region what you send to this channel floods in. The radio does not keep it: meshctl does, and it goes in its link."
 }

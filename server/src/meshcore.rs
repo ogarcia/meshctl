@@ -396,6 +396,8 @@ pub enum Link {
     Channel {
         name: String,
         secret: [u8; 16],
+        /// The region it floods in, as the apps share it.
+        scope: Option<String>,
     },
 }
 
@@ -444,7 +446,12 @@ pub fn parse_link(url: &str) -> Option<Link> {
         "channel/add" => {
             let secret = unhex::<16>(&field("secret")?)?;
             let name = stored_name(&field("name").unwrap_or_default(), &secret);
-            (!name.is_empty() && name.len() <= 31).then_some(Link::Channel { name, secret })
+            let scope = field("region_scope").and_then(|s| scope_name(&s));
+            (!name.is_empty() && name.len() <= 31).then_some(Link::Channel {
+                name,
+                secret,
+                scope,
+            })
         }
         _ => None,
     }
@@ -546,7 +553,7 @@ pub fn link_contents(
                 known: state.nodes.contains_key(&node),
             }
         }
-        Link::Channel { name, secret } => meshctl_api::LinkContents::Channels {
+        Link::Channel { name, secret, .. } => meshctl_api::LinkContents::Channels {
             channels: vec![meshctl_api::LinkChannel {
                 name: name.clone(),
                 key: meshctl_api::ChannelKey::Aes128,
@@ -620,8 +627,12 @@ pub fn initials(name: &str) -> String {
         .collect()
 }
 
-/// A MeshCore radio's channels, each by its kind.
-pub fn channels(state: &meshctl_core::mesh::MeshState) -> Option<meshctl_api::MeshcoreChannels> {
+/// A MeshCore radio's channels, each by its kind, with its region as meshctl
+/// keeps it by its fingerprint.
+pub fn channels(
+    state: &meshctl_core::mesh::MeshState,
+    scopes: &std::collections::HashMap<crate::channels::Fingerprint, String>,
+) -> Option<meshctl_api::MeshcoreChannels> {
     let meshcore = state.meshcore_channels.as_ref()?;
     Some(meshctl_api::MeshcoreChannels {
         slots: u32::from(meshcore.slots),
@@ -637,9 +648,25 @@ pub fn channels(state: &meshctl_core::mesh::MeshState) -> Option<meshctl_api::Me
                     .map_or(meshctl_api::MeshcoreChannelKind::Private, |s| {
                         kind_of(&c.name, s)
                     }),
+                scope: meshcore.secrets.get(&c.index).and_then(|secret| {
+                    scopes
+                        .get(&crate::channels::fingerprint(&c.name, secret))
+                        .cloned()
+                }),
             })
             .collect(),
     })
+}
+
+/// A region as kept: its name without `#`, or `*` for none; none for
+/// anything else, empty or too long.
+pub fn scope_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    if name == "*" {
+        return Some(name.to_owned());
+    }
+    let name = name.strip_prefix('#').unwrap_or(name).trim();
+    (!name.is_empty() && name.len() <= 30 && !name.contains(',')).then(|| name.to_owned())
 }
 
 /// Why a channel cannot be: the very same as another in another slot.
@@ -685,13 +712,25 @@ pub fn channel_change(
     Ok((name, secret))
 }
 
-/// A channel's link, as the apps read it: its name and secret.
-pub fn channel_link(state: &meshctl_core::mesh::MeshState, index: u32) -> Option<String> {
+/// A channel's link, as the apps read it: its name and secret, and its
+/// region if it has one.
+pub fn channel_link(
+    state: &meshctl_core::mesh::MeshState,
+    index: u32,
+    scope: Option<&str>,
+) -> Option<String> {
     let channel = state.channels.get(&index)?;
     let secret = state.meshcore_channels.as_ref()?.secrets.get(&index)?;
     let name: String = form_urlencoded::byte_serialize(channel.name.as_bytes()).collect();
+    let region = scope
+        .filter(|s| *s != "*")
+        .map(|s| {
+            let s: String = form_urlencoded::byte_serialize(s.as_bytes()).collect();
+            format!("&region_scope={s}")
+        })
+        .unwrap_or_default();
     Some(format!(
-        "meshcore://channel/add?name={name}&secret={}",
+        "meshcore://channel/add?name={name}&secret={}{region}",
         hex(secret)
     ))
 }
@@ -719,7 +758,19 @@ mod link_tests {
             ),
             Some(Link::Channel {
                 name: "#galicia".into(),
-                secret: unhex("00112233445566778899aabbccddeeff").unwrap()
+                secret: unhex("00112233445566778899aabbccddeeff").unwrap(),
+                scope: None,
+            })
+        );
+        // With its region, as the apps share it.
+        assert_eq!(
+            parse_link(
+                "meshcore://channel/add?name=galicia&secret=840c972239a5c781de274e011ff18159&region_scope=galicia"
+            ),
+            Some(Link::Channel {
+                name: "galicia".into(),
+                secret: hashtag_secret("galicia"),
+                scope: Some("galicia".into()),
             })
         );
         // A #name's, kept without its `#` as the apps keep it.
@@ -729,9 +780,14 @@ mod link_tests {
             ),
             Some(Link::Channel {
                 name: "galicia".into(),
-                secret: hashtag_secret("#galicia")
+                secret: hashtag_secret("#galicia"),
+                scope: None,
             })
         );
+        assert_eq!(scope_name("#galicia").as_deref(), Some("galicia"));
+        assert_eq!(scope_name("*").as_deref(), Some("*"));
+        assert_eq!(scope_name(" "), None);
+        assert_eq!(scope_name(&"x".repeat(31)), None);
         // A short key, no name, or a Meshtastic link: nothing.
         assert_eq!(
             parse_link("meshcore://contact/add?name=X&public_key=50"),

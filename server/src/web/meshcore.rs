@@ -103,7 +103,7 @@ async fn search_regions(State(state): State<AppState>, Path(radio): Path<RadioId
     )
 )]
 async fn channels(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
-    match state.radios.meshcore_channels(radio) {
+    match state.radios.meshcore_channels(radio).await {
         Ok(channels) => Json(channels).into_response(),
         Err(failure) => refused(failure),
     }
@@ -238,7 +238,7 @@ async fn channel_link(
     State(state): State<AppState>,
     Path((radio, index)): Path<(RadioId, u32)>,
 ) -> Response {
-    match state.radios.meshcore_channel_link(radio, index) {
+    match state.radios.meshcore_channel_link(radio, index).await {
         Ok(url) => Json(Contact { url }).into_response(),
         Err(failure) => refused(failure),
     }

@@ -644,6 +644,9 @@ pub(crate) struct Session {
     /// Requests waiting for their answer: the tag the radio gave, who they
     /// went to and what they asked.
     asked: Arc<Mutex<HashMap<[u8; 4], Asked>>>,
+    /// Held while a message is sent with a region of its own, set before it
+    /// and back after: another is not sent in between.
+    sending: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// What an anonymous request asks a node for, as the firmware numbers it.
@@ -688,6 +691,29 @@ impl Session {
         mesh: &Mesh,
         outgoing: &OutgoingText,
     ) -> Result<Sent, SendError> {
+        let _sending = self.sending.lock().await;
+        // A region of its own: set just before, and back just after, sent
+        // or not.
+        if let Some(scope) = outgoing.scope {
+            let set = match scope {
+                crate::mesh::Scope::Region(key) => command::set_flood_scope(Some(&key)),
+                crate::mesh::Scope::Unscoped => command::set_flood_unscoped(),
+            };
+            self.client
+                .done(set)
+                .await
+                .map_err(|_| SendError::Refused)?;
+        }
+        let sent = self.send_now(mesh, outgoing).await;
+        if outgoing.scope.is_some()
+            && let Err(error) = self.client.done(command::set_flood_scope(None)).await
+        {
+            tracing::warn!(?error, "the radio's region not set back");
+        }
+        sent
+    }
+
+    async fn send_now(&self, mesh: &Mesh, outgoing: &OutgoingText) -> Result<Sent, SendError> {
         let stamp = now();
         if outgoing.to == BROADCAST {
             let channel = u8::try_from(outgoing.channel).map_err(|_| SendError::Refused)?;
@@ -1180,6 +1206,7 @@ async fn session(
         pending: Arc::default(),
         paths: Arc::default(),
         asked: Arc::default(),
+        sending: Arc::default(),
     };
     let me_node = Node {
         last_heard: Some(now()),

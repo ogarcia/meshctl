@@ -289,6 +289,22 @@ fn ChannelEditor(
         _ => start_name.clone(),
     };
     let name = RwSignal::new(written);
+    // Its region as written, `#` and all; empty for the radio's.
+    let region = RwSignal::new(
+        start
+            .as_ref()
+            .and_then(|c| c.scope.clone())
+            .map_or_else(String::new, |s| if s == "*" { s } else { format!("#{s}") }),
+    );
+    // The regions found nearby, to pick one.
+    let found = RwSignal::new(Vec::<String>::new());
+    if let Some(radio) = live.selected.get_untracked() {
+        spawn_local(async move {
+            if let Ok(read) = daemon::meshcore_regions(radio).await {
+                found.set(read.regions.into_iter().map(|r| r.name).collect());
+            }
+        });
+    }
     let secret = RwSignal::new(if adding { Secret::New } else { Secret::Keep });
     let own = RwSignal::new(String::new());
     // Its link, to share it, and the secret it has.
@@ -328,7 +344,12 @@ fn ChannelEditor(
         let Some(radio) = live.selected.get_untracked() else {
             return;
         };
+        let scope = region.with_untracked(|r| {
+            let r = r.trim();
+            (!r.is_empty()).then(|| r.trim_start_matches('#').to_owned())
+        });
         let wanted = MeshcoreChannelChange {
+            scope,
             name: name.get_untracked().trim().to_owned(),
             secret: if hashtag.get_untracked() {
                 None
@@ -496,6 +517,55 @@ fn ChannelEditor(
                                 {t!(i18n, mc_secret_own_hint)}
                             </span>
                         </Show>
+                    </div>
+                    <div class="field">
+                        <span class="dim">{t!(i18n, mc_channel_scope)}</span>
+                        <input
+                            maxlength="31"
+                            placeholder=move || t_string!(i18n, mc_channel_scope_default)
+                            prop:value=move || region.get()
+                            on:input=move |ev| region.set(event_target_value(&ev))
+                        />
+                        <div class="flag-chips channel-regions">
+                            <button
+                                type="button"
+                                class="choice"
+                                class:on=move || region.with(|r| r.trim().is_empty())
+                                on:click=move |_| region.set(String::new())
+                            >
+                                {t!(i18n, mc_channel_scope_default)}
+                            </button>
+                            <button
+                                type="button"
+                                class="choice"
+                                class:on=move || region.with(|r| r.trim() == "*")
+                                on:click=move |_| region.set("*".to_owned())
+                            >
+                                {t!(i18n, chat_scope_none)}
+                            </button>
+                            {move || {
+                                found
+                                    .get()
+                                    .into_iter()
+                                    .map(|name| {
+                                        let written = format!("#{name}");
+                                        let shown = written.clone();
+                                        let on = written.clone();
+                                        view! {
+                                            <button
+                                                type="button"
+                                                class="choice"
+                                                class:on=move || region.with(|r| r.trim() == on)
+                                                on:click=move |_| region.set(written.clone())
+                                            >
+                                                {shown}
+                                            </button>
+                                        }
+                                    })
+                                    .collect_view()
+                            }}
+                        </div>
+                        <span class="hint dim">{t!(i18n, mc_channel_scope_hint)}</span>
                     </div>
                     {share}
                 </div>

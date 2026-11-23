@@ -731,12 +731,53 @@ impl Radios {
             (None, Some(node)) if node != mesh::BROADCAST => (node, 0),
             _ => return Err(SendFailure::Invalid),
         };
+        // The region it floods in: as asked for it alone, its channel's, or
+        // the radio's default; and the one kept with it, if any.
+        let meshcore = self.protocol(id) == Some(Protocol::Meshcore);
+        let (scope, scope_kept) = if meshcore {
+            let asked = match &message.scope {
+                Some(name) => Some(crate::meshcore::scope_name(name).ok_or(SendFailure::Invalid)?),
+                None if to == mesh::BROADCAST => {
+                    let print = mesh.read(|state| {
+                        crate::channels::slots_of(state)
+                            .into_iter()
+                            .find(|s| s.index == channel)
+                            .map(|s| s.fingerprint)
+                    });
+                    match print {
+                        Some(print) => self.store.channel_scopes(id).await?.remove(&print),
+                        None => None,
+                    }
+                }
+                None => None,
+            };
+            let default = mesh.read(|state| {
+                state
+                    .meshcore
+                    .as_ref()
+                    .and_then(|s| s.default_scope.clone().flatten())
+                    .map(|(name, _)| name)
+            });
+            match asked.as_deref() {
+                Some("*") => (Some(mesh::Scope::Unscoped), None),
+                Some(name) => (
+                    Some(mesh::Scope::Region(crate::meshcore::hashtag_secret(name))),
+                    Some(name.to_owned()),
+                ),
+                None => (None, default),
+            }
+        } else if message.scope.is_some() {
+            return Err(SendFailure::Invalid);
+        } else {
+            (None, None)
+        };
         let outgoing = OutgoingText {
             to,
             channel,
             text: message.text.clone(),
             reply_id: message.reply_id,
             emoji: message.emoji,
+            scope,
         };
         if self.link(id) != LinkState::Ready {
             return Err(SendFailure::NotConnected);
@@ -772,6 +813,7 @@ impl Radios {
             rssi: None,
             hops_away: None,
             via_mqtt: false,
+            scope: scope_kept,
         };
         let kept = self
             .store
@@ -1512,13 +1554,34 @@ impl Radios {
     }
 
     /// A MeshCore radio's channels, each by its kind.
-    pub fn meshcore_channels(
+    pub async fn meshcore_channels(
         &self,
         id: RadioId,
     ) -> Result<meshctl_api::MeshcoreChannels, SettingsFailure> {
         let mesh = self.meshcore(id)?;
-        mesh.read(crate::meshcore::channels)
+        let scopes = self
+            .store
+            .channel_scopes(id)
+            .await
+            .map_err(SettingsFailure::Failed)?;
+        mesh.read(|state| crate::meshcore::channels(state, &scopes))
             .ok_or(SettingsFailure::NotConnected)
+    }
+
+    /// Keeps the region a MeshCore channel floods in, by the channel: its
+    /// name as kept and its secret.
+    async fn keep_scope(
+        &self,
+        id: RadioId,
+        name: &str,
+        secret: &[u8; 16],
+        scope: Option<&str>,
+    ) -> Result<(), SettingsFailure> {
+        let print = crate::channels::fingerprint(name, secret);
+        self.store
+            .set_channel_scope(id, &print, scope)
+            .await
+            .map_err(SettingsFailure::Failed)
     }
 
     /// Sets a MeshCore radio's channel in a slot: its name, and its secret
@@ -1540,7 +1603,18 @@ impl Radios {
                 crate::meshcore::DUPLICATE => SettingsFailure::Duplicate,
                 why => SettingsFailure::Invalid(why.to_owned()),
             })?;
+        let scope = match wanted.scope.as_deref() {
+            Some(scope) => Some(
+                crate::meshcore::scope_name(scope)
+                    .ok_or_else(|| SettingsFailure::Invalid("scope".into()))?,
+            ),
+            None => None,
+        };
         let index = u8::try_from(index).map_err(|_| SettingsFailure::Invalid("index".into()))?;
+        // Kept first: the radio is read back as it takes it, and the channel
+        // is shown with its region then.
+        self.keep_scope(id, &name, &secret, scope.as_deref())
+            .await?;
         mesh.meshcore_set_channel(index, &name, &secret)
             .await
             .map_err(meshcore_failure)?;
@@ -1759,14 +1833,21 @@ impl Radios {
         let _ = self.changes.send(Change::Mesh(id, mesh::Event::Synced));
     }
 
-    /// A MeshCore channel's link, to share it: with its secret.
-    pub fn meshcore_channel_link(
+    /// A MeshCore channel's link, to share it: with its secret, and its
+    /// region if it has one.
+    pub async fn meshcore_channel_link(
         &self,
         id: RadioId,
         index: u32,
     ) -> Result<String, SettingsFailure> {
+        let channels = self.meshcore_channels(id).await?;
+        let scope = channels
+            .channels
+            .iter()
+            .find(|c| c.index == index)
+            .and_then(|c| c.scope.clone());
         let mesh = self.meshcore(id)?;
-        mesh.read(|state| crate::meshcore::channel_link(state, index))
+        mesh.read(|state| crate::meshcore::channel_link(state, index, scope.as_deref()))
             .ok_or(SettingsFailure::Invalid("index".into()))
     }
 
@@ -1817,7 +1898,17 @@ impl Radios {
                 .await
                 .map(|_| ())
                 .map_err(LinkFailure::Admin),
-            crate::meshcore::Link::Channel { name, secret } => {
+            crate::meshcore::Link::Channel {
+                name,
+                secret,
+                scope,
+            } => {
+                // Its region kept with it, whether the radio had it or not.
+                if scope.is_some() {
+                    self.keep_scope(id, &name, &secret, scope.as_deref())
+                        .await
+                        .map_err(LinkFailure::Settings)?;
+                }
                 let (present, free) = mesh.read(|state| {
                     (
                         crate::meshcore::has_channel(state, &name, &secret),
@@ -2455,6 +2546,7 @@ fn heard_row(heard: mesh::TextMessage, local: Option<u32>) -> NewMessageRow {
         rssi: heard.rssi,
         hops_away: heard.hops_away,
         via_mqtt: heard.via_mqtt,
+        scope: None,
     }
 }
 
