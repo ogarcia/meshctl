@@ -271,12 +271,15 @@ fn NodeList() -> impl IntoView {
         <section class="node-list">
             <div class="node-tools">
                 {crate::preferences::pills(reaches)}
-                <input
-                    type="search"
-                    placeholder=move || t_string!(i18n, search)
-                    prop:value=move || filter.get()
-                    on:input=move |ev| filter.set(event_target_value(&ev))
-                />
+                <div class="node-search">
+                    <input
+                        type="search"
+                        placeholder=move || t_string!(i18n, search)
+                        prop:value=move || filter.get()
+                        on:input=move |ev| filter.set(event_target_value(&ev))
+                    />
+                    <SortMenu sort />
+                </div>
             </div>
             <table class="nodes-table">
                 <thead>
@@ -310,6 +313,109 @@ fn matches(node: &Node, needle: &str) -> bool {
     .any(|text| text.to_lowercase().contains(needle))
 }
 
+/// The sorting the table's headings give, for when the list has no headings
+/// (in two lines, short of room): a button beside the search and, under it,
+/// the columns. The one in use, again, the other way up.
+#[component]
+fn SortMenu(sort: Memo<Option<(Column, bool)>>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let open = RwSignal::new(false);
+    let closing = window_event_listener(leptos::ev::click, move |_| open.set(false));
+    on_cleanup(move || closing.remove());
+    let choose = move |column: Option<Column>| {
+        open.set(false);
+        let mut preferences = live.preferences.get_untracked();
+        preferences.nodes_sort = column.map(|column| NodesSort {
+            column,
+            reversed: matches!(sort.get_untracked(), Some((c, true)) if c == column),
+        });
+        live.prefer(preferences);
+    };
+    let item = move |column: Option<Column>, label: Signal<String>| {
+        let on = move || match (sort.get(), column) {
+            (None, None) => true,
+            (Some((c, _)), Some(column)) => c == column,
+            _ => false,
+        };
+        let arrow = move || match sort.get() {
+            Some((c, upright)) if Some(c) == column => {
+                if upright {
+                    SORTED
+                } else {
+                    SORTED_BACK
+                }
+            }
+            _ if on() => CHECK,
+            _ => "",
+        };
+        view! {
+            <button
+                role="menuitemradio"
+                aria-checked=move || on().to_string()
+                class:on=on
+                on:click=move |_| choose(column)
+            >
+                <span class="label">{label}</span>
+                <span class="icon" inner_html=arrow></span>
+            </button>
+        }
+    };
+    let columns = [
+        (
+            None,
+            Signal::derive(move || t_string!(i18n, nodes_sort_default).to_owned()),
+        ),
+        (
+            Some(Column::Name),
+            Signal::derive(move || t_string!(i18n, nodes_name).to_owned()),
+        ),
+        (
+            Some(Column::Heard),
+            Signal::derive(move || t_string!(i18n, nodes_heard).to_owned()),
+        ),
+        (
+            Some(Column::Reach),
+            Signal::derive(move || t_string!(i18n, nodes_reach).to_owned()),
+        ),
+        (
+            Some(Column::Power),
+            Signal::derive(move || t_string!(i18n, nodes_battery).to_owned()),
+        ),
+        (
+            Some(Column::Hardware),
+            Signal::derive(move || t_string!(i18n, nodes_hardware).to_owned()),
+        ),
+    ];
+    view! {
+        <span class="sort-menu">
+            <button
+                type="button"
+                class="icon-button"
+                class:on=move || open.get()
+                class:sorted=move || sort.get().is_some()
+                aria-haspopup="menu"
+                aria-expanded=move || open.get().to_string()
+                title=move || t_string!(i18n, nodes_sort)
+                aria-label=move || t_string!(i18n, nodes_sort)
+                inner_html=ARROWS_SORT
+                on:click=move |ev| {
+                    ev.stop_propagation();
+                    open.update(|o| *o = !*o);
+                }
+            ></button>
+            <Show when=move || open.get()>
+                <div class="heading-menu" role="menu" on:click=|ev| ev.stop_propagation()>
+                    {columns.into_iter().map(|(column, label)| item(column, label)).collect_view()}
+                </div>
+            </Show>
+        </span>
+    }
+}
+
+const ARROWS_SORT: &str =
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/arrows-sort.svg");
+const CHECK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/check.svg");
 const SORTED: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 const SORTED_BACK: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-up.svg");

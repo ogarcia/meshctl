@@ -82,6 +82,8 @@
   "nodes_hops": "Saltos",
   "nodes_battery": "Alimentación",
   "nodes_hardware": "Hardware",
+  "nodes_sort": "Ordenar",
+  "nodes_sort_default": "Favoritos y recientes",
   "search": "Buscar",
   "nav_radios": "Radios",
   "nav_meshctl_settings": "Ajustes de meshctl",

@@ -82,6 +82,8 @@
   "nodes_hops": "Hops",
   "nodes_battery": "Power",
   "nodes_hardware": "Hardware",
+  "nodes_sort": "Sort",
+  "nodes_sort_default": "Favourites, then latest",
   "search": "Search",
   "nav_radios": "Radios",
   "nav_meshctl_settings": "meshctl settings",

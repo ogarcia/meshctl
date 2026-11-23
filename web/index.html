@@ -1056,7 +1056,15 @@
       .node-tools .segmented { width: 420px; max-width: 100%; }
       .node-tools .segmented button { padding: 0 8px; white-space: nowrap; }
       /* As wide as the reach beside it, where there is room; less where not. */
-      .node-tools input { flex: 0 1 420px; min-width: 0; margin-left: auto; }
+      .node-search { display: flex; gap: 8px; flex: 0 1 420px; min-width: 0; margin-left: auto; }
+      .node-search input { flex: 1 1 auto; min-width: 0; }
+      /* The sorting, for when the list has no headings: see below. */
+      .sort-menu { display: none; position: relative; }
+      .sort-menu > .icon-button { width: auto; height: 100%; aspect-ratio: 1; border: 1px solid var(--mc-border); border-radius: 10px; }
+      .sort-menu > .icon-button.sorted { color: var(--mc-primary); }
+      .sort-menu .heading-menu button { justify-content: space-between; gap: 24px; }
+      .sort-menu .heading-menu button.on { color: var(--mc-primary); font-weight: 600; }
+      .sort-menu .heading-menu button.on .icon { color: var(--mc-primary); }
       .nodes-table { width: 100%; border-collapse: collapse; }
       .nodes-table th {
         padding: 8px 10px;
@@ -2831,7 +2839,7 @@
       @container nodes (max-width: 680px) {
         .node-tools { flex-direction: column; align-items: stretch; }
         .node-tools .segmented { width: 100%; }
-        .node-tools input { flex: none; margin-left: 0; width: 100%; }
+        .node-search { flex: none; margin-left: 0; width: 100%; }
       }
       /*
        * The nodes, each in two lines, who and how it is heard, small, while
@@ -2840,6 +2848,7 @@
        */
       @container nodes (max-width: 860px) {
         .nodes-table thead { display: none; }
+        .sort-menu { display: block; }
         .nodes-table, .nodes-table tbody { display: block; }
         .nodes-table tr.node-row {
           display: flex;
