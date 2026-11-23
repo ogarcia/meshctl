@@ -720,8 +720,9 @@ window.meshctlMap = (() => {
   // Draws a small map on an element, or draws it again: where (lat, lon),
   // how far it may be from there (radius, in metres, or none) and the
   // colour of its pin, as one of the interface's (pin).
-  function mini(element, json) {
-    const at = JSON.parse(json);
+  // The small map on an element, made the first time: still, its tiles and
+  // a layer for what is drawn on it.
+  function smallMap(element) {
     let small = minis.get(element);
     if (!small) {
       small = L.map(element, {
@@ -741,6 +742,12 @@ window.meshctlMap = (() => {
       small.drawn = L.layerGroup().addTo(small);
       minis.set(element, small);
     }
+    return small;
+  }
+
+  function mini(element, json) {
+    const at = JSON.parse(json);
+    const small = smallMap(element);
     // Laid out first: placed by its circle, it has to know its size.
     requestAnimationFrame(() => {
       small.invalidateSize();
@@ -772,6 +779,53 @@ window.meshctlMap = (() => {
     });
   }
 
+  // The way a message came, on a small map, as JSON: {points: [{lat, lon,
+  // pin, gap}]}, in order from its sender's side to the radio, each with
+  // the colour of its pin; gap on one reached across repeaters that could
+  // not be placed, its stretch dashed.
+  function miniRoute(element, json) {
+    const drawn = JSON.parse(json);
+    const small = smallMap(element);
+    requestAnimationFrame(() => {
+      small.invalidateSize();
+      small.drawn.clearLayers();
+      const points = drawn.points.map((p) => L.latLng(p.lat, p.lon));
+      if (points.length === 0) return;
+      const casing = color("--mc-route-casing");
+      for (let i = 1; i < points.length; i++) {
+        const stretch = [points[i - 1], points[i]];
+        L.polyline(stretch, {
+          color: casing,
+          weight: 6,
+          opacity: 0.85,
+          lineCap: "round",
+          interactive: false,
+        }).addTo(small.drawn);
+        L.polyline(stretch, {
+          color: color("--mc-primary"),
+          weight: 3,
+          dashArray: drawn.points[i].gap ? "6 6" : null,
+          interactive: false,
+        }).addTo(small.drawn);
+      }
+      drawn.points.forEach((p, i) => {
+        L.circleMarker(points[i], {
+          radius: 6,
+          color: color("--mc-surface"),
+          weight: 2,
+          fillColor: color(p.pin),
+          fillOpacity: 1,
+          interactive: false,
+        }).addTo(small.drawn);
+      });
+      if (points.length === 1) {
+        small.setView(points[0], FOCUS_ZOOM, { animate: false });
+      } else {
+        small.fitBounds(L.latLngBounds(points), { padding: [20, 20], maxZoom: 15, animate: false });
+      }
+    });
+  }
+
   // The small map on an element, gone with it.
   function miniClose(element) {
     const small = minis.get(element);
@@ -781,5 +835,5 @@ window.meshctlMap = (() => {
     }
   }
 
-  return { open, close, nodes, focus, route, stay, reset, resize, view, mini, miniClose };
+  return { open, close, nodes, focus, route, stay, reset, resize, view, mini, miniRoute, miniClose };
 })();

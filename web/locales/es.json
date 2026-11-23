@@ -825,5 +825,6 @@
   "route_many": "{n} posibles ({hash})",
   "route_region_unknown": "región desconocida",
   "route_heard_one": "Oído una vez",
-  "route_echoes_one": "Repetido una vez"
+  "route_echoes_one": "Repetido una vez",
+  "route_unplaced": "No hay bastantes nodos de esta ruta con posición conocida para verla en el mapa."
 }

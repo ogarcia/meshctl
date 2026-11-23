@@ -2866,6 +2866,11 @@
       .message-details .routes .arrow { color: var(--mc-muted); }
       .message-details .routes .hop.unsure { color: var(--mc-muted); font-style: italic; }
       .message-details .routes .dim { font-size: 12px; }
+      /* With more than one, each picked for the map, the one shown marked. */
+      .message-details .routes li.pickable { cursor: pointer; padding: 6px 8px; margin: 0 -8px; border-radius: 10px; }
+      .message-details .routes li.pickable:hover { background: var(--mc-raised); }
+      .message-details .routes li.pickable.on { background: var(--mc-soft); }
+      .message-details .route-map { height: 200px; margin-top: 10px; border: 1px solid var(--mc-border); border-radius: 10px; overflow: hidden; }
       /* A MeshCore channel's region, in its chat's heading: its menu as the
          heading's others, each region by the world's icon. */
       .channel-region { position: relative; }

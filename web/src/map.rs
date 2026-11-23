@@ -47,6 +47,42 @@ extern "C" {
     fn map_mini(element: &web_sys::HtmlElement, json: &str);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = miniClose)]
     fn map_mini_close(element: &web_sys::HtmlElement);
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = miniRoute)]
+    fn map_mini_route(element: &web_sys::HtmlElement, json: &str);
+}
+
+/// A point of a route on a small map: where, its pin's colour, and whether
+/// repeaters that could not be placed came before it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RoutePoint {
+    pub lat: f64,
+    pub lon: f64,
+    pub pin: &'static str,
+    pub gap: bool,
+}
+
+/// The way a message came, on a small map: its points joined in order.
+#[component]
+pub fn RouteMap(points: Signal<Vec<RoutePoint>>) -> impl IntoView {
+    let element = NodeRef::<html::Div>::new();
+    let drawn = StoredValue::new_local(None::<web_sys::HtmlElement>);
+    Effect::new(move |_| {
+        let Some(div) = element.get() else {
+            return;
+        };
+        let div: web_sys::HtmlElement = div.into();
+        let json = points.with(|points| {
+            serde_json::to_string(&serde_json::json!({ "points": points })).unwrap_or_default()
+        });
+        map_mini_route(&div, &json);
+        drawn.set_value(Some(div));
+    });
+    on_cleanup(move || {
+        if let Some(div) = drawn.get_value() {
+            map_mini_close(&div);
+        }
+    });
+    view! { <div class="route-map" node_ref=element></div> }
 }
 
 /// Where a small map shows a node, and in which colour.

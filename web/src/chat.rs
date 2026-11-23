@@ -1047,11 +1047,14 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
     let live = expect_context::<Live>();
     let thread = expect_context::<Thread>();
     let packet = RwSignal::new(None::<meshctl_api::Packet>);
-    // The ways it came, on a MeshCore radio: read again as more copies come.
+    // The ways it came, on a MeshCore radio: read again as more copies come;
+    // and the one shown on the map.
     let routes = RwSignal::new(Vec::<meshctl_api::MessageRoute>::new());
+    let shown_route = RwSignal::new(0_usize);
     Effect::new(move |_| {
         let Some(id) = thread.details.get() else {
             routes.set(Vec::new());
+            shown_route.set(0);
             return;
         };
         let heard = live
@@ -1229,6 +1232,62 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
         // Each copy heard, and the way it came: every repeater by its name,
         // or by its hash and how many it may be.
         let outgoing = message.outgoing;
+        // Where it set out from: the radio, for one of ours; its sender, if
+        // known and placed.
+        let local = live
+            .status
+            .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+        let origin = if outgoing {
+            local
+        } else {
+            match peer {
+                Peer::Node { node } => Some(node),
+                Peer::Channel { .. } => (message.from != 0).then_some(message.from),
+            }
+        };
+        // The route shown, as points on the map: from its origin, through the
+        // repeaters that can be placed, to the radio.
+        let points = Signal::derive(move || {
+            let at = shown_route.get();
+            let Some(route) = routes.with(|r| r.get(at).cloned()) else {
+                return Vec::new();
+            };
+            live.nodes.with(|nodes| {
+                let point = |num: u32, gap: bool| {
+                    let node = nodes.get(&num)?;
+                    let at = node.position?;
+                    Some(crate::map::RoutePoint {
+                        lat: at.latitude,
+                        lon: at.longitude,
+                        pin: crate::mesh::pin(node, Some(num) == local),
+                        gap,
+                    })
+                };
+                let mut points: Vec<crate::map::RoutePoint> = Vec::new();
+                let mut gap = false;
+                let start = origin.and_then(|num| point(num, false));
+                if start.is_none() {
+                    gap = true;
+                }
+                points.extend(start);
+                for hop in &route.hops {
+                    match hop.nodes.as_slice() {
+                        [one] => match point(*one, gap && !points.is_empty()) {
+                            Some(p) => {
+                                points.push(p);
+                                gap = false;
+                            }
+                            None => gap = true,
+                        },
+                        _ => gap = true,
+                    }
+                }
+                if let Some(end) = local.and_then(|num| point(num, gap && !points.is_empty())) {
+                    points.push(end);
+                }
+                points
+            })
+        });
         let route_list = move || {
             let all = routes.get();
             if all.is_empty() {
@@ -1237,7 +1296,8 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
             let count = all.len();
             let lines = all
                 .into_iter()
-                .map(|route| {
+                .enumerate()
+                .map(|(index, route)| {
                     let hops = route
                         .hops
                         .iter()
@@ -1281,8 +1341,13 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                         Some(name) => facts.push(format!("#{name}")),
                         None => {}
                     }
+                    // Picked for the map, when there are more than one.
                     view! {
-                        <li>
+                        <li
+                            class:pickable={count > 1}
+                            class:on={move || count > 1 && shown_route.get() == index}
+                            on:click=move |_| shown_route.set(index)
+                        >
                             <span class="hops">
                                 {(!way.is_empty()).then(|| view! { <span class="way">{way}</span> })}
                                 {hops}
@@ -1308,6 +1373,15 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                         {move || if outgoing { t!(i18n, route_echoes_hint).into_any() } else { t!(i18n, route_hint).into_any() }}
                     </p>
                     <ol>{lines}</ol>
+                    // On the map, while two of its points can be placed.
+                    {move || {
+                        (points.with(Vec::len) >= 2)
+                            .then(|| view! { <crate::map::RouteMap points /> })
+                    }}
+                    {move || {
+                        (points.with(Vec::len) < 2)
+                            .then(|| view! { <p class="hint dim">{t!(i18n, route_unplaced)}</p> })
+                    }}
                 </section>
             })
         };
