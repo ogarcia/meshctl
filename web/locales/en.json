@@ -764,7 +764,7 @@
   "mc_advert_sent_flood": "Advert sent to the whole mesh.",
   "mc_scope": "Default region",
   "mc_scope_hint": "What it floods is passed on only by that region's repeaters, like #galicia. Empty, it reaches the whole mesh.",
-  "mc_autoadd_kinds": "Add by themselves",
+  "mc_autoadd_kinds": "Add automatically",
   "mc_autoadd_kinds_hint": "Even with contacts added by hand, the kinds of node that join them by themselves as they advertise.",
   "mc_kind_companions": "Companions",
   "mc_kind_repeaters": "Repeaters",

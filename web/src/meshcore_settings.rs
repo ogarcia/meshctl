@@ -700,11 +700,13 @@ fn AdvancedTab(draft: Draft) -> impl IntoView {
             // Which kinds it adds even so, with contacts added by hand.
             <div class:gone=move || !manual.get() || add.get().is_none()>
                 <Row title=t!(i18n, mc_autoadd_kinds).into_any() hint=t!(i18n, mc_autoadd_kinds_hint).into_any()>
-                    <div class="pref-control flag-chips">
+                    <div class="pref-control kinds-box">
+                    <div class="flag-chips kinds">
                         {kind(|i18n| t_string!(i18n, mc_kind_companions), |a| a.companions, |a| a.companions = !a.companions)}
                         {kind(|i18n| t_string!(i18n, mc_kind_repeaters), |a| a.repeaters, |a| a.repeaters = !a.repeaters)}
                         {kind(|i18n| t_string!(i18n, mc_kind_rooms), |a| a.rooms, |a| a.rooms = !a.rooms)}
                         {kind(|i18n| t_string!(i18n, mc_kind_sensors), |a| a.sensors, |a| a.sensors = !a.sensors)}
+                    </div>
                     </div>
                 </Row>
             </div>

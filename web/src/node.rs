@@ -1005,7 +1005,7 @@ fn Shortcuts() -> impl IntoView {
         };
         return view! {
             <Section title=t!(i18n, own_settings).into_any() class="own-shortcuts">
-                <div class="shortcuts">{TABS.into_iter().map(button).collect_view()}</div>
+                <div class="shortcuts pairs">{TABS.into_iter().map(button).collect_view()}</div>
             </Section>
         }
         .into_any();
@@ -1124,7 +1124,7 @@ fn Advert() -> impl IntoView {
     view! {
         <Section title=t!(i18n, mc_advert).into_any() class="mc-advert">
             <p class="hint dim">{t!(i18n, mc_advert_hint)}</p>
-            <div class="path-actions">
+            <div class="path-actions advert-actions">
                 <button
                     type="button"
                     disabled=move || busy.get() || !connected(live)
