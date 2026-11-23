@@ -162,6 +162,9 @@ fn NodePage(num: u32) -> impl IntoView {
     };
     view! {
         <div class="node-page" class:own-page=is_own>
+            // Of a node heard, that it can be read but not asked; of the
+            // radio's own, nothing is asked anyway.
+            {move || view! { <crate::offline::OfflineBanner node=!is_own.get() /> }}
             <Checks />
             <Tiles num />
             <div class="node-sections" class:balanced=is_own>
@@ -316,7 +319,8 @@ fn Checks() -> impl IntoView {
         let note = if !supported(live) {
             Some(t!(i18n, meshcore_not_yet).into_any())
         } else if !connected(live) {
-            Some(t!(i18n, node_not_connected).into_any())
+            // Said over the page, as on every other.
+            None
         } else if live
             .nodes
             .with(|nodes| nodes.get(&asking.num).is_some_and(|n| n.via_mqtt))

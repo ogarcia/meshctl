@@ -462,6 +462,47 @@
       .empty-state h2 { margin: 0; font-size: 18px; }
       .empty-state p { margin: 0; font-size: 14px; line-height: 1.5; }
       .empty-state .empty-actions { margin-top: 10px; display: flex; gap: 8px; }
+      /*
+       * The radio out of reach, over what is known of it: why, how old what
+       * shows is, and what can be done; the same on every page.
+       */
+      .offline-banner {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px 14px;
+        margin-bottom: 16px;
+        padding: 12px 14px;
+        border: 1px solid var(--mc-border);
+        border-radius: 12px;
+        background: var(--mc-surface);
+      }
+      .offline-icon {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--mc-raised);
+        color: var(--mc-muted);
+      }
+      .offline-icon svg { width: 20px; height: 20px; }
+      .offline-words { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+      .offline-words strong { font-weight: 600; }
+      .offline-words span { color: var(--mc-muted); font-size: 13px; }
+      .offline-banner > button { min-height: 34px; padding: 0 14px; }
+      /* On a phone, what can be done under the words, lined up with them. */
+      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+        .offline-banner { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+        .offline-banner > button, .offline-banner > .badge { grid-column: 2; justify-self: start; }
+      }
+      .live.gone { display: none; }
+      /* On a node's page and the live view, their own gap after it. */
+      .node-page > .offline-banner, .live > .offline-banner { margin: 0; }
+      /* A node's figures, none while nothing is known of it. */
+      .node-figures:empty { display: none; }
       .local-foot {
         display: flex;
         align-items: center;
@@ -1721,6 +1762,17 @@
       .map-legend i.direct { background: var(--mc-pin-direct); }
       .map-legend i.near { background: var(--mc-pin-near); }
       .map-legend i.mid { background: var(--mc-pin-mid); }
+      .map-offline {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 500;
+        width: 560px;
+        max-width: calc(100% - 96px);
+        pointer-events: none;
+      }
+      .map-offline .offline-banner { margin: 0; box-shadow: var(--mc-shadow); pointer-events: auto; }
       .map-empty {
         position: absolute;
         top: 12px;

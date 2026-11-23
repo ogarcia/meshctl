@@ -3,55 +3,34 @@
 
 //! What the selected radio knows: itself, and the nodes it hears.
 
-use crate::app::{Daemon, Live};
+use crate::app::Live;
 use crate::i18n::{Locale, t, t_string, use_i18n};
 use leptos::prelude::*;
 use leptos_i18n::I18nContext;
-use meshctl_api::{LinkState, Node, NodesColumn as Column, NodesSort, Peer};
+use meshctl_api::{Node, NodesColumn as Column, NodesSort, Peer};
 
 #[component]
 pub fn MeshView() -> impl IntoView {
-    view! {
-        <OfflineNote />
-        <NodeList />
-    }
-}
-
-/// For a radio that is not connected: why, and how old what it shows is.
-#[component]
-fn OfflineNote() -> impl IntoView {
-    let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let radio = move || {
-        let id = live.selected.get()?;
-        live.radios
-            .with(|radios| radios.as_ref()?.iter().find(|r| r.id == id).cloned())
-    };
-    move || {
-        let radio = radio()?;
-        if live.daemon.get() != Daemon::Connected {
-            // Not the radio: meshctl itself is out of reach.
-            return Some(
-                view! { <p class="card note">{t!(i18n, daemon_down_note)}</p> }.into_any(),
-            );
+    // A radio out of reach with no nodes known: why, in the middle, and not
+    // an empty list under a strip saying it.
+    let bare = Memo::new(move |_| {
+        let offline = crate::offline::offline(live)?;
+        let local = live
+            .status
+            .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+        let any = live
+            .nodes
+            .with(|nodes| nodes.keys().any(|num| Some(*num) != local));
+        (!any).then_some(offline)
+    });
+    move || match bare.get() {
+        Some((why, radio)) => view! { <crate::offline::OfflineEmpty why radio /> }.into_any(),
+        None => view! {
+            <crate::offline::OfflineBanner />
+            <NodeList />
         }
-        let why = match radio.link {
-            LinkState::Ready | LinkState::Syncing => return None,
-            LinkState::Disabled => t!(i18n, radio_disabled_note).into_any(),
-            LinkState::Connecting | LinkState::Disconnected => {
-                // While it first connects there is nothing to explain yet.
-                radio.last_connected?;
-                t!(i18n, radio_offline_note).into_any()
-            }
-        };
-        let since = radio.last_connected.map(|at| {
-            let at = u32::try_from(at).unwrap_or_default();
-            view! {
-                " "
-                {t!(i18n, radio_last_connected, ago = move || ago(live.now.get(), at))}
-            }
-        });
-        Some(view! { <p class="card note">{why} {since}</p> }.into_any())
+        .into_any(),
     }
 }
 

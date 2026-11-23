@@ -508,7 +508,12 @@ pub fn MapView() -> impl IntoView {
                     <span><b class="icon base"></b>{t!(i18n, map_base)}</span>
                 </div>
             </div>
-            <Show when=move || placed(live) == 0>
+            // Over the map, a radio out of reach first: its nodes may well
+            // have said where they are, and still show.
+            <div class="map-offline">
+                <crate::offline::OfflineBanner />
+            </div>
+            <Show when=move || placed(live) == 0 && crate::offline::offline(live).is_none()>
                 <p class="map-empty card dim">{t!(i18n, map_empty)}</p>
             </Show>
             <RouteNotice />

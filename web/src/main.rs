@@ -17,6 +17,7 @@ mod map;
 mod mesh;
 mod names;
 mod node;
+mod offline;
 mod packets;
 mod phone;
 mod preferences;

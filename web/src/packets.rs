@@ -160,8 +160,21 @@ pub fn PacketsView() -> impl IntoView {
         packet: RwSignal::new(None),
     });
 
+    // A radio out of reach that heard nothing yet: why, in the middle, and
+    // not "nothing heard yet" under the filters, as if it were listening.
+    let bare = Memo::new(move |_| {
+        let offline = crate::offline::offline(live)?;
+        (live.packets.with(Vec::is_empty) && !filtered()).then_some(offline)
+    });
+
     view! {
-        <div class="live">
+        <Show when=move || bare.get().is_some()>
+            {move || {
+                bare.get().map(|(why, radio)| view! { <crate::offline::OfflineEmpty why radio /> })
+            }}
+        </Show>
+        <div class="live" class:gone=move || bare.get().is_some()>
+            <crate::offline::OfflineBanner />
             <PacketTools />
             <section class="packets">
                 <Show when=move || held() != 0>
