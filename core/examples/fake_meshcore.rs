@@ -21,6 +21,13 @@
 //!
 //! After a direct message to Ana, the radio says it was delivered, and now
 //! and then she answers.
+//!
+//! Its own settings change as the firmware's do, each checked as it checks
+//! them; its clock starts an hour behind, as a radio's does after a power
+//! cut, and goes only forward.
+
+/// The frequencies, in kHz, on which the firmware lets a client repeat.
+const REPEAT_FREQUENCIES: [u32; 3] = [433_000, 869_495, 918_000];
 
 use meshctl_core::meshcore::protocol::{FROM_CLIENT, FROM_RADIO};
 use std::collections::VecDeque;
@@ -72,7 +79,16 @@ struct Radio {
     bandwidth: u32,
     spreading_factor: u8,
     coding_rate: u8,
-    tx_power: u8,
+    tx_power: i8,
+    repeat: bool,
+    manual_add: bool,
+    telemetry: u8,
+    location_policy: u8,
+    multi_acks: u8,
+    /// Its clock, as an offset from the host's: it goes only forward.
+    clock_offset: i64,
+    /// When it started, for its uptime.
+    started: u32,
     contacts: Vec<Contact>,
     /// Each slot's name, empty when unset.
     channels: Vec<String>,
@@ -138,6 +154,13 @@ impl Radio {
             spreading_factor: 8,
             coding_rate: 8,
             tx_power: 22,
+            repeat: false,
+            manual_add: false,
+            telemetry: 0,
+            location_policy: 1,
+            multi_acks: 0,
+            clock_offset: -3600,
+            started: at,
             contacts: vec![
                 contact(0x41, 1, 0, "Ana", 43_365_000, -8_405_000),
                 contact(0x52, 2, 1, "Repetidor Monte", 43_340_000, -8_380_000),
@@ -147,6 +170,11 @@ impl Radio {
             channels,
             queued: VecDeque::new(),
         }
+    }
+
+    /// Its clock, by the seconds.
+    fn clock(&self) -> u32 {
+        u32::try_from(i64::from(now()) + self.clock_offset).unwrap_or(0)
     }
 
     fn contact_named(&self, name: &str) -> Option<&Contact> {
@@ -164,12 +192,16 @@ fn field(text: &str, len: usize) -> Vec<u8> {
 }
 
 fn self_info(radio: &Radio) -> Vec<u8> {
-    let mut frame = vec![0x05, 1, radio.tx_power, 22];
+    let mut frame = vec![0x05, 1, radio.tx_power.cast_unsigned(), 22];
     frame.extend(ME);
     frame.extend(radio.lat.to_le_bytes());
     frame.extend(radio.lon.to_le_bytes());
-    // Multi acks, location policy, telemetry modes, manual add.
-    frame.extend([0, 0, 0, 0]);
+    frame.extend([
+        radio.multi_acks,
+        radio.location_policy,
+        radio.telemetry,
+        u8::from(radio.manual_add),
+    ]);
     frame.extend(radio.frequency.to_le_bytes());
     frame.extend(radio.bandwidth.to_le_bytes());
     frame.extend([radio.spreading_factor, radio.coding_rate]);
@@ -177,10 +209,10 @@ fn self_info(radio: &Radio) -> Vec<u8> {
     frame
 }
 
-fn device_info() -> Vec<u8> {
+fn device_info(radio: &Radio) -> Vec<u8> {
     let mut frame = vec![
         0x0d,
-        9,
+        14,
         u8::try_from(MAX_CONTACTS / 2).unwrap_or(0),
         MAX_CHANNELS,
     ];
@@ -189,7 +221,33 @@ fn device_info() -> Vec<u8> {
     frame.extend(field("23 Nov 2026", 12));
     frame.extend(field("Fake MeshCore", 40));
     frame.extend(field("v1.18.0-fake", 20));
+    // Repeat (v9+) and the path's hash size, less one (v10+).
+    frame.extend([u8::from(radio.repeat), 0]);
     frame
+}
+
+/// An error, by the firmware's code: 1 unsupported, 2 not found, 6 an
+/// illegal argument.
+fn error(code: u8) -> Vec<Vec<u8>> {
+    vec![vec![0x01, code]]
+}
+
+fn ok() -> Vec<Vec<u8>> {
+    vec![vec![0x00]]
+}
+
+fn u32_in(data: &[u8], at: usize) -> Option<u32> {
+    data.get(at..at + 4)?
+        .try_into()
+        .ok()
+        .map(u32::from_le_bytes)
+}
+
+fn i32_in(data: &[u8], at: usize) -> Option<i32> {
+    data.get(at..at + 4)?
+        .try_into()
+        .ok()
+        .map(i32::from_le_bytes)
 }
 
 /// A contact, as listed (0x03) or as pushed when first heard (0x8a).
@@ -315,8 +373,150 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         }
         // SYNC_NEXT_MESSAGE
         0x0a => vec![radio.queued.pop_front().unwrap_or_else(|| vec![0x0a])],
+        // GET_DEVICE_TIME
+        0x05 => {
+            let mut frame = vec![0x09];
+            frame.extend(radio.clock().to_le_bytes());
+            vec![frame]
+        }
+        // SET_DEVICE_TIME: only forward.
+        0x06 => match u32_in(data, 0) {
+            Some(secs) if secs >= radio.clock() => {
+                radio.clock_offset = i64::from(secs) - i64::from(now());
+                println!("clock set, {} s off now", radio.clock_offset);
+                ok()
+            }
+            _ => error(6),
+        },
+        // SET_ADVERT_NAME: 31 bytes kept.
+        0x08 if !data.is_empty() => {
+            let name = &data[..data.len().min(31)];
+            radio.name = String::from_utf8_lossy(name).into_owned();
+            println!("named {:?}", radio.name);
+            ok()
+        }
+        // SET_RADIO_PARAMS, client repeat with them.
+        0x0b => {
+            let (Some(frequency), Some(bandwidth), Some(&sf), Some(&cr)) =
+                (u32_in(data, 0), u32_in(data, 4), data.get(8), data.get(9))
+            else {
+                return error(6);
+            };
+            let repeat = data.get(10).is_some_and(|&r| r != 0);
+            if repeat && !REPEAT_FREQUENCIES.contains(&frequency) {
+                return error(6);
+            }
+            if !(150_000..=2_500_000).contains(&frequency)
+                || !(7_000..=500_000).contains(&bandwidth)
+                || !(5..=12).contains(&sf)
+                || !(5..=8).contains(&cr)
+            {
+                return error(6);
+            }
+            (radio.frequency, radio.bandwidth) = (frequency, bandwidth);
+            (radio.spreading_factor, radio.coding_rate) = (sf, cr);
+            radio.repeat = repeat;
+            println!("radio {frequency} kHz, {bandwidth} Hz, SF{sf} CR{cr}, repeat {repeat}");
+            ok()
+        }
+        // SET_RADIO_TX_POWER
+        0x0c => match data.first().map(|&p| p.cast_signed()) {
+            Some(dbm @ -9..=22) => {
+                radio.tx_power = dbm;
+                println!("tx power {dbm} dBm");
+                ok()
+            }
+            _ => error(6),
+        },
+        // SET_ADVERT_LATLON
+        0x0e => match (i32_in(data, 0), i32_in(data, 4)) {
+            (Some(lat), Some(lon))
+                if (-90_000_000..=90_000_000).contains(&lat)
+                    && (-180_000_000..=180_000_000).contains(&lon) =>
+            {
+                (radio.lat, radio.lon) = (lat, lon);
+                println!("at {lat}, {lon}");
+                ok()
+            }
+            _ => error(6),
+        },
+        // GET_BATT_AND_STORAGE
+        0x14 => {
+            let mut frame = vec![0x0c];
+            frame.extend(
+                u16::try_from(3_900 + random(250))
+                    .unwrap_or(4_000)
+                    .to_le_bytes(),
+            );
+            frame.extend(118u32.to_le_bytes());
+            frame.extend(1_408u32.to_le_bytes());
+            vec![frame]
+        }
         // DEVICE_QUERY
-        0x16 => vec![device_info()],
+        0x16 => vec![device_info(&radio)],
+        // SET_OTHER_PARAMS
+        0x26 if !data.is_empty() => {
+            radio.manual_add = data[0] != 0;
+            if let Some(&telemetry) = data.get(1) {
+                radio.telemetry = telemetry & 0x3f;
+            }
+            if let Some(&policy) = data.get(2) {
+                radio.location_policy = policy;
+            }
+            if let Some(&acks) = data.get(3) {
+                radio.multi_acks = acks;
+            }
+            println!(
+                "manual add {}, telemetry {:06b}, location {}, acks {}",
+                radio.manual_add, radio.telemetry, radio.location_policy, radio.multi_acks
+            );
+            ok()
+        }
+        // GET_STATS, by kind.
+        0x38 => {
+            let up = now() - radio.started;
+            match data.first() {
+                Some(0) => {
+                    let mut frame = vec![0x18, 0];
+                    frame.extend(
+                        u16::try_from(3_900 + random(250))
+                            .unwrap_or(4_000)
+                            .to_le_bytes(),
+                    );
+                    frame.extend(up.to_le_bytes());
+                    frame.extend(0u16.to_le_bytes());
+                    frame.push(0);
+                    vec![frame]
+                }
+                Some(1) => {
+                    let mut frame = vec![0x18, 1];
+                    let noise = -115 + i16::try_from(random(8)).unwrap_or(0);
+                    frame.extend(noise.to_le_bytes());
+                    frame.push((-70 - i8::try_from(random(30)).unwrap_or(0)).cast_unsigned());
+                    frame.push(i8::try_from(random(40)).unwrap_or(0).cast_unsigned());
+                    frame.extend((up / 400).to_le_bytes());
+                    frame.extend((up / 25).to_le_bytes());
+                    vec![frame]
+                }
+                Some(2) => {
+                    let mut frame = vec![0x18, 2];
+                    let received = up / 9;
+                    for n in [
+                        received,
+                        up / 60,
+                        up / 120,
+                        up / 120,
+                        received / 2,
+                        received / 2,
+                        3,
+                    ] {
+                        frame.extend(n.to_le_bytes());
+                    }
+                    vec![frame]
+                }
+                _ => error(6),
+            }
+        }
         // GET_CHANNEL: past the last slot, an error.
         0x1f => {
             let index = data.first().copied().unwrap_or(0);

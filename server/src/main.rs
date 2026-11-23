@@ -5,6 +5,7 @@ mod channels;
 mod keys;
 mod links;
 mod lora;
+mod meshcore;
 mod packets;
 mod radios;
 mod sections;

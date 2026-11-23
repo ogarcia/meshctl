@@ -444,6 +444,108 @@ pub struct LinkChannel {
     pub present: bool,
 }
 
+/// A MeshCore radio's own settings: what it advertises, where, and how it
+/// transmits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreSettings {
+    /// What it advertises itself as: up to 31 bytes.
+    #[cfg_attr(feature = "openapi", schema(example = "Casa"))]
+    pub name: String,
+    /// Where it says it is; none for nowhere.
+    pub position: Option<MeshcorePosition>,
+    /// In kHz: 150000 to 2500000.
+    #[cfg_attr(feature = "openapi", schema(example = 869618))]
+    pub frequency: u32,
+    /// In Hz: 7000 to 500000.
+    #[cfg_attr(feature = "openapi", schema(example = 62500))]
+    pub bandwidth: u32,
+    /// 5 to 12.
+    #[cfg_attr(feature = "openapi", schema(example = 8))]
+    pub spreading_factor: u8,
+    /// 5 to 8.
+    #[cfg_attr(feature = "openapi", schema(example = 8))]
+    pub coding_rate: u8,
+    /// In dBm: -9 to `max_tx_power`.
+    #[cfg_attr(feature = "openapi", schema(example = 22))]
+    pub tx_power: i8,
+    /// The most its board allows, in dBm; read only.
+    #[serde(default)]
+    pub max_tx_power: u8,
+    /// Whether it repeats what it hears as well; none on firmware without
+    /// it. Only on 433.000, 869.495 or 918.000 MHz.
+    pub repeat: Option<bool>,
+    /// Whether nodes heard advertising are added to its contacts only by
+    /// hand.
+    pub manual_add_contacts: bool,
+    /// Whether its adverts say where it is.
+    pub share_position: bool,
+    /// Who it answers telemetry to.
+    pub telemetry: MeshcoreTelemetry,
+    /// Whether it sends its acknowledgements more than once.
+    pub multi_acks: bool,
+}
+
+/// A place, in degrees.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcorePosition {
+    #[cfg_attr(feature = "openapi", schema(example = 43.3623))]
+    pub latitude: f64,
+    #[cfg_attr(feature = "openapi", schema(example = -8.4115))]
+    pub longitude: f64,
+}
+
+/// Who a MeshCore radio answers each kind of telemetry to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreTelemetry {
+    /// Its battery and the like.
+    pub base: TelemetryShare,
+    pub location: TelemetryShare,
+    /// Its sensors.
+    pub environment: TelemetryShare,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryShare {
+    Nobody,
+    /// The contacts allowed to, each by its own flag.
+    Allowed,
+    Anyone,
+}
+
+/// A MeshCore radio's figures, asked for now: each none if its firmware
+/// does not give it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreStatus {
+    pub battery_mv: Option<u16>,
+    /// Its storage, in KB.
+    pub storage_used_kb: Option<u32>,
+    pub storage_total_kb: Option<u32>,
+    /// Since it started, in seconds.
+    pub uptime: Option<u32>,
+    /// What waits to be sent.
+    pub queue: Option<u8>,
+    /// In dBm.
+    pub noise_floor: Option<i16>,
+    pub last_rssi: Option<i8>,
+    pub last_snr: Option<f32>,
+    /// Seconds spent sending and receiving since it started.
+    pub tx_air_secs: Option<u32>,
+    pub rx_air_secs: Option<u32>,
+    pub packets_received: Option<u32>,
+    pub packets_sent: Option<u32>,
+    pub sent_flood: Option<u32>,
+    pub sent_direct: Option<u32>,
+    pub received_flood: Option<u32>,
+    pub received_direct: Option<u32>,
+    pub receive_errors: Option<u32>,
+}
+
 /// How long what meshctl keeps is kept, each in days: `null` for ever.
 /// Whatever is left out takes its default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

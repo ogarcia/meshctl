@@ -16,6 +16,7 @@ mod fields;
 mod links;
 mod map;
 mod mesh;
+mod meshcore_settings;
 mod names;
 mod node;
 mod offline;

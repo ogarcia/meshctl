@@ -454,6 +454,29 @@ pub async fn use_emoji(emoji: &str) -> Result<Vec<String>, Failure> {
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// A MeshCore radio's own settings.
+pub async fn meshcore_settings(radio: RadioId) -> Result<meshctl_api::MeshcoreSettings, Failure> {
+    get(&format!("/radios/{radio}/meshcore/settings")).await
+}
+
+/// Changes a MeshCore radio's own settings, whole.
+pub async fn set_meshcore_settings(
+    radio: RadioId,
+    settings: &meshctl_api::MeshcoreSettings,
+) -> Result<(), Failure> {
+    let request = with_token(Request::put(&url(&format!(
+        "/radios/{radio}/meshcore/settings"
+    ))))
+    .json(settings)
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
+/// A MeshCore radio's figures, asked of it now.
+pub async fn meshcore_status(radio: RadioId) -> Result<meshctl_api::MeshcoreStatus, Failure> {
+    get(&format!("/radios/{radio}/meshcore/status")).await
+}
+
 /// What meshctl keeps, and how much room it takes.
 pub async fn kept() -> Result<meshctl_api::Storage, Failure> {
     get("/storage").await

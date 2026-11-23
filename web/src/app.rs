@@ -119,6 +119,8 @@ pub struct Live {
     pub selected: RwSignal<Option<RadioId>>,
     /// The radio settings' tab, kept as it was left or as a shortcut asks.
     pub settings_tab: RwSignal<crate::settings::Tab>,
+    /// The same, for a MeshCore radio, whose tabs are its own.
+    pub meshcore_tab: RwSignal<crate::meshcore_settings::MeshcoreTab>,
     /// What the radios' editor is open on.
     pub radio_editing: RwSignal<Editing>,
     /// Of the selected radio.
@@ -227,6 +229,7 @@ impl Live {
             radios: RwSignal::new(None),
             selected: RwSignal::new(daemon::last_radio()),
             settings_tab: RwSignal::new(crate::settings::Tab::User),
+            meshcore_tab: RwSignal::new(crate::meshcore_settings::MeshcoreTab::User),
             radio_editing: RwSignal::new(Editing::Closed),
             status: RwSignal::new(None),
             nodes: RwSignal::new(BTreeMap::new()),

@@ -1394,6 +1394,61 @@ impl Radios {
         Ok(mesh)
     }
 
+    /// A connected MeshCore radio.
+    fn meshcore(&self, id: RadioId) -> Result<Mesh, SettingsFailure> {
+        let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
+        if self.protocol(id) != Some(Protocol::Meshcore) {
+            return Err(SettingsFailure::Unsupported);
+        }
+        if self.link(id) != LinkState::Ready {
+            return Err(SettingsFailure::NotConnected);
+        }
+        Ok(mesh)
+    }
+
+    /// A MeshCore radio's own settings, as it last said them.
+    pub fn meshcore_settings(
+        &self,
+        id: RadioId,
+    ) -> Result<meshctl_api::MeshcoreSettings, SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        mesh.read(|state| state.meshcore.as_ref().map(crate::meshcore::view))
+            .ok_or(SettingsFailure::NotConnected)
+    }
+
+    /// Changes a MeshCore radio's own settings, each as the radio applies
+    /// it, at once; read back from it after.
+    pub async fn change_meshcore_settings(
+        &self,
+        id: RadioId,
+        wanted: &meshctl_api::MeshcoreSettings,
+    ) -> Result<(), SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        let current = mesh
+            .read(|state| state.meshcore.clone())
+            .ok_or(SettingsFailure::NotConnected)?;
+        let change = crate::meshcore::change(&current, wanted).map_err(SettingsFailure::Invalid)?;
+        mesh.meshcore_change(&change)
+            .await
+            .map_err(|error| match error {
+                // What the radio would not take, as it names it.
+                AdminError::Refused(why) => SettingsFailure::Invalid(why),
+                other => admin_failure(other),
+            })?;
+        tracing::info!(radio = id, "MeshCore settings changed");
+        Ok(())
+    }
+
+    /// A MeshCore radio's figures, asked for now.
+    pub async fn meshcore_status(
+        &self,
+        id: RadioId,
+    ) -> Result<meshctl_api::MeshcoreStatus, SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        let status = mesh.meshcore_status().await.map_err(admin_failure)?;
+        Ok(crate::meshcore::status(status))
+    }
+
     /// What a link holds, against what a Meshtastic radio has and knows.
     pub fn read_link(&self, id: RadioId, url: &str) -> Result<LinkContents, LinkFailure> {
         let mesh = self.configurable(id).map_err(LinkFailure::Settings)?;

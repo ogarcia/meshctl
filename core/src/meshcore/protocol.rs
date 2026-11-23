@@ -6,8 +6,8 @@
 //! values out, and the other way round.
 //!
 //! MeshCore has no schema to generate this from. The layouts are the
-//! firmware's, as `meshcore-rs` and coresplitter read them, each checked
-//! against the other and against real radios. Every value is little endian.
+//! firmware's own, from its companion radio (`examples/companion_radio/
+//! MyMesh.cpp`), checked against real radios. Every value is little endian.
 //!
 //! A frame is a header byte, `<` from the client and `>` from the radio, the
 //! payload's length as a u16, and the payload: a code and what it carries.
@@ -82,9 +82,18 @@ pub mod command {
     const SEND_TEXT: u8 = 0x02;
     const SEND_CHANNEL_TEXT: u8 = 0x03;
     const GET_CONTACTS: u8 = 0x04;
+    const GET_DEVICE_TIME: u8 = 0x05;
+    const SET_DEVICE_TIME: u8 = 0x06;
+    const SET_ADVERT_NAME: u8 = 0x08;
     const SYNC_NEXT_MESSAGE: u8 = 0x0a;
+    const SET_RADIO_PARAMS: u8 = 0x0b;
+    const SET_RADIO_TX_POWER: u8 = 0x0c;
+    const SET_ADVERT_LATLON: u8 = 0x0e;
+    const GET_BATT_AND_STORAGE: u8 = 0x14;
     const DEVICE_QUERY: u8 = 0x16;
     const GET_CHANNEL: u8 = 0x1f;
+    const SET_OTHER_PARAMS: u8 = 0x26;
+    const GET_STATS: u8 = 0x38;
     /// Plain text, as opposed to a CLI command or a signed message.
     const TEXT_PLAIN: u8 = 0;
     /// The protocol version the client speaks, which the radio answers to.
@@ -140,6 +149,87 @@ pub mod command {
         payload.extend_from_slice(text.as_bytes());
         payload
     }
+
+    /// The radio's clock, answered with `CurrentTime`.
+    pub fn get_time() -> Vec<u8> {
+        vec![GET_DEVICE_TIME]
+    }
+
+    /// Sets the radio's clock. Only forward: an earlier time is refused.
+    pub fn set_time(secs: u32) -> Vec<u8> {
+        let mut payload = vec![SET_DEVICE_TIME];
+        payload.extend_from_slice(&secs.to_le_bytes());
+        payload
+    }
+
+    /// The name it advertises; the firmware keeps 31 bytes of it.
+    pub fn set_name(name: &str) -> Vec<u8> {
+        let mut payload = vec![SET_ADVERT_NAME];
+        payload.extend_from_slice(name.as_bytes());
+        payload
+    }
+
+    /// Where it says it is, in millionths of a degree.
+    pub fn set_position(lat: i32, lon: i32) -> Vec<u8> {
+        let mut payload = vec![SET_ADVERT_LATLON];
+        payload.extend_from_slice(&lat.to_le_bytes());
+        payload.extend_from_slice(&lon.to_le_bytes());
+        payload
+    }
+
+    /// Its transmit power, in dBm, from -9 to what the board allows.
+    pub fn set_tx_power(dbm: i8) -> Vec<u8> {
+        vec![SET_RADIO_TX_POWER, dbm.cast_unsigned()]
+    }
+
+    /// Its frequency in kHz, bandwidth in Hz, spreading factor and coding
+    /// rate, applied at once. On firmware that has it (v9+) the last byte
+    /// sets client repeat too, and leaving it out leaves it off: `None` only
+    /// for firmware without it.
+    pub fn set_radio_params(
+        frequency: u32,
+        bandwidth: u32,
+        spreading_factor: u8,
+        coding_rate: u8,
+        repeat: Option<bool>,
+    ) -> Vec<u8> {
+        let mut payload = vec![SET_RADIO_PARAMS];
+        payload.extend_from_slice(&frequency.to_le_bytes());
+        payload.extend_from_slice(&bandwidth.to_le_bytes());
+        payload.extend_from_slice(&[spreading_factor, coding_rate]);
+        if let Some(repeat) = repeat {
+            payload.push(u8::from(repeat));
+        }
+        payload
+    }
+
+    /// Whether contacts are added only by hand; who it shares telemetry
+    /// with, two bits for each of base, location and environment; whether
+    /// its adverts carry its position; and its extra acknowledgements.
+    pub fn set_other_params(
+        manual_add: bool,
+        telemetry: u8,
+        location_policy: u8,
+        multi_acks: u8,
+    ) -> Vec<u8> {
+        vec![
+            SET_OTHER_PARAMS,
+            u8::from(manual_add),
+            telemetry,
+            location_policy,
+            multi_acks,
+        ]
+    }
+
+    /// Answered with `Battery`.
+    pub fn get_battery() -> Vec<u8> {
+        vec![GET_BATT_AND_STORAGE]
+    }
+
+    /// Answered with `Stats` of that kind: 0 core, 1 radio, 2 packets.
+    pub fn get_stats(kind: u8) -> Vec<u8> {
+        vec![GET_STATS, kind]
+    }
 }
 
 /// A contact the radio keeps.
@@ -165,11 +255,21 @@ pub struct Contact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelfInfo {
     pub kind: u8,
-    pub tx_power: u8,
+    /// In dBm, which may be below zero.
+    pub tx_power: i8,
     pub max_tx_power: u8,
     pub public_key: [u8; 32],
     pub lat: i32,
     pub lon: i32,
+    /// Extra acknowledgements it sends.
+    pub multi_acks: u8,
+    /// 0 its adverts say nothing of where it is, 1 they say.
+    pub location_policy: u8,
+    /// Who it shares telemetry with, two bits each: base, location (<< 2)
+    /// and environment (<< 4); 0 nobody, 1 those flagged, 2 anyone.
+    pub telemetry: u8,
+    /// Whether contacts are added only by hand.
+    pub manual_add: bool,
     /// In kHz.
     pub frequency: u32,
     /// In Hz.
@@ -188,6 +288,40 @@ pub struct DeviceInfo {
     pub build: Option<String>,
     pub model: Option<String>,
     pub version: Option<String>,
+    /// Whether it repeats as well (v9+).
+    pub repeat: Option<bool>,
+    /// How many bytes each hop's hash takes, less one (v10+).
+    pub path_hash_mode: Option<u8>,
+}
+
+/// The radio's figures, by kind.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stats {
+    Core {
+        battery_mv: u16,
+        uptime_secs: u32,
+        errors: u16,
+        queue: u8,
+    },
+    Radio {
+        /// In dBm.
+        noise_floor: i16,
+        last_rssi: i8,
+        last_snr: f32,
+        /// Seconds spent sending and receiving, since it started.
+        tx_air_secs: u32,
+        rx_air_secs: u32,
+    },
+    Packets {
+        received: u32,
+        sent: u32,
+        sent_flood: u32,
+        sent_direct: u32,
+        received_flood: u32,
+        received_direct: u32,
+        /// Only on firmware that counts them.
+        receive_errors: Option<u32>,
+    },
 }
 
 /// A direct message, as received.
@@ -241,6 +375,15 @@ pub enum Response {
         index: u8,
         name: String,
     },
+    /// The radio's clock.
+    CurrentTime(u32),
+    Battery {
+        millivolts: u16,
+        /// Its storage, in KB, on firmware that says.
+        used_kb: Option<u32>,
+        total_kb: Option<u32>,
+    },
+    Stats(Stats),
     /// Pushed: a contact advertised.
     Advert,
     /// Pushed: the path to a contact changed.
@@ -284,7 +427,13 @@ impl Response {
             },
             0x07 => Self::ContactMessage(contact_message(data, false)?),
             0x08 => Self::ChannelMessage(channel_message(data, false)?),
+            0x09 => Self::CurrentTime(u32_at(data, 0)?),
             0x0a => Self::NoMoreMessages,
+            0x0c => Self::Battery {
+                millivolts: u16::from_le_bytes(bytes_at(data, 0)?),
+                used_kb: u32_at(data, 2),
+                total_kb: u32_at(data, 6),
+            },
             0x0d => Self::DeviceInfo(device_info(data)),
             0x10 => Self::ContactMessage(contact_message(data, true)?),
             0x11 => Self::ChannelMessage(channel_message(data, true)?),
@@ -292,6 +441,7 @@ impl Response {
                 index: *data.first()?,
                 name: text_at(data, 1, 32),
             },
+            0x18 => Self::Stats(stats(data)?),
             0x80 => Self::Advert,
             0x81 => Self::PathUpdate,
             0x82 => Self::Ack(bytes_at(data, 0)?),
@@ -361,12 +511,15 @@ fn self_info(data: &[u8]) -> Option<SelfInfo> {
     }
     Some(SelfInfo {
         kind: data[0],
-        tx_power: data[1],
+        tx_power: data[1].cast_signed(),
         max_tx_power: data[2],
         public_key: bytes_at(data, 3)?,
         lat: i32_at(data, 35)?,
         lon: i32_at(data, 39)?,
-        // 43..47: multi acks, location policy, telemetry modes, manual add.
+        multi_acks: data[43],
+        location_policy: data[44],
+        telemetry: data[45],
+        manual_add: data[46] != 0,
         frequency: u32_at(data, 47)?,
         bandwidth: u32_at(data, 51)?,
         spreading_factor: data.get(55).copied().unwrap_or(0),
@@ -393,7 +546,43 @@ fn device_info(data: &[u8]) -> DeviceInfo {
         build: text(7, 12),
         model: text(19, 40),
         version: text(59, 20),
+        repeat: (firmware_code >= 9)
+            .then(|| data.get(79).map(|&b| b != 0))
+            .flatten(),
+        path_hash_mode: (firmware_code >= 10)
+            .then(|| data.get(80).copied())
+            .flatten(),
     }
+}
+
+fn stats(data: &[u8]) -> Option<Stats> {
+    let (&kind, data) = data.split_first()?;
+    let u16_at = |at| bytes_at(data, at).map(u16::from_le_bytes);
+    Some(match kind {
+        0 => Stats::Core {
+            battery_mv: u16_at(0)?,
+            uptime_secs: u32_at(data, 2)?,
+            errors: u16_at(6)?,
+            queue: *data.get(8)?,
+        },
+        1 => Stats::Radio {
+            noise_floor: bytes_at(data, 0).map(i16::from_le_bytes)?,
+            last_rssi: data.get(2)?.cast_signed(),
+            last_snr: snr(*data.get(3)?),
+            tx_air_secs: u32_at(data, 4)?,
+            rx_air_secs: u32_at(data, 8)?,
+        },
+        2 => Stats::Packets {
+            received: u32_at(data, 0)?,
+            sent: u32_at(data, 4)?,
+            sent_flood: u32_at(data, 8)?,
+            sent_direct: u32_at(data, 12)?,
+            received_flood: u32_at(data, 16)?,
+            received_direct: u32_at(data, 20)?,
+            receive_errors: u32_at(data, 24),
+        },
+        _ => return None,
+    })
 }
 
 fn contact_message(data: &[u8], newer: bool) -> Option<ContactMessage> {
@@ -627,6 +816,106 @@ mod tests {
         assert_eq!(info.model.as_deref(), Some("Heltec V3"));
         assert_eq!(info.version.as_deref(), Some("v1.18.0"));
         assert_eq!(info.build.as_deref(), Some("15 Oct 2026"));
+    }
+
+    #[test]
+    fn the_radios_own_settings_read_back() {
+        let mut payload = vec![0x05, 1, 0xf7, 22];
+        payload.extend([0x50; 32]);
+        payload.extend(43_331_140i32.to_le_bytes());
+        payload.extend((-8_463_732i32).to_le_bytes());
+        payload.extend([1, 1, 0b10_01_10, 1]);
+        payload.extend(869_618u32.to_le_bytes());
+        payload.extend(62_500u32.to_le_bytes());
+        payload.extend([8, 8]);
+        payload.extend(b"Casa");
+        let Some(Response::SelfInfo(me)) = Response::parse(&payload) else {
+            panic!("self info");
+        };
+        assert_eq!(me.tx_power, -9);
+        assert_eq!((me.multi_acks, me.location_policy), (1, 1));
+        assert_eq!(me.telemetry, 0b10_01_10);
+        assert!(me.manual_add);
+
+        // Repeat and the path's hash, on firmware new enough to say.
+        let mut device = vec![0x0d, 14, 175, 40, 0, 0, 0, 0];
+        device.extend([0u8; 72]);
+        device.extend([1, 2]);
+        let Some(Response::DeviceInfo(info)) = Response::parse(&device) else {
+            panic!("device info");
+        };
+        assert_eq!((info.repeat, info.path_hash_mode), (Some(true), Some(2)));
+        device[1] = 8;
+        let Some(Response::DeviceInfo(old)) = Response::parse(&device) else {
+            panic!("device info");
+        };
+        assert_eq!((old.repeat, old.path_hash_mode), (None, None));
+    }
+
+    #[test]
+    fn time_battery_and_stats_read_back() {
+        let mut time = vec![0x09];
+        time.extend(1_795_000_000u32.to_le_bytes());
+        assert_eq!(
+            Response::parse(&time),
+            Some(Response::CurrentTime(1_795_000_000))
+        );
+        let mut battery = vec![0x0c];
+        battery.extend(4_012u16.to_le_bytes());
+        battery.extend(120u32.to_le_bytes());
+        battery.extend(1_024u32.to_le_bytes());
+        assert_eq!(
+            Response::parse(&battery),
+            Some(Response::Battery {
+                millivolts: 4_012,
+                used_kb: Some(120),
+                total_kb: Some(1_024)
+            })
+        );
+        let mut radio = vec![0x18, 1];
+        radio.extend((-112i16).to_le_bytes());
+        radio.extend([(-60i8).cast_unsigned(), 26]);
+        radio.extend(30u32.to_le_bytes());
+        radio.extend(400u32.to_le_bytes());
+        assert_eq!(
+            Response::parse(&radio),
+            Some(Response::Stats(Stats::Radio {
+                noise_floor: -112,
+                last_rssi: -60,
+                last_snr: 6.5,
+                tx_air_secs: 30,
+                rx_air_secs: 400
+            }))
+        );
+        let mut packets = vec![0x18, 2];
+        for n in 1..=6u32 {
+            packets.extend(n.to_le_bytes());
+        }
+        let Some(Response::Stats(Stats::Packets { receive_errors, .. })) =
+            Response::parse(&packets)
+        else {
+            panic!("packet stats");
+        };
+        assert_eq!(receive_errors, None);
+    }
+
+    #[test]
+    fn settings_are_laid_out_as_the_firmware_reads_them() {
+        assert_eq!(command::set_tx_power(-9), [0x0c, 0xf7]);
+        assert_eq!(
+            command::set_radio_params(869_618, 62_500, 8, 8, Some(true)),
+            [0x0b, 0xf2, 0x44, 0x0d, 0, 0x24, 0xf4, 0, 0, 8, 8, 1]
+        );
+        assert_eq!(
+            command::set_radio_params(869_618, 62_500, 8, 8, None).len(),
+            11
+        );
+        assert_eq!(
+            command::set_other_params(true, 0b10_00_01, 1, 0),
+            [0x26, 1, 0b10_00_01, 1, 0]
+        );
+        assert_eq!(command::set_position(1, -1)[5..], (-1i32).to_le_bytes());
+        assert_eq!(command::get_stats(2), [0x38, 2]);
     }
 
     #[test]

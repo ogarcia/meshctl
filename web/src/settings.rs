@@ -340,14 +340,14 @@ pub fn SettingsView() -> impl IntoView {
                 let radio = live.selected_radio();
                 let name = radio.as_ref().map(|r| r.name.clone()).unwrap_or_default();
                 match radio {
-                    Some(radio) if radio.kind == RadioKind::Meshcore => view! {
-                        <EmptyState
-                            icon=empty::SETTINGS_OFF
-                            title=t!(i18n, empty_meshcore_title).into_any()
-                            text=t!(i18n, meshcore_not_yet).into_any()
-                        />
+                    // A MeshCore radio's settings are its own, while it is
+                    // connected.
+                    Some(radio)
+                        if radio.kind == RadioKind::Meshcore
+                            && matches!(radio.link, LinkState::Ready | LinkState::Syncing) =>
+                    {
+                        view! { <crate::meshcore_settings::MeshcoreSettingsView /> }.into_any()
                     }
-                    .into_any(),
                     // Switched off: it can be switched on from here.
                     Some(radio) if radio.link == LinkState::Disabled => view! {
                         <EmptyState

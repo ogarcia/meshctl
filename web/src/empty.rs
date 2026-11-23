@@ -11,8 +11,6 @@ pub const PLUG_OFF: &str =
 pub const POWER: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/power.svg");
 pub const SERVER_OFF: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/server-off.svg");
-pub const SETTINGS_OFF: &str =
-    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/settings-off.svg");
 
 /// An icon in a circle, what is the matter, a word on it and, if any, what
 /// can be done: in the middle of the page, or of its part with `compact`.

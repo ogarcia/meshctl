@@ -343,6 +343,9 @@ pub struct MeshState {
     /// Whether the radio is being read again, quietly, its link as it was:
     /// what changes is told once it has said it all.
     pub rereading: bool,
+    /// A MeshCore radio's own settings, as it last said them; none for a
+    /// Meshtastic one, whose are in `settings`.
+    pub meshcore: Option<crate::meshcore::Settings>,
 }
 
 /// The radio's settings, whole and as the protobufs carry them: what changing

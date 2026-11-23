@@ -149,13 +149,22 @@ fn NodePage(num: u32) -> impl IntoView {
                     || live
                         .nodes
                         .with(|nodes| nodes.get(&num).is_some_and(|n| n.position.is_some()));
+                // A MeshCore radio's figures are asked of it, not heard.
+                let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
                 view! {
                     {placed.then(|| view! {
                         <PositionSection at=latest.position.as_ref().map(|p| p.at) />
                     })}
-                    <Device packet=latest.device.clone() />
-                    <Stats packet=latest.local_stats.clone() />
-                    <Sensors latest own=true />
+                    {if meshcore {
+                        view! { <MeshcoreStatus /> }.into_any()
+                    } else {
+                        view! {
+                            <Device packet=latest.device.clone() />
+                            <Stats packet=latest.local_stats.clone() />
+                            <Sensors latest own=true />
+                        }
+                        .into_any()
+                    }}
                 }
             }}
             <Shortcuts />
@@ -892,18 +901,41 @@ fn Radio() -> impl IntoView {
                 .into_any()
             },
         );
+        // A MeshCore radio says its hardware, frequency and modulation in
+        // words already, not as the protobufs name Meshtastic's.
+        let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
         let preset = local.modem_preset.as_deref().map_or_else(
             || t_string!(i18n, own_custom_lora).to_owned(),
-            |p| crate::names::preset(locale, p),
+            |p| {
+                if meshcore {
+                    p.to_owned()
+                } else {
+                    crate::names::preset(locale, p)
+                }
+            },
         );
+        let hardware = |hw: &str| {
+            if meshcore {
+                hw.to_owned()
+            } else {
+                crate::mesh::model(hw)
+            }
+        };
+        let region = |region: &str| {
+            if meshcore {
+                region.to_owned()
+            } else {
+                crate::names::region(locale, region)
+            }
+        };
         Some(view! {
             <dl class="facts">
                 {live.nodes.with(|nodes| nodes.get(&local.num).and_then(|own| status_fact(live, own)))}
                 {fact(t!(i18n, nodes_id), view! { <span class="mono">{local.id.clone()}</span> })}
                 {local.firmware_version.clone().map(|v| fact(t!(i18n, own_firmware), view! { <span class="mono">{v}</span> }))}
-                {local.hw_model.as_deref().map(|hw| fact(t!(i18n, nodes_hardware), crate::mesh::model(hw)))}
+                {local.hw_model.as_deref().map(|hw| fact(t!(i18n, nodes_hardware), hardware(hw)))}
                 {local.role.as_deref().map(|role| fact(t!(i18n, node_role), crate::names::role(locale, role)))}
-                {local.region.as_deref().map(|region| fact(t!(i18n, own_region), crate::names::region(locale, region)))}
+                {local.region.as_deref().map(|r| fact(t!(i18n, own_region), region(r)))}
                 {fact(t!(i18n, own_preset), preset)}
                 {wide_fact(t!(i18n, node_public_key), key)}
                 {licensed(live).then(|| fact(t!(i18n, node_licensed), t!(i18n, node_yes)))}
@@ -923,6 +955,35 @@ fn Shortcuts() -> impl IntoView {
     use crate::settings::Tab;
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    // A MeshCore radio's tabs are its own: its kind, read once, as the
+    // own page is drawn again for another radio.
+    if untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore) {
+        use crate::meshcore_settings::{MeshcoreTab, TABS};
+        let button = move |tab: MeshcoreTab| {
+            let label = move || match tab {
+                MeshcoreTab::User => t_string!(i18n, settings_tab_user),
+                MeshcoreTab::Radio => t_string!(i18n, mc_tab_radio),
+                MeshcoreTab::Advanced => t_string!(i18n, mc_tab_advanced),
+            };
+            view! {
+                <button
+                    type="button"
+                    on:click=move |_| {
+                        live.meshcore_tab.set(tab);
+                        live.go(crate::app::Page::RadioSettings);
+                    }
+                >
+                    {label}
+                </button>
+            }
+        };
+        return view! {
+            <Section title=t!(i18n, own_settings).into_any() class="own-shortcuts">
+                <div class="shortcuts">{TABS.into_iter().map(button).collect_view()}</div>
+            </Section>
+        }
+        .into_any();
+    }
     let open = move |tab: Tab| {
         live.settings_tab.set(tab);
         live.go(crate::app::Page::RadioSettings);
@@ -946,6 +1007,92 @@ fn Shortcuts() -> impl IntoView {
                     .collect_view()}
             </div>
         </Section>
+    }
+    .into_any()
+}
+
+/// A MeshCore radio's figures: its battery and storage, how long it has
+/// been on, how it hears the air and what it has sent and received. Asked
+/// of it on showing, and every half minute while shown.
+#[component]
+fn MeshcoreStatus() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let status = RwSignal::new(None::<meshctl_api::MeshcoreStatus>);
+    let read = move || {
+        if let Some(radio) = live.selected.get_untracked() {
+            spawn_local(async move {
+                if let Ok(read) = daemon::meshcore_status(radio).await {
+                    status.set(Some(read));
+                }
+            });
+        }
+    };
+    read();
+    if let Ok(every) = set_interval_with_handle(read, Duration::from_secs(30)) {
+        on_cleanup(move || every.clear());
+    }
+    let body = move || {
+        let Some(s) = status.get() else {
+            return nothing(i18n).into_any();
+        };
+        let number = |n: u32| n.to_string();
+        // A share of the time it has been on.
+        #[allow(clippy::cast_precision_loss)]
+        let share = |secs: Option<u32>| match (secs, s.uptime) {
+            (Some(secs), Some(up)) if up > 0 => {
+                Some(format!("{:.1} %", secs as f64 * 100.0 / up as f64))
+            }
+            _ => None,
+        };
+        view! {
+            <dl class="facts compact">
+                {s.battery_mv.map(|mv| fact(t!(i18n, nodes_battery), format!("{:.2} V", f64::from(mv) / 1000.0)))}
+                {s.uptime.map(|up| fact(t!(i18n, node_uptime), duration(u64::from(up))))}
+                {match (s.storage_used_kb, s.storage_total_kb) {
+                    (Some(used), Some(total)) if total > 0 => Some(fact(
+                        t!(i18n, mc_storage),
+                        t_string!(i18n, mc_storage_of)
+                            .replace("{used}", &used.to_string())
+                            .replace("{total}", &total.to_string()),
+                    )),
+                    _ => None,
+                }}
+                {s.noise_floor.map(|n| fact(t!(i18n, stats_noise), format!("{n} dBm")))}
+                {match (s.last_rssi, s.last_snr) {
+                    (Some(rssi), Some(snr)) => Some(fact(t!(i18n, mc_last_heard), format!("{rssi} dBm · {snr:.1} dB"))),
+                    _ => None,
+                }}
+                {share(s.tx_air_secs).map(|v| fact(t!(i18n, node_air_tx), v))}
+                {share(s.rx_air_secs).map(|v| fact(t!(i18n, mc_air_rx), v))}
+                {s.packets_sent.map(|n| fact(t!(i18n, stats_packets_tx), number(n)))}
+                {s.packets_received.map(|n| fact(t!(i18n, stats_packets_rx), number(n)))}
+                {match (s.sent_flood, s.sent_direct) {
+                    (Some(flood), Some(direct)) => Some(fact(
+                        t!(i18n, mc_sent_how),
+                        t_string!(i18n, mc_flood_direct)
+                            .replace("{flood}", &flood.to_string())
+                            .replace("{direct}", &direct.to_string()),
+                    )),
+                    _ => None,
+                }}
+                {match (s.received_flood, s.received_direct) {
+                    (Some(flood), Some(direct)) => Some(fact(
+                        t!(i18n, mc_received_how),
+                        t_string!(i18n, mc_flood_direct)
+                            .replace("{flood}", &flood.to_string())
+                            .replace("{direct}", &direct.to_string()),
+                    )),
+                    _ => None,
+                }}
+                {s.receive_errors.map(|n| fact(t!(i18n, stats_rx_bad), number(n)))}
+                {s.queue.map(|n| fact(t!(i18n, mc_queue), n.to_string()))}
+            </dl>
+        }
+        .into_any()
+    };
+    view! {
+        <Section title=t!(i18n, mc_status).into_any()>{body}</Section>
     }
 }
 

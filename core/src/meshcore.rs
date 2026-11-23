@@ -30,10 +30,12 @@ use crate::mesh::{
     User,
 };
 use crate::radio::{
-    Mesh, OutgoingText, RECONNECT_MAX, RECONNECT_MIN, REREAD_INTERVAL, STABLE_SESSION, SendError,
-    Sent, now,
+    AdminError, Mesh, OutgoingText, RECONNECT_MAX, RECONNECT_MIN, REREAD_INTERVAL, STABLE_SESSION,
+    SendError, Sent, now,
 };
-use protocol::{ChannelMessage, Contact, ContactMessage, DeviceInfo, Response, SelfInfo, command};
+use protocol::{
+    ChannelMessage, Contact, ContactMessage, DeviceInfo, Response, SelfInfo, Stats, command,
+};
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io;
@@ -66,6 +68,100 @@ const CONTACTS_SETTLE: Duration = Duration::from_secs(2);
 
 /// What the radio's path length says for a path it does not know.
 const NO_PATH: u8 = 0xff;
+
+/// How far behind its clock may be before it is set: a little drift is
+/// not worth writing to the radio for.
+const CLOCK_SLACK: u32 = 60;
+
+/// A radio's own settings, as it says them, and as they are changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Settings {
+    /// What it advertises itself as.
+    pub name: String,
+    /// Where it says it is, in millionths of a degree; both zero for
+    /// nowhere.
+    pub lat: i32,
+    pub lon: i32,
+    /// In kHz.
+    pub frequency: u32,
+    /// In Hz.
+    pub bandwidth: u32,
+    pub spreading_factor: u8,
+    pub coding_rate: u8,
+    /// In dBm.
+    pub tx_power: i8,
+    /// The most its board allows, in dBm; not changed.
+    pub max_tx_power: u8,
+    /// Whether it repeats as well; none on firmware without it.
+    pub repeat: Option<bool>,
+    /// Whether contacts are added only by hand.
+    pub manual_add: bool,
+    /// Who it shares telemetry with, two bits each: base, location (<< 2)
+    /// and environment (<< 4); 0 nobody, 1 those flagged, 2 anyone.
+    pub telemetry: u8,
+    /// 0 its adverts say nothing of where it is, 1 they say.
+    pub location_policy: u8,
+    /// Extra acknowledgements it sends.
+    pub multi_acks: u8,
+}
+
+impl Settings {
+    fn from(me: &SelfInfo, device: Option<&DeviceInfo>) -> Self {
+        Self {
+            name: me.name.clone(),
+            lat: me.lat,
+            lon: me.lon,
+            frequency: me.frequency,
+            bandwidth: me.bandwidth,
+            spreading_factor: me.spreading_factor,
+            coding_rate: me.coding_rate,
+            tx_power: me.tx_power,
+            max_tx_power: me.max_tx_power,
+            repeat: device.and_then(|d| d.repeat),
+            manual_add: me.manual_add,
+            telemetry: me.telemetry,
+            location_policy: me.location_policy,
+            multi_acks: me.multi_acks,
+        }
+    }
+}
+
+/// A radio's figures, asked for: each as its firmware gives it, none of a
+/// kind it does not.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Status {
+    pub battery_mv: Option<u16>,
+    pub storage_used_kb: Option<u32>,
+    pub storage_total_kb: Option<u32>,
+    pub core: Option<Stats>,
+    pub radio: Option<Stats>,
+    pub packets: Option<Stats>,
+}
+
+/// What an error code says, as the firmware names it.
+fn error_name(code: u8) -> &'static str {
+    match code {
+        1 => "UNSUPPORTED_CMD",
+        2 => "NOT_FOUND",
+        3 => "TABLE_FULL",
+        4 => "BAD_STATE",
+        5 => "FILE_IO_ERROR",
+        6 => "ILLEGAL_ARG",
+        _ => "UNKNOWN",
+    }
+}
+
+/// The radio as the other nodes see it: where it listens, in words.
+fn describe(local: &mut LocalNode, settings: &Settings) {
+    // Frequency in kHz, bandwidth in Hz: as people write them.
+    local.region = Some(format!("{:.3} MHz", f64::from(settings.frequency) / 1000.0));
+    local.modem_preset = Some(format!(
+        "BW {} kHz · SF{} · CR{}",
+        f64::from(settings.bandwidth) / 1000.0,
+        settings.spreading_factor,
+        settings.coding_rate
+    ));
+}
 
 /// A connection to a companion radio, which answers one command at a time:
 /// what it says in answer goes to whoever asked, what it pushes on its own
@@ -176,6 +272,83 @@ impl Client {
             Response::SelfInfo(me) => Ok(me),
             _ => Err("the radio refused APP_START"),
         }
+    }
+
+    /// Gives a command whose answer is `Ok`: what the radio says otherwise,
+    /// as it names it.
+    pub async fn done(&self, command: Vec<u8>) -> Result<(), AdminError> {
+        match self.ask_one(command, |r| matches!(r, Response::Ok)).await {
+            Ok(Response::Ok) => Ok(()),
+            Ok(Response::Error(code)) => Err(AdminError::Refused(error_name(code).to_owned())),
+            Ok(_) => Err(AdminError::Refused("UNEXPECTED".to_owned())),
+            Err("the radio did not answer") => Err(AdminError::NoAnswer),
+            Err(_) => Err(AdminError::NotConnected),
+        }
+    }
+
+    /// Sets the radio's clock if it is behind, as it keeps no time of its
+    /// own across a power cut and dates what it sends by it. It cannot be
+    /// set back: a clock ahead is only said.
+    pub async fn keep_time(&self) {
+        let Ok(Response::CurrentTime(radio)) = self
+            .ask_one(command::get_time(), |r| {
+                matches!(r, Response::CurrentTime(_))
+            })
+            .await
+        else {
+            return;
+        };
+        let host = now();
+        if radio.saturating_add(CLOCK_SLACK) < host {
+            match self.done(command::set_time(host)).await {
+                Ok(()) => tracing::info!(behind = host - radio, "set the radio's clock"),
+                Err(error) => tracing::warn!(?error, "cannot set the radio's clock"),
+            }
+        } else if radio > host.saturating_add(CLOCK_SLACK) {
+            tracing::warn!(
+                ahead = radio - host,
+                "the radio's clock is ahead, and cannot be set back"
+            );
+        }
+    }
+
+    /// Its battery and storage, and each kind of figure it has.
+    pub async fn status(&self) -> Result<Status, AdminError> {
+        let mut status = Status::default();
+        match self
+            .ask_one(command::get_battery(), |r| {
+                matches!(r, Response::Battery { .. })
+            })
+            .await
+        {
+            Ok(Response::Battery {
+                millivolts,
+                used_kb,
+                total_kb,
+            }) => {
+                status.battery_mv = Some(millivolts);
+                status.storage_used_kb = used_kb;
+                status.storage_total_kb = total_kb;
+            }
+            Ok(_) => {}
+            Err("the radio did not answer") => return Err(AdminError::NoAnswer),
+            Err(_) => return Err(AdminError::NotConnected),
+        }
+        for kind in 0..3 {
+            if let Ok(Response::Stats(stats)) = self
+                .ask_one(command::get_stats(kind), |r| {
+                    matches!(r, Response::Stats(_))
+                })
+                .await
+            {
+                match stats {
+                    Stats::Core { .. } => status.core = Some(stats),
+                    Stats::Radio { .. } => status.radio = Some(stats),
+                    Stats::Packets { .. } => status.packets = Some(stats),
+                }
+            }
+        }
+        Ok(status)
     }
 
     pub async fn device(&self) -> Option<DeviceInfo> {
@@ -442,6 +615,105 @@ impl Session {
     }
 }
 
+impl Mesh {
+    /// The open session with a MeshCore radio.
+    fn meshcore_session(&self) -> Result<Session, AdminError> {
+        self.meshcore
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or(AdminError::NotConnected)
+    }
+
+    /// Changes a MeshCore radio's own settings to `wanted`, each only if it
+    /// changes, as the radio applies each at once; then reads them back, so
+    /// that what is kept is what it took. A refusal stops there: what was
+    /// changed before it stays changed.
+    pub async fn meshcore_change(&self, wanted: &Settings) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        let client = &session.client;
+        let current = self
+            .read(|state| state.meshcore.clone())
+            .ok_or(AdminError::NotConnected)?;
+        if wanted.name != current.name {
+            client.done(command::set_name(&wanted.name)).await?;
+        }
+        if (wanted.lat, wanted.lon) != (current.lat, current.lon) {
+            client
+                .done(command::set_position(wanted.lat, wanted.lon))
+                .await?;
+        }
+        if wanted.tx_power != current.tx_power {
+            client.done(command::set_tx_power(wanted.tx_power)).await?;
+        }
+        let radio = |s: &Settings| {
+            (
+                s.frequency,
+                s.bandwidth,
+                s.spreading_factor,
+                s.coding_rate,
+                s.repeat,
+            )
+        };
+        if radio(wanted) != radio(&current) {
+            // Repeat goes with them on firmware that has it, or it would
+            // be turned off.
+            let repeat = current.repeat.map(|now| wanted.repeat.unwrap_or(now));
+            client
+                .done(command::set_radio_params(
+                    wanted.frequency,
+                    wanted.bandwidth,
+                    wanted.spreading_factor,
+                    wanted.coding_rate,
+                    repeat,
+                ))
+                .await?;
+        }
+        let other = |s: &Settings| (s.manual_add, s.telemetry, s.location_policy, s.multi_acks);
+        if other(wanted) != other(&current) {
+            client
+                .done(command::set_other_params(
+                    wanted.manual_add,
+                    wanted.telemetry,
+                    wanted.location_policy,
+                    wanted.multi_acks,
+                ))
+                .await?;
+        }
+        self.meshcore_read_back(client).await
+    }
+
+    /// Reads a MeshCore radio's settings back, and tells them as on syncing.
+    async fn meshcore_read_back(&self, client: &Client) -> Result<(), AdminError> {
+        let me = client.start().await.map_err(|_| AdminError::NoAnswer)?;
+        let device = client.device().await;
+        let settings = Settings::from(&me, device.as_ref());
+        self.update(|state| {
+            if let Some(local) = state.local.as_mut() {
+                describe(local, &settings);
+            }
+            let mut events = Vec::new();
+            let own = state.local.as_ref().map(|l| l.num);
+            if let Some(node) = own.and_then(|num| state.nodes.get_mut(&num)) {
+                if let Some(user) = node.user.as_mut() {
+                    user.long_name.clone_from(&settings.name);
+                }
+                node.position = position(settings.lat, settings.lon);
+                events.push(Event::Node(node.clone()));
+            }
+            state.meshcore = Some(settings);
+            events.push(Event::Synced);
+            events
+        });
+        Ok(())
+    }
+
+    /// A MeshCore radio's figures, asked for now.
+    pub async fn meshcore_status(&self) -> Result<Status, AdminError> {
+        self.meshcore_session()?.client.status().await
+    }
+}
+
 /// Connects to the radio and keeps connected, for as long as the task runs.
 pub(crate) async fn run(mesh: Mesh, transport: Transport) {
     let mut delay = RECONNECT_MIN;
@@ -481,7 +753,9 @@ async fn session(
         Err(why) => return why,
     };
     let device = client.device().await;
-    let local = LocalNode {
+    client.keep_time().await;
+    let settings = Settings::from(&me, device.as_ref());
+    let mut local = LocalNode {
         num: num_of(&me.public_key),
         firmware_version: device.as_ref().and_then(|d| match (&d.version, &d.build) {
             (Some(version), Some(build)) => Some(format!("{version} ({build})")),
@@ -489,15 +763,10 @@ async fn session(
         }),
         hw_model: device.as_ref().and_then(|d| d.model.clone()),
         role: Some(role_name(me.kind)),
-        // Frequency in kHz, bandwidth in Hz: as people write them.
-        region: Some(format!("{:.3} MHz", f64::from(me.frequency) / 1000.0)),
-        modem_preset: Some(format!(
-            "BW {} kHz · SF{} · CR{}",
-            f64::from(me.bandwidth) / 1000.0,
-            me.spreading_factor,
-            me.coding_rate
-        )),
+        region: None,
+        modem_preset: None,
     };
+    describe(&mut local, &settings);
     let slots = device
         .as_ref()
         .and_then(|d| d.max_channels)
@@ -531,6 +800,7 @@ async fn session(
     remember_keys(&session, &contacts);
     mesh.update(|state| {
         state.local = Some(local);
+        state.meshcore = Some(settings);
         state.channels = channels
             .into_iter()
             .map(|(index, name)| {

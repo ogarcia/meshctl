@@ -926,6 +926,11 @@
       }
       /* Its figures as a node's, four to the width of the page. */
       .data-figures { padding-top: 6px; }
+      /* A MeshCore radio's settings: a place in two, a figure with its unit. */
+      .mc-position { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .mc-position input { min-width: 0; }
+      .mc-unit { display: flex; align-items: center; gap: 8px; }
+      .mc-unit input { flex: 1; min-width: 0; }
       /* What a node says of itself, as it says it. */
       .node-status { font-style: italic; overflow-wrap: anywhere; }
       .data-figures .figure { flex: 1 1 0; min-width: 120px; }
