@@ -300,18 +300,24 @@ enum Item {
     /// A day, as [`day_of`] gives it.
     Day(i64),
     Unread,
-    Said(Message),
+    /// A message, and whether it starts a run of its author's: only that
+    /// one says who it is.
+    Said(Message, bool),
 }
 
 impl Item {
-    fn key(&self) -> (i64, i64, MessageStatus) {
+    fn key(&self) -> (i64, i64, MessageStatus, bool) {
         match self {
-            Self::Day(day) => (*day, 0, MessageStatus::Received),
-            Self::Unread => (-1, 0, MessageStatus::Received),
-            Self::Said(m) => (0, m.id, m.status),
+            Self::Day(day) => (*day, 0, MessageStatus::Received, false),
+            Self::Unread => (-1, 0, MessageStatus::Received, false),
+            Self::Said(m, first) => (0, m.id, m.status, *first),
         }
     }
 }
+
+/// How long apart two messages of the same author may be and still be one
+/// run of theirs.
+const RUN: i64 = 10 * 60;
 
 /// How far from the newest, in pixels, reads as away from it.
 const AWAY: i32 = 240;
@@ -436,6 +442,8 @@ pub fn ChatView() -> impl IntoView {
             let mut items = Vec::new();
             let mut last_day = None;
             let mut banded = false;
+            // Who said the one before, and when, while it is a run.
+            let mut before: Option<(u32, Option<String>, i64)> = None;
             for m in thread.iter().filter(|m| {
                 !(m.emoji
                     && m.reply_id
@@ -445,12 +453,22 @@ pub fn ChatView() -> impl IntoView {
                 if last_day != Some(day) {
                     items.push(Item::Day(day));
                     last_day = Some(day);
+                    before = None;
                 }
                 if !banded && band.is_some_and(|read| m.id > read && !m.outgoing && !m.emoji) {
                     items.push(Item::Unread);
                     banded = true;
+                    before = None;
                 }
-                items.push(Item::Said(m.clone()));
+                let author = (!m.outgoing).then(|| (m.from, m.sender_name.clone()));
+                let first = match (&before, &author) {
+                    (Some((from, name, at)), Some((m_from, m_name))) => {
+                        from != m_from || name != m_name || m.at - at > RUN
+                    }
+                    _ => true,
+                };
+                before = author.map(|(from, name)| (from, name, m.at));
+                items.push(Item::Said(m.clone(), first));
             }
             items
         })
@@ -633,7 +651,9 @@ pub fn ChatView() -> impl IntoView {
                                     </div>
                                 }
                                 .into_any(),
-                                Item::Said(message) => view! { <Bubble message peer /> }.into_any(),
+                                Item::Said(message, first) => {
+                                    view! { <Bubble message peer first /> }.into_any()
+                                }
                             }}
                         </For>
                     </div>
@@ -647,34 +667,81 @@ pub fn ChatView() -> impl IntoView {
 }
 
 #[component]
-fn Bubble(message: Message, peer: Peer) -> impl IntoView {
+fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let at = u32::try_from(message.at).unwrap_or_default();
     let mine = message.outgoing;
-    // In a channel, who said it; in a direct conversation it is obvious.
-    let author = (!mine && matches!(peer, Peer::Channel { .. })).then(|| {
-        // A sender known only by the name the message gives, as on MeshCore
-        // channels, is shown by that name.
-        // As the node becomes known, its names.
-        let known = message.from != 0;
-        let (from, given) = (message.from, message.sender_name.clone());
-        let name = move || match (&given, known) {
-            (Some(name), false) => name.clone(),
-            _ => node_name(live, from),
+    // In a channel, who said it, on the first of a run of theirs; in a
+    // direct conversation it is obvious.
+    let channel = !mine && matches!(peer, Peer::Channel { .. });
+    // A sender known only by the name the message gives, as on MeshCore
+    // channels, is shown by that name. As the node becomes known, its names.
+    let known = message.from != 0;
+    let (from, given) = (message.from, message.sender_name.clone());
+    let name = move || match (&given, known) {
+        (Some(name), false) => name.clone(),
+        _ => node_name(live, from),
+    };
+    let author = (channel && first).then(|| view! { <span class="author">{name.clone()}</span> });
+    // Their short name in an avatar, as the list of nodes draws it, coloured
+    // by how far they are: their page, a click away. The rest of a run
+    // leaves its room.
+    let avatar = channel.then(|| {
+        if !first {
+            return view! { <span class="bubble-avatar gap" aria-hidden="true"></span> }.into_any();
+        }
+        let name = name.clone();
+        let short = {
+            let name = name.clone();
+            move || {
+                let short = if known {
+                    short_name(live, from)
+                } else {
+                    String::new()
+                };
+                let short = if short.is_empty() {
+                    crate::badge::initials(&name())
+                } else {
+                    short
+                };
+                crate::badge::fit(&short)
+            }
         };
-        let short = move || {
-            known
-                .then(|| short_name(live, from))
-                .filter(|s| !s.is_empty())
-                .map(|s| view! { <span class="short">{s}</span> " " })
+        let class = {
+            let short = short.clone();
+            move || {
+                let kind = live.nodes.with(|nodes| {
+                    nodes
+                        .get(&from)
+                        .map(|node| crate::mesh::avatar_class(node, false))
+                });
+                let mut class = kind.unwrap_or_else(|| "node-avatar".to_owned());
+                if crate::badge::is_emoji(&short()) {
+                    class.push_str(" emoji");
+                }
+                format!("bubble-avatar {class}")
+            }
+        };
+        let page = move |ev: leptos::ev::MouseEvent| {
+            ev.stop_propagation();
+            if known && live.nodes.with_untracked(|nodes| nodes.contains_key(&from)) {
+                live.open_node(from);
+            }
         };
         view! {
-            <span class="author">
+            <button
+                type="button"
+                class=class
+                title=name.clone()
+                aria-label=name
+                disabled=!known
+                on:click=page
+            >
                 {short}
-                {name}
-            </span>
+            </button>
         }
+        .into_any()
     });
     // How it came, in words: through MQTT, directly with its signal, or
     // through so many hops.
@@ -886,8 +953,11 @@ fn Bubble(message: Message, peer: Peer) -> impl IntoView {
             class="bubble-row"
             data-id=id
             class:mine=mine
+            class:with-avatar=channel
+            class:goes-on=channel && !first
             class:reacting=move || thread.reacting.get() == Some(packet) && packet != 0
         >
+            {avatar}
             <div
                 class=if mine { "bubble mine" } else { "bubble" }
                 class:held=move || thread.menu.get() == Some(id)
