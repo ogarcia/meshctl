@@ -486,7 +486,7 @@ fn NodeRow(node: Node, now: RwSignal<u32>) -> impl IntoView {
                     <span class=class>{crate::badge::fit(&short)}</span>
                     <span class="names">
                         <span class="name">
-                            {name}
+                            <span class="text">{name}</span>
                             {favorite.then(|| view! { <span class="mark star" inner_html=STAR></span> })}
                             {unmessagable.then(|| view! { <span class="mark" title=move || t_string!(i18n, node_unmessagable) inner_html=MESSAGE_OFF></span> })}
                             // Where it is, always the last, to find it in the

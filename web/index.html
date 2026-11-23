@@ -544,7 +544,7 @@
       .offline-words span { color: var(--mc-muted); font-size: 13px; }
       .offline-banner > button { min-height: 34px; padding: 0 14px; }
       /* On a phone, what can be done under the words, lined up with them. */
-      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+      @media (max-width: 835px), (max-height: 500px) and (pointer: coarse) {
         .offline-banner { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
         .offline-banner > button, .offline-banner > .badge { grid-column: 2; justify-self: start; }
       }
@@ -648,7 +648,7 @@
       /* On a wide screen the map goes without the bar over it, as its nodes'
          cards say all it would. A narrow one keeps it, for its menu button,
          until phones get a design of their own. */
-      @media (min-width: 761px) and (min-height: 501px), (min-width: 761px) and (pointer: fine) {
+      @media (min-width: 836px) and (min-height: 501px), (min-width: 836px) and (pointer: fine) {
         .app.on-map .topbar { display: none; }
       }
       main {
@@ -672,7 +672,7 @@
       body .phone-back { display: none; }
       .wide-only { display: contents; }
       .phone-only { display: none; }
-      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+      @media (max-width: 835px), (max-height: 500px) and (pointer: coarse) {
         .app { display: flex; flex-direction: column; }
         .page { flex: 1; min-height: 0; }
         .rail, .sidebar, .menu-toggle, .menu-backdrop, .wide-only { display: none !important; }
@@ -1162,7 +1162,8 @@
       .node-search input { flex: 1 1 auto; min-width: 0; }
       /* The sorting, for when the list has no headings: see below. */
       .sort-menu { display: none; position: relative; }
-      .sort-menu > .icon-button { width: auto; height: 100%; aspect-ratio: 1; border: 1px solid var(--mc-border); border-radius: 10px; }
+      /* As high as the search, by stretching, and as wide: a square. */
+      .sort-menu > .icon-button { width: 40px; height: auto; border: 1px solid var(--mc-border); border-radius: 10px; }
       .sort-menu > .icon-button.sorted { color: var(--mc-primary); }
       .sort-menu .heading-menu button { justify-content: space-between; gap: 24px; }
       .sort-menu .heading-menu button.on { color: var(--mc-primary); font-weight: 600; }
@@ -1217,7 +1218,10 @@
       .node-avatar.emoji { font-size: 20px; }
       .topbar .node-avatar.emoji { font-size: 18px; }
       .nodes-table .names { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-      .nodes-table .name { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+      .nodes-table .name { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
+      /* Cut short when there is no room, its marks always shown after it. */
+      .nodes-table .name > .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .nodes-table .name > .mark { flex: none; }
       .nodes-table .mono.dim, .nodes-table .small { font-size: 12px; }
       .nodes-table .mark { display: flex; color: var(--mc-muted); }
       .nodes-table .mark.to-map {
@@ -1244,7 +1248,7 @@
       .secret-field { display: flex; align-items: center; gap: 6px; }
       .secret-field input { flex: 1; min-width: 0; }
       .section-panel .note { padding: 8px 12px; }
-      @media (max-width: 760px) {
+      @media (max-width: 835px) {
         .sections-tab { grid-template-columns: minmax(0, 1fr); }
       }
 
@@ -2750,7 +2754,7 @@
       .composer .send .icon { display: flex; }
       .composer .send svg { width: 18px; height: 18px; }
       /* Narrow, its icon alone, as square as it is tall. */
-      @media (max-width: 760px) {
+      @media (max-width: 835px) {
         .composer .send { min-width: 44px; padding: 0 10px; }
         .composer .send .label { display: none; }
       }
@@ -2776,7 +2780,7 @@
       /* Back up beside the language on a phone, over the form elsewhere;
          and less room around the steps, for a screen short of height. */
       .welcome-back.up { display: none; }
-      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+      @media (max-width: 835px), (max-height: 500px) and (pointer: coarse) {
         .welcome-back.up { display: inline-flex; }
         .welcome-radio > .welcome-back { display: none; }
         .welcome-screen .welcome-body { padding: 12px 0 16px; }
@@ -3407,7 +3411,7 @@
       /*
        * A phone, last: over the rules of each page above, at the same weight.
        */
-      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+      @media (max-width: 835px), (max-height: 500px) and (pointer: coarse) {
         /* The columns one under the other: the first's last keeps its line. */
         .node-page > .node-sections:last-child > .node-column:first-child > .node-section:last-child {
           margin-bottom: 18px;
@@ -3424,7 +3428,7 @@
        * one under the other. A phone on its side is wide enough for the
        * pages as on a wider screen.
        */
-      @media (max-width: 760px) {
+      @media (max-width: 835px) {
         /* Settings: each control under what it is, the whole width; the tabs
            a little tighter, to fit the five. */
         .pref-control,
@@ -3481,7 +3485,7 @@
        */
       @container nodes (max-width: 860px) {
         .nodes-table thead { display: none; }
-        .sort-menu { display: block; }
+        .sort-menu { display: flex; flex: none; }
         .nodes-table, .nodes-table tbody { display: block; }
         .nodes-table tr.node-row {
           display: flex;
@@ -3492,7 +3496,7 @@
         }
         .nodes-table tr.node-row td { padding: 0; border: 0; }
         .nodes-table tr.node-row:last-child { border-bottom: 0; }
-        .nodes-table tr.node-row td:first-child { flex: 1 1 100%; }
+        .nodes-table tr.node-row td:first-child { flex: 1 1 100%; min-width: 0; }
         .nodes-table tr.node-row td:nth-child(2),
         .nodes-table tr.node-row td:nth-child(3),
         .nodes-table tr.node-row td:nth-child(4) { margin-top: 2px; font-size: 12px; color: var(--mc-muted); }
@@ -3545,6 +3549,7 @@
        */
       @media (pointer: coarse) {
         button, input, select { min-height: 44px; }
+        .sort-menu > .icon-button { width: 44px; }
         button.link,
         .mark,
         .favorite,
