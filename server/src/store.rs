@@ -965,8 +965,8 @@ impl Store {
         let id = sqlx::query(
             "INSERT INTO message (radio_id, packet_id, from_num, sender_name, to_num, channel,
                 channel_id, text, at, outgoing, status, reply_id, emoji, snr, rssi, hops_away,
-                via_mqtt, scope)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                via_mqtt, scope, sent_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (radio_id, from_num, packet_id) DO NOTHING",
         )
         .bind(radio)
@@ -987,6 +987,7 @@ impl Store {
         .bind(message.hops_away.map(i64::from))
         .bind(message.via_mqtt)
         .bind(&message.scope)
+        .bind(message.sent_at)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -1259,12 +1260,41 @@ impl Store {
         .bind(route.at)
         .execute(&self.pool)
         .await?;
+        let size = usize::try_from(route.hash_size).unwrap_or(1).max(1);
+        for hop in route.path.chunks(size) {
+            sqlx::query(
+                "INSERT INTO message_relay (radio_id, packet_id, hop, at) VALUES (?, ?, ?, ?)
+                ON CONFLICT DO NOTHING",
+            )
+            .bind(radio)
+            .bind(i64::from(packet_id))
+            .bind(hop)
+            .bind(route.at)
+            .execute(&self.pool)
+            .await?;
+        }
         let row: Option<MessageRow> =
             sqlx::query_as("SELECT * FROM message_view WHERE radio_id = ? AND packet_id = ?")
                 .bind(radio)
                 .bind(i64::from(packet_id))
                 .fetch_optional(&self.pool)
                 .await?;
+        Ok(row.map(MessageRow::message))
+    }
+
+    /// A radio's message by its packet id, as now kept.
+    pub async fn message_by_packet(
+        &self,
+        radio: RadioId,
+        packet_id: u32,
+    ) -> Result<Option<Message>> {
+        let row: Option<MessageRow> = sqlx::query_as(
+            "SELECT * FROM message_view WHERE radio_id = ? AND packet_id = ? ORDER BY id DESC LIMIT 1",
+        )
+        .bind(radio)
+        .bind(i64::from(packet_id))
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(MessageRow::message))
     }
 
@@ -1694,6 +1724,8 @@ pub struct NewMessageRow {
     pub via_mqtt: bool,
     /// The region it went flooded in.
     pub scope: Option<String>,
+    /// When its sender says it sent it, by its clock.
+    pub sent_at: Option<i64>,
 }
 
 /// A packet as kept, with one radio's hearing of it.
@@ -1741,6 +1773,8 @@ struct MessageRow {
     via_mqtt: bool,
     scope: Option<String>,
     heard: i64,
+    sent_at: Option<i64>,
+    repeaters: i64,
 }
 
 impl MessageRow {
@@ -1765,6 +1799,8 @@ impl MessageRow {
             via_mqtt: self.via_mqtt,
             scope: self.scope,
             heard: u32::try_from(self.heard).unwrap_or(0),
+            sent_at: self.sent_at,
+            repeaters: u32::try_from(self.repeaters).unwrap_or(0),
         }
     }
 }
@@ -2194,6 +2230,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!((told.id, told.heard), (kept.id, 2));
+        // Two copies, two repeaters: one of them on both.
+        assert_eq!(told.repeaters, 2);
         let routes = store.routes(radio, kept.id).await.unwrap().unwrap();
         assert_eq!(routes.len(), 2);
         assert_eq!(routes[0].path, [0x52, 0x59, 0x55, 0x5c]);
@@ -2253,6 +2291,7 @@ mod tests {
             hops_away: None,
             via_mqtt: false,
             scope: None,
+            sent_at: None,
         }
     }
 

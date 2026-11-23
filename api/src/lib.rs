@@ -1146,6 +1146,15 @@ pub struct Message {
     /// own, as its routes tell.
     #[serde(default)]
     pub heard: u32,
+    /// When its sender says it sent it, by its clock, in seconds since the
+    /// epoch: on MeshCore, where replies and reactions name a message by it.
+    #[serde(default)]
+    pub sent_at: Option<i64>,
+    /// How many repeaters it was heard through, each once whatever copies
+    /// went through it: for one of ours on a MeshCore channel, which nothing
+    /// acknowledges, how it is known to have gone out.
+    #[serde(default)]
+    pub repeaters: u32,
 }
 
 /// A copy of a message heard, and the way it came.

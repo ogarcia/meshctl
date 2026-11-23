@@ -899,6 +899,7 @@ impl Session {
             return Ok(Sent {
                 packet_id: message_id(&me.to_be_bytes(), stamp, &outgoing.text),
                 acknowledged: false,
+                sent_at: Some(stamp),
             });
         }
         let key = self
@@ -948,6 +949,7 @@ impl Session {
         Ok(Sent {
             packet_id: u32::from_le_bytes(tag),
             acknowledged: true,
+            sent_at: Some(stamp),
         })
     }
 }
@@ -1615,6 +1617,7 @@ fn direct(state: &mut MeshState, message: &ContactMessage) -> Vec<Event> {
         rssi: None,
         hops_away: hops(message.path_len),
         via_mqtt: false,
+        sent_at: Some(message.timestamp),
     }));
     events
 }
@@ -1652,6 +1655,7 @@ fn channel(state: &mut MeshState, message: &ChannelMessage) -> Vec<Event> {
         rssi: None,
         hops_away: hops(message.path_len),
         via_mqtt: false,
+        sent_at: Some(message.timestamp),
     })]
 }
 

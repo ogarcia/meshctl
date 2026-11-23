@@ -53,6 +53,7 @@ pub enum Change {
         radio: RadioId,
         id: MessageId,
         heard: u32,
+        repeaters: u32,
         scope: Option<String>,
     },
     /// What became of a message sent.
@@ -399,6 +400,7 @@ async fn keep_route(
             radio,
             id: message.id,
             heard: message.heard,
+            repeaters: message.repeaters,
             scope: message.scope,
         });
     }
@@ -802,9 +804,55 @@ impl Radios {
             (None, Some(node)) if node != mesh::BROADCAST => (node, 0),
             _ => return Err(SendFailure::Invalid),
         };
+        // On MeshCore, which has neither, a reply or a reaction goes as its
+        // apps send them: what goes on the air, kept as it went; and a reply
+        // in the region its message came in, unless another is asked for.
+        let meshcore = self.protocol(id) == Some(Protocol::Meshcore);
+        let mut wire = message.text.clone();
+        let mut region_of_reply = None;
+        if meshcore && let Some(answered) = message.reply_id {
+            let target = self
+                .store
+                .message_by_packet(id, answered)
+                .await?
+                .ok_or(SendFailure::Invalid)?;
+            // Who wrote it, as named on a channel.
+            let sender = if target.outgoing {
+                mesh.read(|s| s.meshcore.as_ref().map(|m| m.name.clone()))
+            } else {
+                target.sender_name.clone().or_else(|| {
+                    mesh.read(|s| {
+                        s.nodes
+                            .get(&target.from)
+                            .and_then(|n| n.user.as_ref())
+                            .map(|u| u.long_name.clone())
+                    })
+                })
+            };
+            let on_channel = to == mesh::BROADCAST;
+            if message.emoji {
+                let at = target
+                    .sent_at
+                    .and_then(|at| u32::try_from(at).ok())
+                    .ok_or(SendFailure::Invalid)?;
+                let named = if on_channel {
+                    Some(sender.as_deref().ok_or(SendFailure::Invalid)?)
+                } else {
+                    None
+                };
+                wire = crate::reactions::build(message.text.trim(), named, &target.text, at)
+                    .ok_or(SendFailure::Invalid)?;
+            } else if on_channel && let Some(sender) = &sender {
+                wire = format!("@[{sender}]: {}", message.text);
+            }
+            region_of_reply = target.scope.filter(|s| s != "?");
+        }
+        let message = NewMessage {
+            scope: message.scope.clone().or(region_of_reply),
+            ..message
+        };
         // The region it floods in: as asked for it alone, its channel's, or
         // the radio's default; and the one kept with it, if any.
-        let meshcore = self.protocol(id) == Some(Protocol::Meshcore);
         let (scope, scope_kept) = if meshcore {
             let asked = match &message.scope {
                 Some(name) => Some(crate::meshcore::scope_name(name).ok_or(SendFailure::Invalid)?),
@@ -845,9 +893,9 @@ impl Radios {
         let outgoing = OutgoingText {
             to,
             channel,
-            text: message.text.clone(),
-            reply_id: message.reply_id,
-            emoji: message.emoji,
+            text: wire.clone(),
+            reply_id: message.reply_id.filter(|_| !meshcore),
+            emoji: message.emoji && !meshcore,
             scope,
         };
         if self.link(id) != LinkState::Ready {
@@ -869,7 +917,9 @@ impl Radios {
             sender_name: None,
             to,
             channel,
-            text: message.text,
+            // As it went on the air, a MeshCore reply's `@[Sender]: ` and all,
+            // as what reacts to it hashes; a reaction, its emoji.
+            text: if message.emoji { message.text } else { wire },
             at: now(),
             outgoing: true,
             // What cannot be acknowledged is as sent as it will ever be.
@@ -885,6 +935,7 @@ impl Radios {
             hops_away: None,
             via_mqtt: false,
             scope: scope_kept,
+            sent_at: sent.sent_at.map(i64::from),
         };
         let kept = self
             .store
@@ -2516,7 +2567,14 @@ impl Radios {
                     }
                     Ok(mesh::Event::Message(heard)) => {
                         let local = mesh.read(|s| s.local.as_ref().map(|l| l.num));
-                        let kept = store.add_message(id, &heard_row(heard, local)).await;
+                        let mut row = heard_row(heard, local);
+                        // MeshCore's reactions come as text.
+                        if mesh.read(|s| s.meshcore.is_some())
+                            && let Err(err) = read_reaction(&store, id, &mesh, &mut row).await
+                        {
+                            tracing::warn!(radio = id, error = format_args!("{err:#}"), "reaction");
+                        }
+                        let kept = store.add_message(id, &row).await;
                         kept.map(|kept| {
                             if let Some(message) = kept {
                                 let _ = changes.send(Change::Message(id, message));
@@ -2701,8 +2759,55 @@ fn heard_row(heard: mesh::TextMessage, local: Option<u32>) -> NewMessageRow {
         hops_away: heard.hops_away,
         via_mqtt: heard.via_mqtt,
         scope: None,
+        sent_at: heard.sent_at.map(i64::from),
     }
 }
+
+/// A MeshCore message heard that is a reaction, as its apps send them: kept
+/// as a reaction, its emoji its text, to the message it names in the same
+/// conversation, the newest that matches; to none if none does.
+async fn read_reaction(
+    store: &Store,
+    radio: RadioId,
+    mesh: &Mesh,
+    row: &mut NewMessageRow,
+) -> Result<()> {
+    let channel = row.to == mesh::BROADCAST;
+    let Some(reaction) = crate::reactions::parse(&row.text, channel) else {
+        return Ok(());
+    };
+    let peer = if channel {
+        Peer::Channel {
+            channel: row.channel,
+        }
+    } else if row.outgoing {
+        Peer::Node { node: row.to }
+    } else {
+        Peer::Node { node: row.from }
+    };
+    let own = mesh.read(|s| s.meshcore.as_ref().map(|m| m.name.clone()));
+    let messages = store.messages(radio, peer, None, REACTION_REACH).await?;
+    let target = messages.iter().rev().filter(|m| !m.emoji).find(|m| {
+        let Some(at) = m.sent_at.and_then(|at| u32::try_from(at).ok()) else {
+            return false;
+        };
+        let sender = if !channel {
+            None
+        } else if m.outgoing {
+            own.clone()
+        } else {
+            m.sender_name.clone()
+        };
+        reaction.names(&m.text, sender.as_deref(), at)
+    });
+    row.reply_id = target.map(|m| m.packet_id);
+    row.emoji = true;
+    row.text = reaction.emoji().to_owned();
+    Ok(())
+}
+
+/// How far back in a conversation a reaction's message is looked for.
+const REACTION_REACH: u32 = 300;
 
 /// Takes the channels a radio was just read with: each slot's conversation
 /// is its channel's. If any slot has another, the radio is said to be in
@@ -2924,6 +3029,7 @@ mod tests {
             rssi: None,
             hops_away: None,
             via_mqtt: false,
+            sent_at: None,
         };
         let ours = heard_row(heard.clone(), Some(7));
         assert!(ours.outgoing);

@@ -300,6 +300,9 @@ pub struct TextMessage {
     pub rssi: Option<i32>,
     pub hops_away: Option<u32>,
     pub via_mqtt: bool,
+    /// When its sender says it sent it, by its own clock: on MeshCore, where
+    /// reactions name a message by it.
+    pub sent_at: Option<u32>,
 }
 
 /// A packet as the radio heard it.
@@ -775,6 +778,7 @@ fn said(packet: &pb::MeshPacket, now: u32) -> Option<Event> {
                 hops_away: (reception && packet.hop_start > 0)
                     .then(|| packet.hop_start.saturating_sub(packet.hop_limit)),
                 via_mqtt: packet.via_mqtt,
+                sent_at: None,
             }))
         }
         Ok(PortNum::AdminApp) if data.request_id != 0 => {

@@ -826,5 +826,7 @@
   "route_region_unknown": "unknown region",
   "route_heard_one": "Heard once",
   "route_echoes_one": "Repeated once",
-  "route_unplaced": "Not enough of this route's nodes have a known position to show it on the map."
+  "route_unplaced": "Not enough of this route's nodes have a known position to show it on the map.",
+  "chat_repeaters": "{n} repeaters carried it",
+  "chat_reaction_orphan": "reacted to a message not here"
 }

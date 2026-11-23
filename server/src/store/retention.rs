@@ -111,6 +111,10 @@ impl Store {
             .bind(before)
             .execute(&self.pool)
             .await?;
+        sqlx::query("DELETE FROM message_relay WHERE at < ?")
+            .bind(before)
+            .execute(&self.pool)
+            .await?;
         Ok(sqlx::query("DELETE FROM message WHERE at < ?")
             .bind(before)
             .execute(&self.pool)

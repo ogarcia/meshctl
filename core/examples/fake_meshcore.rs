@@ -105,6 +105,10 @@ struct Radio {
     /// The region what it floods next goes in, as a client set it: none for
     /// its default.
     send_scope: Option<SendScope>,
+    /// The latest said on each channel, by whom, and by its sender's clock.
+    said: std::collections::HashMap<u8, (String, String, u32)>,
+    /// The latest said between Ana and the radio, and when.
+    with_ana: Option<(String, u32)>,
     /// Its clock, as an offset from the host's: it goes only forward.
     clock_offset: i64,
     /// When it started, for its uptime.
@@ -212,6 +216,8 @@ impl Radio {
             autoadd: (31, 0),
             default_scope: None,
             send_scope: None,
+            said: std::collections::HashMap::new(),
+            with_ana: None,
             clock_offset: -3600,
             started: at,
             contacts: vec![
@@ -337,13 +343,36 @@ fn key_in(data: &[u8]) -> Option<[u8; 32]> {
 
 /// A direct message from a contact, in the newer form, with its SNR.
 fn direct_message(from: &Contact, text: &str) -> Vec<u8> {
+    direct_message_at(from, now(), text)
+}
+
+fn direct_message_at(from: &Contact, at: u32, text: &str) -> Vec<u8> {
     let snr = i8::try_from(20 + random(20)).unwrap_or(0);
     let mut frame = vec![0x10, snr.cast_unsigned(), 0, 0];
     frame.extend(&from.key[..6]);
     frame.extend([from.path_len.cast_unsigned(), 0]);
-    frame.extend(now().to_le_bytes());
+    frame.extend(at.to_le_bytes());
     frame.extend(text.as_bytes());
     frame
+}
+
+/// MeshCore One's hash of a message, which its reactions name it by: the
+/// first 40 bits of the SHA-256 of its text and its sender's clock, in
+/// lowercase Crockford base32.
+fn reaction_hash(text: &str, at: u32) -> String {
+    use sha2::{Digest, Sha256};
+    const BASE32: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
+    let digest = Sha256::new()
+        .chain_update(text.trim_matches([' ', '\t']).as_bytes())
+        .chain_update(at.to_le_bytes())
+        .finalize();
+    let bits = digest[..5]
+        .iter()
+        .fold(0u64, |acc, b| (acc << 8) | u64::from(*b));
+    (0..8)
+        .rev()
+        .map(|i| BASE32[usize::try_from((bits >> (i * 5)) & 0x1f).unwrap_or(0)] as char)
+        .collect()
 }
 
 /// A channel message, in the newer form: its sender only in its text.
@@ -408,6 +437,15 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         // SEND_TEXT: to the contact its key prefix names.
         0x02 => {
             println!("direct text, {}", radio.scope_words());
+            // To Ana: kept, for her to react to.
+            if let (Some(at), Some(prefix), Some(text)) =
+                (u32_in(data, 2), data.get(6..12), data.get(12..))
+                && radio
+                    .contact_named("Ana")
+                    .is_some_and(|ana| &ana.key[..6] == prefix)
+            {
+                radio.with_ana = Some((String::from_utf8_lossy(text).into_owned(), at));
+            }
             let Some(prefix) = data.get(6..12) else {
                 return vec![vec![0x01, 2]];
             };
@@ -508,11 +546,32 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         },
         // SEND_CHANNEL_TEXT: taken, and nothing ever said of it again.
         0x03 => {
-            println!(
-                "channel text on slot {}, {}",
-                data.get(1).copied().unwrap_or(0),
-                radio.scope_words()
-            );
+            let slot = data.get(1).copied().unwrap_or(0);
+            println!("channel text on slot {slot}, {}", radio.scope_words());
+            // Kept, and heard back as two repeaters pass it on: Torre, then
+            // Monte from Torre.
+            if let (Some(at), Some(text)) = (u32_in(data, 2), data.get(6..)) {
+                let text = String::from_utf8_lossy(text).into_owned();
+                let name = radio.name.clone();
+                radio.said.insert(slot, (name.clone(), text.clone(), at));
+                if let Some((_, secret)) = radio.channels.get(usize::from(slot)) {
+                    let payload = raw::seal_channel_text(secret, at, &format!("{name}: {text}"));
+                    let first = flooded(raw::PAYLOAD_GRP_TXT, &[key(0x55)], None, &payload);
+                    let second = flooded(
+                        raw::PAYLOAD_GRP_TXT,
+                        &[key(0x55), key(0x52)],
+                        None,
+                        &payload,
+                    );
+                    let events = events.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(700)).await;
+                        let _ = events.send(Event::Push(rx_log(7, -88, &first)));
+                        tokio::time::sleep(Duration::from_millis(900)).await;
+                        let _ = events.send(Event::Push(rx_log(2, -104, &second)));
+                    });
+                }
+            }
             vec![vec![0x00]]
         }
         // GET_CONTACTS, those changed since a time if one is given.
@@ -929,6 +988,9 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             const SENDERS: [&str; 4] = ["Pepe", "Uxía", "Brais 🚲", "EA1XYZ"];
             let sender = SENDERS[usize::try_from(random(4)).unwrap_or(0)];
             let at = now();
+            radio
+                .said
+                .insert(slot, (sender.to_owned(), text.to_owned(), at));
             let message = channel_message(slot, at, sender, text);
             radio.queued.push_back(message);
             // Heard twice: through Monte and Torre, then through the room
@@ -957,6 +1019,37 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             });
             format!("{sender} writes on slot {slot}")
         }
+        Some("react") => {
+            let slot = words.next().and_then(|w| w.parse::<u8>().ok());
+            let (Some(slot), Some(emoji)) = (slot, words.next()) else {
+                return "usage: react <slot> <emoji>".into();
+            };
+            let Some((sender, text, at)) = radio.said.get(&slot).cloned() else {
+                return format!("nothing said on slot {slot}");
+            };
+            // Someone else than who said it, in MeshCore One's form.
+            let reactor = if sender == "Uxía" { "Pepe" } else { "Uxía" };
+            let reaction = format!("@[{sender}]{emoji}\n{}", reaction_hash(&text, at));
+            radio
+                .queued
+                .push_back(channel_message(slot, now(), reactor, &reaction));
+            let _ = events.send(Event::Push(vec![0x83]));
+            format!("{reactor} reacts {emoji} to {sender}")
+        }
+        Some("dmreact") => {
+            let Some(emoji) = words.next() else {
+                return "usage: dmreact <emoji>".into();
+            };
+            let (Some(ana), Some((text, at))) =
+                (radio.contact_named("Ana").cloned(), radio.with_ana.clone())
+            else {
+                return "nothing said with Ana".into();
+            };
+            let reaction = format!("{emoji}\n{}", reaction_hash(&text, at));
+            radio.queued.push_back(direct_message(&ana, &reaction));
+            let _ = events.send(Event::Push(vec![0x83]));
+            format!("Ana reacts {emoji}")
+        }
         Some("dm") => {
             let text = words.collect::<Vec<_>>().join(" ");
             if text.is_empty() {
@@ -965,7 +1058,9 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             let Some(ana) = radio.contact_named("Ana").cloned() else {
                 return "Ana is gone".into();
             };
-            radio.queued.push_back(direct_message(&ana, &text));
+            let at = now();
+            radio.with_ana = Some((text.clone(), at));
+            radio.queued.push_back(direct_message_at(&ana, at, &text));
             // Straight from her, sealed to the radio's key: whom it is to and
             // from, and what cannot be read here.
             let mut payload = vec![ME[0], ana.key[0]];

@@ -94,6 +94,9 @@ pub enum ServerMessage {
         radio: RadioId,
         id: MessageId,
         heard: u32,
+        /// How many repeaters it was heard through.
+        #[serde(default)]
+        repeaters: u32,
         scope: Option<String>,
     },
     /// A traceroute sent through a radio, or what became of it.

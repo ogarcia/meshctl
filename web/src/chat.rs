@@ -243,10 +243,40 @@ fn forget(live: Live, i18n: I18nContext<Locale>, id: MessageId) {
     }
 }
 
-/// Whether the radio has replies and reactions: Meshtastic does, MeshCore
-/// does not.
+/// Whether the radio has replies and reactions: Meshtastic has them in its
+/// packets; MeshCore's apps write them in the text, and so does meshctl.
 fn answerable(live: Live) -> bool {
-    live.selected_kind() == Some(RadioKind::Meshtastic)
+    live.selected_kind().is_some()
+}
+
+/// A message's text, each `@[Name]` in it said as a mention; and, for a
+/// reply shown under its quote, the one it starts with left out, as the
+/// quote says whom it answers.
+fn said(text: &str, quoted: bool) -> AnyView {
+    let mut text = text;
+    if quoted
+        && text.starts_with("@[")
+        && let Some(close) = text.find(']')
+    {
+        let rest = &text[close + 1..];
+        text = rest.strip_prefix(':').unwrap_or(rest).trim_start();
+    }
+    let mut parts: Vec<AnyView> = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find("@[") {
+        let Some(close) = rest[open..].find(']').map(|c| open + c) else {
+            break;
+        };
+        let name = &rest[open + 2..close];
+        if name.is_empty() || name.contains('\n') {
+            break;
+        }
+        parts.push(rest[..open].to_owned().into_any());
+        parts.push(view! { <span class="mention">"@" {name.to_owned()}</span> }.into_any());
+        rest = &rest[close + 1..];
+    }
+    parts.push(rest.to_owned().into_any());
+    parts.into_iter().collect_view().into_any()
 }
 
 /// Sends a message, and puts it in the open conversation as sent.
@@ -751,6 +781,30 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
         let (mqtt, hops, snr) = (message.via_mqtt, message.hops_away, message.snr);
         move || reach(i18n, mqtt, hops, snr)
     });
+    // Ours on a MeshCore channel, which nothing acknowledges: how many
+    // repeaters were heard carrying it, which is how it is known to have
+    // gone out.
+    // Counted as they are heard, after it was drawn.
+    let (said_id, broadcast) = (message.id, message.to == meshctl_api::BROADCAST);
+    let repeaters = move || {
+        live.thread.with(|t| {
+            t.iter()
+                .find(|m| m.id == said_id)
+                .map_or(0, |m| m.repeaters)
+        })
+    };
+    let repeated = (mine && broadcast).then_some(move || {
+        let n = repeaters();
+        (n > 0).then(|| {
+            let words = t_string!(i18n, chat_repeaters).replace("{n}", &n.to_string());
+            view! {
+                <span class="repeated" title=words.clone() aria-label=words>
+                    <span class="mark delivered" inner_html=CHECKS></span>
+                    {n}
+                </span>
+            }
+        })
+    });
     // How far it went, as an icon: waiting, out, received, or not; its words
     // on hovering, and why it failed, when it did.
     let status = message.status;
@@ -987,12 +1041,24 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
             >
                 {author}
                 {quote}
-                <p>{message.text.clone()}</p>
+                {if message.emoji {
+                    // A reaction to a message not here: what it is.
+                    view! {
+                        <p class="orphan-reaction">
+                            {message.text.clone()}
+                            <span class="dim">{move || t_string!(i18n, chat_reaction_orphan)}</span>
+                        </p>
+                    }
+                    .into_any()
+                } else {
+                    view! { <p>{said(&message.text, message.reply_id.is_some())}</p> }.into_any()
+                }}
                 <span class="meta dim">
                     <span title=when(i64::from(at))>{clock(i64::from(at))}</span>
                     {reception.map(|r| move || r().map(|r| format!(" · {r}")))}
                     {message.scope.clone().map(|s| format!(" · #{s}"))}
                     {mark}
+                    {repeated}
                 </span>
                 {reactions}
                 {actions}

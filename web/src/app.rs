@@ -1022,11 +1022,13 @@ impl Live {
                     radio,
                     id,
                     heard,
+                    repeaters,
                     scope,
                 } if self.is_selected(radio) => {
                     self.thread.update(|thread| {
                         if let Some(message) = thread.iter_mut().find(|m| m.id == id) {
                             message.heard = heard;
+                            message.repeaters = repeaters;
                             message.scope = scope;
                         }
                     });

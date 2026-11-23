@@ -114,6 +114,9 @@ pub struct Sent {
     /// Whether an acknowledgement can come at all. A MeshCore channel message
     /// has none: once the radio took it, that is all there is to know.
     pub acknowledged: bool,
+    /// When it went, by the clock it was sent by: on MeshCore, where replies
+    /// and reactions name a message by it.
+    pub sent_at: Option<u32>,
 }
 
 /// The mesh as meshctl knows it, shared between the radio task, which writes
@@ -234,6 +237,7 @@ impl Mesh {
         Ok(Sent {
             packet_id,
             acknowledged: true,
+            sent_at: None,
         })
     }
 

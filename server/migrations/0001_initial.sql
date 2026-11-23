@@ -154,7 +154,10 @@ CREATE TABLE message (
     hops_away INTEGER,
     via_mqtt INTEGER NOT NULL DEFAULT 0,
     -- The region it went flooded in, for one sent scoped to one.
-    scope TEXT
+    scope TEXT,
+    -- When its sender says it sent it, by its clock: on MeshCore, where
+    -- replies and reactions name a message by it.
+    sent_at INTEGER
 );
 
 -- A packet is heard once: the copies a radio or a tasticsplitter replays on
@@ -183,6 +186,16 @@ CREATE TABLE message_route (
 
 CREATE INDEX message_route_packet ON message_route (radio_id, packet_id, id);
 
+-- The repeaters a message was heard through, each once whatever copies went
+-- through it: how many carried it.
+CREATE TABLE message_relay (
+    radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
+    packet_id INTEGER NOT NULL,
+    hop BLOB NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (radio_id, packet_id, hop)
+);
+
 -- The messages as shown: a channel message with the slot its channel has
 -- now, if any.
 CREATE VIEW message_view AS
@@ -193,7 +206,7 @@ SELECT
         m.channel
     ) AS channel,
     m.channel_id, m.text, m.at, m.outgoing, m.status, m.error, m.reply_id,
-    m.emoji, m.snr, m.rssi, m.hops_away, m.via_mqtt,
+    m.emoji, m.snr, m.rssi, m.hops_away, m.via_mqtt, m.sent_at,
     coalesce(m.scope, (
         SELECT r.scope FROM message_route r
         WHERE r.radio_id = m.radio_id AND r.packet_id = m.packet_id AND r.scope IS NOT NULL
@@ -202,7 +215,11 @@ SELECT
     (
         SELECT count(*) FROM message_route r
         WHERE r.radio_id = m.radio_id AND r.packet_id = m.packet_id
-    ) AS heard
+    ) AS heard,
+    (
+        SELECT count(*) FROM message_relay h
+        WHERE h.radio_id = m.radio_id AND h.packet_id = m.packet_id
+    ) AS repeaters
 FROM message m;
 
 -- The traceroutes each radio sent.

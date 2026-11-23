@@ -8,6 +8,7 @@ mod lora;
 mod meshcore;
 mod packets;
 mod radios;
+mod reactions;
 mod sections;
 mod settings;
 mod store;

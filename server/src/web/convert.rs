@@ -120,11 +120,13 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
             radio,
             id,
             heard,
+            repeaters,
             scope,
         } => ServerMessage::MessageHeard {
             radio,
             id,
             heard,
+            repeaters,
             scope,
         },
         Change::Traceroute(radio, traceroute) => ServerMessage::Traceroute { radio, traceroute },

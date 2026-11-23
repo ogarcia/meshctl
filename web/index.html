@@ -2804,6 +2804,12 @@
       .bubble-row.goes-on { margin-top: -6px; }
       .bubble-row.goes-on > .bubble { border-top-left-radius: 14px; }
       .bubble .meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: 11px; }
+      /* A mention, as MeshCore's apps write them: @[Name]. */
+      .bubble .mention { color: var(--mc-primary); font-weight: 600; }
+      /* How many repeaters carried one of ours: its double tick and how many. */
+      .bubble .meta .repeated { display: inline-flex; align-items: center; gap: 1px; }
+      .bubble .orphan-reaction { display: flex; align-items: baseline; gap: 8px; }
+      .bubble .orphan-reaction .dim { font-size: 12px; }
       .bubble .mark { display: flex; }
       .bubble .mark svg { width: 14px; height: 14px; }
       .mark.pending { color: var(--mc-muted); }
