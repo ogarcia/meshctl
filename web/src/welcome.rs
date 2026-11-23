@@ -53,7 +53,10 @@ pub fn Welcome(welcoming: RwSignal<Option<RadioId>>) -> impl IntoView {
     };
     view! {
         <div class="welcome-screen">
+            // Back, on a phone, up here beside the language: a row less
+            // over the form, for a screen short of height.
             <div class="welcome-top">
+                {move || (step.get() == Step::Radio).then(|| back(step, "welcome-back up"))}
                 <Languages />
             </div>
             <div class="welcome-body">
@@ -64,6 +67,18 @@ pub fn Welcome(welcoming: RwSignal<Option<RadioId>>) -> impl IntoView {
                 }}
             </div>
         </div>
+    }
+}
+
+/// Back from the radio to what meshctl is: over the form, or at the top on
+/// a phone (`up`), as the style sheet shows one or the other.
+fn back(step: RwSignal<Step>, class: &'static str) -> impl IntoView {
+    let i18n = use_i18n();
+    view! {
+        <button type="button" class=class on:click=move |_| step.set(Step::Hello)>
+            <span class="icon" inner_html=ARROW_LEFT></span>
+            {t!(i18n, welcome_back)}
+        </button>
     }
 }
 
@@ -298,14 +313,7 @@ fn RadioStep(
 
     view! {
         <form class="welcome-radio" on:submit=submit>
-            <button
-                type="button"
-                class="welcome-back"
-                on:click=move |_| step.set(Step::Hello)
-            >
-                <span class="icon" inner_html=ARROW_LEFT></span>
-                {t!(i18n, welcome_back)}
-            </button>
+            {back(step, "welcome-back")}
             <h1>{t!(i18n, welcome_radio_title)}</h1>
             <fieldset>
                 <legend>{t!(i18n, welcome_kind)}</legend>

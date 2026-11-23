@@ -2338,7 +2338,58 @@
         padding: 16px;
         background: var(--mc-page);
       }
-      .welcome-top { display: flex; justify-content: flex-end; }
+      /* As tall as back by touch (44px), there or not: the language does
+         not move from one step to the next. */
+      .welcome-top { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 44px; }
+      .welcome-top .welcome-back { align-self: center; margin: 0 auto 0 0; }
+      /* Back up beside the language on a phone, over the form elsewhere;
+         and less room around the steps, for a screen short of height. */
+      .welcome-back.up { display: none; }
+      @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+        .welcome-back.up { display: inline-flex; }
+        .welcome-radio > .welcome-back { display: none; }
+        .welcome-screen .welcome-body { padding: 12px 0 16px; }
+        .welcome-screen .welcome-radio { gap: 16px; }
+      }
+      /*
+       * A phone on its side: wide but short. The radio's form in two
+       * columns, the choices side by side and then the two fields, and the
+       * cards with their icon beside the words, so that it takes half the
+       * height.
+       */
+      @media (max-height: 500px) and (pointer: coarse) and (orientation: landscape) {
+        .welcome-screen .welcome-body > * { max-width: 760px; }
+        .welcome-screen .welcome-radio {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          gap: 12px 20px;
+          align-items: start;
+        }
+        .welcome-radio > h1,
+        .welcome-radio > .error,
+        .welcome-radio > .welcome-go { grid-column: 1 / -1; }
+        .welcome-radio .welcome-card { padding: 10px 12px; }
+        .welcome-radio .welcome-card:has(> .icon) {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
+          column-gap: 10px;
+        }
+        .welcome-radio .welcome-card > .icon { grid-row: span 2; margin: 0; }
+        .welcome-screen .welcome-hello { gap: 12px; }
+        .welcome-screen .welcome-logo { width: 52px; height: 52px; margin: 0; }
+        .welcome-screen { padding: 8px 16px; }
+        .welcome-screen .welcome-body { padding: 8px 0; }
+        .welcome-radio > h1, .welcome-linking > h1 { font-size: 20px; }
+        /* The steps and, when the radio does not answer, why, side by side. */
+        .welcome-screen .welcome-linking {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          gap: 8px 16px;
+          align-items: start;
+        }
+        .welcome-linking > h1, .welcome-linking > .welcome-address { grid-column: 1 / -1; }
+        .welcome-linking .welcome-steps, .welcome-linking .welcome-failed { margin: 0; }
+      }
       .welcome-language { position: relative; display: flex; align-items: center; }
       /* The span, not the svg in it, which has the class "icon" too. */
       .welcome-language > .icon { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); color: var(--mc-muted); pointer-events: none; }
