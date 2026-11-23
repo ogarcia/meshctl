@@ -622,7 +622,8 @@ fn NodeLine(node: Node, now: RwSignal<u32>) -> impl IntoView {
             </td>
             <td class="heard dim">{move || heard.map(|t| ago(now.get(), t)).unwrap_or_default()}</td>
             <td class="reach">{reach}</td>
-            {is_meshtastic(live).then(|| view! { <td class="power-cell">{power}</td> })}
+            // Read once: every row is drawn again for another radio.
+            {untrack(|| is_meshtastic(live)).then(|| view! { <td class="power-cell">{power}</td> })}
             <td class="hardware">
                 <span class="names">
                     <span>{node.hw_model.as_deref().map(model)}</span>
