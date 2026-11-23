@@ -60,6 +60,8 @@ pub enum Change {
     /// All kept of a node was forgotten, as asked: what was asked of it, the
     /// routes traced to it, its conversation and what it sent.
     NodeForgotten(RadioId, u32),
+    /// Messages forgotten, as asked: one, and the reactions to it.
+    MessagesForgotten(RadioId, Vec<MessageId>),
     /// Events of a radio were lost on their way here.
     Lagged,
 }
@@ -490,9 +492,34 @@ impl Radios {
         })
     }
 
+    /// Forgets a message a radio keeps, and the reactions to it, and tells
+    /// every client; nothing of it changes on the mesh. False if there is no
+    /// such message.
+    pub async fn forget_message(&self, id: RadioId, message: MessageId) -> Result<bool> {
+        let forgotten = self.store.forget_message(id, message).await?;
+        if forgotten.is_empty() {
+            return Ok(false);
+        }
+        let _ = self.changes.send(Change::MessagesForgotten(id, forgotten));
+        Ok(true)
+    }
+
     /// Sends a message through a radio, and keeps it as sent.
     pub async fn send(&self, id: RadioId, message: NewMessage) -> Result<Message, SendFailure> {
         let mesh = self.mesh(id).ok_or(SendFailure::NoSuchRadio)?;
+        // A reaction: to a message, and an emoji, a few characters beyond
+        // plain text, none a space.
+        if message.emoji {
+            let emoji = message.text.trim();
+            if message.reply_id.is_none()
+                || emoji.is_empty()
+                || emoji.len() > 32
+                || emoji.is_ascii()
+                || emoji.chars().any(char::is_whitespace)
+            {
+                return Err(SendFailure::Invalid);
+            }
+        }
         let (to, channel) = match (message.channel, message.node) {
             (Some(channel), None) => {
                 let usable = mesh.read(|state| {
@@ -516,6 +543,7 @@ impl Radios {
             channel,
             text: message.text.clone(),
             reply_id: message.reply_id,
+            emoji: message.emoji,
         };
         if self.link(id) != LinkState::Ready {
             return Err(SendFailure::NotConnected);
@@ -546,7 +574,7 @@ impl Radios {
                 MessageStatus::Sent
             },
             reply_id: message.reply_id,
-            emoji: false,
+            emoji: message.emoji,
             snr: None,
             rssi: None,
             hops_away: None,

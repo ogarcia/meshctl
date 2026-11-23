@@ -92,6 +92,7 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
             ServerMessage::NodeRemoved { radio, node }
         }
         Change::NodeForgotten(radio, node) => ServerMessage::NodeForgotten { radio, node },
+        Change::MessagesForgotten(radio, ids) => ServerMessage::MessagesForgotten { radio, ids },
         Change::Mesh(radio, mesh::Event::Node(n)) => ServerMessage::Node {
             radio,
             node: node(&n),

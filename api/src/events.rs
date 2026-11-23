@@ -62,6 +62,9 @@ pub enum ServerMessage {
     NodeForgotten { radio: RadioId, node: u32 },
     /// A message heard or sent through a radio.
     Message { radio: RadioId, message: Message },
+    /// Messages forgotten, as asked of the daemon: one, and the reactions to
+    /// it.
+    MessagesForgotten { radio: RadioId, ids: Vec<MessageId> },
     /// What became of a message sent.
     MessageStatus {
         radio: RadioId,

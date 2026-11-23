@@ -2372,6 +2372,137 @@
         background: var(--mc-out);
         border-radius: 14px 4px 14px 14px;
       }
+      /* A message, and with a mouse what can be done with it, on hovering:
+         at its foot on the right, half over its edge. */
+      .bubble-row { position: relative; display: flex; align-self: flex-start; max-width: min(70%, 560px); }
+      .bubble-row.mine { align-self: flex-end; }
+      .bubble-row > .bubble { position: relative; min-width: 0; max-width: none; }
+      .bubble .answer {
+        position: absolute;
+        right: 10px;
+        bottom: -15px;
+        z-index: 5;
+        display: none;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid var(--mc-border);
+        border-radius: 999px;
+        background: var(--mc-surface);
+        box-shadow: var(--mc-shadow);
+      }
+      .bubble .answer .icon-button { width: 28px; height: 28px; border: 0; border-radius: 50%; }
+      .bubble .answer .icon-button svg { width: 16px; height: 16px; }
+      .bubble .answer .icon-button.on { color: var(--mc-primary); }
+      /* With reactions at its foot, up at its top instead, half over its
+         edge, not to cover them; and its emojis over it. */
+      .bubble.reacted .answer { top: -15px; bottom: auto; }
+      .bubble-row.reacted .reaction-picker { top: auto; bottom: calc(100% + 18px); }
+      @media (hover: hover) and (pointer: fine) {
+        .bubble-row:hover .answer, .bubble-row.reacting .answer { display: flex; }
+      }
+      /* Touched, its menu open. */
+      .bubble.held { outline: 2px solid var(--mc-primary); outline-offset: 1px; }
+      /* What it answers, quoted: who, and the start of it. */
+      .bubble .quote, .composer .replying .quote {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        padding: 3px 8px;
+        border-left: 3px solid var(--mc-primary);
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--mc-text) 6%, transparent);
+        font-size: 12px;
+      }
+      .bubble .quote { margin: 2px 0 4px; }
+      .quote .who { font-weight: 600; color: var(--mc-primary); }
+      .quote .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mc-muted); }
+      /* The reactions to it, each emoji once, and how many. */
+      .bubble .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+      .bubble .reaction {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 8px;
+        border: 1px solid var(--mc-border);
+        border-radius: 999px;
+        background: var(--mc-surface);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .bubble .reaction.ours { border-color: var(--mc-primary); background: var(--mc-soft); }
+      .bubble .reaction:disabled { opacity: 1; cursor: default; }
+      .bubble .reaction .count { font-size: 12px; color: var(--mc-muted); }
+      .bubble .reaction.more { color: var(--mc-muted); font-size: 12px; }
+      /* The emojis to react with, over the message: the most used, then all. */
+      .reaction-picker {
+        position: absolute;
+        /* Over the buttons at the message's foot, on its right. */
+        right: 10px;
+        bottom: 18px;
+        z-index: 40;
+        padding: 4px;
+        border: 1px solid var(--mc-border);
+        border-radius: 999px;
+        background: var(--mc-surface);
+        box-shadow: var(--mc-shadow);
+      }
+      .reaction-picker .quick { display: flex; gap: 2px; }
+      .reaction-picker .quick button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: none;
+        font-size: 20px;
+      }
+      .reaction-picker .quick button:hover { background: var(--mc-raised); }
+      .reaction-picker .quick .more { color: var(--mc-muted); }
+      .reaction-picker .quick .more svg { width: 18px; height: 18px; }
+      .reaction-picker.all { width: 340px; max-width: calc(100vw - 32px); padding: 0; border-radius: 12px; }
+      .reaction-picker.all .emoji-picker { max-width: none; border: 0; background: var(--mc-surface); }
+      /* By touch, a message's menu, from below: its reactions, then what
+         can be done with it. */
+      .sheet-back { position: fixed; inset: 0; z-index: 3000; display: flex; align-items: flex-end; background: rgb(0 0 0 / 45%); }
+      .message-menu {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        width: 100%;
+        padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+        border-radius: 16px 16px 0 0;
+        background: var(--mc-surface);
+      }
+      .message-menu .reaction-picker {
+        position: static;
+        margin-bottom: 6px;
+        padding: 0 0 8px;
+        border: 0;
+        border-bottom: 1px solid var(--mc-border);
+        border-radius: 0;
+        box-shadow: none;
+      }
+      .message-menu .reaction-picker .quick { justify-content: space-between; }
+      .message-menu .reaction-picker.all { width: auto; max-width: none; }
+      .message-menu > button {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-height: 48px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: 10px;
+        background: none;
+        font-size: 15px;
+        text-align: left;
+      }
+      .message-menu > button:active { background: var(--mc-raised); }
+      .message-menu > button .icon { display: flex; color: var(--mc-muted); }
+      .message-menu > button svg { width: 20px; height: 20px; }
+      .message-menu .danger-item, .message-menu .danger-item .icon { color: var(--mc-danger); }
       .bubble p { margin: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
       .bubble .author { font-size: 12px; color: var(--mc-muted); }
       .bubble .meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: 11px; }
@@ -2409,6 +2540,11 @@
       /* A line tall, growing with what is written up to eight, then
          scrolled within; long words broken, as nothing runs off its side. */
       .composer { position: relative; }
+      /* What is answered, over the field, the whole width. */
+      .composer .replying { display: flex; flex-basis: 100%; align-items: center; gap: 10px; width: 100%; min-width: 0; }
+      .composer .replying > .icon { display: flex; color: var(--mc-primary); }
+      .composer .replying > .icon svg { width: 18px; height: 18px; }
+      .composer .replying .quote { flex: 1; overflow: hidden; }
       .composer .field { position: relative; flex: 1; min-width: 0; display: flex; }
       /* The emojis' button inside the field, on its right, at its foot. */
       /* A line tall, its face as big as it fits, in the middle of it. */
@@ -2430,8 +2566,8 @@
       }
       .emoji-popover .emoji-picker { max-width: none; background: var(--mc-surface); }
       /* Its groups in one row, as wide as it is. */
-      .emoji-popover .emoji-groups { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
-      .emoji-popover .emoji-groups button { width: auto; }
+      .emoji-popover .emoji-groups, .reaction-picker .emoji-groups { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+      .emoji-popover .emoji-groups button, .reaction-picker .emoji-groups button { width: auto; }
       .composer textarea {
         position: relative;
         flex: 1;
@@ -3317,6 +3453,9 @@
         .swatch { min-height: 0; }
         .accents .swatch { width: 40px; height: 40px; }
         .ask-menu button { min-height: 44px; }
+        /* A message's reactions as they look, not a finger tall. */
+        .bubble .reaction { min-height: 0; }
+        .reaction-picker .quick button { min-height: 0; width: 40px; height: 40px; }
         /* A mark that is a button: its finger's room, not its look. */
         .nodes-table .mark.to-map { padding: 10px; margin: -10px -10px -10px -6px; }
       }

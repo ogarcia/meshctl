@@ -55,6 +55,8 @@ pub struct OutgoingText {
     pub text: String,
     /// The packet it answers, if any.
     pub reply_id: Option<u32>,
+    /// Whether it is a reaction to `reply_id`: its text an emoji.
+    pub emoji: bool,
 }
 
 /// Why a text could not be sent.
@@ -198,7 +200,14 @@ impl Mesh {
             .unwrap_or_else(|e| e.into_inner())
             .clone();
         if let Some(session) = meshcore {
+            // MeshCore has neither replies nor reactions.
+            if outgoing.emoji {
+                return Err(SendError::Unsupported);
+            }
             return session.send_text(self, outgoing).await;
+        }
+        if outgoing.emoji && outgoing.reply_id.is_none() {
+            return Err(SendError::BadText);
         }
         let packet_id = self.send_packet(
             outgoing.to,
@@ -208,6 +217,7 @@ impl Mesh {
                 portnum: PortNum::TextMessageApp as i32,
                 payload: outgoing.text.as_bytes().to_vec(),
                 reply_id: outgoing.reply_id.unwrap_or_default(),
+                emoji: u32::from(outgoing.emoji),
                 ..Default::default()
             },
         )?;
@@ -885,6 +895,7 @@ mod tests {
             channel: 4,
             text: "hola".into(),
             reply_id: None,
+            emoji: false,
         };
         assert_eq!(mesh.send_text(&text).await, Err(SendError::NotConnected));
 
@@ -910,6 +921,29 @@ mod tests {
             panic!("in the clear");
         };
         assert_eq!(data.payload, b"hola");
+        assert_eq!(data.emoji, 0);
+
+        // A reaction: the emoji, marked as one, to the packet it answers.
+        let reaction = OutgoingText {
+            text: "👍".into(),
+            reply_id: Some(id),
+            emoji: true,
+            ..text.clone()
+        };
+        mesh.send_text(&reaction).await.unwrap();
+        let Some(to_radio::PayloadVariant::Packet(packet)) = radio.receive().await.payload_variant
+        else {
+            panic!("a packet");
+        };
+        let Some(mesh_packet::PayloadVariant::Decoded(data)) = packet.payload_variant else {
+            panic!("in the clear");
+        };
+        assert_eq!((data.emoji, data.reply_id), (1, id));
+        let to_nothing = OutgoingText {
+            reply_id: None,
+            ..reaction
+        };
+        assert_eq!(mesh.send_text(&to_nothing).await, Err(SendError::BadText));
 
         let too_long = OutgoingText {
             text: "x".repeat(MAX_TEXT_BYTES + 1),

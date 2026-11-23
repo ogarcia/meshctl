@@ -25,6 +25,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(conversations))
         .routes(routes!(messages, send))
+        .routes(routes!(forget))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -148,6 +149,36 @@ async fn send(
     }
 }
 
+/// Forget a message
+///
+/// Forgets a message the radio keeps, and the reactions to it: only in
+/// meshctl, as what went out on the mesh cannot be taken back. Every client
+/// connected hears of it on the event stream, as `messages_forgotten`.
+#[utoipa::path(
+    delete,
+    path = "/radios/{radio}/messages/{id}",
+    tag = "chat",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("id" = MessageId, Path, description = "The message's id"),
+    ),
+    responses(
+        (status = 204, description = "Forgotten"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio or message", body = Error),
+    )
+)]
+async fn forget(
+    State(state): State<AppState>,
+    Path((radio, id)): Path<(RadioId, MessageId)>,
+) -> Response {
+    match state.radios.forget_message(radio, id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(err) => failed(&err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::web::tests::{RADIO, app, ask, get, json};
@@ -213,6 +244,9 @@ mod tests {
             r#"{"text":"hola","channel":6}"#,
             r#"{"text":"hola"}"#,
             r#"{"text":"hola","channel":4,"node":7}"#,
+            // Reactions: to nothing, and not an emoji.
+            r#"{"text":"👍","channel":4,"emoji":true}"#,
+            r#"{"text":"hola","channel":4,"reply_id":7,"emoji":true}"#,
         ] {
             let (status, answer) = ask(app(None).await, post(body)).await;
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");

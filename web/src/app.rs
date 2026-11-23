@@ -901,6 +901,10 @@ impl Live {
                     Ok(())
                 }
                 // All kept of it forgotten: out of what this page has too.
+                ServerMessage::MessagesForgotten { radio, ids } if self.is_selected(radio) => {
+                    self.thread.update(|t| t.retain(|m| !ids.contains(&m.id)));
+                    Ok(())
+                }
                 ServerMessage::NodeForgotten { radio, node } if self.is_selected(radio) => {
                     let peer = Peer::Node { node };
                     self.requests.update(|r| r.retain(|r| r.node != node));

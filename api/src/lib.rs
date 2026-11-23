@@ -665,6 +665,10 @@ pub struct NewMessage {
     /// The packet it answers, if any.
     #[serde(default)]
     pub reply_id: Option<u32>,
+    /// Whether it is a reaction to `reply_id`, its text an emoji. Not on
+    /// MeshCore radios, which have no reactions.
+    #[serde(default)]
+    pub emoji: bool,
 }
 
 /// Where messages are exchanged: a channel, or a node.

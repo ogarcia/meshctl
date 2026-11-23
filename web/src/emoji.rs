@@ -108,52 +108,67 @@ fn find<'a>(all: &'a [Emoji], search: &str) -> Vec<&'a Emoji> {
     found
 }
 
-/// Those of the emojis this browser draws: the newest are missing from older
-/// fonts, which show a box instead, or nothing. Each is drawn once, out of
-/// sight, and kept if it comes out in colour, as emojis do and those boxes
-/// do not. A browser with no font of emojis in colour keeps them all.
-fn drawable(all: Vec<Emoji>) -> Vec<Emoji> {
+/// Whether this browser draws an emoji: the newest are missing from older
+/// fonts, which show a box instead, or nothing. It is drawn once, out of
+/// sight, and drawn if it comes out in colour, as emojis do and those boxes
+/// do not; with no font of emojis in colour, every one is taken as drawn.
+/// Each answer is kept.
+pub fn draws(emoji: &str) -> bool {
     use wasm_bindgen::JsCast;
     const SIZE: u32 = 24;
-    let Some(canvas) = document()
-        .create_element("canvas")
-        .ok()
-        .and_then(|c| c.dyn_into::<web_sys::HtmlCanvasElement>().ok())
-    else {
-        return all;
-    };
-    canvas.set_width(SIZE);
-    canvas.set_height(SIZE);
-    // Read back once per emoji: the browser keeps it where that is fast.
-    let options = web_sys::ContextAttributes2d::new();
-    options.set_will_read_frequently(true);
-    let Some(context) = canvas
-        .get_context_with_context_options("2d", &options)
-        .ok()
-        .flatten()
-        .and_then(|c| c.dyn_into::<web_sys::CanvasRenderingContext2d>().ok())
-    else {
-        return all;
-    };
-    context.set_font(&format!("{}px sans-serif", SIZE - 4));
-    context.set_text_baseline("top");
-    context.set_fill_style_str("#000");
-    let coloured = |emoji: &str| {
-        context.clear_rect(0.0, 0.0, f64::from(SIZE), f64::from(SIZE));
-        let _ = context.fill_text(emoji, 0.0, 2.0);
-        context
-            .get_image_data(0.0, 0.0, f64::from(SIZE), f64::from(SIZE))
-            .map(|image| {
-                image.data().as_chunks::<4>().0.iter().any(|&[r, g, b, a]| {
-                    a > 0 && (r.abs_diff(g) > 24 || g.abs_diff(b) > 24 || r.abs_diff(b) > 24)
-                })
+    thread_local! {
+        static CANVAS: Option<web_sys::CanvasRenderingContext2d> = {
+            let canvas = document()
+                .create_element("canvas")
+                .ok()
+                .and_then(|c| c.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+            canvas.and_then(|canvas| {
+                canvas.set_width(SIZE);
+                canvas.set_height(SIZE);
+                // Read back once per emoji: the browser keeps it where that
+                // is fast.
+                let options = web_sys::ContextAttributes2d::new();
+                options.set_will_read_frequently(true);
+                let context = canvas
+                    .get_context_with_context_options("2d", &options)
+                    .ok()
+                    .flatten()
+                    .and_then(|c| c.dyn_into::<web_sys::CanvasRenderingContext2d>().ok())?;
+                context.set_font(&format!("{}px sans-serif", SIZE - 4));
+                context.set_text_baseline("top");
+                context.set_fill_style_str("#000");
+                Some(context)
             })
-            .unwrap_or(true)
-    };
-    if !coloured("😀") {
-        return all;
+        };
+        static DRAWN: RefCell<std::collections::HashMap<String, bool>> = RefCell::default();
     }
-    all.into_iter().filter(|e| coloured(&e.unicode)).collect()
+    if let Some(drawn) = DRAWN.with_borrow(|drawn| drawn.get(emoji).copied()) {
+        return drawn;
+    }
+    let coloured = |emoji: &str| {
+        CANVAS.with(|context| {
+            let Some(context) = context else { return true };
+            context.clear_rect(0.0, 0.0, f64::from(SIZE), f64::from(SIZE));
+            let _ = context.fill_text(emoji, 0.0, 2.0);
+            context
+                .get_image_data(0.0, 0.0, f64::from(SIZE), f64::from(SIZE))
+                .map(|image| {
+                    image.data().as_chunks::<4>().0.iter().any(|&[r, g, b, a]| {
+                        a > 0 && (r.abs_diff(g) > 24 || g.abs_diff(b) > 24 || r.abs_diff(b) > 24)
+                    })
+                })
+                .unwrap_or(true)
+        })
+    };
+    // A face every font of emojis has: without it, none is in colour.
+    let drawn = !coloured("😀") || coloured(emoji);
+    DRAWN.with_borrow_mut(|known| known.insert(emoji.to_owned(), drawn));
+    drawn
+}
+
+/// Those of the emojis this browser draws.
+fn drawable(all: Vec<Emoji>) -> Vec<Emoji> {
+    all.into_iter().filter(|e| draws(&e.unicode)).collect()
 }
 
 /// The emojis read in a language.

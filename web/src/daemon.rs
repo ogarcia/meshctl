@@ -142,6 +142,15 @@ pub async fn send_message(radio: RadioId, message: &NewMessage) -> Result<Messag
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// Forgets a message the radio keeps, and the reactions to it: only in
+/// meshctl, not on the mesh.
+pub async fn forget_message(radio: RadioId, id: meshctl_api::MessageId) -> Result<(), Failure> {
+    let request = with_token(Request::delete(&url(&format!(
+        "/radios/{radio}/messages/{id}"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
 pub async fn settings(radio: RadioId) -> Result<NodeSettings, Failure> {
     get(&format!("/radios/{radio}/settings")).await
 }

@@ -981,6 +981,41 @@ impl Store {
 
     /// The messages exchanged with a peer, the newest `limit` before
     /// `before`, oldest first.
+    /// Forgets a message a radio keeps, and the reactions to it, which are
+    /// part of it: only here, not on the mesh. The ids of those forgotten,
+    /// the message's first; none if the radio keeps no such message.
+    pub async fn forget_message(&self, radio: RadioId, id: MessageId) -> Result<Vec<MessageId>> {
+        let mut tx = self.pool.begin().await?;
+        let Some((packet,)): Option<(i64,)> =
+            sqlx::query_as("SELECT packet_id FROM message WHERE radio_id = ? AND id = ?")
+                .bind(radio)
+                .bind(id)
+                .fetch_optional(&mut *tx)
+                .await?
+        else {
+            return Ok(Vec::new());
+        };
+        let reactions: Vec<(i64,)> = sqlx::query_as(
+            "SELECT id FROM message WHERE radio_id = ? AND emoji = 1 AND reply_id = ? AND id != ?",
+        )
+        .bind(radio)
+        .bind(packet)
+        .bind(id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let forgotten: Vec<MessageId> = std::iter::once(id)
+            .chain(reactions.into_iter().map(|(r,)| r))
+            .collect();
+        for gone in &forgotten {
+            sqlx::query("DELETE FROM message WHERE id = ?")
+                .bind(gone)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(forgotten)
+    }
+
     pub async fn messages(
         &self,
         radio: RadioId,
@@ -1845,6 +1880,53 @@ mod tests {
             hops_away: None,
             via_mqtt: false,
         }
+    }
+
+    #[tokio::test]
+    async fn a_message_forgotten_takes_its_reactions_and_nothing_else() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        let kept = |row: &NewMessageRow| {
+            let row = row.clone();
+            let store = &store;
+            async move { store.add_message(radio, &row).await.unwrap().unwrap().id }
+        };
+        let message = kept(&text(1, 9, BROADCAST, false)).await;
+        let other = kept(&text(2, 9, BROADCAST, false)).await;
+        let reaction = |packet_id: u32, to: u32| NewMessageRow {
+            text: "👍".into(),
+            reply_id: Some(to),
+            emoji: true,
+            ..text(packet_id, 5, BROADCAST, false)
+        };
+        let to_it = kept(&reaction(3, 1)).await;
+        let to_other = kept(&reaction(4, 2)).await;
+        // A reply to it is a message of its own: it stays.
+        let reply = kept(&NewMessageRow {
+            reply_id: Some(1),
+            ..text(5, 5, BROADCAST, false)
+        })
+        .await;
+
+        assert_eq!(
+            store.forget_message(radio, message).await.unwrap(),
+            [message, to_it]
+        );
+        assert!(
+            store
+                .forget_message(radio, message)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let left: Vec<MessageId> = store
+            .messages(radio, Peer::Channel { channel: 0 }, None, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(left, [other, to_other, reply]);
     }
 
     #[tokio::test]
