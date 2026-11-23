@@ -1833,7 +1833,7 @@
       main:has(> .map-page) { display: flex; padding: 0; overflow: hidden; }
       /* Leaflet's panes and controls go up to z-index 1000: kept to the map,
          so that they never come over the rest of the page. */
-      .map-page { position: relative; flex: 1; min-width: 0; min-height: 0; isolation: isolate; }
+      .map-page { position: relative; flex: 1; min-width: 0; min-height: 0; isolation: isolate; container: map / inline-size; }
       .menu-backdrop { display: none; }
       .map { position: absolute; inset: 0; background: var(--mc-map); }
       .map-legend {
@@ -1876,15 +1876,23 @@
       .map-legend i.direct { background: var(--mc-pin-direct); }
       .map-legend i.near { background: var(--mc-pin-near); }
       .map-legend i.mid { background: var(--mc-pin-mid); }
+      /*
+       * Over the map, clear of its zoom buttons on the left: centred while
+       * there is room, and on a narrow map out to its right edge, with no
+       * room wasted there.
+       */
       .map-offline {
         position: absolute;
         top: 12px;
-        left: 50%;
-        transform: translateX(-50%);
+        left: 56px;
+        right: 56px;
         z-index: 500;
-        width: 560px;
-        max-width: calc(100% - 96px);
+        max-width: 560px;
+        margin: 0 auto;
         pointer-events: none;
+      }
+      @container map (max-width: 680px) {
+        .map-offline { right: 12px; }
       }
       .map-offline .offline-banner { margin: 0; box-shadow: var(--mc-shadow); pointer-events: auto; }
       /* A node where it is, small, on its page: a click shows it on the map. */
