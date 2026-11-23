@@ -133,6 +133,10 @@ pub struct Radio {
     /// none if it never was. What meshctl shows of a radio that is not
     /// connected is what it knew then.
     pub last_connected: Option<i64>,
+    /// How many messages others wrote in its conversations that were not
+    /// read yet, all of them.
+    #[serde(default)]
+    pub unread: u32,
 }
 
 /// What it takes to add a radio, or to change one.

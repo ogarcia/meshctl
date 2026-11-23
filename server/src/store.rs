@@ -1049,6 +1049,26 @@ impl Store {
         Ok((read, u32::try_from(unread).unwrap_or_default()))
     }
 
+    /// How many messages others wrote in all the conversations of a radio
+    /// that were not read yet: one's own and reactions not counted.
+    pub async fn unread(&self, radio: RadioId) -> Result<u32> {
+        let (unread,): (i64,) = sqlx::query_as(
+            "SELECT count(*) FROM message m
+            WHERE m.radio_id = ? AND m.outgoing = 0 AND m.emoji = 0
+            AND m.id > coalesce(
+                CASE WHEN m.to_num = ?
+                    THEN (SELECT r.message_id FROM conversation_read r WHERE r.channel_id = m.channel_id)
+                    ELSE (SELECT r.message_id FROM conversation_read r
+                        WHERE r.radio_id = m.radio_id AND r.node = m.from_num)
+                END, 0)",
+        )
+        .bind(radio)
+        .bind(i64::from(BROADCAST))
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(u32::try_from(unread).unwrap_or_default())
+    }
+
     /// Reads a conversation of a radio up to a message, never back: the
     /// newest read now. None for a channel with no slot on the radio.
     pub async fn mark_read(
@@ -2045,8 +2065,10 @@ mod tests {
             store.read_state(radio, node).await.unwrap(),
             (Some(direct), 0)
         );
-        // The channel is unread still, each conversation on its own.
+        // The channel is unread still, each conversation on its own; and
+        // the radio, all of them.
         assert_eq!(store.read_state(radio, channel).await.unwrap().1, 1);
+        assert_eq!(store.unread(radio).await.unwrap(), 1);
         // A slot with no channel cannot be read.
         assert_eq!(
             store

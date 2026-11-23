@@ -2393,6 +2393,9 @@
       .item .unread { margin-left: auto; }
       .tabbar button { position: relative; }
       .tabbar .unread { position: absolute; top: 2px; left: calc(50% + 6px); }
+      /* On a radio's button, at its corner; in the phone's list, at the end. */
+      .rail-button .unread { position: absolute; top: -5px; right: -5px; box-shadow: 0 0 0 2px var(--mc-rail); }
+      .radio-list .unread { margin-left: auto; }
       /* Away from the newest, back to it, and how many came meanwhile. */
       .to-latest {
         position: absolute;

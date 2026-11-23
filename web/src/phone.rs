@@ -233,6 +233,12 @@ pub fn RadioSheet() -> impl IntoView {
                                             <LinkLabel link />
                                         </span>
                                     </span>
+                                    {move || {
+                                        let unread = live.unread(id);
+                                        (unread > 0).then(|| view! {
+                                            <span class="unread">{crate::app::unread_count(unread)}</span>
+                                        })
+                                    }}
                                     <Show when=selected>
                                         <svg class="check" viewBox="0 0 24 24" aria-hidden="true">
                                             <path d="M5 12l5 5l10 -10"></path>

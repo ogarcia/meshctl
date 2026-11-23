@@ -1348,14 +1348,22 @@ impl Radios {
 
     pub async fn list(&self) -> Result<Vec<Radio>> {
         let records = self.store.radios().await?;
-        Ok(records
-            .into_iter()
-            .map(|record| self.radio(record))
-            .collect())
+        let mut radios = Vec::with_capacity(records.len());
+        for record in records {
+            let mut radio = self.radio(record);
+            radio.unread = self.store.unread(radio.id).await?;
+            radios.push(radio);
+        }
+        Ok(radios)
     }
 
     pub async fn get(&self, id: RadioId) -> Result<Option<Radio>> {
-        Ok(self.store.radio(id).await?.map(|record| self.radio(record)))
+        let Some(record) = self.store.radio(id).await? else {
+            return Ok(None);
+        };
+        let mut radio = self.radio(record);
+        radio.unread = self.store.unread(id).await?;
+        Ok(Some(radio))
     }
 
     /// Adds a radio, already validated, and connects to it if it is enabled.
@@ -1519,6 +1527,8 @@ impl Radios {
                 .flatten(),
             badge: record.settings.badge,
             last_connected: record.last_connected,
+            // Read from the store where it is asked for.
+            unread: 0,
         }
     }
 

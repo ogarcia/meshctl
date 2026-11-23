@@ -458,6 +458,8 @@ impl Live {
         self.menu.set(false);
         spawn_local(async move {
             let _ = self.refresh_selected().await;
+            // The one left, its unread as they are now.
+            let _ = self.refresh_radios().await;
         });
     }
 
@@ -469,6 +471,23 @@ impl Live {
         spawn_local(async move {
             let _ = self.refresh_thread().await;
         });
+    }
+
+    /// How many messages a radio has unread: the selected one's as its
+    /// conversations say now, any other's as the daemon said last.
+    pub fn unread(self, id: RadioId) -> u32 {
+        if self.selected.get() == Some(id) {
+            self.conversations
+                .with(|c| c.iter().map(|c| c.unread).sum())
+        } else {
+            self.radios.with(|radios| {
+                radios
+                    .iter()
+                    .flatten()
+                    .find(|r| r.id == id)
+                    .map_or(0, |r| r.unread)
+            })
+        }
     }
 
     /// Changes the preferences here at once, and in the daemon for every
@@ -1021,6 +1040,11 @@ impl Live {
                     Ok(())
                 }
                 ServerMessage::Radios | ServerMessage::Lagged => self.refresh().await,
+                // Another radio's messages, come or read: how many it has
+                // unread, on its button.
+                ServerMessage::Message { .. } | ServerMessage::ConversationRead { .. } => {
+                    self.refresh_radios().await
+                }
                 _ => Ok(()),
             };
             if let Err(failure) = refreshed {
@@ -1381,6 +1405,10 @@ fn RadioButton(
         >
             <Face name=name.clone() badge=badge.clone() short=short.clone() />
             <span class=move || format!("dot {}", live.link_class(link()))></span>
+            {move || {
+                let unread = live.unread(id);
+                (unread > 0).then(|| view! { <span class="unread">{unread_count(unread)}</span> })
+            }}
         </button>
     }
 }
