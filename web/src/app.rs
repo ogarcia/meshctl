@@ -62,6 +62,14 @@ pub enum Back {
 /// How many steps back are kept: enough for any walk through neighbours.
 const BACK_KEPT: usize = 20;
 
+/// How many pages' scrolling is kept: those steps back, and the pages.
+const SCROLLS_KEPT: usize = 40;
+
+/// What scrolls the page.
+fn scroller() -> Option<web_sys::Element> {
+    document().query_selector("main").ok().flatten()
+}
+
 /// Which page is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -149,6 +157,12 @@ pub struct Live {
     pub node: RwSignal<Option<u32>>,
     /// Where the open node's page was opened from, the latest last.
     pub back: RwSignal<Vec<Back>>,
+    /// How far down each page left was scrolled, the latest last: to come
+    /// back to it there, and to open any other at its top.
+    scrolls: StoredValue<Vec<(Back, i32)>>,
+    /// Which scrolling is the latest: one put off while the page is drawn
+    /// gives way to another.
+    scroll_turn: StoredValue<u32>,
     /// The last page out of the settings, to go back to from them on a wider
     /// screen.
     pub came_from: RwSignal<Page>,
@@ -213,6 +227,8 @@ impl Live {
             packets_mark: RwSignal::new(0),
             node: RwSignal::new(None),
             back: RwSignal::new(Vec::new()),
+            scrolls: StoredValue::new(Vec::new()),
+            scroll_turn: StoredValue::new(0),
             came_from: RwSignal::new(Page::Map),
             history: RwSignal::new(false),
             removing: RwSignal::new(false),
@@ -296,8 +312,79 @@ impl Live {
         self.packets.set(packets);
     }
 
-    /// Shows a page, and closes the bars over it on a narrow screen.
+    /// Shows a page at its top, and closes the bars over it on a narrow
+    /// screen.
     pub fn go(self, page: Page) {
+        self.leave();
+        self.open_page(page);
+        self.scroll_to(0);
+    }
+
+    /// Goes back to a page: where it was left, scrolled as it was.
+    pub fn go_back_to(self, page: Page) {
+        self.leave();
+        let top = self.left_at(Back::Page(page));
+        self.open_page(page);
+        self.scroll_to(top);
+    }
+
+    /// The page shown, as a step to go back to.
+    fn here(self) -> Back {
+        match (self.page.get_untracked(), self.node.get_untracked()) {
+            (Page::Node, Some(node)) => Back::Node(node),
+            (page, _) => Back::Page(page),
+        }
+    }
+
+    /// Keeps how far down the page shown is scrolled, to come back to it
+    /// there.
+    fn leave(self) {
+        let Some(main) = scroller() else { return };
+        let here = self.here();
+        let top = main.scroll_top();
+        self.scrolls.update_value(|scrolls| {
+            scrolls.retain(|(step, _)| *step != here);
+            scrolls.push((here, top));
+            if scrolls.len() > SCROLLS_KEPT {
+                scrolls.remove(0);
+            }
+        });
+    }
+
+    /// How far down a page was left; at its top, if it never was.
+    fn left_at(self, step: Back) -> i32 {
+        self.scrolls.with_value(|scrolls| {
+            scrolls
+                .iter()
+                .find(|(left, _)| *left == step)
+                .map_or(0, |(_, top)| *top)
+        })
+    }
+
+    /// Scrolls the page to `top` once it is drawn: tried again for a moment
+    /// while what it shows is read and it is not that long yet.
+    fn scroll_to(self, top: i32) {
+        let turn = self.scroll_turn.get_value().wrapping_add(1);
+        self.scroll_turn.set_value(turn);
+        fn attempt(live: Live, turn: u32, top: i32, left: u32) {
+            if live.scroll_turn.get_value() != turn {
+                return;
+            }
+            let Some(main) = scroller() else { return };
+            main.set_scroll_top(top);
+            if main.scroll_top() + 1 < top && left > 0 {
+                set_timeout(
+                    move || attempt(live, turn, top, left - 1),
+                    Duration::from_millis(50),
+                );
+            }
+        }
+        request_animation_frame(move || attempt(self, turn, top, 20));
+    }
+
+    /// Shows a page, as it is, and closes the bars over it on a narrow
+    /// screen.
+    fn open_page(self, page: Page) {
         let from = self.page.get_untracked();
         if crate::phone::back_of(from) != Some(Page::More) && from != Page::More {
             self.came_from.set(from);
@@ -318,15 +405,20 @@ impl Live {
 
     /// Goes back to where the open node's page was opened from: another
     /// node's page, or a page; the nodes list when nothing is known.
+    /// Where it was left, scrolled as it was.
     pub fn go_back(self) {
+        self.leave();
         let mut back = self.back.get_untracked();
-        match back.pop().unwrap_or(Back::Page(Page::Nodes)) {
+        let to = back.pop().unwrap_or(Back::Page(Page::Nodes));
+        let top = self.left_at(to);
+        match to {
             Back::Node(node) => {
                 self.show_node(node);
                 self.back.set(back);
             }
-            Back::Page(page) => self.go(page),
+            Back::Page(page) => self.open_page(page),
         }
+        self.scroll_to(top);
     }
 
     pub fn select(self, radio: RadioId) {
@@ -465,6 +557,7 @@ impl Live {
 
     /// Opens a node's page.
     pub fn open_node(self, node: u32) {
+        self.leave();
         // Where it is opened from, to go back to; the same page again is
         // nowhere new.
         let from = match self.page.get_untracked() {
@@ -480,6 +573,8 @@ impl Live {
         }
         self.show_node(node);
         self.back.set(back);
+        // Another node's page, at its top.
+        self.scroll_to(0);
     }
 
     /// Shows a node's page, and reads what it shows.

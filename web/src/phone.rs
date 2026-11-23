@@ -140,7 +140,7 @@ pub fn PhoneBack() -> impl IntoView {
                 class=class
                 title=move || t_string!(i18n, back)
                 aria-label=move || t_string!(i18n, back)
-                on:click=move |_| live.go(to)
+                on:click=move |_| live.go_back_to(to)
             >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M5 12h14M5 12l6 6M5 12l6 -6"></path>
