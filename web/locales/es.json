@@ -525,6 +525,8 @@
   "env_current": "Corriente",
   "power_channel": "Canal {n}",
   "neighbors_none": "No oye a ningún nodo directamente.",
+  "neighbors_all": "Ver los {n}",
+  "neighbors_fewer": "Ver menos",
   "traces_all": "Ver anteriores",
   "traces_more": "Cargar más",
   "traces_none": "Aún no se ha trazado ninguna ruta hasta él.",

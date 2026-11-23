@@ -1150,15 +1150,20 @@ fn power_facts(i18n: I18nContext<Locale>, packet: Option<&Packet>) -> Option<Any
     Some(view! { <dl class="facts compact">{facts}</dl> }.into_any())
 }
 
+/// How many neighbours show before "see all": three rows of two, so that a
+/// node that hears many does not make its column the longest.
+const NEIGHBOURS_SHOWN: usize = 6;
+
 /// The nodes it hears directly, each opening its page if the radio knows
-/// of it.
+/// of it: the best heard first, the first few, all of them while `all`.
 fn neighbour_list(
     i18n: I18nContext<Locale>,
     live: Live,
     packet: Option<&Packet>,
+    all: RwSignal<bool>,
 ) -> Option<AnyView> {
     let info = object(packet, None)?;
-    let neighbours: Vec<(u32, Option<f64>)> = info
+    let mut neighbours: Vec<(u32, Option<f64>)> = info
         .get("neighbors")
         .and_then(Value::as_array)
         .map(|list| {
@@ -1173,9 +1178,15 @@ fn neighbour_list(
     if neighbours.is_empty() {
         return Some(view! { <p class="nothing">{t!(i18n, neighbors_none)}</p> }.into_any());
     }
+    neighbours.sort_by(|a, b| {
+        b.1.unwrap_or(f64::NEG_INFINITY)
+            .total_cmp(&a.1.unwrap_or(f64::NEG_INFINITY))
+    });
+    let count = neighbours.len();
     let rows = neighbours
         .into_iter()
-        .map(|(num, snr)| {
+        .enumerate()
+        .map(|(index, (num, snr))| {
             let known = live.nodes.with_untracked(|nodes| nodes.contains_key(&num));
             let name = move || title(live, Peer::Node { node: num });
             let who = if known {
@@ -1189,14 +1200,38 @@ fn neighbour_list(
                 view! { <span class="mono">{name}</span> }.into_any()
             };
             view! {
-                <li>
+                <li class:extra=(index >= NEIGHBOURS_SHOWN)>
                     {who}
                     <span class="snr">{snr.map(|s| format!("{s:.1} dB"))}</span>
                 </li>
             }
         })
         .collect_view();
-    Some(view! { <ul class="neighbours">{rows}</ul> }.into_any())
+    let more = (count > NEIGHBOURS_SHOWN).then(|| {
+        let label = move || {
+            if all.get() {
+                t_string!(i18n, neighbors_fewer).to_owned()
+            } else {
+                t_string!(i18n, neighbors_all).replace("{n}", &count.to_string())
+            }
+        };
+        view! {
+            <button
+                class="link neighbours-more"
+                aria-expanded=move || all.get().to_string()
+                on:click=move |_| all.update(|all| *all = !*all)
+            >
+                {label}
+            </button>
+        }
+    });
+    Some(
+        view! {
+            <ul class="neighbours" class:all=move || all.get()>{rows}</ul>
+            {more}
+        }
+        .into_any(),
+    )
 }
 
 /// What the node tells only with the sensors or the module for it: always
@@ -1223,12 +1258,15 @@ fn Sensors(
             }
         });
     }
+    // Whether all the neighbours show: kept here, out of what is built
+    // anew as the language changes.
+    let all_neighbours = RwSignal::new(false);
     // Its words follow the language: built where that is tracked.
     move || {
         // Here, and not as the parts' properties: those are built untracked.
         let environment = environment_facts(i18n, latest.environment.as_ref());
         let power = power_facts(i18n, latest.power.as_ref());
-        let neighbours = neighbour_list(i18n, live, latest.neighbors.as_ref());
+        let neighbours = neighbour_list(i18n, live, latest.neighbors.as_ref(), all_neighbours);
         let latest = latest.clone();
         // Of a node heard, all of them, as it may answer; of the radio's own,
         // those that told something or are on.

@@ -525,6 +525,8 @@
   "env_current": "Current",
   "power_channel": "Channel {n}",
   "neighbors_none": "It hears no node directly.",
+  "neighbors_all": "See all {n}",
+  "neighbors_fewer": "See fewer",
   "traces_all": "See earlier",
   "traces_more": "Load more",
   "traces_none": "No route to it traced yet.",

@@ -1403,6 +1403,8 @@
       .neighbours { list-style: none; margin: 0; padding: 0; columns: 2 220px; column-gap: 24px; }
       .neighbours li { display: flex; gap: 8px; padding: 4px 0; break-inside: avoid; }
       .neighbours .snr { margin-left: auto; color: var(--mc-muted); font-variant-numeric: tabular-nums; }
+      .neighbours:not(.all) .extra { display: none; }
+      .node-page button.neighbours-more { margin-top: 6px; font-size: 13px; }
       .node-traces .trace { padding: 4px 0 10px; border-bottom: 0; }
       .node-traces .all { font-size: 13px; }
       /* A drawer over the page's side, for a list too long for the page. */

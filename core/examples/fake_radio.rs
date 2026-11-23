@@ -387,18 +387,20 @@ impl Radio {
                     node_id: NEIGHBOUR,
                     last_sent_by_id: NEIGHBOUR,
                     node_broadcast_interval_secs: 900,
-                    neighbors: vec![
-                        pb::Neighbor {
-                            node_id: ME,
-                            snr,
-                            ..Default::default()
-                        },
-                        pb::Neighbor {
-                            node_id: 0x0dec_0de5,
-                            snr: -2.0 + random(60) as f32 / 10.0,
-                            ..Default::default()
-                        },
-                    ],
+                    // Us, and as many others as a busy router hears (more
+                    // than a node page shows before "see all"), unknown to
+                    // the radio but one.
+                    neighbors: std::iter::once(pb::Neighbor {
+                        node_id: ME,
+                        snr,
+                        ..Default::default()
+                    })
+                    .chain((0..8).map(|i| pb::Neighbor {
+                        node_id: 0x0dec_0de5 + i,
+                        snr: -12.0 + random(180) as f32 / 10.0,
+                        ..Default::default()
+                    }))
+                    .collect(),
                 }
                 .encode_to_vec(),
             ),
