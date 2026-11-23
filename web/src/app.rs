@@ -1902,23 +1902,34 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     match peer {
-        Peer::Channel { channel } => view! {
-            <div class="heading">
-                <h1>{move || title(live, peer)}</h1>
-                <span class="dim">{t!(i18n, nav_channel_slot, index = channel)}</span>
-            </div>
-            // A MeshCore channel's region, picked here for good.
-            {move || {
-                (live.selected_kind() == Some(RadioKind::Meshcore)).then(|| {
-                    view! {
-                        <div class="actions">
-                            <crate::meshcore_regions::ChannelRegion channel />
-                        </div>
-                    }
-                })
-            }}
+        Peer::Channel { channel } => {
+            // A MeshCore channel's region: said under its name, beside its
+            // slot, and picked in its button for good.
+            let regions = crate::meshcore_regions::ChannelRegions::of(channel);
+            let meshcore = move || live.selected_kind() == Some(RadioKind::Meshcore);
+            view! {
+                <div class="heading">
+                    <h1>{move || title(live, peer)}</h1>
+                    <span class="dim">
+                        {t!(i18n, nav_channel_slot, index = channel)}
+                        {move || meshcore().then(|| view! {
+                            " · "
+                            <crate::meshcore_regions::RegionWords regions />
+                        })}
+                    </span>
+                </div>
+                {move || {
+                    meshcore().then(|| {
+                        view! {
+                            <div class="actions">
+                                <crate::meshcore_regions::ChannelRegion channel regions />
+                            </div>
+                        }
+                    })
+                }}
+            }
+            .into_any()
         }
-        .into_any(),
         Peer::Node { node } => {
             let known = move || live.nodes.with(|nodes| nodes.get(&node).cloned());
             let local = move || {

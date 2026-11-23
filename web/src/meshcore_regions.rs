@@ -65,27 +65,59 @@ async fn defaults_of(radio: meshctl_api::RadioId, peer: Peer) -> Defaults {
     }
 }
 
+/// A channel's regions, as its chat's heading shows them: read once for its
+/// subtitle and its button, again as the radio is read.
+#[derive(Clone, Copy)]
+pub struct ChannelRegions(RwSignal<Defaults>);
+
+impl ChannelRegions {
+    /// Read for a channel, while the radio is a MeshCore one.
+    pub fn of(channel: u32) -> Self {
+        let live = expect_context::<Live>();
+        let defaults = RwSignal::new(Defaults::default());
+        Effect::new(move |_| {
+            live.synced.track();
+            let Some(radio) = live.selected.get() else {
+                return;
+            };
+            if live.selected_kind() != Some(meshctl_api::RadioKind::Meshcore) {
+                return;
+            }
+            spawn_local(async move {
+                let read = defaults_of(radio, Peer::Channel { channel }).await;
+                if live.selected.get_untracked() == Some(radio) {
+                    defaults.set(read);
+                }
+            });
+        });
+        Self(defaults)
+    }
+}
+
+/// The region what is sent on a channel floods in, in words: its own, the
+/// radio's said as such, or none.
+#[component]
+pub fn RegionWords(regions: ChannelRegions) -> impl IntoView {
+    let i18n = use_i18n();
+    let ChannelRegions(defaults) = regions;
+    move || {
+        defaults.with(|d| match (&d.channel, &d.radio) {
+            (Some(own), _) if own == "*" => t_string!(i18n, regions_subtitle_none).to_owned(),
+            (Some(own), _) => format!("#{own}"),
+            (None, Some(radio)) => t_string!(i18n, regions_subtitle_radio).replace("{r}", radio),
+            (None, None) => t_string!(i18n, regions_subtitle_none).to_owned(),
+        })
+    }
+}
+
 /// A MeshCore channel's own region, in its chat's heading: the one what is
 /// sent on it floods in, picked for good, the radio's by default.
 #[component]
-pub fn ChannelRegion(channel: u32) -> impl IntoView {
+pub fn ChannelRegion(channel: u32, regions: ChannelRegions) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let open = RwSignal::new(false);
-    let defaults = RwSignal::new(Defaults::default());
-    let peer = Peer::Channel { channel };
-    Effect::new(move |_| {
-        live.synced.track();
-        let Some(radio) = live.selected.get_untracked() else {
-            return;
-        };
-        spawn_local(async move {
-            let read = defaults_of(radio, peer).await;
-            if live.selected.get_untracked() == Some(radio) {
-                defaults.set(read);
-            }
-        });
-    });
+    let ChannelRegions(defaults) = regions;
     let closing = window_event_listener(leptos::ev::click, move |_| open.set(false));
     on_cleanup(move || closing.remove());
     let words = move |name: &str| {
@@ -103,13 +135,6 @@ pub fn ChannelRegion(channel: u32) -> impl IntoView {
                     .as_deref()
                     .map_or_else(|| t_string!(i18n, chat_scope_none).to_owned(), words),
             )
-        })
-    };
-    // Its own, if it has one; the radio's otherwise, said as such.
-    let label = move || {
-        defaults.with(|d| match &d.channel {
-            Some(own) => words(own),
-            None => t_string!(i18n, mc_channel_scope_default).to_owned(),
         })
     };
     let title = move || {
@@ -150,19 +175,18 @@ pub fn ChannelRegion(channel: u32) -> impl IntoView {
         <span class="channel-region">
             <button
                 type="button"
-                class="with-icon"
+                class="icon-button"
                 class:on=move || open.get()
                 aria-haspopup="menu"
                 aria-expanded=move || open.get().to_string()
                 title=title
+                aria-label=title
+                inner_html=WORLD
                 on:click=move |ev| {
                     ev.stop_propagation();
                     open.update(|o| *o = !*o);
                 }
-            >
-                <span class="icon" inner_html=WORLD></span>
-                <span class="label">{label}</span>
-            </button>
+            ></button>
             <Show when=move || open.get()>
                 <div class="heading-menu" role="menu" on:click=|ev| ev.stop_propagation()>
                     <p class="dim">{t!(i18n, mc_channel_scope_menu)}</p>

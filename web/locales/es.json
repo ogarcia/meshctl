@@ -812,5 +812,7 @@
   "mc_channel_scope": "Región",
   "mc_channel_scope_default": "La de la radio",
   "mc_channel_scope_hint": "La región en la que se inunda lo que envías a este canal. La radio no la guarda: la recuerda meshctl, y va en su enlace.",
-  "mc_channel_scope_menu": "Región en la que se inunda lo que envías a este canal"
+  "mc_channel_scope_menu": "Región en la que se inunda lo que envías a este canal",
+  "regions_subtitle_radio": "#{r} (radio)",
+  "regions_subtitle_none": "sin región"
 }

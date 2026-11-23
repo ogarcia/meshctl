@@ -812,5 +812,7 @@
   "mc_channel_scope": "Region",
   "mc_channel_scope_default": "The radio's",
   "mc_channel_scope_hint": "The region what you send to this channel floods in. The radio does not keep it: meshctl does, and it goes in its link.",
-  "mc_channel_scope_menu": "Region what you send to this channel floods in"
+  "mc_channel_scope_menu": "Region what you send to this channel floods in",
+  "regions_subtitle_radio": "#{r} (radio)",
+  "regions_subtitle_none": "no region"
 }
