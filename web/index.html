@@ -1399,6 +1399,18 @@
          and what can be done, beside how it went. */
       .mc-path .hint, .mc-advert .hint { margin: 8px 0 0; font-size: 12px; }
       .mc-advert .hint { margin-top: 0; }
+      /* The regions found, under the default region: the search and how
+         many answered, then each region, picked as the default, with how
+         many repeaters serve it and of those how many straight; those none
+         heard straight serve faded. */
+      .region-control { display: flex; align-items: center; gap: 12px; }
+      .region-chips { flex: 1 1 100%; }
+      .region-chips:empty { display: none; }
+      .region-chips .choice { display: inline-flex; align-items: center; gap: 8px; }
+      .region-chips .choice.far:not(.on) { opacity: 0.6; }
+      .region-chips .served { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--mc-muted); }
+      .region-chips .choice.on .served { color: inherit; }
+      .region-warning { flex: 1 1 100%; margin: 0; font-size: 13px; color: var(--mc-warn); }
       /* A repeater's regions: each a chip, not a button. */
       .regions-section .regions { margin-bottom: 8px; }
       .regions-section .regions .choice { display: inline-flex; align-items: center; cursor: default; }

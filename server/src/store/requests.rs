@@ -252,6 +252,29 @@ impl Store {
         }
     }
 
+    /// Each node's latest answer to a regions request through a radio, and
+    /// when it came.
+    pub async fn latest_regions(&self, radio: RadioId) -> Result<Vec<(u32, RequestReply, i64)>> {
+        let rows: Vec<(i64, String, i64)> = sqlx::query_as(
+            "SELECT node, reply, answered_at FROM request
+            WHERE id IN (
+                SELECT max(id) FROM request
+                WHERE radio_id = ? AND kind = 'regions' AND status = 'answered'
+                    AND reply IS NOT NULL AND answered_at IS NOT NULL
+                GROUP BY node
+            )",
+        )
+        .bind(radio)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(node, reply, at)| {
+                Some((u32_from(node), serde_json::from_str(&reply).ok()?, at))
+            })
+            .collect())
+    }
+
     /// A request that will not be answered, and why.
     pub async fn fail_request(
         &self,
@@ -477,6 +500,40 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn each_nodes_latest_regions_are_gathered() {
+        let store = store().await;
+        let said = |regions: &[&str], unscoped| RequestReply::Regions {
+            regions: regions.iter().map(|r| (*r).to_owned()).collect(),
+            unscoped,
+            clock: None,
+        };
+        store
+            .add_request(1, 0x55, RequestKind::Regions, 0, 1, 10)
+            .await
+            .unwrap();
+        store
+            .reply_request(1, 1, 0x55, &said(&["europe"], false), 11)
+            .await
+            .unwrap();
+        store
+            .add_request(1, 0x55, RequestKind::Regions, 0, 2, 20)
+            .await
+            .unwrap();
+        store
+            .reply_request(1, 2, 0x55, &said(&["galicia"], true), 21)
+            .await
+            .unwrap();
+        // One still waiting, and one that failed, say nothing.
+        store
+            .add_request(1, 0x66, RequestKind::Regions, 0, 3, 30)
+            .await
+            .unwrap();
+        let mut latest = store.latest_regions(1).await.unwrap();
+        latest.sort_by_key(|(node, ..)| *node);
+        assert_eq!(latest, [(0x55, said(&["galicia"], true), 21)]);
     }
 
     #[tokio::test]

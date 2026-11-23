@@ -513,6 +513,52 @@ pub struct MeshcoreSettings {
     pub repeat_frequencies: Vec<MeshcoreFrequencies>,
 }
 
+/// The regions a MeshCore radio's repeaters and rooms said they repeat on,
+/// each as it last said; and whether it is asking them now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreRegions {
+    /// Whether it is asking them now, one at a time.
+    pub searching: bool,
+    /// How many are still to be asked in the search going on.
+    pub left: u32,
+    /// Each region said, the most served nearby first.
+    pub regions: Vec<MeshcoreRegion>,
+    /// How many repeat floods with no region, and how many of those it
+    /// hears straight.
+    pub unscoped: u32,
+    pub unscoped_direct: u32,
+    /// Each repeater or room that answered, as it last did.
+    pub repeaters: Vec<MeshcoreRepeaterRegions>,
+}
+
+/// A region, and how many repeaters serve it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreRegion {
+    /// Without `#`.
+    #[cfg_attr(feature = "openapi", schema(example = "galicia"))]
+    pub name: String,
+    pub repeaters: u32,
+    /// Those of them the radio hears straight, which are what anything it
+    /// floods reaches first.
+    pub direct: u32,
+}
+
+/// What a repeater or room said of its regions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MeshcoreRepeaterRegions {
+    pub node: u32,
+    pub name: Option<String>,
+    /// Hops away, as its path says; none if no path is known now.
+    pub hops: Option<u32>,
+    pub regions: Vec<String>,
+    pub unscoped: bool,
+    /// When it answered, in seconds since the epoch.
+    pub answered_at: i64,
+}
+
 /// Which nodes heard advertising a MeshCore radio adds by itself. While
 /// `manual_add_contacts` is off it adds every kind; on, only those here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -17,6 +17,7 @@ mod links;
 mod map;
 mod mesh;
 mod meshcore_channels;
+mod meshcore_regions;
 mod meshcore_settings;
 mod names;
 mod node;

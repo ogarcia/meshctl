@@ -736,11 +736,11 @@
   "mc_received_how": "Recibidos, por inundación y directos",
   "mc_flood_direct": "{flood} · {direct}",
   "mc_queue": "En cola",
-  "mc_channels_hint": "Cada canal se guarda en la radio al guardarlo aquí. Los que empiezan por # tienen la clave de su nombre: los oye quien lo sepa.",
+  "mc_channels_hint": "Cada canal se guarda en la radio al guardarlo aquí. Los canales por nombre toman su clave del propio nombre: los oye cualquiera que lo sepa.",
   "mc_channel_public": "Público",
   "mc_channel_hashtag": "Por nombre",
   "mc_channel_private": "Privado",
-  "mc_channel_name_hint": "Empieza por # para un canal por nombre, como #galicia: su clave sale del nombre, como en las apps de MeshCore.",
+  "mc_channel_name_hint": "Escríbelo con # delante, como #galicia, para un canal por nombre: su clave sale del nombre, como en las apps de MeshCore. En la radio se guarda sin la #.",
   "mc_secret_hashtag": "La clave sale del nombre: cualquiera que lo sepa puede oír el canal.",
   "mc_secret_own_hint": "16 bytes en hexadecimal: 32 cifras.",
   "mc_channel_invalid": "La radio no admite ese canal: revisa el nombre (hasta 31 bytes) y la clave.",
@@ -795,5 +795,13 @@
   "regions_clock_right": "En hora",
   "regions_clock_behind": "Atrasado {d}",
   "regions_clock_ahead": "Adelantado {d}",
-  "ask_no_path": "No se conoce ruta hasta él, y estas peticiones solo van directas: espera a oír un anuncio suyo."
+  "ask_no_path": "No se conoce ruta hasta él, y estas peticiones solo van directas: espera a oír un anuncio suyo.",
+  "regions_nearby": "Regiones cercanas",
+  "regions_nearby_hint": "Pregunta a los repetidores con ruta conocida, hasta dos saltos, qué regiones repiten. Pulsa una para usarla por defecto; la cifra dice cuántos la repiten directos, de los que contestaron.",
+  "regions_search": "Buscar regiones",
+  "regions_searching": "Buscando… quedan {n}",
+  "regions_answered": "Han contestado {n}",
+  "regions_served": "La repiten {n} repetidores; {d} directos",
+  "regions_unserved": "Ningún repetidor directo repite #{name}: lo que inundes no pasará de tu alcance.",
+  "regions_unscoped_unserved": "Ningún repetidor directo repite sin región: lo que inundes sin región no pasará de tu alcance."
 }

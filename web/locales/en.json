@@ -736,11 +736,11 @@
   "mc_received_how": "Received, flooded and direct",
   "mc_flood_direct": "{flood} · {direct}",
   "mc_queue": "Queued",
-  "mc_channels_hint": "Each channel is saved on the radio as it is saved here. Those starting with # take their key from their name: anyone who knows it hears them.",
+  "mc_channels_hint": "Each channel is saved on the radio as it is saved here. Channels by name take their key from the name itself: anyone who knows it hears them.",
   "mc_channel_public": "Public",
   "mc_channel_hashtag": "By name",
   "mc_channel_private": "Private",
-  "mc_channel_name_hint": "Start it with # for a channel by name, like #galicia: its key comes from the name, as in the MeshCore apps.",
+  "mc_channel_name_hint": "Write it with a # in front, like #galicia, for a channel by name: its key comes from the name, as in the MeshCore apps. The radio keeps it without the #.",
   "mc_secret_hashtag": "The key comes from the name: anyone who knows it can hear the channel.",
   "mc_secret_own_hint": "16 bytes in hex: 32 digits.",
   "mc_channel_invalid": "The radio does not take that channel: check the name (up to 31 bytes) and the key.",
@@ -795,5 +795,13 @@
   "regions_clock_right": "On time",
   "regions_clock_behind": "{d} behind",
   "regions_clock_ahead": "{d} ahead",
-  "ask_no_path": "No path to it is known, and these requests go only direct: wait to hear an advert from it."
+  "ask_no_path": "No path to it is known, and these requests go only direct: wait to hear an advert from it.",
+  "regions_nearby": "Nearby regions",
+  "regions_nearby_hint": "Asks the repeaters it knows a path to, up to two hops, which regions they repeat. Click one to use it by default; the figure says how many repeat it straight, of those that answered.",
+  "regions_search": "Search for regions",
+  "regions_searching": "Searching… {n} left",
+  "regions_answered": "{n} answered",
+  "regions_served": "{n} repeaters repeat it; {d} straight",
+  "regions_unserved": "No repeater it hears straight repeats #{name}: what it floods will not go past its reach.",
+  "regions_unscoped_unserved": "No repeater it hears straight repeats with no region: what it floods with none will not go past its reach."
 }

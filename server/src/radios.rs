@@ -21,6 +21,7 @@ use meshctl_core::mesh::{self, MeshState};
 use meshctl_core::radio::{AdminError, Ask, Mesh, OutgoingText, Protocol, SendError};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
@@ -105,6 +106,19 @@ const TRACEROUTE_EXPIRY_TICK: std::time::Duration = std::time::Duration::from_se
 /// How long a request is waited for before it is given up on.
 const REQUEST_TIMEOUT: i64 = 120;
 
+/// How far away the repeaters asked for their regions may be, in hops: past
+/// that, what they serve matters little to what the radio floods.
+const REGIONS_HOPS: u32 = 2;
+/// How many are asked in one search at most.
+const REGIONS_MOST: usize = 12;
+/// How long since a repeater last said its regions before it is asked again
+/// in a search, in seconds.
+const REGIONS_FRESH: i64 = 600;
+/// How long each is waited for.
+const REGIONS_WAIT: Duration = Duration::from_secs(15);
+/// The pause between one and the next.
+const REGIONS_PAUSE: Duration = Duration::from_secs(3);
+
 /// How far back, in seconds, nodes heard with the same public key count as
 /// sharing it: a week, so that one long gone does not.
 const SHARED_KEY_WINDOW: i64 = 7 * 24 * 3600;
@@ -178,6 +192,8 @@ pub enum SettingsFailure {
     NoAnswer,
     /// Not something meshctl does with this kind of radio yet.
     Unsupported,
+    /// What meshctl keeps could not be read.
+    Failed(anyhow::Error),
 }
 
 /// Why a traceroute was not sent.
@@ -451,6 +467,9 @@ impl Drop for Running {
 pub struct Radios {
     store: Store,
     running: Arc<Mutex<HashMap<RadioId, Running>>>,
+    /// The radios searching for regions, and how many repeaters each has
+    /// still to ask.
+    searching: Arc<Mutex<HashMap<RadioId, u32>>>,
     changes: broadcast::Sender<Change>,
     stopped: watch::Sender<bool>,
 }
@@ -461,6 +480,7 @@ impl Radios {
         let radios = Self {
             store,
             running: Arc::default(),
+            searching: Arc::default(),
             changes: broadcast::channel(EVENT_BACKLOG).0,
             stopped: watch::channel(false).0,
         };
@@ -1576,6 +1596,167 @@ impl Radios {
             .map_err(meshcore_failure)?;
         tracing::info!(radio = id, index, "MeshCore channel removed");
         Ok(())
+    }
+
+    /// The regions a MeshCore radio's repeaters and rooms said they repeat
+    /// on, each as it last said; and whether it is asking them now.
+    pub async fn meshcore_regions(
+        &self,
+        id: RadioId,
+    ) -> Result<meshctl_api::MeshcoreRegions, SettingsFailure> {
+        let mesh = self.mesh(id).ok_or(SettingsFailure::NoSuchRadio)?;
+        if self.protocol(id) != Some(Protocol::Meshcore) {
+            return Err(SettingsFailure::Unsupported);
+        }
+        let said = self
+            .store
+            .latest_regions(id)
+            .await
+            .map_err(SettingsFailure::Failed)?;
+        let left = self
+            .searching
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .copied();
+        let repeaters: Vec<meshctl_api::MeshcoreRepeaterRegions> = mesh.read(|state| {
+            said.into_iter()
+                .map(|(node, reply, answered_at)| {
+                    let meshctl_api::RequestReply::Regions {
+                        regions, unscoped, ..
+                    } = reply;
+                    let known = state.nodes.get(&node);
+                    meshctl_api::MeshcoreRepeaterRegions {
+                        node,
+                        name: known
+                            .and_then(|n| n.user.as_ref())
+                            .map(|u| u.long_name.clone()),
+                        hops: known.and_then(|n| n.hops_away),
+                        regions,
+                        unscoped,
+                        answered_at,
+                    }
+                })
+                .collect()
+        });
+        Ok(crate::meshcore::gather_regions(left, repeaters))
+    }
+
+    /// Asks a MeshCore radio's repeaters and rooms their regions, those it
+    /// knows a path to, the nearest first: one at a time, each waited for
+    /// and spaced out, in the background. Those that answered lately are
+    /// not asked again. How things stand as it starts.
+    pub async fn search_regions(
+        &self,
+        id: RadioId,
+    ) -> Result<meshctl_api::MeshcoreRegions, SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        let lately: std::collections::HashSet<u32> = self
+            .store
+            .latest_regions(id)
+            .await
+            .map_err(SettingsFailure::Failed)?
+            .into_iter()
+            .filter(|(.., at)| now() - at < REGIONS_FRESH)
+            .map(|(node, ..)| node)
+            .collect();
+        let mut candidates: Vec<(u32, u32, u32)> = mesh.read(|state| {
+            let me = state.local.as_ref().map(|l| l.num);
+            state
+                .nodes
+                .values()
+                .filter(|n| Some(n.num) != me && n.on_radio != Some(false))
+                .filter(|n| {
+                    n.user
+                        .as_ref()
+                        .is_some_and(|u| u.role == "REPEATER" || u.role == "ROOM")
+                })
+                .filter_map(|n| {
+                    let hops = n.hops_away?;
+                    (hops <= REGIONS_HOPS && !lately.contains(&n.num)).then_some((
+                        hops,
+                        u32::MAX - n.last_heard.unwrap_or(0),
+                        n.num,
+                    ))
+                })
+                .collect()
+        });
+        candidates.sort_unstable();
+        candidates.truncate(REGIONS_MOST);
+        let nodes: Vec<u32> = candidates.into_iter().map(|(.., num)| num).collect();
+        // One search at a time: another while one goes on only says how it
+        // goes.
+        let started = {
+            let mut searching = self.searching.lock().unwrap_or_else(|e| e.into_inner());
+            let free = !searching.contains_key(&id) && !nodes.is_empty();
+            if free {
+                searching.insert(id, u32::try_from(nodes.len()).unwrap_or(u32::MAX));
+            }
+            free
+        };
+        if started {
+            tracing::info!(radio = id, repeaters = nodes.len(), "searching for regions");
+            let radios = self.clone();
+            tokio::spawn(async move { radios.ask_regions(id, nodes).await });
+        }
+        self.meshcore_regions(id).await
+    }
+
+    /// Asks each node its regions in turn, each answer waited for, then a
+    /// pause, as repeaters keep from answering many anonymous requests.
+    async fn ask_regions(&self, id: RadioId, nodes: Vec<u32>) {
+        let mut changes = self.changes.subscribe();
+        let total = nodes.len();
+        for (done, node) in nodes.into_iter().enumerate() {
+            let asked = self
+                .request(
+                    id,
+                    NewRequest {
+                        node,
+                        kind: RequestKind::Regions,
+                        channel: 0,
+                    },
+                )
+                .await;
+            match asked {
+                Ok(request) => {
+                    // Its answer, or giving up on it.
+                    let _ = tokio::time::timeout(REGIONS_WAIT, async {
+                        loop {
+                            match changes.recv().await {
+                                Ok(Change::Request(radio, r))
+                                    if radio == id
+                                        && r.id == request.id
+                                        && r.status != meshctl_api::RequestStatus::Pending =>
+                                {
+                                    return;
+                                }
+                                Err(broadcast::error::RecvError::Closed) => return,
+                                _ => {}
+                            }
+                        }
+                    })
+                    .await;
+                }
+                Err(AskFailure::NotConnected | AskFailure::NoSuchRadio) => break,
+                Err(why) => tracing::debug!(radio = id, node, ?why, "not asked its regions"),
+            }
+            let left = u32::try_from(total - done - 1).unwrap_or(0);
+            self.searching
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(id, left);
+            if left > 0 {
+                tokio::time::sleep(REGIONS_PAUSE).await;
+            }
+        }
+        self.searching
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
+        tracing::info!(radio = id, "regions searched");
+        // Whoever shows them reads them again.
+        let _ = self.changes.send(Change::Mesh(id, mesh::Event::Synced));
     }
 
     /// A MeshCore channel's link, to share it: with its secret.

@@ -525,6 +525,20 @@ pub async fn meshcore_channel_link(
     get(&format!("/radios/{radio}/meshcore/channels/{index}/link")).await
 }
 
+/// The regions a MeshCore radio's repeaters said they repeat on.
+pub async fn meshcore_regions(radio: RadioId) -> Result<meshctl_api::MeshcoreRegions, Failure> {
+    get(&format!("/radios/{radio}/meshcore/regions")).await
+}
+
+/// Has a MeshCore radio ask its repeaters their regions.
+pub async fn search_regions(radio: RadioId) -> Result<meshctl_api::MeshcoreRegions, Failure> {
+    let request = with_token(Request::post(&url(&format!(
+        "/radios/{radio}/meshcore/regions/search"
+    ))));
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
 /// Has a MeshCore radio forget its path to a node.
 pub async fn reset_path(radio: RadioId, node: u32) -> Result<(), Failure> {
     let request = with_token(Request::post(&url(&format!(

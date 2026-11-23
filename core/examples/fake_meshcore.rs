@@ -196,6 +196,7 @@ impl Radio {
                 contact(0x41, 1, 0, "Ana", 43_365_000, -8_405_000),
                 contact(0x52, 2, 1, "Repetidor Monte", 43_340_000, -8_380_000),
                 contact(0x53, 3, 2, "Sala Coruña", 43_370_000, -8_396_000),
+                contact(0x55, 2, 0, "Repetidor Torre", 43_386_000, -8_406_000),
                 contact(0x54, 4, -1, "Sensor Faro", 43_385_800, -8_406_400),
             ],
             channels,
@@ -402,13 +403,20 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             );
             if regions && !flood && matches!(to.kind, 2 | 3) {
                 let events = events.clone();
+                // Each its own: the room only scoped, the tower on time.
+                let (said, behind): (&[u8], u32) = match to.name.as_str() {
+                    "Sala Coruña" => (b"coruna,galicia,", 86_400 * 3),
+                    "Repetidor Torre" => (b"*,galicia,", 0),
+                    _ => (b"*,europe,galicia", 86_400 * 900),
+                };
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_millis(600 + random(1_200))).await;
                     let mut answer = vec![0x8c, 0];
                     answer.extend(tag);
                     // A repeater's clock, behind as real ones often are.
-                    answer.extend((now() - 86_400 * 900).to_le_bytes());
-                    answer.extend(b"*,europe,galicia\0\0\0\0");
+                    answer.extend((now() - behind).to_le_bytes());
+                    answer.extend(said);
+                    answer.extend([0; 4]);
                     let _ = events.send(Event::Push(answer));
                 });
             }

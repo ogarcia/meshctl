@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
     Advert, ChannelOrder, Contact, Error, ErrorCode, MeshcoreChannelChange, MeshcoreChannels,
-    MeshcoreSettings, MeshcoreStatus, RadioId,
+    MeshcoreRegions, MeshcoreSettings, MeshcoreStatus, RadioId,
 };
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -27,6 +27,61 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(channel_link))
         .routes(routes!(reset_path))
         .routes(routes!(advert))
+        .routes(routes!(regions))
+        .routes(routes!(search_regions))
+}
+
+/// MeshCore regions
+///
+/// The regions a MeshCore radio's repeaters and rooms said they repeat
+/// floods scoped to, each as it last said: every region with how many serve
+/// it, and how many of those the radio hears straight, which are what
+/// anything it floods reaches first; and whether it is asking them now.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/meshcore/regions",
+    tag = "nodes",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    responses(
+        (status = 200, description = "The regions", body = MeshcoreRegions),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 422, description = "Not a MeshCore radio: `unsupported_kind`", body = Error),
+    )
+)]
+async fn regions(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
+    match state.radios.meshcore_regions(radio).await {
+        Ok(regions) => Json(regions).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Search for regions
+///
+/// Asks a MeshCore radio's repeaters and rooms which regions they repeat
+/// on: those it knows a path to, up to two hops away, the nearest first,
+/// one at a time and spaced out, in the background. Each answer comes as
+/// the request it is, and the regions are read again as it ends, told as
+/// `synced`. Those that answered in the last ten minutes are not asked
+/// again. This goes on the air, a direct request to each.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/meshcore/regions/search",
+    tag = "nodes",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    responses(
+        (status = 202, description = "Searching, or nothing left to ask", body = MeshcoreRegions),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not a MeshCore radio: `unsupported_kind`", body = Error),
+    )
+)]
+async fn search_regions(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
+    match state.radios.search_regions(radio).await {
+        Ok(regions) => (StatusCode::ACCEPTED, Json(regions)).into_response(),
+        Err(failure) => refused(failure),
+    }
 }
 
 /// MeshCore channels

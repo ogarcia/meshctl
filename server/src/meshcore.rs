@@ -562,6 +562,52 @@ pub fn link_contents(
     }
 }
 
+/// What a radio's repeaters said of their regions, gathered: each region
+/// with how many serve it and how many of those are straight, the most
+/// served nearby first; the repeaters nearest first.
+pub fn gather_regions(
+    left: Option<u32>,
+    mut repeaters: Vec<meshctl_api::MeshcoreRepeaterRegions>,
+) -> meshctl_api::MeshcoreRegions {
+    use std::collections::BTreeMap;
+    let mut regions: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let (mut unscoped, mut unscoped_direct) = (0, 0);
+    for repeater in &repeaters {
+        let direct = u32::from(repeater.hops == Some(0));
+        for name in &repeater.regions {
+            let served = regions.entry(name.clone()).or_default();
+            served.0 += 1;
+            served.1 += direct;
+        }
+        if repeater.unscoped {
+            unscoped += 1;
+            unscoped_direct += direct;
+        }
+    }
+    let mut regions: Vec<meshctl_api::MeshcoreRegion> = regions
+        .into_iter()
+        .map(|(name, (repeaters, direct))| meshctl_api::MeshcoreRegion {
+            name,
+            repeaters,
+            direct,
+        })
+        .collect();
+    regions.sort_by(|a, b| {
+        (b.direct, b.repeaters)
+            .cmp(&(a.direct, a.repeaters))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    repeaters.sort_by_key(|r| (r.hops.unwrap_or(u32::MAX), std::cmp::Reverse(r.answered_at)));
+    meshctl_api::MeshcoreRegions {
+        searching: left.is_some(),
+        left: left.unwrap_or(0),
+        regions,
+        unscoped,
+        unscoped_direct,
+        repeaters,
+    }
+}
+
 /// A name's first letters, as a node with no short name shows.
 pub fn initials(name: &str) -> String {
     let mut words = name.split_whitespace();
@@ -696,6 +742,47 @@ mod link_tests {
             None
         );
         assert_eq!(parse_link("https://meshtastic.org/e/#CgE"), None);
+    }
+
+    #[test]
+    fn regions_are_gathered_the_most_served_nearby_first() {
+        let repeater =
+            |node, hops, regions: &[&str], unscoped| meshctl_api::MeshcoreRepeaterRegions {
+                node,
+                name: None,
+                hops,
+                regions: regions.iter().map(|r| (*r).to_owned()).collect(),
+                unscoped,
+                answered_at: 10,
+            };
+        let gathered = gather_regions(
+            Some(2),
+            vec![
+                repeater(1, Some(2), &["europe", "coruna"], false),
+                repeater(2, Some(0), &["europe", "galicia"], true),
+                repeater(3, None, &["coruna"], true),
+            ],
+        );
+        assert!(gathered.searching);
+        assert_eq!(gathered.left, 2);
+        let names: Vec<_> = gathered
+            .regions
+            .iter()
+            .map(|r| (r.name.as_str(), r.repeaters, r.direct))
+            .collect();
+        assert_eq!(
+            names,
+            [("europe", 2, 1), ("galicia", 1, 1), ("coruna", 2, 0)]
+        );
+        assert_eq!((gathered.unscoped, gathered.unscoped_direct), (2, 1));
+        assert_eq!(
+            gathered
+                .repeaters
+                .iter()
+                .map(|r| r.node)
+                .collect::<Vec<_>>(),
+            [2, 1, 3]
+        );
     }
 
     #[test]

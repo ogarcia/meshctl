@@ -54,6 +54,10 @@ pub(super) fn refused(failure: SettingsFailure) -> Response {
         SettingsFailure::NoAnswer => {
             error(StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer)
         }
+        SettingsFailure::Failed(err) => {
+            tracing::error!(error = format_args!("{err:#}"), "database");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 

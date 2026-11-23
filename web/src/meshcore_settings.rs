@@ -392,7 +392,7 @@ fn RadioTab(draft: Draft) -> impl IntoView {
     let (max_power, _) = field(draft, |d| d.max_tx_power, |_, _: u8| {});
     let (repeat, set_repeat) = field(draft, |d| d.repeat, |d, v| d.repeat = v);
     let (scopes, _) = field(draft, |d| d.scopes, |_, _: bool| {});
-    let (_, set_scope) = field(
+    let (scope, set_scope) = field(
         draft,
         |d| d.default_scope.clone(),
         |d, v| d.default_scope = v,
@@ -404,6 +404,11 @@ fn RadioTab(draft: Draft) -> impl IntoView {
             .with_untracked(|d| d.as_ref().and_then(|d| d.default_scope.clone()))
             .map_or_else(String::new, |name| format!("#{name}")),
     );
+    // A region found, picked: written as typed, `#` and all.
+    let pick_region = move |name: Option<String>| {
+        region.set(name.as_ref().map_or_else(String::new, |n| format!("#{n}")));
+        set_scope(name);
+    };
     // The frequency as written, read into kHz once it is a number.
     let typed = RwSignal::new(mhz(frequency.get_untracked()));
     let bandwidths = move || {
@@ -536,6 +541,10 @@ fn RadioTab(draft: Draft) -> impl IntoView {
                         }
                     />
                 </Row>
+                <crate::meshcore_regions::RegionFinder
+                    scope
+                    pick=pick_region
+                />
             </div>
             <div class:gone=move || repeat.get().is_none()>
                 <Row
