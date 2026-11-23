@@ -2405,9 +2405,14 @@
       }
       /* A line tall, growing with what is written up to eight, then
          scrolled within; long words broken, as nothing runs off its side. */
+      .composer .field { position: relative; flex: 1; min-width: 0; display: flex; }
       .composer textarea {
+        position: relative;
         flex: 1;
         min-width: 0;
+        background: transparent;
+        /* Scrolled without a bar, which the text behind has not. */
+        scrollbar-width: none;
         min-height: 40px;
         max-height: calc(8 * 1.45em + 20px);
         padding: 9px 12px;
@@ -2416,6 +2421,29 @@
         overflow-y: auto;
         overflow-wrap: anywhere;
       }
+      /* The text behind, laid out as the field's, unseen but for what goes
+         past what a message takes. */
+      .composer .backdrop {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        padding: 9px 12px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: var(--mc-page);
+        color: transparent;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      /* Near the end, faintly; past it, plainly, and the field with it. */
+      .composer .backdrop mark {
+        border-radius: 2px;
+        background: color-mix(in srgb, var(--mc-danger) 18%, transparent);
+        color: transparent;
+      }
+      .composer .backdrop mark.over { background: color-mix(in srgb, var(--mc-danger) 45%, transparent); }
+      .composer .field.over textarea { border-color: var(--mc-danger); }
       .composer .count { font-size: 12px; font-family: var(--mc-mono); line-height: 40px; }
       .composer .count.over { color: var(--mc-danger); }
       .composer button { min-height: 40px; }
@@ -3250,8 +3278,11 @@
         .topbar .actions button { min-height: 44px; }
         /* What a message is written in, and its button, a finger tall too. */
         .composer textarea, .composer button { min-height: 44px; }
-        .composer textarea { padding: 11px 12px; }
-        .composer .count { line-height: 44px; }
+        .composer textarea, .composer .backdrop { padding: 11px 12px; }
+        /* No count: the field says when it is near, and what goes past. */
+        .composer .count { display: none; }
+        /* Its button round, a finger wide. */
+        .composer .send { width: 44px; min-width: 44px; padding: 0; border-radius: 50%; }
         .segmented button { min-height: 38px; }
         /* A colour to pick: round, a finger wide, not stretched to its height. */
         .swatch { min-height: 0; }

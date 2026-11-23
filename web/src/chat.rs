@@ -21,6 +21,27 @@ const SEND: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/sen
 
 const MAX_TEXT_BYTES: usize = 200;
 
+/// From how many bytes a message is near what it takes, and its field says
+/// so.
+const NEAR_TEXT_BYTES: usize = MAX_TEXT_BYTES - 20;
+
+/// A text split where it nears what a message takes and where it goes
+/// past, in bytes, each at a character: what is well within, what is near
+/// the end, and what does not fit.
+fn past_limit(text: &str) -> (String, String, String) {
+    let at = |limit: usize| {
+        text.char_indices()
+            .find(|(at, c)| at + c.len_utf8() > limit)
+            .map_or(text.len(), |(at, _)| at)
+    };
+    let (near, over) = (at(NEAR_TEXT_BYTES), at(MAX_TEXT_BYTES));
+    (
+        text[..near].to_owned(),
+        text[near..over].to_owned(),
+        text[over..].to_owned(),
+    )
+}
+
 /// Who a message was exchanged with.
 pub fn peer_of(message: &Message) -> Peer {
     if message.to == BROADCAST {
@@ -219,6 +240,7 @@ fn Composer(peer: Peer) -> impl IntoView {
     let error = RwSignal::new(None::<Failure>);
     let busy = RwSignal::new(false);
     let bytes = move || text.with(String::len);
+    let over = move || bytes() > MAX_TEXT_BYTES;
     let connected = move || {
         live.status
             .with(|s| s.as_ref().is_some_and(|s| s.link == LinkState::Ready))
@@ -233,6 +255,7 @@ fn Composer(peer: Peer) -> impl IntoView {
     // As tall as what is written, wrapped even where it has no spaces, up to
     // a few lines; scrolled within past them. Again as it is emptied.
     let field = NodeRef::<html::Textarea>::new();
+    let backdrop = NodeRef::<html::Div>::new();
     Effect::new(move |_| {
         text.track();
         field.track();
@@ -351,14 +374,39 @@ fn Composer(peer: Peer) -> impl IntoView {
                 })
         }}
         <form class="composer" on:submit=submit>
-            <textarea
-                node_ref=field
-                rows="1"
-                placeholder=move || t_string!(i18n, chat_write)
-                prop:value=move || text.get()
-                on:input=move |ev| text.set(event_target_value(&ev))
-                on:keydown=keydown
-            ></textarea>
+            // Behind what is written, the same text unseen but for what
+            // goes past what a message takes, in red: a field cannot colour
+            // a part of its own text.
+            <div
+                class="field"
+                class:over=over
+            >
+                <div class="backdrop" node_ref=backdrop aria-hidden="true">
+                    {move || {
+                        let (fits, near, over) = text.with(|t| past_limit(t));
+                        view! {
+                            {fits}
+                            <mark class="near">{near}</mark>
+                            <mark class="over">{over}</mark>
+                            // A last new line takes a line too.
+                            " "
+                        }
+                    }}
+                </div>
+                <textarea
+                    node_ref=field
+                    rows="1"
+                    placeholder=move || t_string!(i18n, chat_write)
+                    prop:value=move || text.get()
+                    on:input=move |ev| text.set(event_target_value(&ev))
+                    on:keydown=keydown
+                    on:scroll=move |_| {
+                        if let (Some(field), Some(backdrop)) = (field.get_untracked(), backdrop.get_untracked()) {
+                            backdrop.set_scroll_top(field.scroll_top());
+                        }
+                    }
+                ></textarea>
+            </div>
             <span class=move || {
                 if bytes() > MAX_TEXT_BYTES { "count over" } else { "count dim" }
             }>{move || format!("{}/{MAX_TEXT_BYTES}", bytes())}</span>
@@ -382,7 +430,35 @@ fn Composer(peer: Peer) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::preset_name;
+    use super::{MAX_TEXT_BYTES, NEAR_TEXT_BYTES, past_limit, preset_name};
+
+    #[test]
+    fn what_nears_and_goes_past_a_message_splits_at_a_character() {
+        let fits = "a".repeat(NEAR_TEXT_BYTES);
+        assert_eq!(
+            past_limit(&fits),
+            (fits.clone(), String::new(), String::new())
+        );
+        let near = "a".repeat(MAX_TEXT_BYTES);
+        assert_eq!(
+            past_limit(&near),
+            (
+                fits.clone(),
+                "a".repeat(MAX_TEXT_BYTES - NEAR_TEXT_BYTES),
+                String::new()
+            )
+        );
+        let over = format!("{}ñb", "a".repeat(MAX_TEXT_BYTES - 1));
+        // The ñ takes two bytes, one past: it goes, whole.
+        assert_eq!(
+            past_limit(&over),
+            (
+                fits,
+                "a".repeat(MAX_TEXT_BYTES - NEAR_TEXT_BYTES - 1),
+                "ñb".to_owned()
+            )
+        );
+    }
 
     #[test]
     fn presets_read_as_people_write_them() {
