@@ -687,5 +687,8 @@
   "data_gone_none": "No hay ninguna.",
   "data_forget": "Borrar",
   "data_sure": "Sí, borrar",
-  "data_cancel": "Cancelar"
+  "data_cancel": "Cancelar",
+  "newer_title": "Hay una versión nueva de meshctl",
+  "newer_text": "Esta pestaña sigue con la anterior: recárgala para usar la nueva.",
+  "newer_reload": "Recargar"
 }

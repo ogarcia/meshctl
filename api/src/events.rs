@@ -43,6 +43,11 @@ pub struct Hello {
 pub enum ServerMessage {
     /// The client is in; events follow.
     Ready,
+    /// Which interface the daemon serves, right after `ready`: a hash of its
+    /// page, which changes with every build of it. A page that heard another
+    /// before runs an interface the daemon no longer serves, and should be
+    /// reloaded. Not sent by a daemon built without its interface.
+    Interface { build: String },
     /// The client is not in, and the stream closes.
     Error { error: ErrorCode },
     /// The client fell behind and missed some events.

@@ -687,5 +687,8 @@
   "data_gone_none": "There are none.",
   "data_forget": "Forget",
   "data_sure": "Yes, forget",
-  "data_cancel": "Cancel"
+  "data_cancel": "Cancel",
+  "newer_title": "There is a newer meshctl",
+  "newer_text": "This tab still runs the one before: reload it to use the new one.",
+  "newer_reload": "Reload"
 }

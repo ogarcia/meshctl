@@ -1509,6 +1509,34 @@
       }
       .ask-menu button:hover { background: var(--mc-raised); }
       .ask-menu .slot { min-width: 16px; color: var(--mc-muted); font-variant-numeric: tabular-nums; }
+      /*
+       * A newer meshctl than this page runs: over everything, at the foot,
+       * until the page is reloaded; on a phone, over its tabs.
+       */
+      .newer {
+        position: fixed;
+        left: 50%;
+        bottom: 20px;
+        z-index: 2000;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        width: max-content;
+        max-width: calc(100vw - 24px);
+        padding: 12px 14px 12px 16px;
+        border: 1px solid var(--mc-border);
+        border-left: 3px solid var(--mc-primary);
+        border-radius: 12px;
+        background: var(--mc-surface);
+        box-shadow: var(--mc-shadow);
+        transform: translateX(-50%);
+      }
+      .newer-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .newer-words span { color: var(--mc-muted); font-size: 13px; }
+      .newer button { flex: none; }
+      @media (max-width: 835px) {
+        .newer { bottom: calc(76px + env(safe-area-inset-bottom)); }
+      }
       /* Why a request was not sent, over the page for a while. */
       .toast {
         position: fixed;

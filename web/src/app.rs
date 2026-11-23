@@ -181,6 +181,11 @@ pub struct Live {
     /// Turned whenever what meshctl keeps was cleaned, or how long it keeps
     /// it changed: for the Data page to read it again.
     pub storage_turn: RwSignal<u32>,
+    /// The interface the daemon served when first heard, which is this one.
+    pub interface: StoredValue<Option<String>>,
+    /// Whether the daemon serves another one now: this page is to be
+    /// reloaded.
+    pub newer: RwSignal<bool>,
     /// Whether the open node's requests are shown, in their drawer.
     pub history: RwSignal<bool>,
     /// Whether the radios are shown to switch the selected one, on a phone.
@@ -249,6 +254,8 @@ impl Live {
             removing: RwSignal::new(false),
             adding_link: RwSignal::new(None),
             storage_turn: RwSignal::new(0),
+            interface: StoredValue::new(None),
+            newer: RwSignal::new(false),
             radio_sheet: RwSignal::new(false),
             map_pick: RwSignal::new(None),
             map_focus: RwSignal::new(None),
@@ -1053,6 +1060,15 @@ impl Live {
                     }
                     Ok(())
                 }
+                // The first heard is this page's; another, a newer meshctl.
+                ServerMessage::Interface { build } => {
+                    match self.interface.get_value() {
+                        None => self.interface.set_value(Some(build)),
+                        Some(first) if first != build => self.newer.set(true),
+                        Some(_) => {}
+                    }
+                    Ok(())
+                }
                 ServerMessage::Preferences { preferences } => {
                     self.preferences.set(preferences);
                     Ok(())
@@ -1259,7 +1275,36 @@ fn Frame() -> impl IntoView {
             <crate::phone::TabBar />
             <crate::phone::RadioSheet />
             <crate::links::LinkAdder />
+            <Newer />
         </div>
+    }
+}
+
+/// That the daemon serves a newer interface than this page runs: to reload
+/// it, which it does not on its own, not to lose what is being written.
+#[component]
+fn Newer() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let reload = |_| {
+        if let Some(window) = web_sys::window() {
+            let _ = window.location().reload();
+        }
+    };
+    move || {
+        live.newer.get().then(|| {
+            view! {
+                <div class="newer" role="status">
+                    <span class="newer-words">
+                        <strong>{t!(i18n, newer_title)}</strong>
+                        <span>{t!(i18n, newer_text)}</span>
+                    </span>
+                    <button type="button" class="primary" on:click=reload>
+                        {t!(i18n, newer_reload)}
+                    </button>
+                </div>
+            }
+        })
     }
 }
 

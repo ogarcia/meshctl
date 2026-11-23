@@ -21,6 +21,22 @@ struct Interface;
 /// The page every address the interface routes itself leads to.
 const INDEX: &str = "index.html";
 
+/// Which interface this daemon serves: its page's hash, which names the
+/// scripts and styles of that build by their own hashes. `None` without
+/// one.
+pub fn build() -> Option<String> {
+    let index = Interface::get(INDEX)?;
+    Some(
+        index
+            .metadata
+            .sha256_hash()
+            .iter()
+            .take(8)
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
+}
+
 /// Answers anything no other route did.
 pub async fn serve(State(state): State<AppState>, uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');

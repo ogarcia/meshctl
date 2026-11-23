@@ -69,6 +69,14 @@ async fn stream(mut socket: WebSocket, state: AppState) {
     if send(&mut socket, &ServerMessage::Ready).await.is_err() {
         return;
     }
+    // Which interface is served, for a page left open across an update.
+    if let Some(build) = super::assets::build()
+        && send(&mut socket, &ServerMessage::Interface { build })
+            .await
+            .is_err()
+    {
+        return;
+    }
 
     loop {
         tokio::select! {
@@ -167,7 +175,12 @@ mod tests {
         assert_eq!(message(receive(&mut client).await), ServerMessage::Ready);
 
         radios.stop().await;
-        let Some(Message::Close(Some(frame))) = receive(&mut client).await else {
+        // Past which interface is served, if this build has one.
+        let mut next = receive(&mut client).await;
+        if matches!(&next, Some(Message::Text(text)) if text.contains("\"interface\"")) {
+            next = receive(&mut client).await;
+        }
+        let Some(Message::Close(Some(frame))) = next else {
             panic!("a close frame");
         };
         assert_eq!(u16::from(frame.code), 1001);
@@ -192,6 +205,13 @@ mod tests {
         let mut client = connect(None).await;
         client.send(Message::text("{}")).await.unwrap();
         assert_eq!(message(receive(&mut client).await), ServerMessage::Ready);
+        // Then which interface is served, when there is one.
+        if let Some(build) = crate::web::assets::build() {
+            assert_eq!(
+                message(receive(&mut client).await),
+                ServerMessage::Interface { build }
+            );
+        }
     }
 
     #[tokio::test]
