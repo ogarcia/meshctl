@@ -1235,6 +1235,63 @@ impl Store {
     /// Takes a radio's channels as just read: each slot's conversation is
     /// the channel's, wherever it was before, and through its name or key
     /// being changed where it is. Whether any slot has another now.
+    /// Keeps a copy of a message heard, and the way it came; the message it
+    /// is, as now kept, if it is.
+    pub async fn add_route(
+        &self,
+        radio: RadioId,
+        packet_id: u32,
+        route: &RouteRow,
+    ) -> Result<Option<Message>> {
+        sqlx::query(
+            "INSERT INTO message_route
+                (radio_id, packet_id, path, hash_size, flooded, snr, rssi, scope, at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(radio)
+        .bind(i64::from(packet_id))
+        .bind(&route.path)
+        .bind(route.hash_size)
+        .bind(route.flooded)
+        .bind(route.snr)
+        .bind(route.rssi)
+        .bind(&route.scope)
+        .bind(route.at)
+        .execute(&self.pool)
+        .await?;
+        let row: Option<MessageRow> =
+            sqlx::query_as("SELECT * FROM message_view WHERE radio_id = ? AND packet_id = ?")
+                .bind(radio)
+                .bind(i64::from(packet_id))
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(MessageRow::message))
+    }
+
+    /// The copies of a message heard, the first first: none if there is no
+    /// such message.
+    pub async fn routes(&self, radio: RadioId, id: MessageId) -> Result<Option<Vec<RouteRow>>> {
+        let packet: Option<(i64,)> =
+            sqlx::query_as("SELECT packet_id FROM message WHERE radio_id = ? AND id = ?")
+                .bind(radio)
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
+        let Some((packet,)) = packet else {
+            return Ok(None);
+        };
+        Ok(Some(
+            sqlx::query_as(
+                "SELECT path, hash_size, flooded, snr, rssi, scope, at FROM message_route
+                WHERE radio_id = ? AND packet_id = ? ORDER BY id",
+            )
+            .bind(radio)
+            .bind(packet)
+            .fetch_all(&self.pool)
+            .await?,
+        ))
+    }
+
     /// The region each of a radio's channels floods in, by the channel: as
     /// meshctl keeps it, by its fingerprint.
     pub async fn channel_scopes(&self, radio: RadioId) -> Result<HashMap<Fingerprint, String>> {
@@ -1683,6 +1740,7 @@ struct MessageRow {
     hops_away: Option<i64>,
     via_mqtt: bool,
     scope: Option<String>,
+    heard: i64,
 }
 
 impl MessageRow {
@@ -1706,8 +1764,21 @@ impl MessageRow {
             hops_away: self.hops_away.map(u32_from),
             via_mqtt: self.via_mqtt,
             scope: self.scope,
+            heard: u32::try_from(self.heard).unwrap_or(0),
         }
     }
+}
+
+/// A copy of a message heard, as kept.
+#[derive(Debug, Clone, PartialEq, sqlx::FromRow)]
+pub struct RouteRow {
+    pub path: Vec<u8>,
+    pub hash_size: i64,
+    pub flooded: bool,
+    pub snr: Option<f32>,
+    pub rssi: Option<i32>,
+    pub scope: Option<String>,
+    pub at: i64,
 }
 
 fn status_name(status: MessageStatus) -> &'static str {
@@ -2083,6 +2154,50 @@ mod tests {
         assert_eq!(count("SELECT count(*) FROM traceroute").await, 1);
         assert_eq!(count("SELECT count(*) FROM packet").await, 1);
         assert_eq!(count("SELECT count(*) FROM packet_seen").await, 1);
+    }
+
+    #[tokio::test]
+    async fn a_messages_routes_are_kept_whether_it_came_first_or_not() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        let route = |path: Vec<u8>, scope: Option<&str>| RouteRow {
+            path,
+            hash_size: 2,
+            flooded: true,
+            snr: Some(6.0),
+            rssi: Some(-92),
+            scope: scope.map(str::to_owned),
+            at: 10,
+        };
+        // A copy before its message: nothing to tell of yet.
+        assert!(
+            store
+                .add_route(
+                    radio,
+                    9,
+                    &route(vec![0x52, 0x59, 0x55, 0x5c], Some("galicia"))
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let kept = store
+            .add_message(radio, &text(9, 5, BROADCAST, false))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((kept.heard, kept.scope.as_deref()), (1, Some("galicia")));
+        // Another, after: the message as it is now.
+        let told = store
+            .add_route(radio, 9, &route(vec![0x55, 0x5c], None))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((told.id, told.heard), (kept.id, 2));
+        let routes = store.routes(radio, kept.id).await.unwrap().unwrap();
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0].path, [0x52, 0x59, 0x55, 0x5c]);
+        assert_eq!(store.routes(radio, kept.id + 1).await.unwrap(), None);
     }
 
     #[tokio::test]

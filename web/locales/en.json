@@ -814,5 +814,16 @@
   "mc_channel_scope_hint": "The region what you send to this channel floods in. The radio does not keep it: meshctl does, and it goes in its link.",
   "mc_channel_scope_menu": "Region what you send to this channel floods in",
   "regions_subtitle_radio": "#{r} (radio)",
-  "regions_subtitle_none": "no region"
+  "regions_subtitle_none": "no region",
+  "route_heard": "Heard {n} times",
+  "route_echoes": "Repeated {n} times",
+  "route_hint": "Each copy that came and which way: the repeaters from its sender's side to this radio.",
+  "route_echoes_hint": "The copies of your message this radio heard as it was repeated, and which way.",
+  "route_straight": "Straight, no repeaters",
+  "route_direct": "Along a known path",
+  "route_unknown": "A repeater this radio does not know",
+  "route_many": "{n} possible ({hash})",
+  "route_region_unknown": "unknown region",
+  "route_heard_one": "Heard once",
+  "route_echoes_one": "Repeated once"
 }

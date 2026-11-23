@@ -1047,16 +1047,42 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
     let live = expect_context::<Live>();
     let thread = expect_context::<Thread>();
     let packet = RwSignal::new(None::<meshctl_api::Packet>);
+    // The ways it came, on a MeshCore radio: read again as more copies come.
+    let routes = RwSignal::new(Vec::<meshctl_api::MessageRoute>::new());
+    Effect::new(move |_| {
+        let Some(id) = thread.details.get() else {
+            routes.set(Vec::new());
+            return;
+        };
+        let heard = live
+            .thread
+            .with(|t| t.iter().find(|m| m.id == id).map_or(0, |m| m.heard));
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        if heard == 0 {
+            routes.set(Vec::new());
+            return;
+        }
+        spawn_local(async move {
+            if let Ok(read) = daemon::message_routes(radio, id).await
+                && thread.details.get_untracked() == Some(id)
+            {
+                routes.set(read);
+            }
+        });
+    });
     Effect::new(move |_| {
         packet.set(None);
         let (Some(id), Some(radio)) = (thread.details.get(), live.selected.get_untracked()) else {
             return;
         };
-        // What was sent says no more than its status: only what was heard.
+        // What was sent says no more than its status: only what was heard;
+        // and a MeshCore radio keeps no packets, its routes tell instead.
         let heard = live
             .thread
             .with_untracked(|t| t.iter().any(|m| m.id == id && !m.outgoing));
-        if !heard {
+        if !heard || untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore) {
             return;
         }
         spawn_local(async move {
@@ -1200,6 +1226,91 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                 .into_any(),
             )
         });
+        // Each copy heard, and the way it came: every repeater by its name,
+        // or by its hash and how many it may be.
+        let outgoing = message.outgoing;
+        let route_list = move || {
+            let all = routes.get();
+            if all.is_empty() {
+                return None;
+            }
+            let count = all.len();
+            let lines = all
+                .into_iter()
+                .map(|route| {
+                    let hops = route
+                        .hops
+                        .iter()
+                        .enumerate()
+                        .map(|(at, hop)| {
+                            let (name, title, unsure) = match hop.nodes.as_slice() {
+                                [one] => (node_name(live, *one), None, false),
+                                [] => (format!("··{}", hop.hash), Some(t_string!(i18n, route_unknown).to_owned()), true),
+                                many => (
+                                    t_string!(i18n, route_many)
+                                        .replace("{n}", &many.len().to_string())
+                                        .replace("{hash}", &hop.hash),
+                                    Some(many.iter().map(|n| node_name(live, *n)).collect::<Vec<_>>().join(", ")),
+                                    true,
+                                ),
+                            };
+                            view! {
+                                {(at > 0).then(|| view! { <span class="arrow" aria-hidden="true">"→"</span> })}
+                                <span class="hop" class:unsure=unsure title=title>{name}</span>
+                            }
+                        })
+                        .collect_view();
+                    let way = if route.hops.is_empty() {
+                        if route.flooded {
+                            t_string!(i18n, route_straight).to_owned()
+                        } else {
+                            t_string!(i18n, route_direct).to_owned()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    let mut facts: Vec<String> = Vec::new();
+                    if let Some(snr) = route.snr {
+                        facts.push(format!("{snr:.1} dB"));
+                    }
+                    if let Some(rssi) = route.rssi {
+                        facts.push(format!("{rssi} dBm"));
+                    }
+                    match route.scope.as_deref() {
+                        Some("?") => facts.push(t_string!(i18n, route_region_unknown).to_owned()),
+                        Some(name) => facts.push(format!("#{name}")),
+                        None => {}
+                    }
+                    view! {
+                        <li>
+                            <span class="hops">
+                                {(!way.is_empty()).then(|| view! { <span class="way">{way}</span> })}
+                                {hops}
+                            </span>
+                            <span class="dim">{facts.join(" · ")}</span>
+                        </li>
+                    }
+                })
+                .collect_view();
+            Some(view! {
+                <section class="routes">
+                    <h3>
+                        {move || {
+                            match (outgoing, count) {
+                                (true, 1) => t_string!(i18n, route_echoes_one).to_owned(),
+                                (false, 1) => t_string!(i18n, route_heard_one).to_owned(),
+                                (true, n) => t_string!(i18n, route_echoes).replace("{n}", &n.to_string()),
+                                (false, n) => t_string!(i18n, route_heard).replace("{n}", &n.to_string()),
+                            }
+                        }}
+                    </h3>
+                    <p class="hint dim">
+                        {move || if outgoing { t!(i18n, route_echoes_hint).into_any() } else { t!(i18n, route_hint).into_any() }}
+                    </p>
+                    <ol>{lines}</ol>
+                </section>
+            })
+        };
         let packet_id = (message.packet_id != 0).then(|| {
             fact(
                 t!(i18n, chat_packet).into_any(),
@@ -1239,6 +1350,7 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                         {reactions}
                         {packet_id}
                     </dl>
+                    {route_list}
                 </div>
             </div>
         })

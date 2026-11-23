@@ -1137,10 +1137,45 @@ pub struct Message {
     pub rssi: Option<i32>,
     pub hops_away: Option<u32>,
     pub via_mqtt: bool,
-    /// The region it went flooded in, without `#`, for one meshctl sent
-    /// through a MeshCore radio scoped to one; none otherwise.
+    /// The region it went flooded in, without `#`: sent scoped to one from
+    /// meshctl, or heard in one through a MeshCore radio; `?` for a region
+    /// whose key is not known; none otherwise.
     #[serde(default)]
     pub scope: Option<String>,
+    /// How many copies of it a MeshCore radio heard: each by a way of its
+    /// own, as its routes tell.
+    #[serde(default)]
+    pub heard: u32,
+}
+
+/// A copy of a message heard, and the way it came.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MessageRoute {
+    /// The repeaters it went through, from its sender's side to the radio;
+    /// none for one heard straight, or sent along a path.
+    pub hops: Vec<RouteHop>,
+    /// Whether it was flooded, its path built up as it went.
+    pub flooded: bool,
+    pub snr: Option<f32>,
+    pub rssi: Option<i32>,
+    /// The region it came in, without `#`; `?` for one whose key is not
+    /// known.
+    pub scope: Option<String>,
+    /// When it was heard, in seconds since the epoch.
+    pub at: i64,
+}
+
+/// A repeater on a route: its hash, and the nodes it may be.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RouteHop {
+    /// The start of its public key, in hex: one to three bytes.
+    #[cfg_attr(feature = "openapi", schema(example = "1e35"))]
+    pub hash: String,
+    /// The nodes the radio knows whose key starts so: none, one, or more
+    /// than one it cannot tell apart.
+    pub nodes: Vec<u32>,
 }
 
 /// A message to send: to a channel, or to a node.

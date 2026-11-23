@@ -163,6 +163,26 @@ CREATE UNIQUE INDEX message_packet ON message (radio_id, from_num, packet_id);
 CREATE INDEX message_channel ON message (channel_id, id) WHERE channel_id IS NOT NULL;
 CREATE INDEX message_direct ON message (radio_id, to_num, id);
 
+-- Each copy of a message a MeshCore radio heard, and the way it came, by the
+-- message's packet id: a copy may come before its message is kept.
+CREATE TABLE message_route (
+    id INTEGER PRIMARY KEY,
+    radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
+    packet_id INTEGER NOT NULL,
+    -- The repeaters' hashes it went through, from its sender's side, each
+    -- hash_size bytes.
+    path BLOB NOT NULL,
+    hash_size INTEGER NOT NULL,
+    flooded INTEGER NOT NULL,
+    snr REAL,
+    rssi INTEGER,
+    -- The region it came in, by its name; ? for one whose key is not known.
+    scope TEXT,
+    at INTEGER NOT NULL
+);
+
+CREATE INDEX message_route_packet ON message_route (radio_id, packet_id, id);
+
 -- The messages as shown: a channel message with the slot its channel has
 -- now, if any.
 CREATE VIEW message_view AS
@@ -173,7 +193,16 @@ SELECT
         m.channel
     ) AS channel,
     m.channel_id, m.text, m.at, m.outgoing, m.status, m.error, m.reply_id,
-    m.emoji, m.snr, m.rssi, m.hops_away, m.via_mqtt, m.scope
+    m.emoji, m.snr, m.rssi, m.hops_away, m.via_mqtt,
+    coalesce(m.scope, (
+        SELECT r.scope FROM message_route r
+        WHERE r.radio_id = m.radio_id AND r.packet_id = m.packet_id AND r.scope IS NOT NULL
+        ORDER BY r.id LIMIT 1
+    )) AS scope,
+    (
+        SELECT count(*) FROM message_route r
+        WHERE r.radio_id = m.radio_id AND r.packet_id = m.packet_id
+    ) AS heard
 FROM message m;
 
 -- The traceroutes each radio sent.

@@ -177,6 +177,36 @@ pub enum Event {
     /// What a node answered a request with that comes as no packet, as
     /// MeshCore nodes answer.
     Reply(Reply),
+    /// A copy of a message heard, and the way it came.
+    Route(Route),
+}
+
+/// A copy of a message the radio heard, and the way it came: as MeshCore
+/// radios log every one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Route {
+    /// The message it is a copy of.
+    pub packet_id: u32,
+    /// The hashes of the repeaters it went through, from its sender's side;
+    /// none for one heard straight, or sent along a path.
+    pub hops: Vec<Vec<u8>>,
+    /// Whether it was flooded, its path built up as it went.
+    pub flooded: bool,
+    pub snr: f32,
+    pub rssi: i32,
+    /// When it was heard, in seconds since the epoch.
+    pub at: u32,
+    /// The region code it went with, and what it is the code of.
+    pub region: Option<RegionCode>,
+}
+
+/// A packet's region code, with what it was worked out from: which region it
+/// is, whoever knows the region's key can tell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegionCode {
+    pub code: u16,
+    pub payload_type: u8,
+    pub payload: Vec<u8>,
 }
 
 /// The region a MeshCore message floods in, for it alone.

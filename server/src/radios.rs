@@ -48,6 +48,13 @@ pub enum Change {
     Mesh(RadioId, mesh::Event),
     /// A message heard or sent, as kept.
     Message(RadioId, Message),
+    /// Another copy of a message heard.
+    MessageHeard {
+        radio: RadioId,
+        id: MessageId,
+        heard: u32,
+        scope: Option<String>,
+    },
     /// What became of a message sent.
     MessageStatus {
         radio: RadioId,
@@ -330,6 +337,70 @@ async fn keep_reply(
         .await?
     {
         let _ = changes.send(Change::Request(radio, request));
+    }
+    Ok(())
+}
+
+/// Keeps a copy of a message heard and the way it came, its region told by
+/// the regions whose keys are known: found nearby, of a channel, or the
+/// radio's default. Tells of the message, if kept already.
+async fn keep_route(
+    store: &Store,
+    changes: &broadcast::Sender<Change>,
+    radio: RadioId,
+    mesh: &Mesh,
+    route: &mesh::Route,
+) -> Result<()> {
+    let scope = match &route.region {
+        None => None,
+        Some(region) => {
+            let mut names: Vec<String> = store
+                .latest_regions(radio)
+                .await?
+                .into_iter()
+                .flat_map(|(_, reply, _)| {
+                    let meshctl_api::RequestReply::Regions { regions, .. } = reply;
+                    regions
+                })
+                .collect();
+            names.extend(store.channel_scopes(radio).await?.into_values());
+            names.extend(mesh.read(|state| {
+                state
+                    .meshcore
+                    .as_ref()
+                    .and_then(|s| s.default_scope.clone().flatten())
+                    .map(|(name, _)| name)
+            }));
+            let found = names.into_iter().find(|name| {
+                name != "*"
+                    && meshctl_core::meshcore::raw::transport_code(
+                        &crate::meshcore::hashtag_secret(name),
+                        region.payload_type,
+                        &region.payload,
+                    ) == region.code
+            });
+            Some(found.unwrap_or_else(|| "?".to_owned()))
+        }
+    };
+    let row = crate::store::RouteRow {
+        path: route.hops.concat(),
+        hash_size: route
+            .hops
+            .first()
+            .map_or(1, |h| i64::try_from(h.len()).unwrap_or(1)),
+        flooded: route.flooded,
+        snr: Some(route.snr),
+        rssi: Some(route.rssi),
+        scope,
+        at: i64::from(route.at),
+    };
+    if let Some(message) = store.add_route(radio, route.packet_id, &row).await? {
+        let _ = changes.send(Change::MessageHeard {
+            radio,
+            id: message.id,
+            heard: message.heard,
+            scope: message.scope,
+        });
     }
     Ok(())
 }
@@ -822,6 +893,55 @@ impl Radios {
             .ok_or_else(|| anyhow::anyhow!("a packet id was used twice"))?;
         let _ = self.changes.send(Change::Message(id, kept.clone()));
         Ok(kept)
+    }
+
+    /// The ways a message came, each copy heard: each hop with the nodes its
+    /// hash may be. None if there is no such radio or message.
+    pub async fn routes(
+        &self,
+        id: RadioId,
+        message: MessageId,
+    ) -> Result<Option<Vec<meshctl_api::MessageRoute>>> {
+        let Some(mesh) = self.mesh(id) else {
+            return Ok(None);
+        };
+        let Some(rows) = self.store.routes(id, message).await? else {
+            return Ok(None);
+        };
+        let keys: Vec<(u32, Vec<u8>)> = mesh.read(|state| {
+            state
+                .nodes
+                .values()
+                .filter_map(|n| Some((n.num, n.user.as_ref()?.public_key.clone())))
+                .filter(|(_, key)| !key.is_empty())
+                .collect()
+        });
+        Ok(Some(
+            rows.into_iter()
+                .map(|row| {
+                    let size = usize::try_from(row.hash_size).unwrap_or(1).max(1);
+                    meshctl_api::MessageRoute {
+                        hops: row
+                            .path
+                            .chunks(size)
+                            .map(|hash| meshctl_api::RouteHop {
+                                hash: hash.iter().map(|b| format!("{b:02x}")).collect(),
+                                nodes: keys
+                                    .iter()
+                                    .filter(|(_, key)| key.starts_with(hash))
+                                    .map(|(num, _)| *num)
+                                    .collect(),
+                            })
+                            .collect(),
+                        flooded: row.flooded,
+                        snr: row.snr,
+                        rssi: row.rssi,
+                        scope: row.scope,
+                        at: row.at,
+                    }
+                })
+                .collect(),
+        ))
     }
 
     /// Every conversation a radio has: its channels, whether or not anything
@@ -2441,6 +2561,9 @@ impl Radios {
                         })
                     }
                     Ok(mesh::Event::Reply(reply)) => keep_reply(&store, &changes, id, &reply).await,
+                    Ok(mesh::Event::Route(route)) => {
+                        keep_route(&store, &changes, id, &mesh, &route).await
+                    }
                     Ok(mesh::Event::Synced) => {
                         connected = true;
                         match save_all(&store, id, &mesh).await {

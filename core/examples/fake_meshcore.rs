@@ -38,6 +38,7 @@ const PUBLIC_SECRET: [u8; 16] = [
 const REPEAT_FREQUENCIES: [u32; 3] = [433_000, 869_495, 918_000];
 
 use meshctl_core::meshcore::protocol::{FROM_CLIENT, FROM_RADIO};
+use meshctl_core::meshcore::raw;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -346,13 +347,53 @@ fn direct_message(from: &Contact, text: &str) -> Vec<u8> {
 }
 
 /// A channel message, in the newer form: its sender only in its text.
-fn channel_message(slot: u8, sender: &str, text: &str) -> Vec<u8> {
+fn channel_message(slot: u8, at: u32, sender: &str, text: &str) -> Vec<u8> {
     let snr = i8::try_from(random(40)).unwrap_or(0) - 20;
-    let hops = u8::try_from(random(4)).unwrap_or(0);
-    let mut frame = vec![0x11, snr.cast_unsigned(), 0, 0, slot, hops, 0];
-    frame.extend(now().to_le_bytes());
+    let mut frame = vec![0x11, snr.cast_unsigned(), 0, 0, slot, 2, 0];
+    frame.extend(at.to_le_bytes());
     frame.extend(format!("{sender}: {text}").as_bytes());
     frame
+}
+
+/// A packet heard, raw, as the radio logs it: its SNR in quarters of a dB,
+/// its RSSI, and the packet.
+fn rx_log(snr: i8, rssi: i8, packet: &[u8]) -> Vec<u8> {
+    let mut frame = vec![0x88, (snr * 4).cast_unsigned(), rssi.cast_unsigned()];
+    frame.extend(packet);
+    frame
+}
+
+/// A flooded packet, its path the hashes of those it went through, two
+/// bytes each; in a region by its key, if given.
+fn flooded(
+    payload_type: u8,
+    hops: &[[u8; 32]],
+    region: Option<&[u8; 16]>,
+    payload: &[u8],
+) -> Vec<u8> {
+    let route = if region.is_some() {
+        raw::ROUTE_TRANSPORT_FLOOD
+    } else {
+        raw::ROUTE_FLOOD
+    };
+    let mut packet = vec![(payload_type << 2) | route];
+    if let Some(key) = region {
+        packet.extend(raw::transport_code(key, payload_type, payload).to_le_bytes());
+        packet.extend([0, 0]);
+    }
+    packet.push(0x40 | u8::try_from(hops.len()).unwrap_or(0));
+    for hop in hops {
+        packet.extend(&hop[..2]);
+    }
+    packet.extend(payload);
+    packet
+}
+
+/// The key of a region, by its name: the start of the SHA-256 of `#name`.
+fn region_key(name: &str) -> [u8; 16] {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!("#{name}").as_bytes());
+    digest[..16].try_into().unwrap_or_default()
 }
 
 /// What the radio answers a command, and what it pushes after a while.
@@ -887,9 +928,33 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             }
             const SENDERS: [&str; 4] = ["Pepe", "Uxía", "Brais 🚲", "EA1XYZ"];
             let sender = SENDERS[usize::try_from(random(4)).unwrap_or(0)];
-            let message = channel_message(slot, sender, text);
+            let at = now();
+            let message = channel_message(slot, at, sender, text);
             radio.queued.push_back(message);
+            // Heard twice: through Monte and Torre, then through the room
+            // and Torre; on galicia, in its region.
+            let secret = radio.channels[usize::from(slot)].1;
+            let payload = raw::seal_channel_text(&secret, at, &format!("{sender}: {text}"));
+            let region = (slot == 1).then(|| region_key("galicia"));
+            let first = flooded(
+                raw::PAYLOAD_GRP_TXT,
+                &[key(0x52), key(0x55)],
+                region.as_ref(),
+                &payload,
+            );
+            let second = flooded(
+                raw::PAYLOAD_GRP_TXT,
+                &[key(0x53), key(0x55)],
+                region.as_ref(),
+                &payload,
+            );
+            let _ = events.send(Event::Push(rx_log(6, -92, &first)));
             let _ = events.send(Event::Push(vec![0x83]));
+            let events = events.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(900)).await;
+                let _ = events.send(Event::Push(rx_log(3, -101, &second)));
+            });
             format!("{sender} writes on slot {slot}")
         }
         Some("dm") => {
@@ -901,6 +966,13 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                 return "Ana is gone".into();
             };
             radio.queued.push_back(direct_message(&ana, &text));
+            // Straight from her, sealed to the radio's key: whom it is to and
+            // from, and what cannot be read here.
+            let mut payload = vec![ME[0], ana.key[0]];
+            payload.extend((0..18).map(|_| u8::try_from(random(256)).unwrap_or(0)));
+            let mut packet = vec![(raw::PAYLOAD_TXT_MSG << 2) | raw::ROUTE_DIRECT, 0x40];
+            packet.extend(payload);
+            let _ = events.send(Event::Push(rx_log(9, -70, &packet)));
             let _ = events.send(Event::Push(vec![0x83]));
             "Ana writes".into()
         }

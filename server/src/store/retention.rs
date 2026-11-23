@@ -106,6 +106,11 @@ impl Store {
 
     /// Forgets the messages heard or sent before `before`. How many went.
     pub async fn prune_messages(&self, before: i64) -> Result<u64> {
+        // The ways they came with them.
+        sqlx::query("DELETE FROM message_route WHERE at < ?")
+            .bind(before)
+            .execute(&self.pool)
+            .await?;
         Ok(sqlx::query("DELETE FROM message WHERE at < ?")
             .bind(before)
             .execute(&self.pool)

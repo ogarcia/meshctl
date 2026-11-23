@@ -113,8 +113,20 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
             | mesh::Event::Ack(_)
             | mesh::Event::Traceroute(_)
             | mesh::Event::AdminAnswer { .. }
-            | mesh::Event::Reply(_),
+            | mesh::Event::Reply(_)
+            | mesh::Event::Route(_),
         ) => return None,
+        Change::MessageHeard {
+            radio,
+            id,
+            heard,
+            scope,
+        } => ServerMessage::MessageHeard {
+            radio,
+            id,
+            heard,
+            scope,
+        },
         Change::Traceroute(radio, traceroute) => ServerMessage::Traceroute { radio, traceroute },
         Change::Message(radio, message) => ServerMessage::Message { radio, message },
         Change::Packet(radio, packet) => ServerMessage::Packet { radio, packet },

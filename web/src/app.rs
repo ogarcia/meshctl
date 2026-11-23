@@ -1018,6 +1018,20 @@ impl Live {
                     });
                     Ok(())
                 }
+                ServerMessage::MessageHeard {
+                    radio,
+                    id,
+                    heard,
+                    scope,
+                } if self.is_selected(radio) => {
+                    self.thread.update(|thread| {
+                        if let Some(message) = thread.iter_mut().find(|m| m.id == id) {
+                            message.heard = heard;
+                            message.scope = scope;
+                        }
+                    });
+                    Ok(())
+                }
                 ServerMessage::Traceroute { radio, traceroute } if self.is_selected(radio) => {
                     if traceroute.status == TracerouteStatus::Pending {
                         self.paced(Pace::Traceroute);

@@ -814,5 +814,16 @@
   "mc_channel_scope_hint": "La región en la que se inunda lo que envías a este canal. La radio no la guarda: la recuerda meshctl, y va en su enlace.",
   "mc_channel_scope_menu": "Región en la que se inunda lo que envías a este canal",
   "regions_subtitle_radio": "#{r} (radio)",
-  "regions_subtitle_none": "sin región"
+  "regions_subtitle_none": "sin región",
+  "route_heard": "Oído {n} veces",
+  "route_echoes": "Repetido {n} veces",
+  "route_hint": "Cada copia que llegó y por dónde: los repetidores desde el lado de quien lo envió hasta esta radio.",
+  "route_echoes_hint": "Las copias de tu mensaje que esta radio oyó al ser repetido, y por dónde.",
+  "route_straight": "Directo, sin repetidores",
+  "route_direct": "Por una ruta conocida",
+  "route_unknown": "Un repetidor que esta radio no conoce",
+  "route_many": "{n} posibles ({hash})",
+  "route_region_unknown": "región desconocida",
+  "route_heard_one": "Oído una vez",
+  "route_echoes_one": "Repetido una vez"
 }

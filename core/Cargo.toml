@@ -9,10 +9,13 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+aes = "0.8"
 bytes = "1"
+hmac = "0.12"
 meshctl-proto.workspace = true
 prost-reflect = "0.16"
 prost.workspace = true
+sha2 = "0.10"
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 # Without libudev: it is only for listing ports with their USB details, which
 # a path given in the configuration does not need, and it would keep a static

@@ -10,8 +10,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Conversation, ConversationRead, Error, ErrorCode, Message, MessageId, NewMessage, Packet, Peer,
-    RadioId,
+    Conversation, ConversationRead, Error, ErrorCode, Message, MessageId, MessageRoute, NewMessage,
+    Packet, Peer, RadioId,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -31,6 +31,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(messages, send))
         .routes(routes!(forget))
         .routes(routes!(message_packet))
+        .routes(routes!(message_routes))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -214,6 +215,38 @@ async fn message_packet(
 ) -> Response {
     match state.radios.message_packet(radio, id).await {
         Ok(Some(packet)) => Json(packet).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(err) => failed(&err),
+    }
+}
+
+/// A message's routes
+///
+/// Each copy of a message a MeshCore radio heard, the first first, and the
+/// way it came: the repeaters it went through, from its sender's side, each
+/// by its hash and the nodes the radio knows that it may be; its signal, and
+/// the region it came in. Ours too, as repeaters repeated them. Empty for a
+/// message none was heard of.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/messages/{id}/routes",
+    tag = "chat",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("id" = MessageId, Path, description = "The message's id"),
+    ),
+    responses(
+        (status = 200, description = "The routes", body = Vec<MessageRoute>),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio or message", body = Error),
+    )
+)]
+async fn message_routes(
+    State(state): State<AppState>,
+    Path((radio, id)): Path<(RadioId, MessageId)>,
+) -> Response {
+    match state.radios.routes(radio, id).await {
+        Ok(Some(routes)) => Json(routes).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         Err(err) => failed(&err),
     }

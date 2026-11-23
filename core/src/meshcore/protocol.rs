@@ -559,6 +559,13 @@ pub enum Response {
     RepeatFrequencies(Vec<(u32, u32)>),
     /// The region what it floods is scoped to, name and key; none if none.
     DefaultScope(Option<(String, [u8; 16])>),
+    /// Pushed: a packet the radio heard, raw, every copy of it: the SNR and
+    /// RSSI it was heard at.
+    RxLog {
+        snr: f32,
+        rssi: i8,
+        raw: Vec<u8>,
+    },
     /// Pushed: what a node answered a request with, by the tag the request
     /// went by.
     BinaryResponse {
@@ -590,6 +597,7 @@ impl Response {
                 | Self::MessagesWaiting
                 | Self::NewContact(_)
                 | Self::BinaryResponse { .. }
+                | Self::RxLog { .. }
         ) || matches!(self, Self::Other(code) if *code >= 0x80)
     }
 
@@ -651,6 +659,11 @@ impl Response {
             0x82 => Self::Ack(bytes_at(data, 0)?),
             0x83 => Self::MessagesWaiting,
             0x8a => Self::NewContact(contact(data)?),
+            0x88 => Self::RxLog {
+                snr: snr(*data.first()?),
+                rssi: data.get(1)?.cast_signed(),
+                raw: data.get(2..).unwrap_or_default().to_vec(),
+            },
             0x8c => Self::BinaryResponse {
                 tag: bytes_at(data, 1)?,
                 data: data.get(5..).unwrap_or_default().to_vec(),
@@ -1000,7 +1013,16 @@ mod tests {
         assert_eq!(ack, Response::Ack([1, 2, 3, 4]));
         assert!(ack.is_push());
         assert!(Response::parse(&[0x83]).unwrap().is_push());
-        assert!(Response::parse(&[0x88, 0]).unwrap().is_push());
+        assert_eq!(Response::parse(&[0x88, 0]), None);
+        assert_eq!(
+            Response::parse(&[0x88, 20, 0xb0, 0x15, 0x01, 0x07]),
+            Some(Response::RxLog {
+                snr: 5.0,
+                rssi: -80,
+                raw: vec![0x15, 0x01, 0x07]
+            })
+        );
+        assert!(Response::parse(&[0x88, 0, 0]).unwrap().is_push());
         assert!(!Response::parse(&[0x0a]).unwrap().is_push());
     }
 

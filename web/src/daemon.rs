@@ -199,6 +199,14 @@ pub async fn message_packet(
     get(&format!("/radios/{radio}/messages/{id}/packet")).await
 }
 
+/// The ways a message came: each copy heard through a MeshCore radio.
+pub async fn message_routes(
+    radio: RadioId,
+    id: meshctl_api::MessageId,
+) -> Result<Vec<meshctl_api::MessageRoute>, Failure> {
+    get(&format!("/radios/{radio}/messages/{id}/routes")).await
+}
+
 /// Forgets a message the radio keeps, and the reactions to it: only in
 /// meshctl, not on the mesh.
 pub async fn forget_message(radio: RadioId, id: meshctl_api::MessageId) -> Result<(), Failure> {

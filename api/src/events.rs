@@ -88,6 +88,14 @@ pub enum ServerMessage {
         status: MessageStatus,
         error: Option<String>,
     },
+    /// Another copy of a message heard, through a MeshCore radio: how many
+    /// times it was heard now, and the region it came in.
+    MessageHeard {
+        radio: RadioId,
+        id: MessageId,
+        heard: u32,
+        scope: Option<String>,
+    },
     /// A traceroute sent through a radio, or what became of it.
     Traceroute {
         radio: RadioId,

@@ -23,6 +23,7 @@
 //! against real radios.
 
 pub mod protocol;
+pub mod raw;
 
 use crate::link::{self, Framing, Link, Transport};
 use crate::mesh::{
@@ -647,6 +648,170 @@ pub(crate) struct Session {
     /// Held while a message is sent with a region of its own, set before it
     /// and back after: another is not sent in between.
     sending: Arc<tokio::sync::Mutex<()>>,
+    /// The packets heard lately, to tell which message each copy is.
+    heard: Arc<Mutex<Heard>>,
+}
+
+/// How long a packet heard is remembered, for its later copies.
+const HEARD_KEPT: Duration = Duration::from_secs(600);
+/// How long a direct text heard waits for the message it is.
+const DIRECT_WAIT: Duration = Duration::from_secs(30);
+
+/// The packets a radio heard lately: those known, by what they carry, and
+/// the message each is; the direct texts to it that wait for their message;
+/// and the direct messages come before any copy of them, by their sender's
+/// hash, that wait for theirs.
+#[derive(Default)]
+struct Heard {
+    known: HashMap<u64, (u32, Instant)>,
+    waiting: std::collections::VecDeque<HeardCopy>,
+    unheard: std::collections::VecDeque<(u8, u32, Instant)>,
+}
+
+/// A copy of a packet heard, as the radio logged it.
+#[derive(Clone)]
+struct HeardCopy {
+    packet: raw::RawPacket,
+    snr: f32,
+    rssi: i8,
+    at: u32,
+    heard: Instant,
+}
+
+impl HeardCopy {
+    fn route(&self, packet_id: u32) -> crate::mesh::Route {
+        crate::mesh::Route {
+            packet_id,
+            hops: self.packet.hops(),
+            flooded: self.packet.flooded(),
+            snr: self.snr,
+            rssi: i32::from(self.rssi),
+            at: self.at,
+            region: self.packet.transport.map(|codes| crate::mesh::RegionCode {
+                code: codes[0],
+                payload_type: self.packet.payload_type,
+                payload: self.packet.payload.clone(),
+            }),
+        }
+    }
+}
+
+/// A packet the radio heard, raw: told as the message it is a copy of, if
+/// that can be said now; a direct text to it waits for its message.
+fn heard_raw(mesh: &Mesh, session: &Session, snr: f32, rssi: i8, bytes: &[u8]) {
+    let Some(packet) = raw::RawPacket::parse(bytes) else {
+        return;
+    };
+    let now = Instant::now();
+    let copy = HeardCopy {
+        packet,
+        snr,
+        rssi,
+        at: crate::meshcore::now(),
+        heard: now,
+    };
+    let key = copy.packet.key();
+    let mut heard = session.heard.lock().unwrap_or_else(|e| e.into_inner());
+    heard
+        .known
+        .retain(|_, (_, at)| now.duration_since(*at) < HEARD_KEPT);
+    heard
+        .waiting
+        .retain(|c| now.duration_since(c.heard) < DIRECT_WAIT);
+    heard
+        .unheard
+        .retain(|(_, _, at)| now.duration_since(*at) < DIRECT_WAIT);
+    let known = heard.known.get(&key).map(|(id, _)| *id);
+    let packet_id = match (known, copy.packet.payload_type) {
+        (Some(id), _) => Some(id),
+        (None, raw::PAYLOAD_GRP_TXT) => {
+            let id = mesh.read(|state| channel_packet_id(state, &copy.packet.payload));
+            if let Some(id) = id {
+                heard.known.insert(key, (id, now));
+            }
+            id
+        }
+        (None, raw::PAYLOAD_TXT_MSG) => {
+            // To the radio: kept for the message from its sender.
+            let own = mesh.read(|state| state.local.as_ref().map(|l| l.num.to_be_bytes()[0]));
+            if copy.packet.payload.first().copied() != own {
+                None
+            } else {
+                // Its message come already, from its sender: it is that one.
+                let from = copy.packet.payload.get(1).copied();
+                match heard.unheard.iter().position(|(f, _, _)| Some(*f) == from) {
+                    Some(at) => {
+                        let id = heard.unheard.remove(at).map_or(0, |(_, id, _)| id);
+                        heard.known.insert(key, (id, now));
+                        Some(id)
+                    }
+                    None => {
+                        heard.waiting.push_back(copy.clone());
+                        None
+                    }
+                }
+            }
+        }
+        _ => None,
+    };
+    drop(heard);
+    if let Some(id) = packet_id {
+        mesh.update(|_| vec![Event::Route(copy.route(id))]);
+    }
+}
+
+/// The message a channel text heard raw is, opened with the secret of a
+/// channel the radio has: as heard, or ours, as repeaters repeat it.
+fn channel_packet_id(state: &MeshState, payload: &[u8]) -> Option<u32> {
+    let channels = state.meshcore_channels.as_ref()?;
+    let (index, timestamp, text) = channels.secrets.iter().find_map(|(index, secret)| {
+        raw::open_channel_text(secret, payload).map(|(at, text)| (*index, at, text))
+    })?;
+    let own = state.meshcore.as_ref().map(|s| format!("{}: ", s.name));
+    let me = state.local.as_ref().map(|l| l.num);
+    match (own, me) {
+        (Some(own), Some(me)) if text.starts_with(&own) => {
+            Some(message_id(&me.to_be_bytes(), timestamp, &text[own.len()..]))
+        }
+        _ => Some(message_id(
+            &[u8::try_from(index).unwrap_or(0)],
+            timestamp,
+            &text,
+        )),
+    }
+}
+
+/// A direct message come: the copies of it heard raw, from its sender, are
+/// told as it, and so will later ones be.
+fn matched_direct(mesh: &Mesh, session: &Session, from: u8, packet_id: u32) {
+    let mut heard = session.heard.lock().unwrap_or_else(|e| e.into_inner());
+    // The latest from its sender, and every copy of the same.
+    let Some(key) = heard
+        .waiting
+        .iter()
+        .rev()
+        .find(|c| c.packet.payload.get(1).copied() == Some(from))
+        .map(|c| c.packet.key())
+    else {
+        // Its copy may come yet, logged ahead of it but read after.
+        heard.unheard.push_back((from, packet_id, Instant::now()));
+        return;
+    };
+    let copies: Vec<HeardCopy> = heard
+        .waiting
+        .iter()
+        .filter(|c| c.packet.key() == key)
+        .cloned()
+        .collect();
+    heard.waiting.retain(|c| c.packet.key() != key);
+    heard.known.insert(key, (packet_id, Instant::now()));
+    drop(heard);
+    mesh.update(|_| {
+        copies
+            .iter()
+            .map(|c| Event::Route(c.route(packet_id)))
+            .collect()
+    });
 }
 
 /// What an anonymous request asks a node for, as the firmware numbers it.
@@ -1207,6 +1372,7 @@ async fn session(
         paths: Arc::default(),
         asked: Arc::default(),
         sending: Arc::default(),
+        heard: Arc::default(),
     };
     let me_node = Node {
         last_heard: Some(now()),
@@ -1239,7 +1405,7 @@ async fn session(
     *mesh.meshcore.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());
 
     // Whatever arrived while nobody was connected: announced once, to nobody.
-    if let Err(why) = drain(mesh, &client).await {
+    if let Err(why) = drain(mesh, &client, &session).await {
         return why;
     }
     let nodes = mesh.read(|s| s.nodes.len());
@@ -1259,7 +1425,7 @@ async fn session(
             push = pushes.recv() => match push {
                 None => return "the link closed",
                 Some(Response::MessagesWaiting) => {
-                    if let Err(why) = drain(mesh, &client).await {
+                    if let Err(why) = drain(mesh, &client, &session).await {
                         return why;
                     }
                 }
@@ -1277,6 +1443,9 @@ async fn session(
                 Some(Response::Ack(tag)) => acknowledged(mesh, &session, tag),
                 Some(Response::BinaryResponse { tag, data }) => {
                     replied(mesh, &session, tag, &data);
+                }
+                Some(Response::RxLog { snr, rssi, raw }) => {
+                    heard_raw(mesh, &session, snr, rssi, &raw);
                 }
                 Some(_) => {}
             },
@@ -1352,10 +1521,14 @@ fn put_channels(state: &mut MeshState, slots: u8, channels: Vec<(u8, String, [u8
 }
 
 /// Asks for every queued message until there are none.
-async fn drain(mesh: &Mesh, client: &Client) -> Result<(), &'static str> {
+async fn drain(mesh: &Mesh, client: &Client, session: &Session) -> Result<(), &'static str> {
     while let Some(message) = client.next_message().await? {
         match message {
-            Response::ContactMessage(message) => mesh.update(|state| direct(state, &message)),
+            Response::ContactMessage(message) => {
+                mesh.update(|state| direct(state, &message));
+                let id = message_id(&message.prefix, message.timestamp, &message.text);
+                matched_direct(mesh, session, message.prefix[0], id);
+            }
             Response::ChannelMessage(message) => mesh.update(|state| channel(state, &message)),
             _ => {}
         }
