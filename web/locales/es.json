@@ -83,7 +83,7 @@
   "chat_sent": "Enviado: la radio oyó a otro nodo pasarlo",
   "chat_delivered": "Entregado: el nodo dijo que lo recibió",
   "chat_failed": "No se pudo enviar",
-  "chat_not_connected": "La radio no está conectada: los mensajes se pueden leer, no enviar.",
+  "chat_not_connected": "La radio no está conectada: puedes leer, no enviar.",
   "chat_invalid": "Ese mensaje no se puede enviar: está vacío o es demasiado largo, o el canal no está en la radio.",
   "radios_title": "Radios",
   "radio_name": "Nombre",
