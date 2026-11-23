@@ -272,7 +272,6 @@ fn NodeList() -> impl IntoView {
                         on:input=move |ev| filter.set(event_target_value(&ev))
                     />
                     <SortMenu sort />
-                    <crate::links::AddNodeLink />
                 </div>
             </div>
             <table class="nodes-table">

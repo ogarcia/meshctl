@@ -1736,7 +1736,11 @@ fn Topbar() -> impl IntoView {
     let heading = move || match live.page.get() {
         // A tab's own page, on a phone, says the radio instead of its name,
         // which the bar of tabs says.
-        Page::Nodes => view! { <h1 class="page-title">{t!(i18n, nodes_title)}</h1> }.into_any(),
+        Page::Nodes => view! {
+            <h1 class="page-title">{t!(i18n, nodes_title)}</h1>
+            <crate::links::AddNodeLink />
+        }
+        .into_any(),
         Page::Map => match live.map_pick.get() {
             // On a phone the node's card says it all, under the radio.
             Some(node) => view! {

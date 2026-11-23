@@ -108,6 +108,7 @@
   "link_no_slots": "La radio no tiene huecos libres para estos canales.",
   "link_refused": "La radio no lo ha aceptado.",
   "link_add_node": "Añadir nodo desde un enlace",
+  "node_add": "Añadir nodo",
   "link_add_channels_title": "Añadir canales desde un enlace",
   "link_hint_node": "Pega el enlace de contacto de un nodo, como lo comparten las apps de Meshtastic. Se lee al pegarlo y no se añade nada hasta que lo confirmes.",
   "link_hint_channels": "Pega un enlace de canales, como lo comparten las apps de Meshtastic. Se lee al pegarlo y no cambia nada hasta que lo confirmes.",

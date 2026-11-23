@@ -14,7 +14,10 @@ use leptos::task::spawn_local;
 use leptos_i18n::I18nContext;
 use meshctl_api::{ChannelKey, ErrorCode, LinkContents, LinkMode, RadioKind};
 
-const USER_PLUS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/user-plus.svg");
+/// A node added: Tabler's antenna, as the nodes' tab has it, with the plus
+/// its `*-plus` icons carry in a corner (`user-plus`'s), which none of its
+/// strokes reach.
+const ANTENNA_PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v8" /><path d="M16 4.5v7" /><path d="M12 5v16" /><path d="M8 5.5v5" /><path d="M4 6v4" /><path d="M20 8h-16" /><path d="M16 19h6" /><path d="M19 16v6" /></svg>"#;
 const LINK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/link.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
 
@@ -25,8 +28,8 @@ pub enum LinkWant {
     Channels,
 }
 
-/// The button by the search of the nodes that adds one from its link: only
-/// on a radio it adds to.
+/// The action of the list of nodes, in its heading, that adds one from its
+/// link, as the radios' adds a radio: only on a radio it adds to.
 #[component]
 pub fn AddNodeLink() -> impl IntoView {
     let i18n = use_i18n();
@@ -34,14 +37,18 @@ pub fn AddNodeLink() -> impl IntoView {
     move || {
         (live.selected_kind() == Some(RadioKind::Meshtastic)).then(|| {
             view! {
-                <button
-                    type="button"
-                    class="icon-button add-link"
-                    title=move || t_string!(i18n, link_add_node)
-                    aria-label=move || t_string!(i18n, link_add_node)
-                    inner_html=USER_PLUS
-                    on:click=move |_| live.adding_link.set(Some(LinkWant::Node))
-                ></button>
+                <div class="actions">
+                    <button
+                        type="button"
+                        class="primary with-icon"
+                        title=move || t_string!(i18n, link_add_node)
+                        aria-label=move || t_string!(i18n, link_add_node)
+                        on:click=move |_| live.adding_link.set(Some(LinkWant::Node))
+                    >
+                        <span class="icon" inner_html=ANTENNA_PLUS></span>
+                        <span class="label">{t!(i18n, node_add)}</span>
+                    </button>
+                </div>
             }
         })
     }

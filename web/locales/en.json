@@ -108,6 +108,7 @@
   "link_no_slots": "The radio has no free slots for these channels.",
   "link_refused": "The radio did not take it.",
   "link_add_node": "Add node from a link",
+  "node_add": "Add node",
   "link_add_channels_title": "Add channels from a link",
   "link_hint_node": "Paste a node's contact link, as the Meshtastic apps share it. It is read as it is pasted, and nothing is added until you confirm.",
   "link_hint_channels": "Paste a channels link, as the Meshtastic apps share it. It is read as it is pasted, and nothing changes until you confirm.",
