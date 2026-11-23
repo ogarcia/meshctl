@@ -1,0 +1,29 @@
+# Build artifacts — largest exclusion, speeds up context transfer significantly
+target/
+web/dist/
+
+# Pre-built binaries injected by CI (not present in local builds)
+# dist/ is intentionally NOT excluded — it must be available when
+# building with --build-arg BUILDER=prebuilt
+
+# What meshctl keeps when run from the tree
+data/
+*.db
+*.db-shm
+*.db-wal
+config.toml
+
+# Git and CI metadata
+.git/
+.github/
+.githooks/
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Redundant symlink — we reference Containerfile explicitly in CI
+Dockerfile

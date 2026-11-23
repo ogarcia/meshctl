@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "README.md"
+      - "LICENSE"
+  pull_request:
+    paths-ignore:
+      - "README.md"
+      - "LICENSE"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+# Least-privilege default for GITHUB_TOKEN; this workflow only reads the repo.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Format / Clippy / Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all -- --check
+      # Keep this line identical to the pre-commit hook's (.githooks).
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # The interface as the browser runs it, which the line above builds for
+      # the host instead.
+      - name: Clippy (interface, wasm)
+        run: cargo clippy -p meshctl-web --target wasm32-unknown-unknown -- -D warnings
+      - name: Test
+        run: cargo test --workspace --no-fail-fast
