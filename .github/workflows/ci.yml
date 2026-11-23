@@ -3,13 +3,19 @@ name: CI
 on:
   push:
     branches: [master]
+    # Only what builds nothing: Markdown at the top (not intro.md, which the
+    # API's docs embed), the licence, what git ignores.
     paths-ignore:
-      - "README.md"
+      - "*.md"
       - "LICENSE"
+      - ".gitignore"
   pull_request:
+    # Only what builds nothing: Markdown at the top (not intro.md, which the
+    # API's docs embed), the licence, what git ignores.
     paths-ignore:
-      - "README.md"
+      - "*.md"
       - "LICENSE"
+      - ".gitignore"
 
 env:
   CARGO_TERM_COLOR: always

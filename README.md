@@ -68,6 +68,38 @@ A radio serves one client at a time. If something else (the phone app, say)
 also needs it, put [tasticsplitter](https://github.com/ogarcia/tasticsplitter)
 in front and give meshctl its address instead.
 
+### In a container
+
+Every push to master builds an image, for amd64 and arm64:
+
+```sh
+podman run -d --name meshctl -p 7434:7434 \
+    -v meshctl:/var/lib/meshctl \
+    -e MESHCTL_TOKEN=a-long-secret \
+    ghcr.io/ogarcia/meshctl:master
+```
+
+In the container, meshctl listens on every interface, port 7434, and keeps its
+database in `/var/lib/meshctl`, the volume above. Set a token, or put a proxy
+in front (see [Access](#access)).
+
+A radio on USB is a device passed in, which the container's user must be
+allowed to open. With rootless podman, keep your own groups:
+
+```sh
+podman run … --device /dev/ttyACM0 --group-add keep-groups …
+```
+
+With docker, add the group that owns the device:
+
+```sh
+docker run … --device /dev/ttyACM0 --group-add "$(stat -c %g /dev/ttyACM0)" …
+```
+
+`master` follows master, and the warning above with it: a newer image may not
+open the database an older one made. If it does not start after an update,
+remove the volume and add your radios again.
+
 ## Access
 
 meshctl listens on `127.0.0.1:7434` by default, so only the machine it runs on
