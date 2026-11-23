@@ -1524,10 +1524,14 @@ fn RadioSidebar() -> impl IntoView {
     view! {
         <Show when=move || live.selected.get().is_some()>
             <RadioHead />
-            <div class="sidebar-body">
+            // The radio's pages, always there; its conversations under
+            // them, scrolled on their own however many there are.
+            <nav class="sidebar-pages">
                 {page_item(Page::Map)}
                 {page_item(Page::Nodes)}
                 {page_item(Page::Packets)}
+            </nav>
+            <div class="sidebar-body">
                 <h2>{t!(i18n, nav_channels)}</h2>
                 <For each=channels key=|peer| *peer let:peer>
                     <PeerItem peer />

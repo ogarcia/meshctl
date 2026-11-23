@@ -395,6 +395,9 @@
         letter-spacing: 0.06em;
       }
       .sidebar-body .empty { margin: 0; padding: 2px 10px; font-size: 12px; }
+      /* A radio's pages, over its conversations, which scroll under them. */
+      .sidebar-pages { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-bottom: 1px solid var(--mc-border); }
+      .sidebar-pages + .sidebar-body > h2:first-child { margin-top: 6px; }
       .item {
         display: flex;
         align-items: center;
