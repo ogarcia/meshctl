@@ -23,6 +23,8 @@
 //! - `hear <slot> <text>`: a node of its mesh sends that on a channel.
 //! - `past <slot>`: messages on a channel heard over the last year and
 //!   more, in their order, as days for a conversation to show.
+//! - `fill`: every slot a channel, and the link dropped to have them read.
+//! - `dms`: nodes that say who they are and write to the radio directly.
 //! - `chat <slot>`: messages on a channel that come every way: directly,
 //!   through some hops of those they could take, through MQTT; and, after a
 //!   client wrote, a reply to its last text and reactions to it.
@@ -954,6 +956,95 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                 }
             });
             format!("{count} messages on slot {channel}, one every 1.5 s")
+        }
+        Some("fill") => {
+            // Every slot a channel, as a radio that has them all; one with
+            // a long name, to be cut.
+            let names = [
+                "Galicia",
+                "Emergencias",
+                "Montaña",
+                "Vecinos",
+                "Radioaficionados",
+                "Pruebas con un nombre larguísimo",
+            ];
+            let mut radio = radio.lock().unwrap();
+            for (index, name) in (2..8).zip(names) {
+                radio.channels.insert(
+                    index,
+                    pb::Channel {
+                        index,
+                        role: pb::channel::Role::Secondary as i32,
+                        settings: Some(pb::ChannelSettings {
+                            name: name.into(),
+                            psk: vec![index as u8; 32],
+                            ..Default::default()
+                        }),
+                    },
+                );
+            }
+            drop(radio);
+            let _ = events.send(Event::Drop);
+            "slots 2 to 7 are channels now; dropped to have them read".into()
+        }
+        Some("dms") => {
+            // Who they are, and what each writes to the radio.
+            let nodes: [(u32, &str, &str, &[&str]); 9] = [
+                (0x0dec_1001, "Ana Coruña", "ANA", &["Hola, ¿me lees?", "Te oigo bien desde casa"]),
+                (0x0dec_1002, "Bici de Bea", "BEA", &["Saliendo hacia el monte"]),
+                (0x0dec_1003, "Repetidor Monte Xalo", "XALO", &["Batería al 80 %", "Todo en orden"]),
+                (0x0dec_1004, "Coche de Luis", "LUIS", &["En la autopista, llego en media hora"]),
+                (0x0dec_1005, "Base Ferrol", "FERR", &["¿Alguien en la frecuencia?"]),
+                (0x0dec_1006, "María", "MAR", &["Gracias por el aviso", "Nos vemos mañana", "👍"]),
+                (0x0dec_1007, "Estación meteorológica", "METE", &["Mañana lluvia"]),
+                (0x0dec_1008, "Un nodo con un nombre larguísimo para ver cómo se corta", "LARG", &["Probando nombres largos"]),
+                (0x0dec_1009, "Pedro", "PED", &["¿Quedamos para probar antenas?"]),
+            ];
+            let count = nodes.iter().map(|(_, _, _, said)| said.len()).sum::<usize>();
+            let events = events.clone();
+            tokio::spawn(async move {
+                for (num, long, short, said) in nodes {
+                    let user = pb::User {
+                        id: format!("!{num:08x}"),
+                        long_name: long.into(),
+                        short_name: short.into(),
+                        hw_model: pb::HardwareModel::HeltecV3 as i32,
+                        public_key: num.to_be_bytes().repeat(8),
+                        ..Default::default()
+                    };
+                    let heard = |to, port: PortNum, payload: Vec<u8>| MeshPacket {
+                        from: num,
+                        to,
+                        channel: 0,
+                        id: fresh_id(&NEXT_ID),
+                        rx_time: Some(now_secs()),
+                        rx_snr: 2.0 + random(80) as f32 / 10.0,
+                        rx_rssi: Some(-60 - random(40) as i32),
+                        hop_limit: 3 - (num % 3),
+                        hop_start: 3,
+                        payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                            portnum: port as i32,
+                            payload,
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    };
+                    let _ = events.send(Event::Heard(heard(
+                        BROADCAST,
+                        PortNum::NodeinfoApp,
+                        user.encode_to_vec(),
+                    )));
+                    for text in said {
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        let _ = events.send(Event::Heard(heard(
+                            ME,
+                            PortNum::TextMessageApp,
+                            text.as_bytes().to_vec(),
+                        )));
+                    }
+                }
+            });
+            format!("{count} direct messages from {} nodes", nodes.len())
         }
         Some("twin") => {
             let (Some(from), Some(to)) = (slot(words.next()), slot(words.next())) else {
