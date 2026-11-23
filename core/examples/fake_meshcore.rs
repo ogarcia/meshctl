@@ -151,7 +151,16 @@ impl Radio {
         };
         let mut channels = vec![(String::new(), [0u8; 16]); usize::from(MAX_CHANNELS)];
         channels[0] = ("Public".into(), PUBLIC_SECRET);
-        channels[1] = ("galicia".into(), [0x17; 16]);
+        // A #name, kept as the apps keep it: without its `#`, its secret
+        // the start of the SHA-256 of `#galicia`.
+        channels[1] = (
+            "galicia".into(),
+            [
+                0x84, 0x0c, 0x97, 0x22, 0x39, 0xa5, 0xc7, 0x81, 0xde, 0x27, 0x4e, 0x01, 0x1f, 0xf1,
+                0x81, 0x59,
+            ],
+        );
+        channels[2] = ("Casa".into(), [0x17; 16]);
         Self {
             name: "Fake core".into(),
             lat: 43_362_300,

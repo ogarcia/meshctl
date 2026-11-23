@@ -305,7 +305,7 @@ pub fn parse_link(url: &str) -> Option<Link> {
         }
         "channel/add" => {
             let secret = unhex::<16>(&field("secret")?)?;
-            let name = field("name").unwrap_or_default().trim().to_owned();
+            let name = stored_name(&field("name").unwrap_or_default(), &secret);
             (!name.is_empty() && name.len() <= 31).then_some(Link::Channel { name, secret })
         }
         _ => None,
@@ -317,36 +317,62 @@ fn num_of(key: &[u8; 32]) -> u32 {
     u32::from_be_bytes([key[0], key[1], key[2], key[3]])
 }
 
-/// The secret the apps give a `#name` channel: the start of its name's
-/// SHA-256, `#` and all.
+/// The secret the apps give a `#name` channel: the start of the SHA-256
+/// of its name, `#` and all, whether it is written with it or not.
 pub fn hashtag_secret(name: &str) -> [u8; 16] {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(name.as_bytes());
+    let bare = name.trim();
+    let bare = bare.strip_prefix('#').unwrap_or(bare);
+    let digest = Sha256::digest(format!("#{bare}").as_bytes());
     let mut secret = [0u8; 16];
     secret.copy_from_slice(&digest[..16]);
     secret
+}
+
+/// A channel's name as the radio keeps it: a `#name`'s without its `#`, as
+/// the apps keep them, which its secret tells; any other as it is.
+pub fn stored_name(name: &str, secret: &[u8; 16]) -> String {
+    let name = name.trim();
+    match name.strip_prefix('#') {
+        Some(bare) if *secret == hashtag_secret(name) => bare.trim().to_owned(),
+        _ => name.to_owned(),
+    }
 }
 
 fn kind_of(name: &str, secret: &[u8; 16]) -> meshctl_api::MeshcoreChannelKind {
     use meshctl_api::MeshcoreChannelKind as Kind;
     if *secret == meshctl_core::meshcore::PUBLIC_SECRET {
         Kind::Public
-    } else if name.starts_with('#') && *secret == hashtag_secret(name) {
+    } else if *secret == hashtag_secret(name) {
         Kind::Hashtag
     } else {
         Kind::Private
     }
 }
 
-/// Whether the radio has a channel already, name and secret.
+/// Whether the radio has a channel already, name and secret: a `#name`'s
+/// with its `#` or not.
 pub fn has_channel(state: &meshctl_core::mesh::MeshState, name: &str, secret: &[u8; 16]) -> bool {
+    twin(state, None, name, secret)
+}
+
+/// Whether a channel other than the one in a slot is the very same: name,
+/// as kept, and secret.
+fn twin(
+    state: &meshctl_core::mesh::MeshState,
+    besides: Option<u32>,
+    name: &str,
+    secret: &[u8; 16],
+) -> bool {
     let Some(meshcore) = &state.meshcore_channels else {
         return false;
     };
-    state
-        .channels
-        .values()
-        .any(|c| c.name == name && meshcore.secrets.get(&c.index) == Some(secret))
+    let name = stored_name(name, secret);
+    state.channels.values().any(|c| {
+        Some(c.index) != besides
+            && meshcore.secrets.get(&c.index) == Some(secret)
+            && stored_name(&c.name, secret) == name
+    })
 }
 
 /// The radio's first slot with no channel.
@@ -465,13 +491,14 @@ pub fn channel_change(
             secret
         }),
     };
-    let twin = state.channels.values().any(|c| {
-        c.index != index && c.name == name && meshcore.secrets.get(&c.index) == Some(&secret)
-    });
-    if twin {
+    let name = stored_name(name, &secret);
+    if name.is_empty() {
+        return Err("name");
+    }
+    if twin(state, Some(index), &name, &secret) {
         return Err(DUPLICATE);
     }
-    Ok((name.to_owned(), secret))
+    Ok((name, secret))
 }
 
 /// A channel's link, as the apps read it: its name and secret.
@@ -511,6 +538,16 @@ mod link_tests {
                 secret: unhex("00112233445566778899aabbccddeeff").unwrap()
             })
         );
+        // A #name's, kept without its `#` as the apps keep it.
+        assert_eq!(
+            parse_link(
+                "meshcore://channel/add?name=%23galicia&secret=840c972239a5c781de274e011ff18159"
+            ),
+            Some(Link::Channel {
+                name: "galicia".into(),
+                secret: hashtag_secret("#galicia")
+            })
+        );
         // A short key, no name, or a Meshtastic link: nothing.
         assert_eq!(
             parse_link("meshcore://contact/add?name=X&public_key=50"),
@@ -534,6 +571,20 @@ mod link_tests {
             kind_of("#galicia", &hashtag_secret("#galicia")),
             Kind::Hashtag
         );
+        // As the apps keep it, and as a real radio has it.
+        assert_eq!(
+            hashtag_secret("galicia"),
+            unhex("840c972239a5c781de274e011ff18159").unwrap()
+        );
+        assert_eq!(
+            kind_of("galicia", &hashtag_secret("#galicia")),
+            Kind::Hashtag
+        );
         assert_eq!(kind_of("#galicia", &[1; 16]), Kind::Private);
+        assert_eq!(
+            stored_name("#galicia", &hashtag_secret("galicia")),
+            "galicia"
+        );
+        assert_eq!(stored_name("#galicia", &[1; 16]), "#galicia");
     }
 }

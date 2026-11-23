@@ -177,7 +177,15 @@ fn ChannelEditor(
     let live = expect_context::<Live>();
     let start_name = start.as_ref().map(|c| c.name.clone()).unwrap_or_default();
     let start_kind = start.as_ref().map(|c| c.kind);
-    let name = RwSignal::new(start_name.clone());
+    // A #name is kept without its mark, as the apps keep it: written with
+    // it, so that it stays one as it is saved.
+    let written = match start_kind {
+        Some(MeshcoreChannelKind::Hashtag) if !start_name.starts_with('#') => {
+            format!("#{start_name}")
+        }
+        _ => start_name.clone(),
+    };
+    let name = RwSignal::new(written);
     let secret = RwSignal::new(if adding { Secret::New } else { Secret::Keep });
     let own = RwSignal::new(String::new());
     // Its link, to share it, and the secret it has.
