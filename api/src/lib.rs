@@ -336,6 +336,20 @@ pub struct Status {
     pub local: Option<LocalNode>,
 }
 
+/// How far a conversation was read: up to a message, the newest seen. A
+/// conversation is read on, never back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ConversationRead {
+    /// The channel's slot, for a channel's conversation.
+    #[serde(default)]
+    pub channel: Option<u32>,
+    /// The node's number, for the direct messages exchanged with it.
+    #[serde(default)]
+    pub node: Option<u32>,
+    pub up_to: MessageId,
+}
+
 /// An emoji picked in the interface, to count among the most used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -687,6 +701,13 @@ pub struct Conversation {
     pub peer: Peer,
     /// The newest message in it, if any.
     pub last: Option<Message>,
+    /// How many messages others wrote in it that were not read yet; one's
+    /// own and reactions are not counted.
+    #[serde(default)]
+    pub unread: u32,
+    /// The newest message read in it, if any was.
+    #[serde(default)]
+    pub read_up_to: Option<MessageId>,
 }
 
 /// How a traceroute is identified in the API.

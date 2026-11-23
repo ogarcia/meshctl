@@ -641,6 +641,11 @@ impl Store {
             .bind(num)
             .execute(&mut *tx)
             .await?;
+        sqlx::query("DELETE FROM conversation_read WHERE radio_id = ? AND node = ?")
+            .bind(radio)
+            .bind(num)
+            .execute(&mut *tx)
+            .await?;
         sqlx::query(
             "DELETE FROM message WHERE radio_id = ? AND to_num != ?
                 AND (from_num = ? OR to_num = ?)",
@@ -1004,6 +1009,93 @@ impl Store {
 
     /// The messages exchanged with a peer, the newest `limit` before
     /// `before`, oldest first.
+    /// How far a conversation of a radio was read, and how many messages
+    /// others wrote in it after that: one's own and reactions not counted.
+    pub async fn read_state(&self, radio: RadioId, peer: Peer) -> Result<(Option<MessageId>, u32)> {
+        let (read, unread): (Option<i64>, i64) = match peer {
+            Peer::Channel { channel } => {
+                sqlx::query_as(
+                    "WITH c AS (SELECT channel_id FROM channel_slot WHERE radio_id = ? AND slot = ?),
+                    r AS (SELECT message_id FROM conversation_read WHERE channel_id = (SELECT channel_id FROM c))
+                    SELECT (SELECT message_id FROM r),
+                        (SELECT count(*) FROM message
+                            WHERE channel_id = (SELECT channel_id FROM c)
+                            AND outgoing = 0 AND emoji = 0
+                            AND id > coalesce((SELECT message_id FROM r), 0))",
+                )
+                .bind(radio)
+                .bind(i64::from(channel))
+                .fetch_one(&self.pool)
+                .await?
+            }
+            Peer::Node { node } => {
+                sqlx::query_as(
+                    "WITH r AS (SELECT message_id FROM conversation_read WHERE radio_id = ? AND node = ?)
+                    SELECT (SELECT message_id FROM r),
+                        (SELECT count(*) FROM message
+                            WHERE radio_id = ? AND to_num != ? AND from_num = ?
+                            AND outgoing = 0 AND emoji = 0
+                            AND id > coalesce((SELECT message_id FROM r), 0))",
+                )
+                .bind(radio)
+                .bind(i64::from(node))
+                .bind(radio)
+                .bind(i64::from(BROADCAST))
+                .bind(i64::from(node))
+                .fetch_one(&self.pool)
+                .await?
+            }
+        };
+        Ok((read, u32::try_from(unread).unwrap_or_default()))
+    }
+
+    /// Reads a conversation of a radio up to a message, never back: the
+    /// newest read now. None for a channel with no slot on the radio.
+    pub async fn mark_read(
+        &self,
+        radio: RadioId,
+        peer: Peer,
+        up_to: MessageId,
+    ) -> Result<Option<MessageId>> {
+        match peer {
+            Peer::Channel { channel } => {
+                let Some((channel_id,)): Option<(i64,)> = sqlx::query_as(
+                    "SELECT channel_id FROM channel_slot WHERE radio_id = ? AND slot = ?",
+                )
+                .bind(radio)
+                .bind(i64::from(channel))
+                .fetch_optional(&self.pool)
+                .await?
+                else {
+                    return Ok(None);
+                };
+                sqlx::query(
+                    "INSERT INTO conversation_read (radio_id, channel_id, message_id) VALUES (?, ?, ?)
+                    ON CONFLICT (channel_id) WHERE channel_id IS NOT NULL
+                    DO UPDATE SET message_id = max(message_id, excluded.message_id)",
+                )
+                .bind(radio)
+                .bind(channel_id)
+                .bind(up_to)
+                .execute(&self.pool)
+                .await?;
+            }
+            Peer::Node { node } => {
+                sqlx::query(
+                    "INSERT INTO conversation_read (radio_id, node, message_id) VALUES (?, ?, ?)
+                    ON CONFLICT (radio_id, node) WHERE node IS NOT NULL
+                    DO UPDATE SET message_id = max(message_id, excluded.message_id)",
+                )
+                .bind(radio)
+                .bind(i64::from(node))
+                .bind(up_to)
+                .execute(&self.pool)
+                .await?;
+            }
+        }
+        Ok(self.read_state(radio, peer).await?.0)
+    }
+
     /// Forgets a message a radio keeps, and the reactions to it, which are
     /// part of it: only here, not on the mesh. The ids of those forgotten,
     /// the message's first; none if the radio keeps no such message.
@@ -1215,6 +1307,8 @@ impl Store {
             .map(|last| Conversation {
                 peer: peer_of(&last),
                 last: Some(last),
+                unread: 0,
+                read_up_to: None,
             })
             .collect())
     }
@@ -1903,6 +1997,64 @@ mod tests {
             hops_away: None,
             via_mqtt: false,
         }
+    }
+
+    #[tokio::test]
+    async fn conversations_are_read_on_and_never_back() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        let kept = |row: NewMessageRow| {
+            let store = &store;
+            async move { store.add_message(radio, &row).await.unwrap().unwrap().id }
+        };
+        let channel = Peer::Channel { channel: 0 };
+        let node = Peer::Node { node: 9 };
+        // On the channel: two from others, one ours, one reaction.
+        let first = kept(text(1, 9, BROADCAST, false)).await;
+        kept(text(2, 5, BROADCAST, false)).await;
+        kept(text(3, 7, BROADCAST, true)).await;
+        kept(NewMessageRow {
+            emoji: true,
+            reply_id: Some(3),
+            ..text(4, 9, BROADCAST, false)
+        })
+        .await;
+        // From the node, directly: one.
+        let direct = kept(text(5, 9, 7, false)).await;
+
+        assert_eq!(store.read_state(radio, channel).await.unwrap(), (None, 2));
+        assert_eq!(store.read_state(radio, node).await.unwrap(), (None, 1));
+        assert_eq!(
+            store.mark_read(radio, channel, first).await.unwrap(),
+            Some(first)
+        );
+        assert_eq!(
+            store.read_state(radio, channel).await.unwrap(),
+            (Some(first), 1)
+        );
+        // Not back.
+        assert_eq!(
+            store.mark_read(radio, channel, first - 1).await.unwrap(),
+            Some(first)
+        );
+        assert_eq!(
+            store.mark_read(radio, node, direct).await.unwrap(),
+            Some(direct)
+        );
+        assert_eq!(
+            store.read_state(radio, node).await.unwrap(),
+            (Some(direct), 0)
+        );
+        // The channel is unread still, each conversation on its own.
+        assert_eq!(store.read_state(radio, channel).await.unwrap().1, 1);
+        // A slot with no channel cannot be read.
+        assert_eq!(
+            store
+                .mark_read(radio, Peer::Channel { channel: 5 }, first)
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     #[tokio::test]

@@ -90,6 +90,7 @@
   "chat_delete_confirm": "Delete this message? It is only deleted from meshctl: what went out on the mesh cannot be taken back.",
   "chat_direct": "direct",
   "chat_today": "Today",
+  "chat_unread": "Unread messages",
   "chat_yesterday": "Yesterday",
   "chat_to_latest": "Go to the latest",
   "chat_new_one": "1 new message",

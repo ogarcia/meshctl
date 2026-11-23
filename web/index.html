@@ -2366,6 +2366,33 @@
       /* Where the day changes: a faint line, the day in the middle. */
       .day-line { display: flex; align-items: center; gap: 12px; margin: 6px 0; color: var(--mc-muted); font-size: 12px; }
       .day-line::before, .day-line::after { content: ""; flex: 1; height: 1px; background: var(--mc-border); }
+      /* Where what was not read starts, in the accent. */
+      .unread-line { display: flex; align-items: center; gap: 12px; margin: 6px 0; color: var(--mc-primary); font-size: 12px; font-weight: 600; }
+      .unread-line::before, .unread-line::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: color-mix(in srgb, var(--mc-primary) 50%, transparent);
+      }
+      /* How many were not read: beside a conversation, over the chats' tab. */
+      .unread {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 999px;
+        background: var(--mc-primary);
+        color: var(--mc-on-primary);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
+      }
+      .item .unread { margin-left: auto; }
+      .tabbar button { position: relative; }
+      .tabbar .unread { position: absolute; top: 2px; left: calc(50% + 6px); }
       /* Away from the newest, back to it, and how many came meanwhile. */
       .to-latest {
         position: absolute;

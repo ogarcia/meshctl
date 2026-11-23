@@ -16,8 +16,8 @@
 //! [`ServerMessage::Lagged`], that everything is. Either way, read it again.
 
 use crate::{
-    ErrorCode, LinkState, Message, MessageId, MessageStatus, Node, Packet, Preferences, RadioId,
-    Request, Traceroute,
+    ErrorCode, LinkState, Message, MessageId, MessageStatus, Node, Packet, Peer, Preferences,
+    RadioId, Request, Traceroute,
 };
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +62,12 @@ pub enum ServerMessage {
     NodeForgotten { radio: RadioId, node: u32 },
     /// A message heard or sent through a radio.
     Message { radio: RadioId, message: Message },
+    /// A conversation read further, in any client: up to which message.
+    ConversationRead {
+        radio: RadioId,
+        peer: Peer,
+        up_to: MessageId,
+    },
     /// Messages forgotten, as asked of the daemon: one, and the reactions to
     /// it.
     MessagesForgotten { radio: RadioId, ids: Vec<MessageId> },

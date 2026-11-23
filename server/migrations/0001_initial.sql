@@ -88,6 +88,21 @@ CREATE TABLE channel (
 
 CREATE UNIQUE INDEX channel_fingerprint ON channel (radio_id, fingerprint);
 
+-- How far each conversation of a radio was read: up to which message, the
+-- newest seen. A channel's, wherever the channel is now; or a node's.
+CREATE TABLE conversation_read (
+    radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
+    channel_id INTEGER REFERENCES channel (id) ON DELETE CASCADE,
+    node INTEGER,
+    message_id INTEGER NOT NULL,
+    CHECK ((channel_id IS NULL) != (node IS NULL))
+);
+
+CREATE UNIQUE INDEX conversation_read_channel ON conversation_read (channel_id)
+    WHERE channel_id IS NOT NULL;
+CREATE UNIQUE INDEX conversation_read_node ON conversation_read (radio_id, node)
+    WHERE node IS NOT NULL;
+
 -- Which channel each slot of a radio has, as the radio was last read.
 CREATE TABLE channel_slot (
     radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,

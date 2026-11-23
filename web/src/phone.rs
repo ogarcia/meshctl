@@ -83,6 +83,11 @@ pub fn TabBar() -> impl IntoView {
             >
                 <span class="tab-icon" inner_html=icon></span>
                 <span class="label">{label}</span>
+                {(page == Page::Chats).then_some(move || {
+                    // All that was not read yet, in every conversation.
+                    let unread: u32 = live.conversations.with(|c| c.iter().map(|c| c.unread).sum());
+                    (unread > 0).then(|| view! { <span class="unread">{crate::app::unread_count(unread)}</span> })
+                })}
             </button>
         }
     };

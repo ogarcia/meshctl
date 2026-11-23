@@ -90,6 +90,7 @@
   "chat_delete_confirm": "¿Eliminar este mensaje? Solo se borra de meshctl: lo que ya salió por la malla no se puede retirar.",
   "chat_direct": "directo",
   "chat_today": "Hoy",
+  "chat_unread": "Mensajes no leídos",
   "chat_yesterday": "Ayer",
   "chat_to_latest": "Ir a lo último",
   "chat_new_one": "1 mensaje nuevo",

@@ -93,6 +93,9 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
         }
         Change::NodeForgotten(radio, node) => ServerMessage::NodeForgotten { radio, node },
         Change::MessagesForgotten(radio, ids) => ServerMessage::MessagesForgotten { radio, ids },
+        Change::ConversationRead { radio, peer, up_to } => {
+            ServerMessage::ConversationRead { radio, peer, up_to }
+        }
         Change::Mesh(radio, mesh::Event::Node(n)) => ServerMessage::Node {
             radio,
             node: node(&n),

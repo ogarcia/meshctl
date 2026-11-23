@@ -10,7 +10,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Conversation, Error, ErrorCode, Message, MessageId, NewMessage, Packet, Peer, RadioId,
+    Conversation, ConversationRead, Error, ErrorCode, Message, MessageId, NewMessage, Packet, Peer,
+    RadioId,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -26,6 +27,7 @@ const PAGE_MAX: u32 = 500;
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(conversations))
+        .routes(routes!(read))
         .routes(routes!(messages, send))
         .routes(routes!(forget))
         .routes(routes!(message_packet))
@@ -60,6 +62,41 @@ async fn conversations(State(state): State<AppState>, Path(radio): Path<RadioId>
     match state.radios.conversations(radio).await {
         Ok(Some(conversations)) => Json(conversations).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Read a conversation
+///
+/// Reads a conversation up to a message, the newest seen: what came before
+/// it is no longer unread. A conversation is read on, never back. Every
+/// client connected hears of it on the event stream, as `conversation_read`.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/conversations/read",
+    tag = "chat",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = ConversationRead,
+    responses(
+        (status = 204, description = "Read"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio or channel", body = Error),
+        (status = 422, description = "Neither a channel nor a node, or both", body = Error),
+    )
+)]
+async fn read(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(read): Json<ConversationRead>,
+) -> Response {
+    let peer = match (read.channel, read.node) {
+        (Some(channel), None) => Peer::Channel { channel },
+        (None, Some(node)) => Peer::Node { node },
+        _ => return error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::BadRequest),
+    };
+    match state.radios.mark_read(radio, peer, read.up_to).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         Err(err) => failed(&err),
     }
 }

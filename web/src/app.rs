@@ -130,6 +130,9 @@ pub struct Live {
     pub channels: RwSignal<Vec<Channel>>,
     /// Of the selected radio.
     pub conversations: RwSignal<Vec<Conversation>>,
+    /// Whether the open conversation is being read: shown, and down at its
+    /// newest. What comes to it then is read as it comes.
+    pub reading: RwSignal<bool>,
     /// The emojis picked most, as the daemon counts them: none until the
     /// picker first needs them.
     pub emojis: RwSignal<Option<Vec<String>>>,
@@ -218,6 +221,7 @@ impl Live {
             loaded: RwSignal::new(None),
             channels: RwSignal::new(Vec::new()),
             conversations: RwSignal::new(Vec::new()),
+            reading: RwSignal::new(false),
             emojis: RwSignal::new(None),
             open: RwSignal::new(None),
             thread: RwSignal::new(Vec::new()),
@@ -901,6 +905,9 @@ impl Live {
                     Ok(())
                 }
                 // All kept of it forgotten: out of what this page has too.
+                ServerMessage::ConversationRead { radio, .. } if self.is_selected(radio) => {
+                    self.refresh_conversations().await
+                }
                 ServerMessage::MessagesForgotten { radio, ids } if self.is_selected(radio) => {
                     self.thread.update(|t| t.retain(|m| !ids.contains(&m.id)));
                     Ok(())
@@ -1569,11 +1576,30 @@ pub(crate) fn PeerItem(peer: Peer) -> impl IntoView {
             .strip_prefix("# ")
             .map_or_else(|| title.clone(), str::to_owned)
     };
+    // What others wrote in it not read yet: none while it is read.
+    let unread = move || {
+        let read_now = live.open.get() == Some(peer) && live.reading.get();
+        let unread = live
+            .conversations
+            .with(|c| c.iter().find(|c| c.peer == peer).map_or(0, |c| c.unread));
+        (!read_now && unread > 0)
+            .then(|| view! { <span class="unread">{unread_count(unread)}</span> })
+    };
     view! {
         <button class=class on:click=move |_| live.open_chat(peer)>
             {marker}
             <span class="label">{label}</span>
+            {unread}
         </button>
+    }
+}
+
+/// How many unread, as a count shows it: past 99, 99+.
+pub fn unread_count(unread: u32) -> String {
+    if unread > 99 {
+        "99+".to_owned()
+    } else {
+        unread.to_string()
     }
 }
 

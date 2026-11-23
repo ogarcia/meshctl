@@ -142,6 +142,29 @@ pub async fn send_message(radio: RadioId, message: &NewMessage) -> Result<Messag
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// Reads a conversation up to a message, never back.
+pub async fn mark_read(
+    radio: RadioId,
+    peer: meshctl_api::Peer,
+    up_to: meshctl_api::MessageId,
+) -> Result<(), Failure> {
+    let (channel, node) = match peer {
+        meshctl_api::Peer::Channel { channel } => (Some(channel), None),
+        meshctl_api::Peer::Node { node } => (None, Some(node)),
+    };
+    let read = meshctl_api::ConversationRead {
+        channel,
+        node,
+        up_to,
+    };
+    let request = with_token(Request::post(&url(&format!(
+        "/radios/{radio}/conversations/read"
+    ))))
+    .json(&read)
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// The packet that carried a message, as the radio heard or sent it.
 pub async fn message_packet(
     radio: RadioId,

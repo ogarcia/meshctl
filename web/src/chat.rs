@@ -292,11 +292,13 @@ fn author_of(live: Live, message: &Message) -> String {
     }
 }
 
-/// What a conversation shows: the day, where it changes, and what is said.
+/// What a conversation shows: the day, where it changes; where what was not
+/// read starts; and what is said.
 #[derive(Clone)]
 enum Item {
     /// A day, as [`day_of`] gives it.
     Day(i64),
+    Unread,
     Said(Message),
 }
 
@@ -304,6 +306,7 @@ impl Item {
     fn key(&self) -> (i64, i64, MessageStatus) {
         match self {
             Self::Day(day) => (*day, 0, MessageStatus::Received),
+            Self::Unread => (-1, 0, MessageStatus::Received),
             Self::Said(m) => (0, m.id, m.status),
         }
     }
@@ -410,12 +413,28 @@ pub fn ChatView() -> impl IntoView {
         state.reacting.set(None);
         state.menu.set(None);
     });
+    // Where what was not read started when the conversation was opened: it
+    // stays there while it is, though it is read meanwhile.
+    let band = RwSignal::new(None::<MessageId>);
+    Effect::new(move |_| {
+        let open = live.open.get();
+        let unread = live.conversations.with_untracked(|c| {
+            c.iter()
+                .find(|c| Some(c.peer) == open)
+                .filter(|c| c.unread > 0)
+                .map(|c| c.read_up_to.unwrap_or(0))
+        });
+        band.set(unread);
+    });
     // A reaction goes under what it reacts to; one to a message not here,
-    // as a message. Where the day changes, the day.
+    // as a message. Where the day changes, the day; where what was not read
+    // starts, a line.
     let shown = move || {
+        let band = band.get();
         live.thread.with(|thread| {
             let mut items = Vec::new();
             let mut last_day = None;
+            let mut banded = false;
             for m in thread.iter().filter(|m| {
                 !(m.emoji
                     && m.reply_id
@@ -425,6 +444,10 @@ pub fn ChatView() -> impl IntoView {
                 if last_day != Some(day) {
                     items.push(Item::Day(day));
                     last_day = Some(day);
+                }
+                if !banded && band.is_some_and(|read| m.id > read && !m.outgoing && !m.emoji) {
+                    items.push(Item::Unread);
+                    banded = true;
                 }
                 items.push(Item::Said(m.clone()));
             }
@@ -438,6 +461,9 @@ pub fn ChatView() -> impl IntoView {
     let away = RwSignal::new(false);
     let fresh = RwSignal::new(0_usize);
     let seen = StoredValue::new((None::<Peer>, 0_usize));
+    // Whether the open conversation was placed yet, once its messages came:
+    // on the line where what was not read starts, or at its newest.
+    let placed = StoredValue::new(false);
     let to_latest = move |smooth: bool| {
         if let Some(list) = list.get_untracked() {
             let options = web_sys::ScrollToOptions::new();
@@ -463,13 +489,58 @@ pub fn ChatView() -> impl IntoView {
         let elsewhere = before != open;
         if elsewhere {
             away.set(false);
+            placed.set_value(false);
         }
-        if elsewhere || !away.get_untracked() || ours {
+        if said > 0 && !placed.get_value() {
+            placed.set_value(true);
+            request_animation_frame(move || {
+                let line = document()
+                    .query_selector(".messages .unread-line")
+                    .ok()
+                    .flatten();
+                match (line, list.get_untracked()) {
+                    (Some(line), Some(list)) => {
+                        let line: web_sys::HtmlElement = line.unchecked_into();
+                        list.set_scroll_top(line.offset_top() - 12);
+                        let left = list.scroll_height() - list.scroll_top() - list.client_height();
+                        away.set(left > AWAY);
+                    }
+                    _ => to_latest(false),
+                }
+            });
+        } else if elsewhere || !away.get_untracked() || ours {
             request_animation_frame(move || to_latest(false));
         } else if said > counted {
             fresh.update(|f| *f += said - counted);
         }
     });
+    let shown_now = RwSignal::new(!document().hidden());
+    let showing = window_event_listener_untyped("visibilitychange", move |_| {
+        shown_now.set(!document().hidden());
+    });
+    on_cleanup(move || showing.remove());
+    let marked = StoredValue::new(0_i64);
+    Effect::new(move |_| {
+        let reading = live.open.get().is_some() && !away.get() && shown_now.get();
+        live.reading.set(reading);
+        let (Some(peer), Some(radio)) = (live.open.get(), live.selected.get_untracked()) else {
+            return;
+        };
+        let newest = live.thread.with(|t| t.iter().map(|m| m.id).max());
+        let read = live.conversations.with_untracked(|c| {
+            c.iter()
+                .find(|c| c.peer == peer)
+                .and_then(|c| c.read_up_to)
+                .unwrap_or(0)
+        });
+        if let Some(newest) = newest.filter(|n| reading && *n > read.max(marked.get_value())) {
+            marked.set_value(newest);
+            spawn_local(async move {
+                let _ = daemon::mark_read(radio, peer, newest).await;
+            });
+        }
+    });
+    on_cleanup(move || live.reading.set(false));
     let scrolled = move |_| {
         let Some(list) = list.get_untracked() else {
             return;
@@ -501,6 +572,12 @@ pub fn ChatView() -> impl IntoView {
                         <For each=shown key=Item::key let:item>
                             {match item {
                                 Item::Day(day) => view! { <DayLine day /> }.into_any(),
+                                Item::Unread => view! {
+                                    <div class="unread-line" role="separator">
+                                        <span>{t!(i18n, chat_unread)}</span>
+                                    </div>
+                                }
+                                .into_any(),
                                 Item::Said(message) => view! { <Bubble message peer /> }.into_any(),
                             }}
                         </For>

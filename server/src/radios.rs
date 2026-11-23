@@ -62,6 +62,12 @@ pub enum Change {
     NodeForgotten(RadioId, u32),
     /// Messages forgotten, as asked: one, and the reactions to it.
     MessagesForgotten(RadioId, Vec<MessageId>),
+    /// A conversation read further, up to a message.
+    ConversationRead {
+        radio: RadioId,
+        peer: Peer,
+        up_to: MessageId,
+    },
     /// Events of a radio were lost on their way here.
     Lagged,
 }
@@ -613,7 +619,12 @@ impl Radios {
                     .iter()
                     .find(|c| c.peer == peer)
                     .and_then(|c| c.last.clone());
-                Conversation { peer, last }
+                Conversation {
+                    peer,
+                    last,
+                    unread: 0,
+                    read_up_to: None,
+                }
             })
             .collect();
         // Channels no longer on the radio keep what was said in them.
@@ -622,7 +633,30 @@ impl Radios {
             .filter(|c| !conversations.iter().any(|known| known.peer == c.peer))
             .collect();
         conversations.extend(others);
+        // How far each was read, and what was not yet.
+        for conversation in &mut conversations {
+            let (read, unread) = self.store.read_state(id, conversation.peer).await?;
+            conversation.read_up_to = read;
+            conversation.unread = unread;
+        }
         Ok(Some(conversations))
+    }
+
+    /// Reads a conversation of a radio up to a message, never back, and
+    /// tells every client: false if there is no such conversation.
+    pub async fn mark_read(&self, id: RadioId, peer: Peer, up_to: MessageId) -> Result<bool> {
+        if self.mesh(id).is_none() {
+            return Ok(false);
+        }
+        let Some(up_to) = self.store.mark_read(id, peer, up_to).await? else {
+            return Ok(false);
+        };
+        let _ = self.changes.send(Change::ConversationRead {
+            radio: id,
+            peer,
+            up_to,
+        });
+        Ok(true)
     }
 
     /// The messages exchanged with a peer through a radio, if there is such a
