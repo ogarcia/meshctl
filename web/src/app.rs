@@ -1423,7 +1423,7 @@ fn RadioHead() -> impl IntoView {
             <h1>{move || radio().map(|r| r.name)}</h1>
             // In one line: if it does not fit, the link gives way. How many
             // nodes there are is said by the list below.
-            <span class="dim facts">
+            <span class="dim head-facts">
                 <span>{kind}</span>
                 <span class="link">
                     <LinkLabel link />
