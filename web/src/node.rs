@@ -969,7 +969,6 @@ fn Share() -> impl IntoView {
 /// link to copy; the QR over the words while they do not fit beside it.
 fn contact_card(link: String, own: bool) -> Option<AnyView> {
     let i18n = use_i18n();
-    let live = expect_context::<Live>();
     let svg = qrcode::QrCode::new(link.as_bytes())
         .ok()?
         .render::<qrcode::render::svg::Color>()
@@ -977,7 +976,8 @@ fn contact_card(link: String, own: bool) -> Option<AnyView> {
         .dark_color(qrcode::render::svg::Color("#111111"))
         .light_color(qrcode::render::svg::Color("#ffffff"))
         .build();
-    let meshcore = live.selected_kind() == Some(meshctl_api::RadioKind::Meshcore);
+    // Whose apps open it, as the link itself says.
+    let meshcore = link.starts_with("meshcore://");
     let hint = move || match (own, meshcore) {
         (true, false) => t!(i18n, own_contact_hint_meshtastic).into_any(),
         (true, true) => t!(i18n, own_contact_hint_meshcore).into_any(),
@@ -1411,9 +1411,10 @@ fn Sensors(
     // power, neighbours. Read from what the daemon keeps, nothing asked of
     // the radio.
     let enabled = RwSignal::new(None::<[bool; 3]>);
-    // MeshCore radios have no such settings yet: nothing to ask.
+    // MeshCore radios have no such settings yet: nothing to ask. Asked
+    // once, as the section is built: not followed.
     if own
-        && live.selected_kind() != Some(meshctl_api::RadioKind::Meshcore)
+        && untrack(|| live.selected_kind()) != Some(meshctl_api::RadioKind::Meshcore)
         && let Some(radio) = live.selected.get_untracked()
     {
         spawn_local(async move {
