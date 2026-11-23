@@ -33,6 +33,10 @@ pub(crate) const STABLE_SESSION: Duration = Duration::from_secs(60);
 /// A healthy node answers want_config in under a second, but a struggling one
 /// has been seen to take a full minute.
 const SYNC_TIMEOUT: Duration = Duration::from_secs(120);
+/// How often a radio in sync is read again, quietly: to know which nodes it
+/// has, as it drops some once its list is full, or another client removes
+/// them, without telling.
+pub(crate) const REREAD_INTERVAL: Duration = Duration::from_secs(3600);
 /// The official clients send one every five minutes; on serial the firmware
 /// drops the API session when it hears nothing for a while.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(300);
@@ -741,6 +745,8 @@ impl Mesh {
 
         let mut heartbeat =
             tokio::time::interval_at(Instant::now() + HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL);
+        let mut reread =
+            tokio::time::interval_at(Instant::now() + REREAD_INTERVAL, REREAD_INTERVAL);
 
         loop {
             tokio::select! {
@@ -761,8 +767,13 @@ impl Mesh {
                             if id == self.nonce.load(Ordering::Relaxed) =>
                         {
                             let nodes = self.read(|state| state.nodes.len());
-                            tracing::info!(nodes, "in sync with the radio");
-                            self.set_link(LinkState::Ready);
+                            if self.read(|state| state.rereading) {
+                                tracing::debug!(nodes, "read the radio again");
+                                self.update(MeshState::reread_done);
+                            } else {
+                                tracing::info!(nodes, "in sync with the radio");
+                                self.set_link(LinkState::Ready);
+                            }
                         }
                         _ => self.update(|state| state.apply(message, now())),
                     }
@@ -771,6 +782,33 @@ impl Mesh {
                     if send(&link, to_radio::PayloadVariant::Heartbeat(Heartbeat::default())).is_err() {
                         return "link closed";
                     }
+                }
+                // In sync, read it all again, as on connecting but quietly:
+                // its link stays as it is.
+                _ = reread.tick(),
+                    if self.read(|s| s.link == LinkState::Ready && !s.rereading) =>
+                {
+                    let again = self::nonce();
+                    self.nonce.store(again, Ordering::Relaxed);
+                    self.mark_sync_start();
+                    self.update(|state| {
+                        state.reread();
+                        Vec::new()
+                    });
+                    if send(&link, to_radio::PayloadVariant::WantConfigId(again)).is_err() {
+                        return "link closed";
+                    }
+                }
+                // Not read again in time: left as it was known, the link
+                // kept, as the radio still answers all else.
+                () = tokio::time::sleep_until(self.sync_started() + SYNC_TIMEOUT),
+                    if self.read(|s| s.rereading) =>
+                {
+                    tracing::debug!("the radio was not read again in time");
+                    self.update(|state| {
+                        state.reread_failed();
+                        Vec::new()
+                    });
                 }
                 // From when the last sync started: on connecting, or a resync
                 // later in the same session.
@@ -862,6 +900,9 @@ mod tests {
             },
         );
         let (stream, _) = listener.accept().await.unwrap();
+        // Each frame out at once: with Nagle's, one written after another
+        // waits for an acknowledgement that a paused clock outruns.
+        stream.set_nodelay(true).unwrap();
         let radio = FakeRadio {
             stream,
             parser: FrameParser::new(),
@@ -1185,6 +1226,83 @@ mod tests {
                 _ => {}
             }
         }
+        task.abort();
+    }
+
+    /// Connected, and in sync with a radio that names nodes 5 and 7.
+    async fn in_sync() -> (Mesh, FakeRadio, JoinHandle<()>, broadcast::Receiver<Event>) {
+        let (mesh, mut radio, task) = connected().await;
+        let mut events = mesh.subscribe();
+        let to_radio::PayloadVariant::WantConfigId(nonce) = next_request(&mut radio).await else {
+            panic!("the configuration first");
+        };
+        for num in [5, 7] {
+            radio
+                .send(from_radio::PayloadVariant::NodeInfo(pb::NodeInfo {
+                    num,
+                    ..Default::default()
+                }))
+                .await;
+        }
+        radio
+            .send(from_radio::PayloadVariant::ConfigCompleteId(nonce))
+            .await;
+        assert_eq!(next_event(&mut events).await, Event::Link(LinkState::Ready));
+        assert_eq!(next_event(&mut events).await, Event::Synced);
+        (mesh, radio, task, events)
+    }
+
+    fn on_radio(mesh: &Mesh, num: u32) -> Option<bool> {
+        mesh.read(|state| state.nodes[&num].on_radio)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_radio_is_read_again_quietly_every_so_often() {
+        let (mesh, mut radio, task, mut events) = in_sync().await;
+        assert_eq!([on_radio(&mesh, 5), on_radio(&mesh, 7)], [Some(true); 2]);
+
+        tokio::time::advance(REREAD_INTERVAL).await;
+        let to_radio::PayloadVariant::WantConfigId(again) = next_request(&mut radio).await else {
+            panic!("the configuration again");
+        };
+        // 5 dropped from the radio's list since.
+        radio
+            .send(from_radio::PayloadVariant::NodeInfo(pb::NodeInfo {
+                num: 7,
+                ..Default::default()
+            }))
+            .await;
+        radio
+            .send(from_radio::PayloadVariant::ConfigCompleteId(again))
+            .await;
+        // Told at once at the end, the link never changed on the way.
+        assert_eq!(next_event(&mut events).await, Event::Synced);
+        assert_eq!(mesh.read(|s| s.link), LinkState::Ready);
+        assert_eq!(
+            [on_radio(&mesh, 5), on_radio(&mesh, 7)],
+            [Some(false), Some(true)]
+        );
+        task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reading_again_unanswered_leaves_all_as_it_was() {
+        let (mesh, mut radio, task, _events) = in_sync().await;
+        tokio::time::advance(REREAD_INTERVAL).await;
+        let to_radio::PayloadVariant::WantConfigId(_) = next_request(&mut radio).await else {
+            panic!("the configuration again");
+        };
+        // Only 7 named, and then nothing more.
+        radio
+            .send(from_radio::PayloadVariant::NodeInfo(pb::NodeInfo {
+                num: 7,
+                ..Default::default()
+            }))
+            .await;
+        tokio::time::sleep(SYNC_TIMEOUT + Duration::from_secs(1)).await;
+        assert!(!mesh.read(|s| s.rereading));
+        assert_eq!(mesh.read(|s| s.link), LinkState::Ready);
+        assert_eq!([on_radio(&mesh, 5), on_radio(&mesh, 7)], [Some(true); 2]);
         task.abort();
     }
 

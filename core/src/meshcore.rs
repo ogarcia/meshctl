@@ -30,7 +30,8 @@ use crate::mesh::{
     User,
 };
 use crate::radio::{
-    Mesh, OutgoingText, RECONNECT_MAX, RECONNECT_MIN, STABLE_SESSION, SendError, Sent, now,
+    Mesh, OutgoingText, RECONNECT_MAX, RECONNECT_MIN, REREAD_INTERVAL, STABLE_SESSION, SendError,
+    Sent, now,
 };
 use protocol::{ChannelMessage, Contact, ContactMessage, DeviceInfo, Response, SelfInfo, command};
 use std::collections::HashMap;
@@ -561,6 +562,7 @@ async fn session(
     mesh.set_link(LinkState::Ready);
 
     let mut contacts_due: Option<Instant> = None;
+    let mut reread = tokio::time::interval_at(Instant::now() + REREAD_INTERVAL, REREAD_INTERVAL);
     loop {
         let settle = async {
             match contacts_due {
@@ -590,6 +592,30 @@ async fn session(
                 Some(Response::Ack(tag)) => acknowledged(mesh, &session, tag),
                 Some(_) => {}
             },
+            // Every contact again, now and then: those the radio no longer
+            // has, as another client removed them, go out of its list here.
+            _ = reread.tick() => {
+                match client.contacts(0).await {
+                    Ok((all, latest)) => {
+                        last_change = latest;
+                        remember_keys(&session, &all);
+                        mesh.update(|state| {
+                            let me = state.local.as_ref().map(|l| l.num);
+                            state.named = all
+                                .iter()
+                                .map(|c| num_of(&c.public_key))
+                                .chain(me)
+                                .collect();
+                            for node in all.iter().map(node_from) {
+                                state.nodes.insert(node.num, node);
+                            }
+                            state.read_through();
+                            vec![Event::Synced]
+                        });
+                    }
+                    Err(why) => tracing::debug!(why, "contacts not read again"),
+                }
+            }
             () = settle => {
                 contacts_due = None;
                 match client.contacts(last_change).await {

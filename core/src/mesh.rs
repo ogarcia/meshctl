@@ -332,6 +332,9 @@ pub struct MeshState {
     /// The nodes the radio names while it is read: those it has, once it is
     /// read in full.
     pub named: BTreeSet<u32>,
+    /// Whether the radio is being read again, quietly, its link as it was:
+    /// what changes is told once it has said it all.
+    pub rereading: bool,
 }
 
 /// The radio's settings, whole and as the protobufs carry them: what changing
@@ -405,17 +408,50 @@ impl MeshState {
     /// The link as it goes to `link`, and which nodes the radio has once it
     /// has said them all: until then, as known before.
     pub(crate) fn link_to(&mut self, link: LinkState) {
+        // A reading again is over, whatever the link does: a sync reads it
+        // all anyway.
+        self.rereading = false;
         match link {
             LinkState::Syncing => self.named.clear(),
-            LinkState::Ready if self.link == LinkState::Syncing => {
-                let named = std::mem::take(&mut self.named);
-                for node in self.nodes.values_mut() {
-                    node.on_radio = Some(named.contains(&node.num));
-                }
-            }
+            LinkState::Ready if self.link == LinkState::Syncing => self.read_through(),
             _ => {}
         }
         self.link = link;
+    }
+
+    /// Whether the radio is saying all it has: on connecting, or read again.
+    fn reading(&self) -> bool {
+        self.link == LinkState::Syncing || self.rereading
+    }
+
+    /// Which nodes the radio has, now that it has named them all.
+    pub(crate) fn read_through(&mut self) {
+        let named = std::mem::take(&mut self.named);
+        for node in self.nodes.values_mut() {
+            node.on_radio = Some(named.contains(&node.num));
+        }
+    }
+
+    /// The radio about to be read again, its link as it is.
+    pub(crate) fn reread(&mut self) {
+        self.rereading = true;
+        self.named.clear();
+    }
+
+    /// Read again in full: what changed, told all at once, as on syncing.
+    pub(crate) fn reread_done(&mut self) -> Vec<Event> {
+        if !self.rereading {
+            return Vec::new();
+        }
+        self.rereading = false;
+        self.read_through();
+        vec![Event::Synced]
+    }
+
+    /// Not read again in full: as it was known.
+    pub(crate) fn reread_failed(&mut self) {
+        self.rereading = false;
+        self.named.clear();
     }
 
     /// Takes in a message from the radio received at `now` (seconds since the
@@ -426,7 +462,7 @@ impl MeshState {
     pub fn apply(&mut self, message: pb::FromRadio, now: u32) -> Vec<Event> {
         use from_radio::PayloadVariant as V;
 
-        let quiet = self.link == LinkState::Syncing;
+        let quiet = self.reading();
         let changed = match message.payload_variant {
             Some(V::MyInfo(info)) => {
                 // Another node behind the same radio, as when its owner swaps
@@ -525,7 +561,7 @@ impl MeshState {
     }
 
     fn node_info(&mut self, info: pb::NodeInfo) -> Node {
-        let syncing = self.link == LinkState::Syncing;
+        let syncing = self.reading();
         let node = self
             .nodes
             .entry(info.num)
@@ -557,7 +593,7 @@ impl MeshState {
 
     fn packet(&mut self, packet: pb::MeshPacket, now: u32) -> Node {
         let ours = self.local.as_ref().is_some_and(|l| l.num == packet.from);
-        let syncing = self.link == LinkState::Syncing;
+        let syncing = self.reading();
         let node = self
             .nodes
             .entry(packet.from)
