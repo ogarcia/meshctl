@@ -344,7 +344,8 @@ fn device_info(radio: &Radio) -> Vec<u8> {
     // The BLE pin.
     frame.extend([0, 0, 0, 0]);
     frame.extend(field("23 Nov 2026", 12));
-    frame.extend(field("Fake MeshCore", 40));
+    // A model of those it could be, as the panel shows it.
+    frame.extend(field("Heltec V4", 40));
     frame.extend(field("v1.18.0-fake", 20));
     // Repeat (v9+) and the path's hash size, less one (v10+).
     frame.extend([u8::from(radio.repeat), radio.path_hash_mode]);
