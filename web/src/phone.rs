@@ -138,8 +138,10 @@ pub fn RadioChip() -> impl IntoView {
 pub fn PhoneBack() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    // On a phone, to the tab's own page; on a wider screen, from the
-    // settings, to the last page out of them, where one came from.
+    // On a phone, to the tab's own page; on a wider screen, from a radio's
+    // settings, which its sidebar has no place for, to the last page out of
+    // them, where one came from. meshctl's own have theirs in the sidebar,
+    // and nothing to go back to.
     let button = move |class: &'static str, to: Page| {
         view! {
             <button
@@ -155,9 +157,10 @@ pub fn PhoneBack() -> impl IntoView {
         }
     };
     move || {
-        back_of(live.page.get()).map(|to| {
-            let wide =
-                (to == Page::More).then(|| button("icon-button wide-back", live.came_from.get()));
+        let page = live.page.get();
+        back_of(page).map(|to| {
+            let wide = (page == Page::RadioSettings)
+                .then(|| button("icon-button wide-back", live.came_from.get()));
             view! {
                 {button("icon-button phone-back", to)}
                 {wide}
