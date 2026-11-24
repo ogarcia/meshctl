@@ -1153,13 +1153,7 @@ impl Mesh {
             return Err(AdminError::OwnNode);
         }
         let key = self.meshcore_key(&session, num)?;
-        // One it says it does not have, though it listed it, as a splitter in
-        // between that keeps contacts of its own may: as gone as removed.
-        match session.client.done(command::remove_contact(&key)).await {
-            Ok(()) => {}
-            Err(AdminError::Refused(why)) if why == "NOT_FOUND" => {}
-            Err(error) => return Err(error),
-        }
+        forgotten(session.client.done(command::remove_contact(&key)).await)?;
         session
             .keys
             .lock()
@@ -1180,7 +1174,7 @@ impl Mesh {
     pub async fn meshcore_reset_path(&self, num: u32) -> Result<(), AdminError> {
         let session = self.meshcore_session()?;
         let key = self.meshcore_key(&session, num)?;
-        session.client.done(command::reset_path(&key)).await?;
+        forgotten(session.client.done(command::reset_path(&key)).await)?;
         self.update(|state| match state.nodes.get_mut(&num) {
             Some(node) => {
                 node.hops_away = None;
@@ -1648,6 +1642,17 @@ impl LoginSent {
     }
 }
 
+/// What the radio said to having something forgotten: done, also when it
+/// says it had no such thing. A splitter in between that keeps contacts of
+/// its own may list what the radio no longer has, and what is gone is as
+/// forgotten as it was meant to be.
+fn forgotten(said: Result<(), AdminError>) -> Result<(), AdminError> {
+    match said {
+        Err(AdminError::Refused(why)) if why == "NOT_FOUND" => Ok(()),
+        said => said,
+    }
+}
+
 /// A login answered: to the one waiting for it, if any still is.
 fn logged_in(session: &Session, prefix: [u8; 6], access: Option<Access>) {
     let waiting = session
@@ -1816,6 +1821,23 @@ mod tests {
         far.path_len = -1;
         assert_eq!(node_from(&far).hops_away, None);
         assert_eq!(hops(NO_PATH), None);
+    }
+
+    #[test]
+    fn what_is_not_there_is_as_forgotten() {
+        assert_eq!(forgotten(Ok(())), Ok(()));
+        assert_eq!(
+            forgotten(Err(AdminError::Refused("NOT_FOUND".into()))),
+            Ok(())
+        );
+        assert_eq!(
+            forgotten(Err(AdminError::Refused("TABLE_FULL".into()))),
+            Err(AdminError::Refused("TABLE_FULL".into()))
+        );
+        assert_eq!(
+            forgotten(Err(AdminError::NoAnswer)),
+            Err(AdminError::NoAnswer)
+        );
     }
 
     #[test]
