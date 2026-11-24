@@ -128,8 +128,8 @@ struct Radio {
     with_ana: Option<(String, u32)>,
     /// Whether repeaters are heard passing on what is sent on a channel.
     echoes: bool,
-    /// Whether a ping comes back.
-    pings: bool,
+    /// Whether pings come back and requests are answered.
+    answers: bool,
     /// Sala Coruña's posts, its own among them: who wrote each, by the first
     /// four bytes of their key, what, and when by its clock.
     room_posts: Vec<([u8; 4], String, u32)>,
@@ -257,7 +257,7 @@ impl Radio {
             said: std::collections::HashMap::new(),
             with_ana: None,
             echoes: true,
-            pings: true,
+            answers: true,
             room_posts: vec![
                 (
                     key_prefix(&key(0x53)),
@@ -937,7 +937,7 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             };
             let what = data.get(32).copied().unwrap_or(0);
             println!("request {what:#04x} to {:?}, logged in as {acl:?}", to.name);
-            let answer = match (acl, what) {
+            let answer = match (acl.filter(|_| radio.answers), what) {
                 (None, _) => None,
                 (Some(_), 0x01) => Some(node_status(&to, to.kind == 3)),
                 (Some(acl), 0x03) => Some(node_telemetry(acl == 3)),
@@ -980,7 +980,7 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             let mut sent = vec![0x06, 0];
             sent.extend(tag);
             sent.extend(1_500u32.to_le_bytes());
-            let back = radio.pings
+            let back = radio.answers
                 && path.len() == size
                 && radio
                     .contacts
@@ -1534,9 +1534,9 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                 }
             )
         }
-        Some("pings") => {
-            radio.pings = words.next() != Some("off");
-            format!("pings {}", if radio.pings { "back" } else { "lost" })
+        Some("answers") => {
+            radio.answers = words.next() != Some("off");
+            format!("answers {}", if radio.answers { "given" } else { "none" })
         }
         Some("echoes") => {
             radio.echoes = words.next() != Some("off");

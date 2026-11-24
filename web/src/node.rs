@@ -2406,9 +2406,10 @@ fn RequestRow(request: Request) -> impl IntoView {
     let open = RwSignal::new(false);
     let at = u32::try_from(request.at).unwrap_or_default();
     let error = request.error.clone();
-    // A ping is given up on sooner than other requests, as it comes back
-    // in a second or two.
+    // A MeshCore radio gives a request up as soon as it is due, a ping
+    // sooner still; a Meshtastic one, after two minutes.
     let ping = request.kind == RequestKind::Ping;
+    let meshcore = untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore);
     let status = move || match request.status {
         RequestStatus::Pending => view! {
             <span class="badge syncing">{t!(i18n, request_pending)}</span>
@@ -2421,6 +2422,7 @@ fn RequestRow(request: Request) -> impl IntoView {
         RequestStatus::Failed => {
             let why = match error.as_deref() {
                 Some("TIMEOUT") if ping => t_string!(i18n, request_ping_timeout).to_owned(),
+                Some("TIMEOUT") if meshcore => t_string!(i18n, request_due_timeout).to_owned(),
                 Some("TIMEOUT") => t_string!(i18n, request_timeout).to_owned(),
                 Some("NO_RESPONSE") => t_string!(i18n, request_no_response).to_owned(),
                 Some("PKI_SEND_FAIL_PUBLIC_KEY") => t_string!(i18n, request_no_key).to_owned(),

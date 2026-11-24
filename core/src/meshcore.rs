@@ -1448,7 +1448,8 @@ impl Mesh {
 
     /// Sends a request once the radio waits for no other answer, and keeps
     /// it waiting for this one, as long as the radio expects it to take and
-    /// at least [`ASK_WAIT`]: another would make it forget it. Its tag.
+    /// at least [`ASK_WAIT`]: another would make it forget it. Given up on
+    /// then, as [`Event::Unanswered`], if it has not been answered. Its tag.
     async fn send_asked(
         &self,
         session: &Session,
@@ -1484,9 +1485,24 @@ impl Mesh {
                 },
             );
         let wait = Duration::from_millis(u64::from(timeout_ms) * 2).max(ASK_WAIT);
+        let (asked, mesh) = (Arc::clone(&session.asked), self.clone());
         tokio::spawn(async move {
-            let _ = tokio::time::timeout(wait, told).await;
+            let timed_out = tokio::time::timeout(wait, told).await.is_err();
             drop(waiting);
+            let lost = timed_out
+                && asked
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&tag)
+                    .is_some();
+            if lost {
+                mesh.update(|_| {
+                    vec![Event::Unanswered {
+                        request_id: u32::from_le_bytes(tag),
+                        from: num,
+                    }]
+                });
+            }
         });
         Ok(u32::from_le_bytes(tag))
     }

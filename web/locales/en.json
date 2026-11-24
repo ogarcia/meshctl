@@ -681,6 +681,7 @@
   "request_no_response": "it has nothing to tell",
   "request_timeout": "nothing in two minutes; it may have answered lately",
   "request_ping_timeout": "it did not come back in time",
+  "request_due_timeout": "it did not answer in time",
   "request_no_key": "the radio did not send it: its public key is missing",
   "forget_history": "Clear the history",
   "forget_requests_sure": "Delete all its requests? What the node told stays on its page.",

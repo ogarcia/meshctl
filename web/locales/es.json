@@ -681,6 +681,7 @@
   "request_no_response": "no tiene ese dato",
   "request_timeout": "nada en dos minutos; puede que ya respondiera hace poco",
   "request_ping_timeout": "no volvió a tiempo",
+  "request_due_timeout": "no respondió a tiempo",
   "request_no_key": "la radio no lo envió: le falta su clave pública",
   "forget_history": "Vaciar el historial",
   "forget_requests_sure": "¿Borrar todas sus peticiones? Lo que dijo el nodo se queda en su página.",
