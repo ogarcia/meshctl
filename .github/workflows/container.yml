@@ -6,11 +6,12 @@ on:
     # Bare semver tags: 0.1.0, 1.2.3-rc1 (no "v" prefix)
     tags: ["[0-9]*"]
     # Only what builds nothing: Markdown at the top (not intro.md, which the
-    # API's docs embed), the licence, what git ignores.
+    # API's docs embed), the licence, what git ignores, the website.
     paths-ignore:
       - "*.md"
       - "LICENSE"
       - ".gitignore"
+      - "website/**"
   pull_request:
     paths:
       - "Containerfile"

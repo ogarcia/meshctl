@@ -1,4 +1,29 @@
+<div align="center">
+
+<img src="assets/icons/app.svg" alt="meshctl" width="128" height="128">
+
 # meshctl
+
+**A lean control panel for your [Meshtastic](https://meshtastic.org/) and [MeshCore](https://meshcore.co.uk/) radios**
+
+*Chat on them, see the mesh around them on a map, follow every packet they hear, and set them up.*
+
+[![CI](https://img.shields.io/github/actions/workflow/status/ogarcia/meshctl/ci.yml?branch=master&style=for-the-badge&label=CI&logo=githubactions&logoColor=white)](https://github.com/ogarcia/meshctl/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/ogarcia/meshctl?include_prereleases&style=for-the-badge&label=version&color=9a5b00)](https://github.com/ogarcia/meshctl/releases/latest)
+[![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0-9a5b00?style=for-the-badge)](LICENSE)
+<br>
+[![Rust](https://img.shields.io/badge/Rust-one%20binary-e66100?style=for-the-badge&logo=rust&logoColor=white)](#installing)
+[![Meshtastic · MeshCore](https://img.shields.io/badge/Meshtastic%20%C2%B7%20MeshCore-67ea94?style=for-the-badge)](#goals)
+[![Desktop app](https://img.shields.io/badge/desktop-Windows%20%C2%B7%20Flatpak-4a5568?style=for-the-badge)](#installing)
+[![Container image](https://img.shields.io/badge/container-ghcr.io-2496ed?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/ogarcia/meshctl/pkgs/container/meshctl)
+
+[Website](https://meshctl.ogarcia.me/) · [Installing](#installing) · [Running](#running) · [Access](#access) · [Changelog](CHANGELOG.md)
+
+<img src="https://meshctl.ogarcia.me/shots/en-map.webp" alt="meshctl's map: the mesh around A Coruña, its nodes coloured by how many hops away they are, beside the radio's pages and channels" width="860">
+
+</div>
+
+---
 
 A lean control panel for your mesh radios: control them, see the mesh around
 them, chat, and trace routes. That is the whole list.
@@ -7,8 +32,6 @@ meshctl stays connected to your radios around the clock, keeps what they hear
 in SQLite, and serves a web interface and an API from a single binary. One
 radio or a dozen, Meshtastic and MeshCore, all from the same panel; on a
 server, in a container, as a desktop app, or as an app on your phone.
-
-Its website is [meshctl.ogarcia.me](https://meshctl.ogarcia.me).
 
 > [!WARNING]
 > **meshctl is young.** Until 1.0, a release may change the interface, the
