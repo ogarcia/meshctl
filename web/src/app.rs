@@ -1778,8 +1778,9 @@ const SECTION_ROOMS: u8 = 2;
 const SECTION_DIRECTS: u8 = 4;
 
 /// A section of the conversations, folded away at its heading, as it is
-/// kept: what is unread in it then said beside its title, and the one open
-/// still there, so as not to lose where one is.
+/// kept: folded, what still calls for one stays, the conversations with
+/// something unread, each with its count, and the one open, so as not to
+/// lose where one is.
 #[component]
 fn Section(bit: u8, title: Signal<String>, peers: Signal<Vec<Peer>>) -> impl IntoView {
     let live = expect_context::<Live>();
@@ -1789,24 +1790,17 @@ fn Section(bit: u8, title: Signal<String>, peers: Signal<Vec<Peer>>) -> impl Int
         preferences.sections_folded ^= bit;
         live.prefer(preferences);
     };
-    let unread = move || {
-        let peers = peers.get();
-        let unread: u32 = live.conversations.with(|c| {
-            c.iter()
-                .filter(|c| peers.contains(&c.peer))
-                .map(|c| c.unread)
-                .sum()
-        });
-        (folded() && unread > 0)
-            .then(|| view! { <span class="unread">{unread_count(unread)}</span> })
-    };
     let shown = move || {
         let open = (live.page.get() == Page::Chat)
             .then(|| live.open.get())
             .flatten();
         let mut peers = peers.get();
         if folded() {
-            peers.retain(|peer| Some(*peer) == open);
+            live.conversations.with(|c| {
+                peers.retain(|peer| {
+                    Some(*peer) == open || c.iter().any(|c| c.peer == *peer && c.unread > 0)
+                });
+            });
         }
         peers
     };
@@ -1814,7 +1808,6 @@ fn Section(bit: u8, title: Signal<String>, peers: Signal<Vec<Peer>>) -> impl Int
         <h2 class="folding">
             <button type="button" aria-expanded=move || (!folded()).to_string() on:click=fold>
                 <span>{move || title.get()}</span>
-                {unread}
                 <span class="chevron" class:folded=folded inner_html=CHEVRON></span>
             </button>
         </h2>
