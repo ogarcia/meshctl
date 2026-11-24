@@ -93,12 +93,14 @@ impl RawPacket {
     }
 
     /// What names the packet whatever path a copy took: its type and what it
-    /// carries, hashed, as the firmware tells copies apart.
+    /// carries, hashed, as the firmware tells copies apart; a trace by how
+    /// far it went too, as it may come back through the same node.
     pub fn key(&self) -> u64 {
-        let digest = Sha256::new()
-            .chain_update([self.payload_type])
-            .chain_update(&self.payload)
-            .finalize();
+        let mut sha = Sha256::new().chain_update([self.payload_type]);
+        if self.payload_type == PAYLOAD_TRACE {
+            sha.update([self.path_len]);
+        }
+        let digest = sha.chain_update(&self.payload).finalize();
         u64::from_le_bytes(digest[..8].try_into().unwrap_or_default())
     }
 
@@ -357,5 +359,20 @@ mod tests {
         assert_eq!(advert.position, Some((43.37, -8.4)));
         // Cut short before its flags, it is no advert.
         assert!(super::advert(&payload[..36 + SIGNATURE_SIZE]).is_none());
+    }
+
+    #[test]
+    fn each_leg_of_a_trace_is_a_packet_of_its_own() {
+        // A trace along two hops, one gone and then both: as the firmware
+        // tells them apart, by how far each went.
+        let leg = |snrs: &[u8]| {
+            let mut bytes = vec![(PAYLOAD_TRACE << 2) | ROUTE_DIRECT];
+            bytes.push(u8::try_from(snrs.len()).unwrap());
+            bytes.extend(snrs);
+            bytes.extend([7, 0, 0, 0, 0, 0, 0, 0, 0, 0x52, 0x55]);
+            RawPacket::parse(&bytes).unwrap()
+        };
+        assert_ne!(leg(&[20]).key(), leg(&[20, 12]).key());
+        assert_eq!(leg(&[20]).key(), leg(&[8]).key());
     }
 }

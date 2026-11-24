@@ -247,8 +247,13 @@ pub enum RawInfo {
     Anonymous { to: u8, from: u32 },
     /// An acknowledgement: its checksum.
     Ack { code: u32 },
-    /// A trace: its tag, and the hashes of the path it goes along.
-    Trace { tag: u32, hashes: Vec<u8> },
+    /// A trace: its tag, and the path it goes along, each hop by a hash of
+    /// `hash_size` bytes; the SNR each heard it at is its packet's path.
+    Trace {
+        tag: u32,
+        hashes: Vec<u8>,
+        hash_size: u8,
+    },
     /// Anything else: only its kind and size.
     Other,
 }

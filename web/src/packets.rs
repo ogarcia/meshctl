@@ -496,7 +496,7 @@ fn who(live: Live, num: u32) -> String {
 /// or only one heard directly does; by the byte otherwise.
 pub fn relay_name(live: Live, relay: u32) -> String {
     let ending = |num: u32| num & 0xff == relay;
-    one_of(live, ending).unwrap_or_else(|| format!("··{relay:02x}"))
+    one_of(live, ending).map_or_else(|| format!("··{relay:02x}"), |num| short_or_id(live, num))
 }
 
 /// A node MeshCore names by a hash, the start of its key, one to three
@@ -506,15 +506,21 @@ pub fn relay_name(live: Live, relay: u32) -> String {
 /// node not known may have it too. A node's number is its key's first four
 /// bytes.
 fn by_hash(live: Live, hash: &str) -> (String, bool) {
+    match node_by_hash(live, hash) {
+        Some((num, guess)) => (short_or_id(live, num), guess),
+        None => (hash.to_ascii_lowercase(), false),
+    }
+}
+
+/// The node a hash is, as `by_hash` tells: its number, and whether it is a
+/// guess.
+fn node_by_hash(live: Live, hash: &str) -> Option<(u32, bool)> {
     let hash = hash.to_ascii_lowercase();
     let starting = |num: u32| format!("{num:08x}").starts_with(&hash);
     let only = live
         .nodes
         .with(|nodes| nodes.values().filter(|n| starting(n.num)).count() == 1);
-    match one_of(live, starting) {
-        Some(name) => (name, !(only && hash.len() >= 4)),
-        None => (hash, false),
-    }
+    one_of(live, starting).map(|num| (num, !(only && hash.len() >= 4)))
 }
 
 /// The hash of the repeater a packet MeshCore heard raw came through last.
@@ -529,31 +535,37 @@ fn last_hop(packet: &Packet) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// By its short name, the one known node that matches, or the one of them
-/// heard directly; none if it cannot be told which.
-fn one_of(live: Live, matches: impl Fn(u32) -> bool) -> Option<String> {
+/// The one known node that matches, or the one of them heard directly;
+/// none if it cannot be told which.
+fn one_of(live: Live, matches: impl Fn(u32) -> bool) -> Option<u32> {
     live.nodes.with(|nodes| {
         let all: Vec<_> = nodes.values().filter(|n| matches(n.num)).collect();
         let direct: Vec<_> = all.iter().filter(|n| n.hops_away == Some(0)).collect();
-        let one = match (all.as_slice(), direct.as_slice()) {
+        match (all.as_slice(), direct.as_slice()) {
             ([only], _) => Some(only.num),
             (_, [only]) => Some(only.num),
             _ => None,
-        }?;
-        let short = short_name(live, one);
-        Some(if short.is_empty() {
-            format!("!{one:08x}")
-        } else {
-            short
-        })
+        }
     })
+}
+
+/// A node by its short name, or its id when it has none.
+fn short_or_id(live: Live, num: u32) -> String {
+    let short = short_name(live, num);
+    if short.is_empty() {
+        format!("!{num:08x}")
+    } else {
+        short
+    }
 }
 
 /// The two ends of a packet MeshCore heard raw, as far as it tells them: the
 /// node it names whole, or its hash, by the one known node that has it; the
-/// channel a text went to; everyone for an advert; a dash when it says
-/// nothing.
-fn meshcore_ends(live: Live, packet: &Packet, everyone: &str) -> (String, String) {
+/// channel a text went to; everyone for an advert; for a trace, the hop that
+/// sent on what was heard and the next, or `back` to whoever sent it; a dash
+/// when it says nothing.
+fn meshcore_ends(live: Live, packet: &Packet, everyone: &str, back: &str) -> (String, String) {
+    let payload = packet.payload.as_ref();
     let field = |name: &str| {
         packet
             .payload
@@ -568,6 +580,19 @@ fn meshcore_ends(live: Live, packet: &Packet, everyone: &str) -> (String, String
         (_, true) => hash,
     };
     let none = || "—".to_owned();
+    if packet.port.as_deref() == Some("TRACE") {
+        let (hops, snrs) = payload.map(trace).unwrap_or_default();
+        let done = snrs.len();
+        let from = done
+            .checked_sub(1)
+            .and_then(|last| hops.get(last).cloned())
+            .map_or_else(none, by_hash);
+        let to = hops
+            .get(done)
+            .cloned()
+            .map_or_else(|| back.to_owned(), by_hash);
+        return (from, to);
+    }
     let from = if packet.from != 0 {
         who(live, packet.from)
     } else if let Some(sender) = field("sender") {
@@ -599,7 +624,14 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
         let packet = StoredValue::new(packet.clone());
         move || {
             (live.selected_kind() == Some(RadioKind::Meshcore)).then(|| {
-                packet.with_value(|p| meshcore_ends(live, p, t_string!(i18n, packets_everyone)))
+                packet.with_value(|p| {
+                    meshcore_ends(
+                        live,
+                        p,
+                        t_string!(i18n, packets_everyone),
+                        t_string!(i18n, packets_trace_back),
+                    )
+                })
             })
         }
     };
@@ -812,7 +844,7 @@ fn PacketDrawer() -> impl IntoView {
                         // MeshCore's has its channel only for a channel's text,
                         // which goes to everyone on it, as Meshtastic's does.
                         let (from_text, to_text, channel_text) = if meshcore {
-                            let (mut from_text, mut to_text) = meshcore_ends(live, &packet, everyone);
+                            let (mut from_text, mut to_text) = meshcore_ends(live, &packet, everyone, t_string!(i18n, packets_trace_back));
                             if from != 0 {
                                 from_text = format!("{from_text} (!{from:08x})");
                             }
@@ -851,6 +883,14 @@ fn PacketDrawer() -> impl IntoView {
                                 format!("{} (0x{:08x})", packet.packet_id, packet.packet_id),
                             ),
                         ];
+                        if let Some(tag) = packet
+                            .payload
+                            .as_ref()
+                            .filter(|_| packet.port.as_deref() == Some("TRACE"))
+                            .and_then(|p| p["tag"].as_str())
+                        {
+                            facts.push(text_fact(t_string!(i18n, packets_trace_tag).to_owned(), tag.to_owned()));
+                        }
                         if let Some(channel_text) = channel_text {
                             facts.insert(
                                 3,
@@ -910,12 +950,66 @@ fn PacketDrawer() -> impl IntoView {
                             <div class="packet-detail">
                                 <dl class="packet-facts">{facts}</dl>
                                 {meshcore.then(|| view! { <crate::chat::RouteList routes origin outgoing=false /> })}
+                                {(packet.port.as_deref() == Some("TRACE"))
+                                    .then(|| packet.payload.as_ref().map(trace))
+                                    .flatten()
+                                    .map(|(hops, snrs)| view! { <TraceHops hops snrs /> })}
                                 <pre class="packet-text mono">{text()}</pre>
                             </div>
                         }
                     })
             }}
         </crate::node::Drawer>
+    }
+}
+
+/// A trace's way, hop by hop, as it was asked for: each by its node, a
+/// guess as it may be, or its hash; and the SNR it heard it at, for those it
+/// went through.
+#[component]
+fn TraceHops(hops: Vec<String>, snrs: Vec<f64>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let mut guessed = false;
+    let lines = hops
+        .into_iter()
+        .enumerate()
+        .map(|(at, hash)| {
+            let found = node_by_hash(live, &hash);
+            let guess = found.is_some_and(|(_, guess)| guess);
+            guessed |= guess;
+            let known = found.is_some();
+            let name = found.map_or_else(|| hash.clone(), |(num, _)| node_name(live, num));
+            let title = if guess {
+                Some(t_string!(i18n, packets_relay_guess).replace("{hash}", &hash))
+            } else if known {
+                None
+            } else {
+                Some(t_string!(i18n, route_unknown).to_owned())
+            };
+            let heard = snrs.get(at).map_or_else(
+                || t_string!(i18n, packets_trace_pending).to_owned(),
+                |snr| format!("{snr:.1} dB"),
+            );
+            view! {
+                <li>
+                    <span class="hops">
+                        <span class="hop" class:guess=guess class:unsure=!known title=title>
+                            {name}
+                        </span>
+                    </span>
+                    <span class="dim">{heard}</span>
+                </li>
+            }
+        })
+        .collect_view();
+    view! {
+        <section class="routes trace-hops">
+            <h3>{t!(i18n, packets_trace)}</h3>
+            <p class="hint dim">{t!(i18n, packets_trace_hint)}</p>
+            <ol>{lines}</ol>
+            {guessed.then(|| view! { <p class="hint dim guessed">{t!(i18n, route_guess_hint)}</p> })}
+        </section>
     }
 }
 
@@ -961,7 +1055,7 @@ fn clock(at: i64) -> String {
 /// What a MeshCore packet heard raw says, in a line: its name and kind for an
 /// advert, who wrote what for a channel's text, its size for what is sealed;
 /// and how many copies came, past the first.
-fn meshcore_summary(port: &str, payload: &serde_json::Value) -> String {
+fn meshcore_summary(port: &str, payload: &serde_json::Value, locale: Locale) -> String {
     let line = match port {
         "ADVERT" => {
             let name = payload["name"].as_str().unwrap_or("?");
@@ -979,9 +1073,18 @@ fn meshcore_summary(port: &str, payload: &serde_json::Value) -> String {
             payload["size"].as_u64().unwrap_or(0)
         ),
         "ACK" => payload["code"].as_str().unwrap_or_default().to_owned(),
+        // How far along the way it was sent it went, and how strong the
+        // last hop heard it.
         "TRACE" => {
-            let hops = payload["hashes"].as_array().map_or(0, Vec::len);
-            format!("{hops} ⇢")
+            let (hops, snrs) = trace(payload);
+            let done = match locale {
+                Locale::es => format!("{} de {} saltos", snrs.len(), hops.len()),
+                Locale::en => format!("{} of {} hops", snrs.len(), hops.len()),
+            };
+            match snrs.last() {
+                Some(snr) => format!("{done} · {snr:.1} dB"),
+                None => done,
+            }
         }
         _ => format!("{} B", payload["size"].as_u64().unwrap_or(0)),
     };
@@ -989,6 +1092,24 @@ fn meshcore_summary(port: &str, payload: &serde_json::Value) -> String {
         Some(copies) if copies > 1 => format!("{line} · ×{copies}"),
         _ => line,
     }
+}
+
+/// A trace heard: the way it was sent along, each hop by its hash; and the
+/// SNR each hop gone through heard it at, as many as it went.
+fn trace(payload: &Value) -> (Vec<String>, Vec<f64>) {
+    let hops = payload["hops"]
+        .as_array()
+        .map(|hops| {
+            hops.iter()
+                .filter_map(|h| h.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    let snrs = payload["snrs"]
+        .as_array()
+        .map(|snrs| snrs.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default();
+    (hops, snrs)
 }
 
 /// What a packet says, in a line.
@@ -1022,9 +1143,11 @@ pub fn summary(packet: &Packet, locale: Locale) -> String {
         // were heard.
         "ADVERT" | "GRP_TXT" | "TXT_MSG" | "REQ" | "RESPONSE" | "PATH" | "ANON_REQ" | "ACK"
         | "TRACE" | "GRP_DATA" | "MULTIPART" | "CONTROL" | "RAW_CUSTOM" => {
-            Some(meshcore_summary(port, payload))
+            Some(meshcore_summary(port, payload, locale))
         }
-        "" if payload.get("channel_hash").is_some() => Some(meshcore_summary("SEALED", payload)),
+        "" if payload.get("channel_hash").is_some() => {
+            Some(meshcore_summary("SEALED", payload, locale))
+        }
         "NODE_STATUS_APP" => Some(format!(
             "«{}»",
             payload["status"].as_str().unwrap_or_default()

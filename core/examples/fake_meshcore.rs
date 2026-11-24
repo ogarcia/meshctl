@@ -1617,6 +1617,32 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             radio.contacts.push(new);
             format!("{name} advertises")
         }
+        // Someone else's trace heard, raw: along Monte, Torre and Monte
+        // again, by two bytes of each, two of its hops gone; then the last.
+        Some("trace") => {
+            let tag = u32::try_from(random(u64::from(u32::MAX))).unwrap_or(7);
+            let mut payload = tag.to_le_bytes().to_vec();
+            payload.extend([0; 4]);
+            payload.push(0x01);
+            for hop in [key(0x52), key(0x55), key(0x52)] {
+                payload.extend(&hop[..2]);
+            }
+            let leg = |snrs: &[i8]| {
+                let mut packet = vec![(raw::PAYLOAD_TRACE << 2) | raw::ROUTE_DIRECT];
+                packet.push(u8::try_from(snrs.len()).unwrap_or(0));
+                packet.extend(snrs.iter().map(|s| (s * 4).cast_unsigned()));
+                packet.extend(&payload);
+                packet
+            };
+            let _ = events.send(Event::Push(rx_log(7, -88, &leg(&[5, -3]))));
+            let last = leg(&[5, -3, 8]);
+            let events = events.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                let _ = events.send(Event::Push(rx_log(4, -97, &last)));
+            });
+            "a trace goes by".into()
+        }
         Some("drop") => {
             let _ = events.send(Event::Drop);
             "dropped".into()

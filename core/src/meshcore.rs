@@ -795,12 +795,15 @@ fn raw_heard(
                     code: u32::from_le_bytes(b),
                 })
         }
-        raw::PAYLOAD_TRACE => match payload.get(..4) {
-            Some(tag) => RawInfo::Trace {
+        // Its tag, a code, its flags, whose lowest two bits tell the size of
+        // each hash of the path after them: 1, 2, 4 or 8 bytes.
+        raw::PAYLOAD_TRACE => match (payload.get(..4), payload.get(8)) {
+            (Some(tag), Some(flags)) => RawInfo::Trace {
                 tag: u32::from_le_bytes(tag.try_into().unwrap_or_default()),
                 hashes: payload.get(9..).unwrap_or_default().to_vec(),
+                hash_size: 1 << (flags & 0x03),
             },
-            None => RawInfo::Other,
+            _ => RawInfo::Other,
         },
         _ => RawInfo::Other,
     };

@@ -93,7 +93,10 @@ impl MeshcoreRow {
             if let Some(scope) = &self.scope {
                 object.insert("region".into(), scope.clone().into());
             }
-            object.insert("path".into(), hops.clone().into());
+            // A trace's path is the SNR each hop heard it at, told apart.
+            if payload_type != raw::PAYLOAD_TRACE {
+                object.insert("path".into(), hops.clone().into());
+            }
             object.insert("copies".into(), self.copies.into());
             object.insert("size".into(), self.payload_len.into());
         }

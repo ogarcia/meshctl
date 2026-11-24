@@ -482,14 +482,23 @@ async fn keep_raw(
             None,
             json!({ "code": format!("{code:08x}") }),
         ),
-        RawInfo::Trace { tag, hashes } => (
+        // The way it was sent along, each hop by its hash; and the SNR each
+        // hop gone through heard it at, its packet's path.
+        RawInfo::Trace {
+            tag,
+            hashes,
+            hash_size,
+        } => (
             PacketKind::Traceroute,
             None,
             None,
             None,
             json!({
                 "tag": format!("{tag:08x}"),
-                "hashes": hashes.iter().map(|b| hash(*b)).collect::<Vec<_>>(),
+                "hops": hashes
+                    .chunks(usize::from(*hash_size).max(1))
+                    .map(|hop| hop.iter().map(|b| hash(*b)).collect::<String>())
+                    .collect::<Vec<_>>(),
                 "snrs": heard
                     .path
                     .iter()
