@@ -2758,9 +2758,9 @@
       /* The emojis to react with, over the message: the most used, then all. */
       .reaction-picker {
         position: absolute;
-        /* Over the buttons at the message's foot, on its right. */
+        /* Over the buttons at the message's foot, on its right, clear of them. */
         right: 10px;
-        bottom: 18px;
+        bottom: 22px;
         z-index: 40;
         padding: 4px;
         border: 1px solid var(--mc-border);
@@ -2786,6 +2786,15 @@
       .reaction-picker .quick .more svg { width: 18px; height: 18px; }
       .reaction-picker.all { width: 340px; max-width: calc(100vw - 32px); padding: 0; border-radius: 12px; }
       .reaction-picker.all .emoji-picker { max-width: none; border: 0; background: var(--mc-surface); }
+      /* Always as tall, whatever group is shown: it opens on the side it
+         fits as it gets largest, and it does not change size. */
+      .reaction-picker.all .emoji-grid { height: 200px; }
+      /* Under the message instead, clear of the buttons at its foot as it
+         is over it, when there is no room over it in the messages' scroll:
+         the first ones of a conversation. */
+      .reaction-picker.below { bottom: auto; top: calc(100% + 18px); }
+      /* From its left edge, when there is no room for it on the left. */
+      .reaction-picker.rightwards { right: auto; left: 10px; }
       /* All of a message, over the page. */
       .message-details { width: 460px; max-width: 100%; padding: 16px 20px 20px; }
       .message-details header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }

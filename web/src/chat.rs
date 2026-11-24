@@ -1907,11 +1907,55 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
 
 /// The emojis to react with: the most used, at a touch, and all of them
 /// behind the last button.
+/// How large the reaction picker gets with all the emojis, in pixels, a
+/// margin beside: as the style sheet makes it, its grid always as tall.
+const ALL_HEIGHT: f64 = 320.0;
+const ALL_WIDTH: f64 = 350.0;
+
+/// How far over or under the message's foot the picker starts, clear of
+/// the buttons that hang from it, as the style sheet places it.
+const CLEAR_ABOVE: f64 = 22.0;
+const CLEAR_BELOW: f64 = 18.0;
+
 #[component]
 fn ReactionPicker(pick: Callback<String>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let all = RwSignal::new(false);
+    // Over the message, or under it when the messages' scroll has no room
+    // above; from its right edge leftwards, or from its left edge when there
+    // is no room on the left, as for a narrow one of someone else's. Worked
+    // out once, as it opens, for all of them, as large as it gets: the few
+    // open on the side all would, so that nothing jumps from one to the
+    // other.
+    let element = NodeRef::<leptos::html::Div>::new();
+    let below = RwSignal::new(false);
+    let rightwards = RwSignal::new(false);
+    Effect::new(move |_| {
+        let Some(picker) = element.get() else {
+            return;
+        };
+        request_animation_frame(move || {
+            let picker: &web_sys::Element = &picker;
+            let Some(message) = picker.parent_element() else {
+                return;
+            };
+            let Some(scroll) = picker.closest(".messages").ok().flatten() else {
+                return;
+            };
+            let (message, scroll) = (
+                message.get_bounding_client_rect(),
+                scroll.get_bounding_client_rect(),
+            );
+            // Clear of the buttons at the message's foot, either way.
+            let above = message.bottom() - CLEAR_ABOVE - scroll.top();
+            let under = scroll.bottom() - (message.bottom() + CLEAR_BELOW);
+            below.set(ALL_HEIGHT > above && under > above);
+            let leftwards = message.right() - scroll.left();
+            let onwards = scroll.right() - message.left();
+            rightwards.set(ALL_WIDTH > leftwards && onwards > leftwards);
+        });
+    });
     if live.emojis.get_untracked().is_none() {
         spawn_local(async move {
             if let Ok(emojis) = daemon::emojis().await {
@@ -1929,7 +1973,14 @@ fn ReactionPicker(pick: Callback<String>) -> impl IntoView {
         offered
     };
     view! {
-        <div class="reaction-picker" class:all=move || all.get() on:click=|ev| ev.stop_propagation()>
+        <div
+            class="reaction-picker"
+            class:all=move || all.get()
+            class:below=move || below.get()
+            class:rightwards=move || rightwards.get()
+            node_ref=element
+            on:click=|ev| ev.stop_propagation()
+        >
             {move || {
                 if all.get() {
                     let frequent = Signal::derive(offered);
