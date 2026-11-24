@@ -657,6 +657,7 @@
   "traces_more": "Cargar más",
   "traces_none": "Aún no se ha trazado ninguna ruta hasta él.",
   "traces_meshcore_hint": "Se traza por la ruta que la radio tiene guardada, ida y vuelta: hace falta una de al menos un salto. A uno que oye directamente, mejor el ping.",
+  "traces_repeat_hint": "Solo responde si tiene activada la repetición, que en salas y sensores viene desactivada de fábrica.",
   "trace_guess_hint": "Los repetidores subrayados son una deducción por su cercanía y alcance, no una certeza.",
   "traces_drawer_title": "Trazas anteriores de {name}",
   "drawer_close": "Cerrar",

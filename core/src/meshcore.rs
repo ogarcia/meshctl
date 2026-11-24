@@ -1612,9 +1612,10 @@ impl Mesh {
             .await
     }
 
-    /// Traces the way to a repeater or a room and back, along the path the
-    /// radio keeps to it, of a hop at least: each hop on it passes it on with
-    /// the SNR it heard it at. Its tag, which its answer comes as an
+    /// Traces the way to a repeater, a room or a sensor and back, along the
+    /// path the radio keeps to it, of a hop at least: each hop on it passes
+    /// it on with the SNR it heard it at. A room or a sensor passes it back
+    /// only when set to repeat, which it is not out of the box. Its tag, which its answer comes as an
     /// [`Event::Traced`] with; [`AdminError::NoPath`] for one with no such
     /// path, [`AdminError::Unsupported`] for a node that passes nothing on.
     pub async fn meshcore_traceroute(&self, num: u32) -> Result<u32, AdminError> {
@@ -1625,7 +1626,7 @@ impl Mesh {
                 .nodes
                 .get(&num)
                 .and_then(|n| n.user.as_ref())
-                .is_some_and(|u| u.role == "REPEATER" || u.role == "ROOM")
+                .is_some_and(|u| matches!(u.role.as_str(), "REPEATER" | "ROOM" | "SENSOR"))
         });
         if !passes_on {
             return Err(AdminError::Unsupported);

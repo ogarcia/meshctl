@@ -147,7 +147,7 @@ fn NodePage(num: u32) -> impl IntoView {
                 <div class="node-column">
                     <MeshcorePath />
                     <RemotePing />
-                    {serves.then(|| view! { <Traces drawer /> })}
+                    <Traces drawer />
                     {serves.then(|| view! { <Regions /> })}
                     <RemoteOwner />
                     <NodeAccessSection />
@@ -355,13 +355,13 @@ fn can_ask(live: Live, asked: Asked, num: u32) -> bool {
     }
 }
 
-/// Whether a MeshCore node can be traced: a repeater or a room, which pass
-/// a trace on, that the radio keeps a path of a hop at least to; one heard
-/// straight is pinged instead.
+/// Whether a MeshCore node can be traced: a repeater, a room or a sensor,
+/// which pass a trace on, the last two when set to, that the radio keeps a
+/// path of a hop at least to; one heard straight is pinged instead.
 fn meshcore_traceable(live: Live, num: u32) -> bool {
     live.nodes.with(|nodes| {
         nodes.get(&num).is_some_and(|n| {
-            matches!(n.role.as_deref(), Some("REPEATER" | "ROOM"))
+            matches!(n.role.as_deref(), Some("REPEATER" | "ROOM" | "SENSOR"))
                 && n.hops_away.is_some_and(|hops| hops > 0)
         })
     })
@@ -2140,6 +2140,16 @@ fn Traces(drawer: RwSignal<bool>) -> impl IntoView {
                 }
                 .into_any(),
                 None => view! { <p class="nothing">{t!(i18n, traces_none)}</p> }.into_any(),
+            }}
+            // A room or a sensor answers only when set to repeat.
+            {move || {
+                let repeats_if_set = live.nodes.with(|nodes| {
+                    nodes
+                        .get(&asking.num)
+                        .is_some_and(|n| matches!(n.role.as_deref(), Some("ROOM" | "SENSOR")))
+                });
+                (repeats_if_set && meshcore_traceable(live, asking.num))
+                    .then(|| view! { <p class="hint dim">{t!(i18n, traces_repeat_hint)}</p> })
             }}
             // Why not, when a MeshCore one cannot be traced now.
             {move || {

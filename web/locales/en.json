@@ -657,6 +657,7 @@
   "traces_more": "Load more",
   "traces_none": "No route to it traced yet.",
   "traces_meshcore_hint": "It is traced along the route the radio keeps, there and back: one of a hop at least is needed. One heard straight is better pinged.",
+  "traces_repeat_hint": "It answers only when set to repeat, which rooms and sensors are not out of the box.",
   "trace_guess_hint": "Underlined repeaters are guessed by how near and within reach they are, not known for sure.",
   "traces_drawer_title": "Earlier traceroutes to {name}",
   "drawer_close": "Close",
