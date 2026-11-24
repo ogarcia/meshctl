@@ -103,6 +103,7 @@ pub mod command {
     const SEND_LOGIN: u8 = 0x1a;
     const SEND_BINARY_REQ: u8 = 0x32;
     const SEND_TRACE_PATH: u8 = 0x24;
+    const SEND_PATH_DISCOVERY_REQ: u8 = 0x34;
     const RUN_CLI_COMMAND: u8 = 0x42;
     const SET_FLOOD_SCOPE_KEY: u8 = 0x36;
     const SET_TUNING_PARAMS: u8 = 0x15;
@@ -366,6 +367,16 @@ pub mod command {
         payload.extend_from_slice(&0u32.to_le_bytes());
         payload.push(flags);
         payload.extend_from_slice(path);
+        payload
+    }
+
+    /// Asks a contact, flooded, the way to it and the way back, by its whole
+    /// key: answered with `MessageSent`, then pushed `PathDiscovery`, by the
+    /// start of its key. The radio forgets any other request it waits for,
+    /// and keeps the path it had.
+    pub fn send_path_discovery(key: &[u8; 32]) -> Vec<u8> {
+        let mut payload = vec![SEND_PATH_DISCOVERY_REQ, 0];
+        payload.extend_from_slice(key);
         payload
     }
 
@@ -684,6 +695,14 @@ pub enum Response {
         snrs: Vec<f32>,
         last_snr: f32,
     },
+    /// Pushed: the way to a contact and back, as a path discovery found
+    /// them, by the first six bytes of its key: each a path's length byte,
+    /// as contacts have, and its hashes.
+    PathDiscovery {
+        prefix: [u8; 6],
+        there: (u8, Vec<u8>),
+        back: (u8, Vec<u8>),
+    },
     /// Pushed: a login was taken.
     LoggedIn(LoggedIn),
     /// Pushed: a login was refused, by the first six bytes of the node's key.
@@ -706,6 +725,7 @@ impl Response {
                 | Self::RxLog { .. }
                 | Self::LoggedIn(_)
                 | Self::TraceData { .. }
+                | Self::PathDiscovery { .. }
                 | Self::NotLoggedIn(_)
         ) || matches!(self, Self::Other(code) if *code >= 0x80)
     }
@@ -775,6 +795,7 @@ impl Response {
             0x8a => Self::NewContact(contact(data)?),
             0x85 => Self::LoggedIn(logged_in(data)?),
             0x89 => trace_data(data)?,
+            0x8d => path_discovery(data)?,
             0x86 => Self::NotLoggedIn(bytes_at(data, 1)?),
             0x88 => Self::RxLog {
                 snr: snr(*data.first()?),
@@ -978,6 +999,27 @@ fn trace_data(data: &[u8]) -> Option<Response> {
         hashes,
         snrs,
         last_snr,
+    })
+}
+
+/// A path discovery's answer: a reserved byte, the start of the node's key,
+/// and the way there and back, each its length byte and its hashes.
+fn path_discovery(data: &[u8]) -> Option<Response> {
+    let prefix = bytes_at(data, 1)?;
+    let path_at = |at: usize| {
+        let len = *data.get(at)?;
+        let bytes = usize::from(len & 0x3f) * (usize::from(len >> 6) + 1);
+        Some((
+            (len, data.get(at + 1..at + 1 + bytes)?.to_vec()),
+            at + 1 + bytes,
+        ))
+    };
+    let (there, at) = path_at(7)?;
+    let (back, _) = path_at(at)?;
+    Some(Response::PathDiscovery {
+        prefix,
+        there,
+        back,
     })
 }
 
@@ -1226,6 +1268,24 @@ mod tests {
         assert!(ack.is_push());
         assert!(Response::parse(&[0x83]).unwrap().is_push());
         assert_eq!(Response::parse(&[0x88, 0]), None);
+        // A path found: two hops there of two bytes each, one back of one.
+        let found = Response::parse(&[
+            0x8d, 0, 1, 2, 3, 4, 5, 6, 0x42, 0x52, 0x59, 0x55, 0x5c, 0x01, 0x52,
+        ])
+        .unwrap();
+        assert_eq!(
+            found,
+            Response::PathDiscovery {
+                prefix: [1, 2, 3, 4, 5, 6],
+                there: (0x42, vec![0x52, 0x59, 0x55, 0x5c]),
+                back: (0x01, vec![0x52]),
+            }
+        );
+        assert!(found.is_push());
+        assert_eq!(
+            Response::parse(&[0x8d, 0, 1, 2, 3, 4, 5, 6, 0x42, 0x52]),
+            None
+        );
         assert_eq!(
             Response::parse(&[0x88, 20, 0xb0, 0x15, 0x01, 0x07]),
             Some(Response::RxLog {

@@ -1534,6 +1534,73 @@ fn hop_is(hop: &meshctl_api::RouteHop) -> HopIs {
     }
 }
 
+/// A route's hops one after the other: each by its node, sure, guessed, or
+/// by its hash when it is not known which, with a title saying why; a
+/// direct route's, which is not guessed, by how many it may be.
+pub fn hop_chain(
+    live: Live,
+    i18n: I18nContext<Locale>,
+    hops: &[meshctl_api::RouteHop],
+    flooded: bool,
+) -> impl IntoView + use<> {
+    hops.iter()
+        .enumerate()
+        .map(|(at, hop)| {
+            let known = hop.nodes.len();
+            let fill = |text: &str| {
+                text.replace("{n}", &known.to_string())
+                    .replace("{hash}", &hop.hash)
+            };
+            let (name, title, guess, unsure) = match hop_is(hop) {
+                HopIs::Sure(num) => (node_name(live, num), None, false, false),
+                HopIs::Guess(num) => {
+                    let why = if known == 1 {
+                        fill(t_string!(i18n, route_guess_only))
+                    } else {
+                        fill(t_string!(i18n, route_guess))
+                    };
+                    (node_name(live, num), Some(why), true, false)
+                }
+                HopIs::Unknown if known == 0 => (
+                    hop.hash.clone(),
+                    Some(t_string!(i18n, route_unknown).to_owned()),
+                    false,
+                    true,
+                ),
+                // A direct route's, which is not guessed: how
+                // many it may be.
+                HopIs::Unknown if !flooded => (
+                    fill(t_string!(i18n, route_many)),
+                    Some(
+                        hop.nodes
+                            .iter()
+                            .map(|n| node_name(live, *n))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                    false,
+                    true,
+                ),
+                HopIs::Unknown => (
+                    hop.hash.clone(),
+                    Some(fill(t_string!(i18n, route_misfit))),
+                    false,
+                    true,
+                ),
+            };
+            view! {
+                {(at > 0).then(|| view! { <span class="arrow" aria-hidden="true">"→"</span> })}
+                <span class="hop" class:guess=guess class:unsure=unsure title=title>{name}</span>
+            }
+        })
+        .collect_view()
+}
+
+/// Whether any of a route's hops is a guess, for the note that says so.
+pub fn any_guessed(hops: &[meshctl_api::RouteHop]) -> bool {
+    hops.iter().any(|h| matches!(hop_is(h), HopIs::Guess(_)))
+}
+
 /// Each copy heard of a message or a packet, and the way it came: every
 /// repeater by its name, or by its hash and how many it may be; the one
 /// picked on a small map, from where it set out, if known, to the radio.
@@ -1611,51 +1678,12 @@ pub fn RouteList(
             return None;
         }
         let count = all.len();
-        let guessed = all
-            .iter()
-            .any(|r| r.hops.iter().any(|h| matches!(hop_is(h), HopIs::Guess(_))));
+        let guessed = all.iter().any(|r| any_guessed(&r.hops));
         let lines = all
             .into_iter()
             .enumerate()
             .map(|(index, route)| {
-                let hops = route
-                    .hops
-                    .iter()
-                    .enumerate()
-                    .map(|(at, hop)| {
-                        let known = hop.nodes.len();
-                        let fill = |text: &str| {
-                            text.replace("{n}", &known.to_string()).replace("{hash}", &hop.hash)
-                        };
-                        let (name, title, guess, unsure) = match hop_is(hop) {
-                            HopIs::Sure(num) => (node_name(live, num), None, false, false),
-                            HopIs::Guess(num) => {
-                                let why = if known == 1 {
-                                    fill(t_string!(i18n, route_guess_only))
-                                } else {
-                                    fill(t_string!(i18n, route_guess))
-                                };
-                                (node_name(live, num), Some(why), true, false)
-                            }
-                            HopIs::Unknown if known == 0 => {
-                                (hop.hash.clone(), Some(t_string!(i18n, route_unknown).to_owned()), false, true)
-                            }
-                            // A direct route's, which is not guessed: how
-                            // many it may be.
-                            HopIs::Unknown if !route.flooded => (
-                                fill(t_string!(i18n, route_many)),
-                                Some(hop.nodes.iter().map(|n| node_name(live, *n)).collect::<Vec<_>>().join(", ")),
-                                false,
-                                true,
-                            ),
-                            HopIs::Unknown => (hop.hash.clone(), Some(fill(t_string!(i18n, route_misfit))), false, true),
-                        };
-                        view! {
-                            {(at > 0).then(|| view! { <span class="arrow" aria-hidden="true">"→"</span> })}
-                            <span class="hop" class:guess=guess class:unsure=unsure title=title>{name}</span>
-                        }
-                    })
-                    .collect_view();
+                let hops = hop_chain(live, i18n, &route.hops, route.flooded);
                 let way = if route.hops.is_empty() {
                     if route.flooded {
                         t_string!(i18n, route_straight).to_owned()

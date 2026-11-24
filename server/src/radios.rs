@@ -538,9 +538,10 @@ async fn keep_reply(
     store: &Store,
     changes: &broadcast::Sender<Change>,
     radio: RadioId,
+    mesh: &Mesh,
     reply: &mesh::Reply,
 ) -> Result<()> {
-    let kept = reply_of(&reply.answer);
+    let kept = reply_of(mesh, &reply.answer);
     if let Some(request) = store
         .reply_request(radio, reply.request_id, reply.from, &kept, now())
         .await?
@@ -550,8 +551,9 @@ async fn keep_reply(
     Ok(())
 }
 
-/// A node's answer, as the API tells it.
-fn reply_of(answer: &mesh::Answer) -> meshctl_api::RequestReply {
+/// A node's answer, as the API tells it: a route's hops with the nodes
+/// they may be, as the radio knows them.
+fn reply_of(mesh: &Mesh, answer: &mesh::Answer) -> meshctl_api::RequestReply {
     use meshctl_api::RequestReply;
     match answer {
         mesh::Answer::Regions {
@@ -633,6 +635,22 @@ fn reply_of(answer: &mesh::Answer) -> meshctl_api::RequestReply {
             snr_there: *snr_there,
             snr_back: *snr_back,
         },
+        // The way back as a flood came, to the radio; the way there read
+        // the other way round for it, and told as it goes.
+        mesh::Answer::Route { there, back } => {
+            let known = known_nodes(mesh);
+            fn slices(hops: &[Vec<u8>]) -> Vec<&[u8]> {
+                hops.iter().map(Vec::as_slice).collect()
+            }
+            let mut towards = slices(there);
+            towards.reverse();
+            let mut there = hops_of(&known, &towards, true);
+            there.reverse();
+            RequestReply::Route {
+                there,
+                back: hops_of(&known, &slices(back), true),
+            }
+        }
     }
 }
 
@@ -670,13 +688,13 @@ fn lpp_name(kind: u8) -> String {
     .to_owned()
 }
 
-/// Copies heard as the ways they came: each hop by its hash, with the nodes
-/// the radio knows whose key starts so, and the one it most likely is.
-fn routes_of(mesh: &Mesh, rows: Vec<crate::store::RouteRow>) -> Vec<meshctl_api::MessageRoute> {
+/// Each node known by its key, as a hop of a route may be; and where the
+/// radio is.
+type Known = (Vec<(Vec<u8>, crate::routes::Candidate)>, Option<(f64, f64)>);
+
+fn known_nodes(mesh: &Mesh) -> Known {
     use crate::routes::{Candidate, Repeats};
-    // Each node known by its key, and where the radio is.
-    type Known = (Vec<(Vec<u8>, Candidate)>, Option<(f64, f64)>);
-    let (known, radio): Known = mesh.read(|state| {
+    mesh.read(|state| {
         let at = |n: &mesh::Node| n.position.map(|p| (p.latitude, p.longitude));
         let known = state
             .nodes
@@ -704,45 +722,58 @@ fn routes_of(mesh: &Mesh, rows: Vec<crate::store::RouteRow>) -> Vec<meshctl_api:
             .and_then(|l| state.nodes.get(&l.num))
             .and_then(at);
         (known, radio)
-    });
+    })
+}
+
+/// A route's hops, by their hashes, from the far end to the radio: each with
+/// the nodes the radio knows whose key starts so, and the one it most
+/// likely is, as a flood's route tells; a direct one's, only one a hash
+/// alone tells, as it goes on to where it is sent.
+fn hops_of(known: &Known, hashes: &[&[u8]], flooded: bool) -> Vec<meshctl_api::RouteHop> {
+    let (known, radio) = known;
+    let candidates: Vec<Vec<crate::routes::Candidate>> = hashes
+        .iter()
+        .map(|hash| {
+            known
+                .iter()
+                .filter(|(key, _)| key.starts_with(hash))
+                .map(|(_, c)| c.clone())
+                .collect()
+        })
+        .collect();
+    let likely = if flooded {
+        crate::routes::likely(&candidates, *radio)
+    } else {
+        candidates
+            .iter()
+            .map(|c| match c.as_slice() {
+                [one] => Some(one.num),
+                _ => None,
+            })
+            .collect()
+    };
+    hashes
+        .iter()
+        .zip(candidates)
+        .zip(likely)
+        .map(|((hash, candidates), likely)| meshctl_api::RouteHop {
+            hash: hash.iter().map(|b| format!("{b:02x}")).collect(),
+            nodes: candidates.iter().map(|c| c.num).collect(),
+            likely,
+        })
+        .collect()
+}
+
+/// Copies heard as the ways they came: each hop by its hash, with the nodes
+/// the radio knows whose key starts so, and the one it most likely is.
+fn routes_of(mesh: &Mesh, rows: Vec<crate::store::RouteRow>) -> Vec<meshctl_api::MessageRoute> {
+    let known = known_nodes(mesh);
     rows.into_iter()
         .map(|row| {
             let size = usize::try_from(row.hash_size).unwrap_or(1).max(1);
             let hashes: Vec<&[u8]> = row.path.chunks(size).collect();
-            let candidates: Vec<Vec<Candidate>> = hashes
-                .iter()
-                .map(|hash| {
-                    known
-                        .iter()
-                        .filter(|(key, _)| key.starts_with(hash))
-                        .map(|(_, c)| c.clone())
-                        .collect()
-                })
-                .collect();
-            // A flood's path ends at the radio; a direct one's goes on to
-            // where it is sent, so only a hash one known node has is told.
-            let likely = if row.flooded {
-                crate::routes::likely(&candidates, radio)
-            } else {
-                candidates
-                    .iter()
-                    .map(|c| match c.as_slice() {
-                        [one] => Some(one.num),
-                        _ => None,
-                    })
-                    .collect()
-            };
             meshctl_api::MessageRoute {
-                hops: hashes
-                    .iter()
-                    .zip(candidates)
-                    .zip(likely)
-                    .map(|((hash, candidates), likely)| meshctl_api::RouteHop {
-                        hash: hash.iter().map(|b| format!("{b:02x}")).collect(),
-                        nodes: candidates.iter().map(|c| c.num).collect(),
-                        likely,
-                    })
-                    .collect(),
+                hops: hops_of(&known, &hashes, row.flooded),
                 flooded: row.flooded,
                 snr: row.snr,
                 rssi: row.rssi,
@@ -1878,6 +1909,7 @@ impl Radios {
                 | RequestKind::Owner
                 | RequestKind::AccessList
                 | RequestKind::Ping
+                | RequestKind::Route
         );
         if meshcore_kind && !meshcore
             || meshcore && !meshcore_kind && new.kind != RequestKind::Neighbors
@@ -1918,7 +1950,17 @@ impl Radios {
                     asked => anonymous_owner = Some(asked),
                 }
             }
-            if logged.is_some() && !held && anonymous_owner.is_none() {
+            // A repeater, a room or a sensor reads a request only from a
+            // node logged in to it: a route asked of one, too.
+            let serves = mesh.read(|state| {
+                state
+                    .nodes
+                    .get(&new.node)
+                    .and_then(|n| n.user.as_ref())
+                    .is_some_and(|u| u.role != "CHAT")
+            });
+            let login = logged.is_some() || new.kind == RequestKind::Route && serves;
+            if login && !held && anonymous_owner.is_none() {
                 self.log_in_once(id, new.node, arrived)
                     .await
                     .map_err(AskFailure::Login)?;
@@ -1926,6 +1968,7 @@ impl Radios {
             let asked = match (anonymous_owner, new.kind, logged) {
                 (Some(asked), _, _) => asked,
                 (None, RequestKind::Ping, _) => mesh.meshcore_ping(new.node).await,
+                (None, RequestKind::Route, _) => mesh.meshcore_discover(new.node).await,
                 (None, _, Some(what)) => mesh.meshcore_request(new.node, what).await,
                 (None, _, None) => mesh.meshcore_ask(new.node, anonymous::REGIONS).await,
             };
@@ -1963,7 +2006,8 @@ impl Radios {
             | RequestKind::Telemetry
             | RequestKind::Owner
             | RequestKind::AccessList
-            | RequestKind::Ping => return Err(AskFailure::Unsupported),
+            | RequestKind::Ping
+            | RequestKind::Route => return Err(AskFailure::Unsupported),
         };
         let packet_id =
             mesh.send_request(new.node, new.channel, ask)
@@ -3419,7 +3463,9 @@ impl Radios {
                             }
                         })
                     }
-                    Ok(mesh::Event::Reply(reply)) => keep_reply(&store, &changes, id, &reply).await,
+                    Ok(mesh::Event::Reply(reply)) => {
+                        keep_reply(&store, &changes, id, &mesh, &reply).await
+                    }
                     Ok(mesh::Event::Unanswered { request_id, from }) => {
                         match store.unanswered_request(id, request_id, from).await {
                             Ok(Some(request)) => {

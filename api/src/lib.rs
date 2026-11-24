@@ -1421,6 +1421,12 @@ pub enum RequestKind {
     /// A MeshCore node heard straight, pinged, with no login: how long there
     /// and back, and how each end heard the other.
     Ping,
+    /// The way to a MeshCore node and back, found by a request flooded to
+    /// it: each hop by its hash, and the node it most likely is. With no
+    /// login to a companion; to a repeater, a room or a sensor, logged in to
+    /// as for `status`, as they read requests only from those. The radio
+    /// keeps the path it had.
+    Route,
 }
 
 impl RequestKind {
@@ -1435,7 +1441,8 @@ impl RequestKind {
             | Self::Telemetry
             | Self::Owner
             | Self::AccessList
-            | Self::Ping => None,
+            | Self::Ping
+            | Self::Route => None,
             Self::Position => Some(Pace::Position),
             Self::DeviceTelemetry
             | Self::EnvironmentTelemetry
@@ -1585,6 +1592,13 @@ pub enum RequestReply {
         snr_there: f32,
         /// The SNR the radio heard it back at, in dB.
         snr_back: f32,
+    },
+    /// The way to a MeshCore node and back, as a path discovery found them:
+    /// each hop by its hash, with the nodes it may be and the one it most
+    /// likely is; there from the radio's side, back from the node's.
+    Route {
+        there: Vec<RouteHop>,
+        back: Vec<RouteHop>,
     },
 }
 

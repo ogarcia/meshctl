@@ -2603,6 +2603,10 @@
       .packet-detail .routes { margin: 0 20px 16px; padding-top: 14px; }
       /* A trace's hops, each with the SNR it heard it at beside it. */
       .routes.trace-hops li { flex-direction: row; align-items: center; gap: 10px; }
+      /* A route found, there and back: each way a line, by its name. */
+      .node-section .found-route { margin-top: 10px; border-top: 0; padding-top: 0; }
+      .routes.found-route li { flex-direction: row; align-items: baseline; gap: 10px; }
+      .routes.found-route li > .dim { flex: none; min-width: 4em; }
 
       /* The conversation in a column of its own on a wide screen, its
          background the whole width: what is said, and what is written, no

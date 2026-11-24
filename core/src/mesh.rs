@@ -341,6 +341,13 @@ pub enum Answer {
         snr_there: f32,
         snr_back: f32,
     },
+    /// The way to a MeshCore node and back, as a path discovery found them:
+    /// each hop by its hash, from the radio's side there, from the node's
+    /// back.
+    Route {
+        there: Vec<Vec<u8>>,
+        back: Vec<Vec<u8>>,
+    },
 }
 
 /// A node another hears straight: by its number, how long ago, and at what

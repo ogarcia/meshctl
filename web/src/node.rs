@@ -332,6 +332,7 @@ fn meshcore_kind(kind: RequestKind) -> bool {
             | RequestKind::Owner
             | RequestKind::AccessList
             | RequestKind::Ping
+            | RequestKind::Route
     )
 }
 
@@ -1111,6 +1112,8 @@ fn Shortcuts() -> impl IntoView {
 
 /// The path a MeshCore radio knows to a node: straight, by so many hops, or
 /// none, when what goes to it floods to find one. Reset, it floods again.
+/// Asked for, the way there and back as a flooded request finds them, hop
+/// by hop: the one found last, while none is asked anew.
 #[component]
 fn MeshcorePath() -> impl IntoView {
     let i18n = use_i18n();
@@ -1135,6 +1138,73 @@ fn MeshcorePath() -> impl IntoView {
             outcome.set(Some(daemon::reset_path(radio, asking.num).await));
             busy.set(false);
         });
+    };
+    // The latest asked that ended: the ways found, or none, as it did not
+    // answer; and whether it is asked again now.
+    let found = move || {
+        live.requests.with(|requests| {
+            requests
+                .iter()
+                .filter(|r| {
+                    r.node == asking.num
+                        && r.kind == RequestKind::Route
+                        && r.status != RequestStatus::Pending
+                })
+                .max_by_key(|r| r.id)
+                .map(|r| {
+                    let at = r.answered_at.unwrap_or(r.at);
+                    match &r.reply {
+                        Some(meshctl_api::RequestReply::Route { there, back }) => {
+                            (Some((there.clone(), back.clone())), at)
+                        }
+                        _ => (None, at),
+                    }
+                })
+        })
+    };
+    let searching = move || {
+        live.requests.with(|requests| {
+            requests.iter().any(|r| {
+                r.node == asking.num
+                    && r.kind == RequestKind::Route
+                    && r.status == RequestStatus::Pending
+            })
+        })
+    };
+    let ways = move || {
+        if searching() {
+            return None;
+        }
+        let (ways, _) = found()?;
+        let line = |label: AnyView, hops: Vec<meshctl_api::RouteHop>| {
+            let way = if hops.is_empty() {
+                view! { <span class="way">{t!(i18n, route_straight)}</span> }.into_any()
+            } else {
+                crate::chat::hop_chain(live, i18n, &hops, true).into_any()
+            };
+            view! {
+                <li>
+                    <span class="dim">{label}</span>
+                    <span class="hops">{way}</span>
+                </li>
+            }
+        };
+        Some(match ways {
+            Some((there, back)) => {
+                let guessed = crate::chat::any_guessed(&there) || crate::chat::any_guessed(&back);
+                view! {
+                    <div class="routes found-route">
+                        <ol>
+                            {line(t!(i18n, mc_route_there).into_any(), there)}
+                            {line(t!(i18n, mc_route_back).into_any(), back)}
+                        </ol>
+                        {guessed.then(|| view! { <p class="hint dim guessed">{t!(i18n, route_guess_hint)}</p> })}
+                    </div>
+                }
+                .into_any()
+            }
+            None => view! { <p class="hint dim">{t!(i18n, mc_route_lost)}</p> }.into_any(),
+        })
     };
     let body = move || {
         let (hops, contact) = node().unwrap_or((None, false));
@@ -1166,10 +1236,23 @@ fn MeshcorePath() -> impl IntoView {
                     Err(_) => view! { <span class="problem">{t!(i18n, error_failed)}</span> }.into_any(),
                 })}
             </div>
+            {contact.then(|| view! { <p class="hint dim">{t!(i18n, mc_route_hint)}</p> })}
+            {ways}
         }
     };
-    view! {
-        <Section title=t!(i18n, mc_path).into_any() class="mc-path">{body}</Section>
+    // Asked for of a contact only, as the radio asks only those.
+    move || {
+        let contact = node().is_some_and(|(_, contact)| contact);
+        view! {
+            <Section
+                title=t!(i18n, mc_path).into_any()
+                class="mc-path"
+                at=found().map(|(_, at)| at)
+                asked=contact.then_some(Asked::Request(RequestKind::Route))
+            >
+                {body}
+            </Section>
+        }
     }
 }
 
@@ -2524,6 +2607,9 @@ fn reply_summary(
             snr_there,
             snr_back,
         } => format!("{round_trip_ms} ms · ↑ {snr_there:.1} dB · ↓ {snr_back:.1} dB"),
+        RequestReply::Route { there, back } => t_string!(i18n, route_found)
+            .replace("{there}", &there.len().to_string())
+            .replace("{back}", &back.len().to_string()),
     }
 }
 
@@ -3330,6 +3416,7 @@ fn KindLabel(kind: RequestKind) -> impl IntoView {
         RequestKind::Owner => t!(i18n, ask_owner).into_any(),
         RequestKind::AccessList => t!(i18n, ask_access_list).into_any(),
         RequestKind::Ping => t!(i18n, ask_ping).into_any(),
+        RequestKind::Route => t!(i18n, ask_route).into_any(),
     }
 }
 

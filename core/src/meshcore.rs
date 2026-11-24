@@ -642,11 +642,12 @@ struct Asked {
 type Pinged = (u32, std::time::Instant);
 
 /// What a request asks: anonymously, or of a node logged in to, as the
-/// firmware numbers each.
+/// firmware numbers each; or the way to a node and back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Asking {
     Anonymous(u8),
     LoggedIn(u8),
+    Route,
 }
 
 /// The open session with a radio: what sending needs.
@@ -1022,7 +1023,8 @@ fn answer_of(asked: Asking, data: &[u8], room: bool) -> Option<crate::mesh::Answ
                 .collect();
             return Some(Answer::AccessList(listed));
         }
-        Asking::LoggedIn(_) => return None,
+        // Its answer comes as no binary one.
+        Asking::LoggedIn(_) | Asking::Route => return None,
         Asking::Anonymous(kind) => kind,
     };
     let clock = data
@@ -1382,6 +1384,21 @@ impl Mesh {
         Ok(())
     }
 
+    /// Asks a contact the way to it and back, flooded: found, they come as
+    /// an [`Event::Reply`] with the id it gives. The radio keeps the path it
+    /// had.
+    pub async fn meshcore_discover(&self, num: u32) -> Result<u32, AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        self.send_asked(
+            &session,
+            num,
+            Asking::Route,
+            command::send_path_discovery(&key),
+        )
+        .await
+    }
+
     /// Asks a node something with no login, as an anonymous request: it goes
     /// direct, on the path the radio knows, with the way back in it, as a
     /// node answers only those. The id it goes by, which its answer comes
@@ -1586,7 +1603,9 @@ impl Mesh {
             .read(|state| state.meshcore.as_ref().and_then(|s| s.path_hash_mode))
             .unwrap_or(0)
             .min(2);
-        let size = usize::from(mode) + 1;
+        // A trace's hashes are 1, 2, 4 or 8 bytes, by the low two bits of
+        // its flags: three-byte ones go as four.
+        let size = 1usize << mode;
         let tag = ping_tag(num);
         let answer = session
             .client
@@ -1913,6 +1932,11 @@ async fn session(
                 Some(Response::BinaryResponse { tag, data }) => {
                     replied(mesh, &session, tag, &data);
                 }
+                Some(Response::PathDiscovery {
+                    prefix,
+                    there,
+                    back,
+                }) => discovered(mesh, &session, prefix, &there, &back),
                 Some(Response::RxLog { snr, rssi, raw }) => {
                     heard_raw(mesh, &session, snr, rssi, &raw);
                 }
@@ -2135,6 +2159,47 @@ fn replied(mesh: &Mesh, session: &Session, tag: [u8; 4], data: &[u8]) {
             request_id: u32::from_le_bytes(tag),
             from,
             answer,
+        })]
+    });
+}
+
+/// The way to a node and back, as a path discovery found them: told as
+/// the answer to the one asked of the node whose key starts so.
+fn discovered(mesh: &Mesh, session: &Session, prefix: [u8; 6], there: &Path, back: &Path) {
+    let keys = session
+        .keys
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let mut asked = session.asked.lock().unwrap_or_else(|e| e.into_inner());
+    let tag = asked
+        .iter()
+        .find(|(_, a)| {
+            a.what == Asking::Route && keys.get(&a.from).is_some_and(|k| k[..6] == prefix)
+        })
+        .map(|(tag, _)| *tag);
+    let Some(Asked { from, answered, .. }) = tag.and_then(|tag| asked.remove(&tag)) else {
+        return;
+    };
+    drop(asked);
+    // The radio is free for the next request.
+    if let Some(answered) = answered {
+        let _ = answered.send(());
+    }
+    let hops = |(len, hashes): &Path| {
+        hashes
+            .chunks(usize::from(len >> 6) + 1)
+            .map(<[u8]>::to_vec)
+            .collect::<Vec<_>>()
+    };
+    mesh.update(|_| {
+        vec![Event::Reply(crate::mesh::Reply {
+            request_id: tag.map_or(0, u32::from_le_bytes),
+            from,
+            answer: crate::mesh::Answer::Route {
+                there: hops(there),
+                back: hops(back),
+            },
         })]
     });
 }

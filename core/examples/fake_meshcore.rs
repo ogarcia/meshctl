@@ -970,6 +970,39 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         // SEND_TRACE_PATH: a tag, an auth code, flags and a path of hashes.
         // A contact heard straight whose hash is the path passes it back
         // with the SNR it heard the radio at; anything else, nothing.
+        // SEND_PATH_DISCOVERY_REQ: flooded; the way found comes back after
+        // a while, there through Monte and Torre, back through Torre, by two
+        // bytes of each; none comes when answers are off.
+        0x34 => {
+            let Some(key) = data.get(1..).and_then(key_in) else {
+                return error(6);
+            };
+            if !radio.contacts.iter().any(|c| c.key == key) {
+                return error(2);
+            }
+            let tag: [u8; 4] = u32::try_from(random(u64::from(u32::MAX)))
+                .unwrap_or(1)
+                .to_le_bytes();
+            let mut sent = vec![0x06, 1];
+            sent.extend(tag);
+            sent.extend(4_000u32.to_le_bytes());
+            println!("path discovery to {:02x?}", &key[..4]);
+            if radio.answers {
+                let events = events.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(1_500 + random(1_000))).await;
+                    let mut push = vec![0x8d, 0];
+                    push.extend(&key[..6]);
+                    push.push(0x42);
+                    push.extend(&self::key(0x52)[..2]);
+                    push.extend(&self::key(0x55)[..2]);
+                    push.push(0x41);
+                    push.extend(&self::key(0x55)[..2]);
+                    let _ = events.send(Event::Push(push));
+                });
+            }
+            vec![sent]
+        }
         0x24 => {
             let (Some(tag), Some(&flags)) = (data.get(..4), data.get(8)) else {
                 return error(6);
