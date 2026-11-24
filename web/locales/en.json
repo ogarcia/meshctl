@@ -845,7 +845,7 @@
   "ping_round_trip": "Round trip",
   "ping_there": "How it hears us",
   "ping_back": "How we hear it",
-  "ping_only_direct": "Only with nodes the radio hears straight.",
+  "ping_only_direct": "No longer heard straight: only nodes the radio hears straight can be pinged again.",
   "reading_voltage": "Voltage",
   "reading_temperature": "Temperature",
   "reading_humidity": "Humidity",

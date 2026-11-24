@@ -1626,6 +1626,8 @@
       }
       /* Short values, figures: narrower columns, two even on a phone. */
       .facts.compact { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+      /* Three short figures, as a ping's: in one row, even on a phone. */
+      .facts.three { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; }
       .facts .wide { grid-column: 1 / -1; }
       .facts dt { font-size: 12px; color: var(--mc-muted); }
       .facts dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

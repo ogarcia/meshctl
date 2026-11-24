@@ -2839,7 +2839,7 @@ fn RemoteOwner() -> impl IntoView {
 }
 
 /// A MeshCore node heard straight, pinged: how long there and back, and how
-/// each end heard the other. Only for one heard straight.
+/// each end heard the other. Only for one heard straight, or pinged before.
 #[component]
 fn RemotePing() -> impl IntoView {
     let i18n = use_i18n();
@@ -2863,7 +2863,7 @@ fn RemotePing() -> impl IntoView {
         });
         view! {
             {result.map(|(ms, there, back)| view! {
-                <dl class="facts compact">
+                <dl class="facts compact three">
                     {fact(t!(i18n, ping_round_trip), format!("{ms} ms"))}
                     {fact(t!(i18n, ping_there), format!("{there:.1} dB"))}
                     {fact(t!(i18n, ping_back), format!("{back:.1} dB"))}
@@ -2872,16 +2872,20 @@ fn RemotePing() -> impl IntoView {
             {(!direct()).then(|| view! { <p class="hint dim">{t!(i18n, ping_only_direct)}</p> })}
         }
     };
+    // Nothing to show of one not heard straight and never pinged: not
+    // there. One pinged before, as it was heard straight, keeps its last.
     move || {
-        view! {
-            <Section
-                title=t!(i18n, remote_ping).into_any()
-                at=at.get()
-                asked=direct().then_some(Asked::Request(RequestKind::Ping))
-            >
-                {body}
-            </Section>
-        }
+        (direct() || at.get().is_some()).then(|| {
+            view! {
+                <Section
+                    title=t!(i18n, remote_ping).into_any()
+                    at=at.get()
+                    asked=direct().then_some(Asked::Request(RequestKind::Ping))
+                >
+                    {body}
+                </Section>
+            }
+        })
     }
 }
 

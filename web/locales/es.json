@@ -845,7 +845,7 @@
   "ping_round_trip": "Ida y vuelta",
   "ping_there": "Cómo nos oye",
   "ping_back": "Cómo le oímos",
-  "ping_only_direct": "Solo con nodos que la radio oye directamente.",
+  "ping_only_direct": "Ya no lo oye directamente: solo se puede volver a hacer ping a nodos que la radio oye directamente.",
   "reading_voltage": "Voltaje",
   "reading_temperature": "Temperatura",
   "reading_humidity": "Humedad",
