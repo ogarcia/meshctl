@@ -638,8 +638,9 @@ struct Asked {
     answered: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
-/// A ping sent: to whom, and when.
-type Pinged = (u32, std::time::Instant);
+/// A trace sent: to whom, when, and for a traceroute the hops it goes
+/// along, by their hashes; none for a ping.
+type Pinged = (u32, std::time::Instant, Option<Vec<Vec<u8>>>);
 
 /// What a request asks: anonymously, or of a node logged in to, as the
 /// firmware numbers each; or the way to a node and back.
@@ -1607,10 +1608,70 @@ impl Mesh {
         // A trace's hashes are 1, 2, 4 or 8 bytes, by the low two bits of
         // its flags: three-byte ones go as four.
         let size = 1usize << mode;
+        self.send_trace(&session, num, mode, key[..size].to_vec(), None)
+            .await
+    }
+
+    /// Traces the way to a repeater or a room and back, along the path the
+    /// radio keeps to it, of a hop at least: each hop on it passes it on with
+    /// the SNR it heard it at. Its tag, which its answer comes as an
+    /// [`Event::Traced`] with; [`AdminError::NoPath`] for one with no such
+    /// path, [`AdminError::Unsupported`] for a node that passes nothing on.
+    pub async fn meshcore_traceroute(&self, num: u32) -> Result<u32, AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        let passes_on = self.read(|state| {
+            state
+                .nodes
+                .get(&num)
+                .and_then(|n| n.user.as_ref())
+                .is_some_and(|u| u.role == "REPEATER" || u.role == "ROOM")
+        });
+        if !passes_on {
+            return Err(AdminError::Unsupported);
+        }
+        let (path_len, path) = session
+            .paths
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&num)
+            .cloned()
+            .ok_or(AdminError::UnknownNode)?;
+        if path_len == NO_PATH || path_len & 0x3f == 0 {
+            return Err(AdminError::NoPath);
+        }
+        // The path's hashes as a trace takes them, 1, 2, 4 or 8 bytes: a
+        // three-byte one as its first two, as only three are known.
+        let kept = usize::from(path_len >> 6) + 1;
+        let mode = if kept >= 2 { 1 } else { 0 };
+        let size = 1usize << mode;
+        let relays: Vec<Vec<u8>> = path.chunks(kept).map(|h| h[..size].to_vec()).collect();
+        // There through the relays to the node, and back the same way.
+        let hops: Vec<Vec<u8>> = relays
+            .iter()
+            .cloned()
+            .chain([key[..size].to_vec()])
+            .chain(relays.iter().rev().cloned())
+            .collect();
+        self.send_trace(&session, num, mode, hops.concat(), Some(hops))
+            .await
+    }
+
+    /// Sends a trace along a path of hashes, a ping's or a traceroute's: kept
+    /// for its answer as long as the radio expects it to take twice, at
+    /// least [`PING_WAIT`], given up on then as [`Event::Unanswered`].
+    async fn send_trace(
+        &self,
+        session: &Session,
+        num: u32,
+        mode: u8,
+        path: Vec<u8>,
+        hops: Option<Vec<Vec<u8>>>,
+    ) -> Result<u32, AdminError> {
         let tag = ping_tag(num);
         let answer = session
             .client
-            .ask_one(command::send_trace_path(tag, mode, &key[..size]), |r| {
+            .ask_one(command::send_trace_path(tag, mode, &path), |r| {
                 matches!(r, Response::MessageSent { .. })
             })
             .await;
@@ -1628,7 +1689,7 @@ impl Mesh {
             .pinged
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(key, (num, std::time::Instant::now()));
+            .insert(key, (num, std::time::Instant::now(), hops));
         // Given up on when twice as long as the radio expects has gone by,
         // and at least [`PING_WAIT`], if it has not come back by then.
         let wait = Duration::from_millis(u64::from(timeout_ms) * 2).max(PING_WAIT);
@@ -2214,9 +2275,22 @@ fn traced(mesh: &Mesh, session: &Session, tag: [u8; 4], snrs: &[f32], last_snr: 
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&tag);
-    let Some((from, sent)) = pinged else {
+    let Some((from, sent, hops)) = pinged else {
         return;
     };
+    // A traceroute's: the hops it went along, and how each heard it.
+    if let Some(hops) = hops {
+        mesh.update(|_| {
+            vec![Event::Traced {
+                request_id: u32::from_le_bytes(tag),
+                from,
+                hops,
+                snrs: snrs.to_vec(),
+                last_snr,
+            }]
+        });
+        return;
+    }
     let round_trip_ms = u32::try_from(sent.elapsed().as_millis()).unwrap_or(u32::MAX);
     mesh.update(|_| {
         vec![Event::Reply(crate::mesh::Reply {

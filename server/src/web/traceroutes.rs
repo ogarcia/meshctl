@@ -172,6 +172,7 @@ async fn trace(
             }),
         )
             .into_response(),
+        Err(TraceFailure::NoPath) => error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::NoPath),
         Err(TraceFailure::Failed(err)) => failed(&err),
     }
 }

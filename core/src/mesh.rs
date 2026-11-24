@@ -195,6 +195,16 @@ pub enum Event {
         request_id: u32,
         from: u32,
     },
+    /// A MeshCore traceroute come back, by its id: the hops it went along,
+    /// there to the node traced and back, by their hashes; the SNR each one
+    /// heard it at, and the SNR the radio heard it back at.
+    Traced {
+        request_id: u32,
+        from: u32,
+        hops: Vec<Vec<u8>>,
+        snrs: Vec<f32>,
+        last_snr: f32,
+    },
 }
 
 /// A copy of a packet a MeshCore radio heard, raw: what names it whatever

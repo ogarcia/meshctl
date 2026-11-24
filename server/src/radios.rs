@@ -284,6 +284,8 @@ pub enum TraceFailure {
     TooSoon {
         wait: i64,
     },
+    /// A MeshCore node the radio keeps no path of a hop at least to.
+    NoPath,
     Failed(anyhow::Error),
 }
 
@@ -298,18 +300,17 @@ impl From<anyhow::Error> for TraceFailure {
 /// heard at, which the firmware gives one for each hop, in order.
 pub fn routes(origin: u32, answer: &mesh::TracerouteAnswer) -> (Vec<Hop>, Vec<Hop>) {
     let path = |first: u32, relays: &[u32], last: u32, snrs: &[Option<f32>]| -> Vec<Hop> {
-        let first = Hop {
-            node: Some(first),
-            snr: None,
-        };
+        let first = Hop::known(Some(first), None);
         let rest = relays
             .iter()
             .copied()
             .chain([last])
             .enumerate()
-            .map(|(i, node)| Hop {
-                node: (node != mesh::UNKNOWN_HOP).then_some(node),
-                snr: snrs.get(i).copied().flatten(),
+            .map(|(i, node)| {
+                Hop::known(
+                    (node != mesh::UNKNOWN_HOP).then_some(node),
+                    snrs.get(i).copied().flatten(),
+                )
             });
         std::iter::once(first).chain(rest).collect()
     };
@@ -333,6 +334,79 @@ async fn answer_traceroute(
         let _ = changes.send(Change::Traceroute(radio, traceroute));
     }
     Ok(())
+}
+
+/// A MeshCore traceroute come back, as its event tells it.
+struct Traced<'a> {
+    hops: &'a [Vec<u8>],
+    snrs: &'a [f32],
+    last_snr: f32,
+}
+
+/// Takes a MeshCore traceroute come back as the answer to the one sent: its
+/// hops there and back, each relay by the node it most likely is, as a
+/// flood's route tells, the node traced in the middle.
+async fn answer_meshcore_trace(
+    store: &Store,
+    changes: &broadcast::Sender<Change>,
+    radio: RadioId,
+    mesh: &Mesh,
+    request_id: u32,
+    traced: &Traced<'_>,
+) -> Result<()> {
+    let Some((id, origin, target)) = store.pending_traceroute(radio, request_id).await? else {
+        return Ok(());
+    };
+    let (towards, back) = meshcore_trace_routes(mesh, origin, target, traced);
+    if let Some(traceroute) = store.settle_traceroute(id, Ok((&towards, &back))).await? {
+        let _ = changes.send(Change::Traceroute(radio, traceroute));
+    }
+    Ok(())
+}
+
+/// A MeshCore trace's routes: from the radio through the relays to the node
+/// traced, and back the same way; each hop with the SNR it heard the one
+/// before it at, the radio with the SNR it heard the last at.
+fn meshcore_trace_routes(
+    mesh: &Mesh,
+    origin: u32,
+    target: u32,
+    traced: &Traced<'_>,
+) -> (Vec<Hop>, Vec<Hop>) {
+    let middle = traced.hops.len() / 2;
+    let snr = |at: usize| traced.snrs.get(at).copied();
+    // The relays, as the way back names them, to the radio: guessed once,
+    // the way there the same ones the other way round.
+    let back_relays: Vec<&[u8]> = traced.hops[middle + 1..]
+        .iter()
+        .map(Vec::as_slice)
+        .collect();
+    let resolved = hops_of(&known_nodes(mesh), &back_relays, true);
+    let relay = |hop: &meshctl_api::RouteHop, snr: Option<f32>| Hop {
+        node: hop.likely,
+        snr,
+        hash: Some(hop.hash.clone()),
+        guess: hop.likely.is_some()
+            && !(hop.nodes.as_slice() == [hop.likely.unwrap_or_default()] && hop.hash.len() >= 4),
+    };
+    let mut towards = vec![Hop::known(Some(origin), None)];
+    towards.extend(
+        resolved
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(i, hop)| relay(hop, snr(i))),
+    );
+    towards.push(Hop::known(Some(target), snr(middle)));
+    let mut back = vec![Hop::known(Some(target), None)];
+    back.extend(
+        resolved
+            .iter()
+            .enumerate()
+            .map(|(i, hop)| relay(hop, snr(middle + 1 + i))),
+    );
+    back.push(Hop::known(Some(origin), Some(traced.last_snr)));
+    (towards, back)
 }
 
 async fn fail_traceroute(
@@ -1855,16 +1929,40 @@ impl Radios {
         if node == mesh::BROADCAST || origin == Some(node) {
             return Err(TraceFailure::InvalidNode);
         }
-        if !has_channel(&mesh, channel) {
+        let meshcore = self.protocol(id) == Some(Protocol::Meshcore);
+        if !meshcore && !has_channel(&mesh, channel) {
             return Err(TraceFailure::InvalidChannel);
-        }
-        if self.protocol(id) != Some(Protocol::Meshtastic) {
-            return Err(TraceFailure::Unsupported);
         }
         if self.link(id) != LinkState::Ready {
             return Err(TraceFailure::NotConnected);
         }
         let at = now();
+        // MeshCore's along the path the radio keeps, there and back, on no
+        // channel and at no pace.
+        if meshcore {
+            let tag = mesh
+                .meshcore_traceroute(node)
+                .await
+                .map_err(|error| match error {
+                    AdminError::NoPath => TraceFailure::NoPath,
+                    AdminError::Unsupported => TraceFailure::Unsupported,
+                    AdminError::UnknownNode | AdminError::OwnNode => TraceFailure::InvalidNode,
+                    AdminError::NotConnected | AdminError::NoAnswer | AdminError::Refused(_) => {
+                        TraceFailure::NotConnected
+                    }
+                })?;
+            let traceroute = self
+                .store
+                .add_traceroute(id, tag, origin.unwrap_or_default(), node, at)
+                .await?;
+            let _ = self
+                .changes
+                .send(Change::Traceroute(id, traceroute.clone()));
+            return Ok(traceroute);
+        }
+        if self.protocol(id) != Some(Protocol::Meshtastic) {
+            return Err(TraceFailure::Unsupported);
+        }
         let wait = self.wait(id, Pace::Traceroute, at).await?;
         if wait > 0 {
             return Err(TraceFailure::TooSoon { wait });
@@ -3466,7 +3564,28 @@ impl Radios {
                     Ok(mesh::Event::Reply(reply)) => {
                         keep_reply(&store, &changes, id, &mesh, &reply).await
                     }
+                    Ok(mesh::Event::Traced {
+                        request_id,
+                        hops,
+                        snrs,
+                        last_snr,
+                        ..
+                    }) => {
+                        let traced = Traced {
+                            hops: &hops,
+                            snrs: &snrs,
+                            last_snr,
+                        };
+                        answer_meshcore_trace(&store, &changes, id, &mesh, request_id, &traced)
+                            .await
+                    }
+                    // A traceroute given up on, as a request is.
                     Ok(mesh::Event::Unanswered { request_id, from }) => {
+                        if let Err(err) =
+                            fail_traceroute(&store, &changes, id, request_id, "TIMEOUT").await
+                        {
+                            tracing::warn!(radio = id, error = format_args!("{err:#}"), "trace");
+                        }
                         match store.unanswered_request(id, request_id, from).await {
                             Ok(Some(request)) => {
                                 let _ = changes.send(Change::Request(id, request));
@@ -3844,7 +3963,7 @@ mod tests {
             snr_back: vec![Some(-1.5), Some(10.0)],
         };
         let (towards, back) = routes(7, &answer);
-        let hop = |node, snr| Hop { node, snr };
+        let hop = Hop::known;
         assert_eq!(
             towards,
             [

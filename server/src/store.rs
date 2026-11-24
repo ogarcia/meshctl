@@ -2702,16 +2702,7 @@ mod tests {
 
         let (id, origin, target) = store.pending_traceroute(radio, 41).await.unwrap().unwrap();
         assert_eq!((id, origin, target), (first.id, 7, 9));
-        let hops = [
-            Hop {
-                node: Some(7),
-                snr: None,
-            },
-            Hop {
-                node: Some(9),
-                snr: Some(6.0),
-            },
-        ];
+        let hops = [Hop::known(Some(7), None), Hop::known(Some(9), Some(6.0))];
         let done = store
             .settle_traceroute(id, Ok((&hops, &hops)))
             .await

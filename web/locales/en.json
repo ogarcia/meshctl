@@ -656,6 +656,8 @@
   "traces_all": "See earlier",
   "traces_more": "Load more",
   "traces_none": "No route to it traced yet.",
+  "traces_meshcore_hint": "It is traced along the route the radio keeps, there and back: one of a hop at least is needed. One heard straight is better pinged.",
+  "trace_guess_hint": "Underlined repeaters are guessed by how near and within reach they are, not known for sure.",
   "traces_drawer_title": "Earlier traceroutes to {name}",
   "drawer_close": "Close",
   "node_no_key": "Its public key is not known, and without it it cannot be asked for telemetry or neighbours: its node info brings it, if its firmware has one.",

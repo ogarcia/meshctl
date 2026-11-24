@@ -915,7 +915,7 @@ mod tests {
 
     #[test]
     fn a_route_is_drawn_across_the_nodes_it_cannot_place() {
-        let hop = |node: Option<u32>, snr: Option<f32>| Hop { node, snr };
+        let hop = Hop::known;
         let hops = [
             hop(Some(1), None),
             hop(Some(2), Some(8.0)),

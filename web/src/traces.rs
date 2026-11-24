@@ -15,7 +15,13 @@ fn node_label(live: Live, num: u32) -> String {
     live.nodes.with(|nodes| {
         nodes
             .get(&num)
-            .and_then(|n| n.short_name.clone().or_else(|| n.long_name.clone()))
+            .and_then(|n| {
+                // MeshCore's have none: their long name instead.
+                n.short_name
+                    .clone()
+                    .filter(|short| !short.is_empty())
+                    .or_else(|| n.long_name.clone())
+            })
             .unwrap_or_else(|| format!("!{num:08x}"))
     })
 }
@@ -83,6 +89,7 @@ pub fn TraceCard(traceroute: Traceroute) -> impl IntoView {
         let back = traceroute.back.clone();
         let hops_there = towards.len().saturating_sub(2);
         let hops_back = back.len().saturating_sub(2);
+        let guessed = towards.iter().chain(&back).any(|hop| hop.guess);
         view! {
             <div class="route">
                 <span class="label dim">{t!(i18n, trace_towards)} " (" {hops_there} ")"</span>
@@ -92,6 +99,7 @@ pub fn TraceCard(traceroute: Traceroute) -> impl IntoView {
                 <span class="label dim">{t!(i18n, trace_back)} " (" {hops_back} ")"</span>
                 <Route hops=back />
             </div>
+            {guessed.then(|| view! { <p class="hint dim">{t!(i18n, trace_guess_hint)}</p> })}
         }
     });
 
@@ -167,9 +175,7 @@ fn as_text(live: Live, i18n: I18nContext<Locale>, traceroute: &Traceroute) -> St
         hops.iter()
             .enumerate()
             .map(|(i, hop)| {
-                let name = hop
-                    .node
-                    .map_or_else(|| "?".to_owned(), |num| node_label(live, num));
+                let name = hop_name(live, hop);
                 match hop.snr {
                     Some(snr) if i > 0 => format!("{name} ({snr:.1} dB)"),
                     None if i > 0 => format!("{name} (?)"),
@@ -192,9 +198,20 @@ fn as_text(live: Live, i18n: I18nContext<Locale>, traceroute: &Traceroute) -> St
     )
 }
 
+/// A hop by the name of its node, its hash when its node is not known, or a
+/// question mark when neither is.
+fn hop_name(live: Live, hop: &Hop) -> String {
+    match (hop.node, &hop.hash) {
+        (Some(num), _) => node_label(live, num),
+        (None, Some(hash)) => hash.clone(),
+        (None, None) => "?".to_owned(),
+    }
+}
+
 /// A route, node by node, with the SNR each hop was heard at between them.
 #[component]
 fn Route(hops: Vec<Hop>) -> impl IntoView {
+    let i18n = use_i18n();
     let live = expect_context::<Live>();
     let steps = hops
         .into_iter()
@@ -207,13 +224,29 @@ fn Route(hops: Vec<Hop>) -> impl IntoView {
                 let quality = quality(hop.snr);
                 view! { <span class=format!("hop {quality}")>"→ " {snr} " →"</span> }
             });
-            // Named as the radio knows them now: a name learnt later shows.
+            // Named as the radio knows them now: a name learnt later shows;
+            // a MeshCore relay guessed, said so, and one not known by its
+            // hash.
             let num = hop.node;
-            let name = move || num.map_or_else(|| "?".to_owned(), |num| node_label(live, num));
-            let title = move || num.map(|num| node_title(live, num));
+            let guess = hop.guess;
+            let hash = hop.hash.clone();
+            let name = {
+                let hop = hop.clone();
+                move || hop_name(live, &hop)
+            };
+            let title = move || {
+                if guess {
+                    let hash = hash.clone().unwrap_or_default();
+                    Some(t_string!(i18n, packets_relay_guess).replace("{hash}", &hash))
+                } else if num.is_none() && hash.is_some() {
+                    Some(t_string!(i18n, route_unknown).to_owned())
+                } else {
+                    num.map(|num| node_title(live, num))
+                }
+            };
             view! {
                 {link}
-                <span class="short" title=title>{name}</span>
+                <span class="short" class:guess=guess title=title>{name}</span>
             }
         })
         .collect_view();

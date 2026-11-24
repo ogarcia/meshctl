@@ -147,6 +147,7 @@ fn NodePage(num: u32) -> impl IntoView {
                 <div class="node-column">
                     <MeshcorePath />
                     <RemotePing />
+                    {serves.then(|| view! { <Traces drawer /> })}
                     {serves.then(|| view! { <Regions /> })}
                     <RemoteOwner />
                     <NodeAccessSection />
@@ -345,13 +346,25 @@ fn meshcore_kind(kind: RequestKind) -> bool {
 
 /// Whether the selected radio asks nodes for this: a MeshCore radio only
 /// what MeshCore nodes answer, its neighbours too, and the other way round.
-fn can_ask(live: Live, asked: Asked) -> bool {
+fn can_ask(live: Live, asked: Asked, num: u32) -> bool {
     let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
     match asked {
         Asked::Request(kind) if meshcore => meshcore_kind(kind) || kind == RequestKind::Neighbors,
         Asked::Request(kind) => !meshcore_kind(kind),
-        Asked::Trace => !meshcore,
+        Asked::Trace => !meshcore || meshcore_traceable(live, num),
     }
+}
+
+/// Whether a MeshCore node can be traced: a repeater or a room, which pass
+/// a trace on, that the radio keeps a path of a hop at least to; one heard
+/// straight is pinged instead.
+fn meshcore_traceable(live: Live, num: u32) -> bool {
+    live.nodes.with(|nodes| {
+        nodes.get(&num).is_some_and(|n| {
+            matches!(n.role.as_deref(), Some("REPEATER" | "ROOM"))
+                && n.hops_away.is_some_and(|hops| hops > 0)
+        })
+    })
 }
 
 /// The object a packet's payload carries under a key, as telemetry carries
@@ -722,7 +735,11 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
                 .any(|t| t.target == asking.num && t.status == TracerouteStatus::Pending)
         }),
     };
+    // A MeshCore radio traces at no pace.
     let wait = move || {
+        if asked == Asked::Trace && live.selected_kind() == Some(RadioKind::Meshcore) {
+            return 0;
+        }
         asked
             .pace()
             .map_or(0, |pace| live.wait(pace, asking.clock.get()))
@@ -798,7 +815,7 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
         Some((text, filled))
     };
     move || {
-        (can_ask(live, asked) && !own(live, asking.num)).then(|| {
+        (can_ask(live, asked, asking.num) && !own(live, asking.num)).then(|| {
             view! {
                 <span class="ask-split" class:open=open>
                     <button
@@ -2123,6 +2140,12 @@ fn Traces(drawer: RwSignal<bool>) -> impl IntoView {
                 }
                 .into_any(),
                 None => view! { <p class="nothing">{t!(i18n, traces_none)}</p> }.into_any(),
+            }}
+            // Why not, when a MeshCore one cannot be traced now.
+            {move || {
+                (live.selected_kind() == Some(RadioKind::Meshcore)
+                    && !meshcore_traceable(live, asking.num))
+                    .then(|| view! { <p class="hint dim">{t!(i18n, traces_meshcore_hint)}</p> })
             }}
         </Section>
     }

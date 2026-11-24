@@ -377,7 +377,17 @@ fn contact(code: u8, contact: &Contact) -> Vec<u8> {
     let mut frame = vec![code];
     frame.extend(contact.key);
     frame.extend([contact.kind, 0, contact.path_len.cast_unsigned()]);
-    frame.extend([0u8; 64]);
+    // Its path out, one byte a hop: through Torre last, Monte before it.
+    let mut path = [0u8; 64];
+    let hops = usize::try_from(contact.path_len).unwrap_or(0).min(64);
+    for (i, hop) in path.iter_mut().take(hops).enumerate() {
+        *hop = if i + 1 == hops {
+            key(0x55)[0]
+        } else {
+            key(0x52)[0]
+        };
+    }
+    frame.extend(path);
     frame.extend(field(&contact.name, 32));
     frame.extend(contact.last_advert.to_le_bytes());
     frame.extend(contact.lat.to_le_bytes());
@@ -1013,12 +1023,15 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             let mut sent = vec![0x06, 0];
             sent.extend(tag);
             sent.extend(1_500u32.to_le_bytes());
-            let back = radio.answers
-                && path.len() == size
+            // A ping to one heard straight, or a traceroute there and back
+            // through relays: the hops odd, as long the one way as the other.
+            let hops = path.len() / size;
+            let pinged = path.len() == size
                 && radio
                     .contacts
                     .iter()
                     .any(|c| c.path_len == 0 && c.key[..size] == path[..]);
+            let back = radio.answers && (pinged || hops >= 3 && hops % 2 == 1);
             println!(
                 "trace along {path:02x?}, {}",
                 if back { "back" } else { "lost" }
@@ -1027,14 +1040,15 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                 let events = events.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_millis(300 + random(600))).await;
-                    let there = i8::try_from(20 + random(16)).unwrap_or(0);
-                    let back = i8::try_from(12 + random(16)).unwrap_or(0);
+                    // Each hop's SNR in quarters of a dB, from -10 to 10 or so,
+                    // and the radio's of the last.
+                    let snr = || (i8::try_from(random(80)).unwrap_or(0) - 40).cast_unsigned();
                     let mut push = vec![0x89, 0, u8::try_from(path.len()).unwrap_or(0), flags];
                     push.extend(tag);
                     push.extend([0; 4]);
                     push.extend(&path);
-                    push.push(there.cast_unsigned());
-                    push.push(back.cast_unsigned());
+                    push.extend((0..hops).map(|_| snr()));
+                    push.push(snr());
                     let _ = events.send(Event::Push(push));
                 });
             }

@@ -656,6 +656,8 @@
   "traces_all": "Ver anteriores",
   "traces_more": "Cargar más",
   "traces_none": "Aún no se ha trazado ninguna ruta hasta él.",
+  "traces_meshcore_hint": "Se traza por la ruta que la radio tiene guardada, ida y vuelta: hace falta una de al menos un salto. A uno que oye directamente, mejor el ping.",
+  "trace_guess_hint": "Los repetidores subrayados son una deducción por su cercanía y alcance, no una certeza.",
   "traces_drawer_title": "Trazas anteriores de {name}",
   "drawer_close": "Cerrar",
   "node_no_key": "No conocemos su clave pública, y sin ella no se le puede pedir telemetría ni vecinos: la trae su información, si su firmware la tiene.",

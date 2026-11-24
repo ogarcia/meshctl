@@ -1335,7 +1335,7 @@ pub enum TracerouteStatus {
 }
 
 /// A node on a route, and how well it heard the hop before it.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Hop {
     /// None for a relay that could not be told.
@@ -1343,6 +1343,27 @@ pub struct Hop {
     /// The SNR it heard the hop before it at, in dB. None for the first node
     /// of a route, and where it could not be told.
     pub snr: Option<f32>,
+    /// A MeshCore relay's hash, the start of its key in hex, as the route
+    /// names it: what tells it when its node cannot be.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(example = "1e35"))]
+    pub hash: Option<String>,
+    /// Whether its node is guessed: among several with its hash, or the only
+    /// one known with one so short that another may have it too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub guess: bool,
+}
+
+impl Hop {
+    /// A node known for sure, as Meshtastic tells them.
+    pub const fn known(node: Option<u32>, snr: Option<f32>) -> Self {
+        Self {
+            node,
+            snr,
+            hash: None,
+            guess: false,
+        }
+    }
 }
 
 /// A traceroute from a radio to a node: the route there and the route back,

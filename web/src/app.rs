@@ -825,7 +825,10 @@ impl Live {
         spawn_local(async move {
             match daemon::trace(radio, node, channel).await {
                 Ok(traceroute) => {
-                    self.paced(Pace::Traceroute);
+                    // A MeshCore radio sends one whenever asked.
+                    if self.selected_kind() != Some(meshctl_api::RadioKind::Meshcore) {
+                        self.paced(Pace::Traceroute);
+                    }
                     self.keep_traceroute(traceroute);
                 }
                 Err(failure) => self.refused(radio, failure),
