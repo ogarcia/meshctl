@@ -155,11 +155,19 @@ pub fn node_name(live: Live, num: u32) -> String {
     })
 }
 
+/// A node's short name: its own, or, with none (as MeshCore nodes have
+/// none), its name's first letters or emoji, as the list of nodes draws it;
+/// with no name known either, the end of its number.
 pub fn short_name(live: Live, num: u32) -> String {
     live.nodes.with(|nodes| {
-        nodes
-            .get(&num)
-            .and_then(|n| n.short_name.clone())
+        let node = nodes.get(&num);
+        node.and_then(|n| n.short_name.clone())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                node.and_then(|n| n.long_name.as_deref())
+                    .map(crate::badge::initials)
+                    .filter(|s| !s.is_empty())
+            })
             .unwrap_or_else(|| format!("{:04x}", num & 0xffff))
     })
 }

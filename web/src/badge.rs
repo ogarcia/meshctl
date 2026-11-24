@@ -31,8 +31,21 @@ pub fn palette_name(color: &str) -> Option<&'static str> {
         .map(|(name, _)| *name)
 }
 
-/// Two letters for a radio: its words' first, or its first two.
+/// Two letters for a radio or a node: its words' first, or its first two;
+/// or, for a name that starts with an emoji, as many MeshCore nodes' do,
+/// that emoji alone, drawn at an emoji's size.
 pub fn initials(name: &str) -> String {
+    let name = name.trim_start();
+    let emoji: String = name
+        .chars()
+        .take_while(|c| !c.is_alphanumeric() && !c.is_whitespace())
+        // Symbols, as emojis are, without the punctuation some put round
+        // them.
+        .filter(|c| u32::from(*c) >= 0x2000)
+        .collect();
+    if is_emoji(&emoji) {
+        return emoji;
+    }
     let words: Vec<&str> = name.split_whitespace().collect();
     let letters: String = match words.as_slice() {
         [first, second, ..] => first
@@ -262,6 +275,11 @@ mod tests {
         assert_eq!(initials("Casa de campo"), "Cd");
         assert_eq!(initials("Ñu"), "Ñu");
         assert_eq!(initials(""), "?");
+        // A name that starts with an emoji: the emoji alone, joined or not.
+        assert_eq!(initials("🌐 O Morrazo Room-Obs"), "🌐");
+        assert_eq!(initials("📍Ribadeo Room 📟"), "📍");
+        assert_eq!(initials(".❤. GalizA .❤."), "❤");
+        assert_eq!(initials("¿Qué tal?"), "¿t");
     }
 
     #[test]
