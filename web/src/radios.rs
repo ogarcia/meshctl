@@ -479,22 +479,26 @@ pub fn RadioEditor(
         let settings = draft.with_untracked(Draft::settings);
         busy.set(true);
         spawn_local(async move {
+            // Answered after a wait: the window may be gone by then, closed
+            // by hand, or by this once saved. Nothing of it is touched then.
             match daemon::save_radio(id, &settings).await {
                 Ok(radio) => {
-                    error.set(None);
+                    error.try_set(None);
                     let saved = Draft::new(&settings_of(&radio));
-                    base.set_value(saved.clone());
-                    draft.set(saved);
+                    base.try_set_value(saved.clone());
+                    draft.try_set(saved);
                     let _ = live.refresh_radios().await;
                     if modal {
                         close();
-                    } else {
-                        live.select(radio.id);
+                        return;
                     }
+                    live.select(radio.id);
                 }
-                Err(failure) => error.set(Some(failure)),
+                Err(failure) => {
+                    error.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            busy.try_set(false);
         });
     };
     let remove = move |_| {

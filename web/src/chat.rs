@@ -714,6 +714,11 @@ pub fn ChatView() -> impl IntoView {
     // asked to be read, not to ask twice.
     let marked = StoredValue::new((None::<Peer>, 0_i64));
     let mark_seen = move || {
+        // Called a frame or a moment later: the conversation may be gone,
+        // and all this with it.
+        if marked.is_disposed() {
+            return;
+        }
         let (Some(peer), Some(radio), Some(list)) = (
             live.open.get_untracked(),
             live.selected.get_untracked(),
@@ -769,6 +774,9 @@ pub fn ChatView() -> impl IntoView {
             waiting.set_value(true);
             set_timeout(
                 move || {
+                    if waiting.is_disposed() {
+                        return;
+                    }
                     waiting.set_value(false);
                     mark_seen();
                 },

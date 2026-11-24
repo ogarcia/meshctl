@@ -409,10 +409,13 @@ fn Linking(
         tried.set(false);
         let this = wait.get_untracked() + 1;
         wait.set(this);
+        // By then the welcome may be gone, the radio in: none of this then.
         set_timeout(
             move || {
-                if wait.get_untracked() == this && phase.get_untracked() == Phase::Connecting {
-                    failed.set(true);
+                if wait.try_get_untracked() == Some(this)
+                    && phase.try_get_untracked() == Some(Phase::Connecting)
+                {
+                    failed.try_set(true);
                 }
             },
             PATIENCE,
@@ -429,7 +432,11 @@ fn Linking(
     // Into the interface: on the map if the radio knows where any node is,
     // on the nodes if not. The radio's own name, if none was given.
     let enter = move || {
-        let Some(id) = welcoming.get_untracked() else {
+        // A moment after it was ready: the welcome may be gone by then.
+        if form.name.is_disposed() {
+            return;
+        }
+        let Some(id) = welcoming.try_get_untracked().flatten() else {
             return;
         };
         if form.name.get_untracked().trim().is_empty() {
