@@ -7,9 +7,10 @@
 use super::{AppState, convert};
 use axum::extract::State;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum::response::Response;
-use meshctl_api::ErrorCode;
 use meshctl_api::events::{CLOSE_UNAUTHORIZED, Hello, ServerMessage};
+use meshctl_api::{ErrorCode, TOKEN_HEADER};
 use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
 use utoipa_axum::router::OpenApiRouter;
@@ -34,6 +35,10 @@ pub fn router() -> OpenApiRouter<AppState> {
 /// the first message; the daemon answers `{"type": "ready"}` and from then on
 /// sends a `ServerMessage` for every change. With the wrong token it answers
 /// `{"type": "error", "error": "unauthorized"}` and closes with code 4401.
+///
+/// The token may come instead in the `X-Meshctl-Token` header of the request
+/// that opens it, as a proxy in front puts it on every request: then the
+/// hello needs none.
 #[utoipa::path(
     get,
     path = "/events",
@@ -43,11 +48,19 @@ pub fn router() -> OpenApiRouter<AppState> {
         (status = 400, description = "Not a WebSocket request"),
     )
 )]
-async fn events(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| stream(socket, state))
+async fn events(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Response {
+    // Let in already, by a token in the request that opens it.
+    let let_in = headers
+        .get(TOKEN_HEADER)
+        .is_some_and(|given| state.auth.allows(Some(given.as_bytes())));
+    ws.on_upgrade(move |socket| stream(socket, state, let_in))
 }
 
-async fn stream(mut socket: WebSocket, state: AppState) {
+async fn stream(mut socket: WebSocket, state: AppState, let_in: bool) {
     let hello = tokio::time::timeout(HELLO_TIMEOUT, first_text(&mut socket))
         .await
         .ok()
@@ -58,7 +71,7 @@ async fn stream(mut socket: WebSocket, state: AppState) {
         refuse(socket, ErrorCode::BadRequest, CLOSE_BAD_HELLO).await;
         return;
     };
-    if !state.auth.allows(hello.token.as_deref().map(str::as_bytes)) {
+    if !let_in && !state.auth.allows(hello.token.as_deref().map(str::as_bytes)) {
         refuse(socket, ErrorCode::Unauthorized, CLOSE_UNAUTHORIZED).await;
         return;
     }
@@ -222,6 +235,40 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(message(receive(&mut client).await), ServerMessage::Ready);
+    }
+
+    /// A daemon on a port of its own, and a WebSocket to its event stream
+    /// opened with a token in its header, as a proxy puts it.
+    async fn connect_with_header(token: &str, header: &str) -> Client {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = app(Some(token)).await;
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let mut request = format!("ws://{address}/api/v1/events")
+            .into_client_request()
+            .unwrap();
+        request
+            .headers_mut()
+            .insert(meshctl_api::TOKEN_HEADER, header.parse().unwrap());
+        let (client, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+        client
+    }
+
+    #[tokio::test]
+    async fn or_in_the_header_that_opens_it() {
+        let mut client = connect_with_header("s3cret", "s3cret").await;
+        client.send(Message::text("{}")).await.unwrap();
+        assert_eq!(message(receive(&mut client).await), ServerMessage::Ready);
+        // A wrong one there lets nothing in by itself.
+        let mut client = connect_with_header("s3cret", "guess").await;
+        client.send(Message::text("{}")).await.unwrap();
+        assert_eq!(
+            message(receive(&mut client).await),
+            ServerMessage::Error {
+                error: ErrorCode::Unauthorized
+            }
+        );
     }
 
     #[tokio::test]

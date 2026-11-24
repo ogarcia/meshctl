@@ -113,6 +113,29 @@ can reach it. To reach it from elsewhere, set `MESHCTL_LISTEN` (for example
   `X-Meshctl-Token` header. It does not use `Authorization`, so it can be
   combined with a proxy's basic auth.
 
+Both together work too: the proxy asks who is there and puts the token on
+every request it passes on, so its users never see meshctl ask for it, while
+whoever reaches meshctl's own port past the proxy still needs it. The event
+stream takes the token from the header of the request that opens it, as the
+API does from each of its requests. With nginx:
+
+```nginx
+location / {
+    # Whatever authentication the proxy asks for: basic, OIDC…
+    auth_basic "meshctl";
+    auth_basic_user_file /etc/nginx/meshctl.htpasswd;
+
+    proxy_pass http://127.0.0.1:7434;
+    proxy_set_header X-Meshctl-Token "a-long-secret";
+
+    # The event stream is a WebSocket.
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 1h;
+}
+```
+
 meshctl warns at startup when it listens beyond this machine without a token.
 
 ## Building
