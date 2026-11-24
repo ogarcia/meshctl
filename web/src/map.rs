@@ -11,13 +11,11 @@ use crate::daemon;
 use crate::i18n::{t, t_string, use_i18n};
 use crate::mesh::{ago, model, power, radius};
 use crate::traces::quality;
+use crate::traces::{Traceroute, TracerouteId, TracerouteStatus};
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{
-    Hop, MapView, Node, Peer, PositionSource, RadioId, RadioKind, Traceroute, TracerouteId,
-    TracerouteStatus,
-};
+use meshctl_api::{Hop, MapView, Node, Peer, PositionSource, RadioId, RadioKind};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 

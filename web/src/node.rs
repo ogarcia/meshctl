@@ -14,12 +14,13 @@ use crate::daemon::{self, Failure, REQUESTS_PAGE, TRACES_PAGE};
 use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::mesh::{ago, awaiting_clock, radius, reach_words, waited};
 use crate::traces::TraceCard;
+use crate::traces::{Traceroute, TracerouteStatus};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_i18n::I18nContext;
 use meshctl_api::{
     ErrorCode, LinkState, NodeCheck, NodeLatest, Pace, Packet, Peer, PositionSource, RadioKind,
-    Request, RequestKind, RequestStatus, SettingsSection, Traceroute, TracerouteStatus,
+    Request, RequestKind, RequestStatus, SettingsSection,
 };
 use serde_json::{Map, Value};
 use std::time::Duration;
@@ -2507,7 +2508,11 @@ fn RequestsDrawer() -> impl IntoView {
         spawn_local(async move {
             if let Ok(page) = daemon::requests_page(radio, asking.num, before).await {
                 more.set(page.len() == REQUESTS_PAGE);
-                pages.update(|pages| pages.extend(page));
+                // The routes traced have a history of their own.
+                let asked = page
+                    .into_iter()
+                    .filter(|r| r.kind != RequestKind::Traceroute);
+                pages.update(|pages| pages.extend(asked));
             }
         });
     };
@@ -2694,6 +2699,10 @@ fn reply_summary(
             .map(|r| series_words(i18n, r))
             .collect::<Vec<_>>()
             .join(" · "),
+        // Its relays, the ends left out.
+        RequestReply::Traceroute { towards, back } => t_string!(i18n, route_found)
+            .replace("{there}", &towards.len().saturating_sub(2).to_string())
+            .replace("{back}", &back.len().saturating_sub(2).to_string()),
         RequestReply::Route { there, back } => t_string!(i18n, route_found)
             .replace("{there}", &there.len().to_string())
             .replace("{back}", &back.len().to_string()),
@@ -3714,6 +3723,7 @@ fn KindLabel(kind: RequestKind) -> impl IntoView {
         RequestKind::Ping => t!(i18n, ask_ping).into_any(),
         RequestKind::Route => t!(i18n, ask_route).into_any(),
         RequestKind::Series => t!(i18n, ask_series).into_any(),
+        RequestKind::Traceroute => t!(i18n, node_traces).into_any(),
     }
 }
 

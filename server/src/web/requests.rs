@@ -9,7 +9,9 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Error, ErrorCode, Forgotten, NewRequest, RadioId, Request, RequestId, Waits};
+use meshctl_api::{
+    Error, ErrorCode, Forgotten, NewRequest, RadioId, Request, RequestId, RequestKind, Waits,
+};
 use serde::Deserialize;
 use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
@@ -42,6 +44,8 @@ fn failed(err: &anyhow::Error) -> Response {
 struct Which {
     /// Only those to this node.
     node: Option<u32>,
+    /// Only those of this kind: `traceroute`, say, for the routes traced.
+    kind: Option<RequestKind>,
     /// Only those sent before this one, for the next page.
     before: Option<RequestId>,
     /// How many, 50 if not said and at most 500.
@@ -71,7 +75,7 @@ async fn list(
     let limit = which.limit.unwrap_or(PAGE).clamp(1, PAGE_MAX);
     match state
         .radios
-        .requests(radio, which.node, which.before, limit)
+        .requests(radio, which.node, which.kind, which.before, limit)
         .await
     {
         Ok(Some(requests)) => Json(requests).into_response(),
@@ -149,13 +153,16 @@ async fn ask(
 struct Whose {
     /// The node's number.
     node: u32,
+    /// Only those of this kind; of every kind if not said.
+    kind: Option<RequestKind>,
 }
 
 /// Forget requests
 ///
-/// Forgets what a node was asked for through the radio, but what still
-/// waits for its answer. The packets that answered stay, as what the node
-/// told: its page shows the same.
+/// Forgets what a node was asked for through the radio, of one kind or of
+/// every kind, but what still waits for its answer and each kind's latest
+/// that ended. The packets that answered stay, as what the node told: its
+/// page shows the same.
 #[utoipa::path(
     delete,
     path = "/radios/{radio}/requests",
@@ -172,7 +179,11 @@ async fn forget(
     Path(radio): Path<RadioId>,
     Query(whose): Query<Whose>,
 ) -> Response {
-    match state.radios.forget_requests(radio, whose.node).await {
+    match state
+        .radios
+        .forget_requests(radio, whose.node, whose.kind)
+        .await
+    {
         Ok(Some(count)) => Json(Forgotten { count }).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         Err(err) => failed(&err),

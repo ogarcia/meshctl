@@ -26,7 +26,6 @@ mod requests;
 mod secrets;
 mod settings;
 mod storage;
-mod traceroutes;
 
 pub use auth::Auth;
 
@@ -73,7 +72,6 @@ const SCALAR_HTML: &str = r#"<!doctype html>
         (name = "radios", description = "The radios meshctl keeps connected to"),
         (name = "nodes", description = "The nodes each radio hears"),
         (name = "chat", description = "What each radio hears and says"),
-        (name = "traceroutes", description = "The routes from each radio to other nodes"),
         (name = "settings", description = "Each radio's own settings"),
         (name = "secrets", description = "What a radio keeps secret, handed out only when asked for"),
         (name = "packets", description = "What each radio hears, as it hears it"),
@@ -107,7 +105,6 @@ pub fn router(state: AppState) -> Router {
         .merge(messages::router())
         .merge(links::router())
         .merge(meshcore::router())
-        .merge(traceroutes::router())
         .merge(settings::router())
         .merge(secrets::router())
         .merge(preferences::router())

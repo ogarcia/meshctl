@@ -17,7 +17,7 @@
 
 use crate::{
     ErrorCode, LinkState, Message, MessageId, MessageStatus, Node, Packet, Peer, Preferences,
-    RadioId, Request, Traceroute,
+    RadioId, Request,
 };
 use serde::{Deserialize, Serialize};
 
@@ -114,11 +114,6 @@ pub enum ServerMessage {
         #[serde(default)]
         repeaters: u32,
         scope: Option<String>,
-    },
-    /// A traceroute sent through a radio, or what became of it.
-    Traceroute {
-        radio: RadioId,
-        traceroute: Traceroute,
     },
     /// Something a node was asked for through a radio, or what became of it.
     Request { radio: RadioId, request: Request },

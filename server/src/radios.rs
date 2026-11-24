@@ -14,7 +14,7 @@ use meshctl_api::{
     NodeCheck, NodeLatest, NodeLogin, NodeSettings, NodeSettingsChange, NodeTelemetry, Pace,
     Packet, PacketFilter, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings, Request,
     RequestKind, SectionSecret, SettingsApplied, SettingsSection, SightingId, Status,
-    TelemetryPoint, TelemetrySeries, Traceroute, TracerouteId, Waits,
+    TelemetryPoint, TelemetrySeries, Waits,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -69,8 +69,6 @@ pub enum Change {
         status: MessageStatus,
         error: Option<String>,
     },
-    /// A traceroute sent, or what became of it.
-    Traceroute(RadioId, Traceroute),
     /// A packet a radio heard, as kept.
     Packet(RadioId, Packet),
     /// Something a node was asked for, or what became of it.
@@ -168,11 +166,8 @@ impl From<anyhow::Error> for SendFailure {
     }
 }
 
-/// How long a traceroute is waited for before it is given up on.
-const TRACEROUTE_TIMEOUT: i64 = 120;
-
-/// How often traceroutes waited for too long are looked for.
-const TRACEROUTE_EXPIRY_TICK: std::time::Duration = std::time::Duration::from_secs(10);
+/// How often requests waited for too long are looked for.
+const EXPIRY_TICK: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How far back a sensor's kept readings are asked for when not said: a
 /// day.
@@ -273,32 +268,6 @@ pub enum SettingsFailure {
     Failed(anyhow::Error),
 }
 
-/// Why a traceroute was not sent.
-#[derive(Debug)]
-pub enum TraceFailure {
-    NoSuchRadio,
-    NotConnected,
-    /// Not something meshctl does with this kind of radio yet.
-    Unsupported,
-    /// Everyone, or the radio itself.
-    InvalidNode,
-    /// The radio has no such channel, or it is disabled.
-    InvalidChannel,
-    /// The last one was this many seconds ago; wait the rest.
-    TooSoon {
-        wait: i64,
-    },
-    /// A MeshCore node the radio keeps no path of a hop at least to.
-    NoPath,
-    Failed(anyhow::Error),
-}
-
-impl From<anyhow::Error> for TraceFailure {
-    fn from(err: anyhow::Error) -> Self {
-        Self::Failed(err)
-    }
-}
-
 /// The routes a traceroute answer tells, each from its first node to its last:
 /// from the radio to the node traced, and back. Each hop with the SNR it was
 /// heard at, which the firmware gives one for each hop, in order.
@@ -324,18 +293,48 @@ pub fn routes(origin: u32, answer: &mesh::TracerouteAnswer) -> (Vec<Hop>, Vec<Ho
     )
 }
 
+/// Takes a traceroute's answer as the reply to the request it answers: its
+/// routes from the radio, as its own node is now.
 async fn answer_traceroute(
     store: &Store,
     changes: &broadcast::Sender<Change>,
     radio: RadioId,
+    mesh: &Mesh,
     answer: &mesh::TracerouteAnswer,
 ) -> Result<()> {
-    let Some((id, origin, _)) = store.pending_traceroute(radio, answer.request_id).await? else {
-        return Ok(());
-    };
+    let origin = mesh
+        .read(|state| state.local.as_ref().map(|l| l.num))
+        .unwrap_or_default();
     let (towards, back) = routes(origin, answer);
-    if let Some(traceroute) = store.settle_traceroute(id, Ok((&towards, &back))).await? {
-        let _ = changes.send(Change::Traceroute(radio, traceroute));
+    keep_traceroute(
+        store,
+        changes,
+        radio,
+        answer.request_id,
+        answer.from,
+        towards,
+        back,
+    )
+    .await
+}
+
+/// Keeps a traceroute's routes as the reply to the request it answers, if it
+/// waits for it, and tells of it.
+async fn keep_traceroute(
+    store: &Store,
+    changes: &broadcast::Sender<Change>,
+    radio: RadioId,
+    request_id: u32,
+    from: u32,
+    towards: Vec<Hop>,
+    back: Vec<Hop>,
+) -> Result<()> {
+    let reply = meshctl_api::RequestReply::Traceroute { towards, back };
+    if let Some(request) = store
+        .reply_request(radio, request_id, from, &reply, now())
+        .await?
+    {
+        let _ = changes.send(Change::Request(radio, request));
     }
     Ok(())
 }
@@ -356,16 +355,14 @@ async fn answer_meshcore_trace(
     radio: RadioId,
     mesh: &Mesh,
     request_id: u32,
+    target: u32,
     traced: &Traced<'_>,
 ) -> Result<()> {
-    let Some((id, origin, target)) = store.pending_traceroute(radio, request_id).await? else {
-        return Ok(());
-    };
+    let origin = mesh
+        .read(|state| state.local.as_ref().map(|l| l.num))
+        .unwrap_or_default();
     let (towards, back) = meshcore_trace_routes(mesh, origin, target, traced);
-    if let Some(traceroute) = store.settle_traceroute(id, Ok((&towards, &back))).await? {
-        let _ = changes.send(Change::Traceroute(radio, traceroute));
-    }
-    Ok(())
+    keep_traceroute(store, changes, radio, request_id, target, towards, back).await
 }
 
 /// A MeshCore trace's routes: from the radio through the relays to the node
@@ -411,22 +408,6 @@ fn meshcore_trace_routes(
     );
     back.push(Hop::known(Some(origin), Some(traced.last_snr)));
     (towards, back)
-}
-
-async fn fail_traceroute(
-    store: &Store,
-    changes: &broadcast::Sender<Change>,
-    radio: RadioId,
-    packet_id: u32,
-    error: &str,
-) -> Result<()> {
-    let Some((id, _, _)) = store.pending_traceroute(radio, packet_id).await? else {
-        return Ok(());
-    };
-    if let Some(traceroute) = store.settle_traceroute(id, Err(error)).await? {
-        let _ = changes.send(Change::Traceroute(radio, traceroute));
-    }
-    Ok(())
 }
 
 /// Keeps a packet a radio heard, tells of it, and takes it as the answer to a
@@ -954,14 +935,8 @@ async fn keep_route(
     Ok(())
 }
 
-/// Gives up on the traceroutes and requests waited for too long.
+/// Gives up on the requests waited for too long, traceroutes among them.
 async fn expire(store: &Store, changes: &broadcast::Sender<Change>, radio: RadioId) -> Result<()> {
-    for traceroute in store
-        .expire_traceroutes(radio, now() - TRACEROUTE_TIMEOUT)
-        .await?
-    {
-        let _ = changes.send(Change::Traceroute(radio, traceroute));
-    }
     for request in store
         .expire_requests(radio, now() - REQUEST_TIMEOUT)
         .await?
@@ -1939,74 +1914,6 @@ impl Radios {
         Ok(Some(self.store.messages(id, peer, before, limit).await?))
     }
 
-    /// Traces the route from a radio to a node.
-    pub async fn traceroute(
-        &self,
-        id: RadioId,
-        node: u32,
-        channel: u32,
-    ) -> Result<Traceroute, TraceFailure> {
-        let mesh = self.mesh(id).ok_or(TraceFailure::NoSuchRadio)?;
-        let origin = mesh.read(|state| state.local.as_ref().map(|l| l.num));
-        if node == mesh::BROADCAST || origin == Some(node) {
-            return Err(TraceFailure::InvalidNode);
-        }
-        let meshcore = self.protocol(id) == Some(Protocol::Meshcore);
-        if !meshcore && !has_channel(&mesh, channel) {
-            return Err(TraceFailure::InvalidChannel);
-        }
-        if self.link(id) != LinkState::Ready {
-            return Err(TraceFailure::NotConnected);
-        }
-        let at = now();
-        // MeshCore's along the path the radio keeps, there and back, on no
-        // channel and at no pace.
-        if meshcore {
-            let tag = mesh
-                .meshcore_traceroute(node)
-                .await
-                .map_err(|error| match error {
-                    AdminError::NoPath => TraceFailure::NoPath,
-                    AdminError::Unsupported => TraceFailure::Unsupported,
-                    AdminError::UnknownNode | AdminError::OwnNode => TraceFailure::InvalidNode,
-                    AdminError::NotConnected | AdminError::NoAnswer | AdminError::Refused(_) => {
-                        TraceFailure::NotConnected
-                    }
-                })?;
-            let traceroute = self
-                .store
-                .add_traceroute(id, tag, origin.unwrap_or_default(), node, at)
-                .await?;
-            let _ = self
-                .changes
-                .send(Change::Traceroute(id, traceroute.clone()));
-            return Ok(traceroute);
-        }
-        if self.protocol(id) != Some(Protocol::Meshtastic) {
-            return Err(TraceFailure::Unsupported);
-        }
-        let wait = self.wait(id, Pace::Traceroute, at).await?;
-        if wait > 0 {
-            return Err(TraceFailure::TooSoon { wait });
-        }
-        let packet_id = mesh
-            .send_traceroute(node, channel)
-            .map_err(|error| match error {
-                SendError::Unsupported => TraceFailure::Unsupported,
-                SendError::NotConnected | SendError::BadText | SendError::Refused => {
-                    TraceFailure::NotConnected
-                }
-            })?;
-        let traceroute = self
-            .store
-            .add_traceroute(id, packet_id, origin.unwrap_or_default(), node, at)
-            .await?;
-        let _ = self
-            .changes
-            .send(Change::Traceroute(id, traceroute.clone()));
-        Ok(traceroute)
-    }
-
     /// Asks a node for something it tells on request; the answer, or the lack
     /// of one, comes on the event stream as the request changes.
     pub async fn request(&self, id: RadioId, new: NewRequest) -> Result<Request, AskFailure> {
@@ -2032,9 +1939,9 @@ impl Radios {
                 | RequestKind::Route
                 | RequestKind::Series
         );
-        if meshcore_kind && !meshcore
-            || meshcore && !meshcore_kind && new.kind != RequestKind::Neighbors
-        {
+        // Neighbours and traceroutes, both.
+        let both = matches!(new.kind, RequestKind::Neighbors | RequestKind::Traceroute);
+        if meshcore_kind && !meshcore || meshcore && !meshcore_kind && !both {
             return Err(AskFailure::Unsupported);
         }
         if self.link(id) != LinkState::Ready {
@@ -2091,6 +1998,8 @@ impl Radios {
                 (Some(asked), _, _) => asked,
                 (None, RequestKind::Ping, _) => mesh.meshcore_ping(new.node).await,
                 (None, RequestKind::Route, _) => mesh.meshcore_discover(new.node).await,
+                // Along the path it keeps, there and back, at no pace.
+                (None, RequestKind::Traceroute, _) => mesh.meshcore_traceroute(new.node).await,
                 (None, RequestKind::Series, _) => {
                     mesh.meshcore_series(new.node, new.seconds.unwrap_or(SERIES_SECONDS))
                         .await
@@ -2120,13 +2029,15 @@ impl Radios {
             }
         }
         let ask = match new.kind {
-            RequestKind::NodeInfo => Ask::NodeInfo,
-            RequestKind::Position => Ask::Position,
-            RequestKind::DeviceTelemetry => Ask::DeviceTelemetry,
-            RequestKind::EnvironmentTelemetry => Ask::EnvironmentTelemetry,
-            RequestKind::PowerTelemetry => Ask::PowerTelemetry,
-            RequestKind::LocalStats => Ask::LocalStats,
-            RequestKind::Neighbors => Ask::Neighbors,
+            // A route traced: a packet of its own, not a request.
+            RequestKind::Traceroute => None,
+            RequestKind::NodeInfo => Some(Ask::NodeInfo),
+            RequestKind::Position => Some(Ask::Position),
+            RequestKind::DeviceTelemetry => Some(Ask::DeviceTelemetry),
+            RequestKind::EnvironmentTelemetry => Some(Ask::EnvironmentTelemetry),
+            RequestKind::PowerTelemetry => Some(Ask::PowerTelemetry),
+            RequestKind::LocalStats => Some(Ask::LocalStats),
+            RequestKind::Neighbors => Some(Ask::Neighbors),
             RequestKind::Regions
             | RequestKind::Status
             | RequestKind::Telemetry
@@ -2136,14 +2047,16 @@ impl Radios {
             | RequestKind::Route
             | RequestKind::Series => return Err(AskFailure::Unsupported),
         };
-        let packet_id =
-            mesh.send_request(new.node, new.channel, ask)
-                .map_err(|error| match error {
-                    SendError::Unsupported => AskFailure::Unsupported,
-                    SendError::NotConnected | SendError::BadText | SendError::Refused => {
-                        AskFailure::NotConnected
-                    }
-                })?;
+        let sent = match ask {
+            Some(ask) => mesh.send_request(new.node, new.channel, ask),
+            None => mesh.send_traceroute(new.node, new.channel),
+        };
+        let packet_id = sent.map_err(|error| match error {
+            SendError::Unsupported => AskFailure::Unsupported,
+            SendError::NotConnected | SendError::BadText | SendError::Refused => {
+                AskFailure::NotConnected
+            }
+        })?;
         let request = self
             .store
             .add_request(id, new.node, new.kind, new.channel, packet_id, now())
@@ -2439,20 +2352,16 @@ impl Radios {
 
     /// Forgets what a node was asked for through a radio, but what waits for
     /// its answer: how many were, or `None` if there is no such radio.
-    pub async fn forget_requests(&self, id: RadioId, node: u32) -> Result<Option<u64>> {
+    pub async fn forget_requests(
+        &self,
+        id: RadioId,
+        node: u32,
+        kind: Option<RequestKind>,
+    ) -> Result<Option<u64>> {
         if self.mesh(id).is_none() {
             return Ok(None);
         }
-        Ok(Some(self.store.forget_requests(id, node).await?))
-    }
-
-    /// Forgets the routes traced to a node but the latest and those waiting:
-    /// how many were, or `None` if there is no such radio.
-    pub async fn forget_traceroutes(&self, id: RadioId, node: u32) -> Result<Option<u64>> {
-        if self.mesh(id).is_none() {
-            return Ok(None);
-        }
-        Ok(Some(self.store.forget_traceroutes(id, node).await?))
+        Ok(Some(self.store.forget_requests(id, node, kind).await?))
     }
 
     /// How long until a radio sends each paced kind again, or `None` if there
@@ -2475,13 +2384,16 @@ impl Radios {
         &self,
         id: RadioId,
         node: Option<u32>,
+        kind: Option<RequestKind>,
         before: Option<meshctl_api::RequestId>,
         limit: u32,
     ) -> Result<Option<Vec<Request>>> {
         if self.mesh(id).is_none() {
             return Ok(None);
         }
-        Ok(Some(self.store.requests(id, node, before, limit).await?))
+        Ok(Some(
+            self.store.requests(id, node, kind, before, limit).await?,
+        ))
     }
 
     /// A radio's own settings, as it sent them on syncing. Only while it is
@@ -3189,21 +3101,6 @@ impl Radios {
         Ok(SettingsApplied { reboots: true })
     }
 
-    /// A radio's traceroutes, to one node or to any, the newest first, if there
-    /// is such a radio.
-    pub async fn traceroutes(
-        &self,
-        id: RadioId,
-        node: Option<u32>,
-        before: Option<TracerouteId>,
-        limit: u32,
-    ) -> Result<Option<Vec<Traceroute>>> {
-        if self.mesh(id).is_none() {
-            return Ok(None);
-        }
-        Ok(Some(self.store.traceroutes(id, node, before, limit).await?))
-    }
-
     /// The packets a radio heard, the newest first, or `None` if there is no
     /// such radio.
     /// The packet that carried one of a radio's messages, as the radio heard
@@ -3514,7 +3411,7 @@ impl Radios {
         let logins = Arc::clone(&self.logins);
         tokio::spawn(async move {
             let mut connected = false;
-            let mut expiry = tokio::time::interval(TRACEROUTE_EXPIRY_TICK);
+            let mut expiry = tokio::time::interval(EXPIRY_TICK);
             loop {
                 let event = tokio::select! {
                     event = events.recv() => event,
@@ -3536,7 +3433,7 @@ impl Radios {
                         keep_packet(&store, &changes, id, &heard).await
                     }
                     Ok(mesh::Event::Traceroute(answer)) => {
-                        answer_traceroute(&store, &changes, id, &answer).await
+                        answer_traceroute(&store, &changes, id, &mesh, &answer).await
                     }
                     Ok(mesh::Event::Message(heard)) => {
                         let local = mesh.read(|s| s.local.as_ref().map(|l| l.num));
@@ -3555,17 +3452,10 @@ impl Radios {
                         })
                     }
                     Ok(mesh::Event::Ack(ack)) => {
-                        // A relay giving up on a traceroute or a request, or a
-                        // node with nothing to tell, says so this way.
+                        // A relay giving up on a request, a traceroute among
+                        // them, or a node with nothing to tell, says so this way.
                         if let Some(error) = &ack.error {
-                            let failed =
-                                match fail_traceroute(&store, &changes, id, ack.packet_id, error)
-                                    .await
-                                {
-                                    Ok(()) => store.fail_request(id, ack.packet_id, error).await,
-                                    Err(err) => Err(err),
-                                };
-                            match failed {
+                            match store.fail_request(id, ack.packet_id, error).await {
                                 Ok(Some(request)) => {
                                     let _ = changes.send(Change::Request(id, request));
                                 }
@@ -3596,26 +3486,23 @@ impl Radios {
                     }
                     Ok(mesh::Event::Traced {
                         request_id,
+                        from,
                         hops,
                         snrs,
                         last_snr,
-                        ..
                     }) => {
                         let traced = Traced {
                             hops: &hops,
                             snrs: &snrs,
                             last_snr,
                         };
-                        answer_meshcore_trace(&store, &changes, id, &mesh, request_id, &traced)
-                            .await
+                        answer_meshcore_trace(
+                            &store, &changes, id, &mesh, request_id, from, &traced,
+                        )
+                        .await
                     }
-                    // A traceroute given up on, as a request is.
+                    // A request given up on, a traceroute among them.
                     Ok(mesh::Event::Unanswered { request_id, from }) => {
-                        if let Err(err) =
-                            fail_traceroute(&store, &changes, id, request_id, "TIMEOUT").await
-                        {
-                            tracing::warn!(radio = id, error = format_args!("{err:#}"), "trace");
-                        }
                         match store.unanswered_request(id, request_id, from).await {
                             Ok(Some(request)) => {
                                 let _ = changes.send(Change::Request(id, request));

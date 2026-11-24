@@ -9,7 +9,62 @@ use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::mesh::{ago, awaiting_clock, waited};
 use leptos::prelude::*;
 use leptos_i18n::I18nContext;
-use meshctl_api::{Hop, Traceroute, TracerouteStatus};
+use meshctl_api::{Hop, Request, RequestKind, RequestReply, RequestStatus};
+
+/// How a traceroute is told apart: the request it is.
+pub type TracerouteId = meshctl_api::RequestId;
+
+/// Where a traceroute is at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TracerouteStatus {
+    Pending,
+    Done,
+    Failed,
+}
+
+/// A traceroute from a radio to a node, as a request of its kind tells it:
+/// the route there and the route back, each from its first node to its last.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Traceroute {
+    pub id: TracerouteId,
+    /// The node traced.
+    pub target: u32,
+    /// When it was sent, in seconds since the epoch.
+    pub at: i64,
+    pub status: TracerouteStatus,
+    /// Why it failed, or `TIMEOUT`.
+    pub error: Option<String>,
+    /// From the radio to the node traced, once answered.
+    pub towards: Vec<Hop>,
+    /// From the node traced back to the radio, once answered.
+    pub back: Vec<Hop>,
+}
+
+impl Traceroute {
+    /// A request read as the traceroute it is; none for one of another kind.
+    pub fn of(request: &Request) -> Option<Self> {
+        if request.kind != RequestKind::Traceroute {
+            return None;
+        }
+        let (towards, back) = match &request.reply {
+            Some(RequestReply::Traceroute { towards, back }) => (towards.clone(), back.clone()),
+            _ => (Vec::new(), Vec::new()),
+        };
+        Some(Self {
+            id: request.id,
+            target: request.node,
+            at: request.at,
+            status: match request.status {
+                RequestStatus::Pending => TracerouteStatus::Pending,
+                RequestStatus::Answered => TracerouteStatus::Done,
+                RequestStatus::Failed => TracerouteStatus::Failed,
+            },
+            error: request.error.clone(),
+            towards,
+            back,
+        })
+    }
+}
 
 fn node_label(live: Live, num: u32) -> String {
     live.nodes.with(|nodes| {

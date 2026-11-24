@@ -1318,22 +1318,6 @@ pub struct Conversation {
     pub read_up_to: Option<MessageId>,
 }
 
-/// How a traceroute is identified in the API.
-pub type TracerouteId = i64;
-
-/// Where a traceroute is at.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum TracerouteStatus {
-    /// Sent, with no answer yet.
-    Pending,
-    /// Answered: the routes there and back are known.
-    Done,
-    /// No answer: `error` says why, `TIMEOUT` if none came in time.
-    Failed,
-}
-
 /// A node on a route, and how well it heard the hop before it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -1364,38 +1348,6 @@ impl Hop {
             guess: false,
         }
     }
-}
-
-/// A traceroute from a radio to a node: the route there and the route back,
-/// each from its first node to its last.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct Traceroute {
-    pub id: TracerouteId,
-    /// The node traced.
-    pub target: u32,
-    /// When it was sent, in seconds since the epoch.
-    pub at: i64,
-    pub status: TracerouteStatus,
-    /// Why it failed, as the protobufs name it, or `TIMEOUT`.
-    #[cfg_attr(feature = "openapi", schema(example = "NO_RESPONSE"))]
-    pub error: Option<String>,
-    /// From the radio to the node traced, once answered.
-    pub towards: Vec<Hop>,
-    /// From the node traced back to the radio, once answered.
-    pub back: Vec<Hop>,
-}
-
-/// A node to trace the route to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct NewTraceroute {
-    /// The node's number.
-    pub node: u32,
-    /// The channel's slot to trace on, 0 if not said. The node has to have
-    /// that channel too.
-    #[serde(default)]
-    pub channel: u32,
 }
 
 /// What a node can be asked for.
@@ -1447,6 +1399,12 @@ pub enum RequestKind {
     /// A MeshCore node heard straight, pinged, with no login: how long there
     /// and back, and how each end heard the other.
     Ping,
+    /// The route to a node and back, each hop with the SNR it heard the one
+    /// before it at. A Meshtastic radio sends one every thirty seconds at
+    /// most, on a channel the node has too; a MeshCore one traces along the
+    /// path it keeps, of a hop at least, to a repeater, or to a room or a
+    /// sensor set to repeat.
+    Traceroute,
     /// The way to a MeshCore node and back, found by a request flooded to
     /// it: each hop by its hash, and the node it most likely is. With no
     /// login to a companion; to a repeater, a room or a sensor, logged in to
@@ -1471,6 +1429,7 @@ impl RequestKind {
             | Self::Route
             | Self::Series => None,
             Self::Position => Some(Pace::Position),
+            Self::Traceroute => Some(Pace::Traceroute),
             Self::DeviceTelemetry
             | Self::EnvironmentTelemetry
             | Self::PowerTelemetry
@@ -1624,6 +1583,9 @@ pub enum RequestReply {
         /// The SNR the radio heard it back at, in dB.
         snr_back: f32,
     },
+    /// The route to a node and back, each from its first node to its last:
+    /// from the radio to the node traced, and from it back to the radio.
+    Traceroute { towards: Vec<Hop>, back: Vec<Hop> },
     /// What a MeshCore sensor kept of its readings over the `seconds` asked:
     /// the lowest, the highest and the mean of each; and its clock as it
     /// answered, in seconds since the epoch.

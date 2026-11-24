@@ -22,6 +22,7 @@ use crate::packets::{KEPT, PacketsView};
 use crate::preferences::PreferencesView;
 use crate::radios::{Editing, RadiosView};
 use crate::settings::SettingsView;
+use crate::traces::{Traceroute, TracerouteStatus};
 use gloo_timers::future::sleep;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -29,8 +30,7 @@ use meshctl_api::events::ServerMessage;
 use meshctl_api::{
     Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, NewRequest, Node,
     NodeCheck, NodeLatest, Pace, Packet, PacketFilter, Peer, Preferences, Radio, RadioId,
-    RadioKind, Request, RequestKind, RequestStatus, SightingId, Status, Theme, Traceroute,
-    TracerouteStatus,
+    RadioKind, Request, RequestKind, RequestStatus, SightingId, Status, Theme,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
@@ -690,7 +690,11 @@ impl Live {
                 && self.node.get_untracked() == Some(node)
                 && self.selected.get_untracked() == Some(radio)
             {
-                self.requests.set(requests);
+                // The routes traced are kept apart, with every node's.
+                let asked = requests
+                    .into_iter()
+                    .filter(|r| r.kind != RequestKind::Traceroute);
+                self.requests.set(asked.collect());
             }
         });
         self.read_waits(radio);
@@ -1241,20 +1245,18 @@ impl Live {
                     });
                     Ok(())
                 }
-                ServerMessage::Traceroute { radio, traceroute } if self.is_selected(radio) => {
-                    if traceroute.status == TracerouteStatus::Pending {
-                        self.paced(Pace::Traceroute);
-                    }
-                    self.keep_traceroute(traceroute);
-                    Ok(())
-                }
                 ServerMessage::Request { radio, request } if self.is_selected(radio) => {
                     if request.status == RequestStatus::Pending
                         && let Some(pace) = request.kind.pace()
                     {
                         self.paced(pace);
                     }
-                    self.keep_request(request);
+                    // A traceroute among the routes traced, of any node, for
+                    // the map too; the rest, the open node's.
+                    match Traceroute::of(&request) {
+                        Some(traceroute) => self.keep_traceroute(traceroute),
+                        None => self.keep_request(request),
+                    }
                     Ok(())
                 }
                 ServerMessage::Packet { radio, packet } if self.is_selected(radio) => {

@@ -74,8 +74,8 @@ impl Store {
 
     /// Forgets the packets first heard before `before` (seconds since the
     /// epoch) but each node's latest of each kind, however old: what its page
-    /// shows of it. The requests and traceroutes sent before then go too,
-    /// but those still waiting. How many packets went.
+    /// shows of it. The requests sent before then go too, traceroutes among
+    /// them, but those still waiting. How many packets went.
     pub async fn prune_packets(&self, before: i64) -> Result<u64> {
         let mut tx = self.pool.begin().await?;
         let packets = sqlx::query(
@@ -93,10 +93,6 @@ impl Store {
         .await?
         .rows_affected();
         sqlx::query("DELETE FROM request WHERE at < ? AND status != 'pending'")
-            .bind(before)
-            .execute(&mut *tx)
-            .await?;
-        sqlx::query("DELETE FROM traceroute WHERE at < ? AND status != 'pending'")
             .bind(before)
             .execute(&mut *tx)
             .await?;

@@ -41,6 +41,7 @@ fn kind_name(kind: RequestKind) -> &'static str {
         RequestKind::Ping => "ping",
         RequestKind::Route => "route",
         RequestKind::Series => "series",
+        RequestKind::Traceroute => "traceroute",
     }
 }
 
@@ -60,6 +61,7 @@ fn kind_from(name: &str) -> RequestKind {
         "ping" => RequestKind::Ping,
         "route" => RequestKind::Route,
         "series" => RequestKind::Series,
+        "traceroute" => RequestKind::Traceroute,
         _ => RequestKind::NodeInfo,
     }
 }
@@ -82,7 +84,9 @@ fn port_of(kind: RequestKind) -> Option<PortNum> {
         | RequestKind::AccessList
         | RequestKind::Ping
         | RequestKind::Route
-        | RequestKind::Series => return None,
+        | RequestKind::Series
+        // Its answer comes as routes, not as a packet asked for.
+        | RequestKind::Traceroute => return None,
     })
 }
 
@@ -149,11 +153,8 @@ impl Store {
     }
 
     /// When a radio last asked any node for something sent at its own pace,
-    /// if it ever did: a traceroute, or a request of that pace.
+    /// if it ever did.
     pub async fn last_paced_at(&self, radio: RadioId, pace: Pace) -> Result<Option<i64>> {
-        if pace == Pace::Traceroute {
-            return self.last_traceroute_at(radio).await;
-        }
         let kinds = [
             RequestKind::NodeInfo,
             RequestKind::Position,
@@ -163,6 +164,7 @@ impl Store {
             RequestKind::LocalStats,
             RequestKind::Neighbors,
             RequestKind::Regions,
+            RequestKind::Traceroute,
         ]
         .into_iter()
         .filter(|kind| kind.pace() == Some(pace))
@@ -176,15 +178,30 @@ impl Store {
             .await?)
     }
 
-    /// Forgets what a node was asked for through a radio, but what still
-    /// waits for its answer; how many were. The packets that answered stay,
-    /// as what the node told.
-    pub async fn forget_requests(&self, radio: RadioId, node: u32) -> Result<u64> {
+    /// Forgets what a node was asked for through a radio, of one kind or of
+    /// every kind, but what still waits for its answer and each kind's latest
+    /// that ended, which its page shows; how many were. The packets that
+    /// answered stay, as what the node told.
+    pub async fn forget_requests(
+        &self,
+        radio: RadioId,
+        node: u32,
+        kind: Option<RequestKind>,
+    ) -> Result<u64> {
+        let kind = kind.map(kind_name);
         Ok(sqlx::query(
-            "DELETE FROM request WHERE radio_id = ? AND node = ? AND status != 'pending'",
+            "DELETE FROM request
+            WHERE radio_id = ?1 AND node = ?2 AND status != 'pending'
+                AND (?3 IS NULL OR kind = ?3)
+                AND id NOT IN (
+                    SELECT max(id) FROM request
+                    WHERE radio_id = ?1 AND node = ?2 AND status != 'pending'
+                    GROUP BY kind
+                )",
         )
         .bind(radio)
         .bind(i64::from(node))
+        .bind(kind)
         .execute(&self.pool)
         .await?
         .rows_affected())
@@ -362,20 +379,22 @@ impl Store {
         &self,
         radio: RadioId,
         node: Option<u32>,
+        kind: Option<RequestKind>,
         before: Option<RequestId>,
         limit: u32,
     ) -> Result<Vec<Request>> {
         let node = node.map(i64::from);
+        let kind = kind.map(kind_name);
         let rows = sqlx::query_as(
             "SELECT id, node, kind, channel, status, error, at, answered_at, answer, reply
             FROM request
-            WHERE radio_id = ? AND (? IS NULL OR node = ?) AND (? IS NULL OR id < ?)
-            ORDER BY id DESC LIMIT ?",
+            WHERE radio_id = ?1 AND (?2 IS NULL OR node = ?2) AND (?3 IS NULL OR kind = ?3)
+                AND (?4 IS NULL OR id < ?4)
+            ORDER BY id DESC LIMIT ?5",
         )
         .bind(radio)
         .bind(node)
-        .bind(node)
-        .bind(before)
+        .bind(kind)
         .bind(before)
         .bind(i64::from(limit))
         .fetch_all(&self.pool)
@@ -525,7 +544,7 @@ mod tests {
         assert_eq!(answered.status, RequestStatus::Answered);
         assert_eq!(answered.reply, Some(reply.clone()));
         assert_eq!(
-            store.requests(1, Some(0x55), None, 1).await.unwrap()[0].reply,
+            store.requests(1, Some(0x55), None, None, 1).await.unwrap()[0].reply,
             Some(reply)
         );
         // No packet answers it.
@@ -642,28 +661,115 @@ mod tests {
         assert_eq!(expired[0].error.as_deref(), Some("TIMEOUT"));
         assert_eq!(expired[0].channel, 2);
 
-        let to_one = store.requests(1, Some(0x55), None, 10).await.unwrap();
+        let to_one = store.requests(1, Some(0x55), None, None, 10).await.unwrap();
         assert_eq!(to_one.len(), 1);
-        assert_eq!(store.requests(1, None, None, 10).await.unwrap().len(), 2);
+        assert_eq!(
+            store.requests(1, None, None, None, 10).await.unwrap().len(),
+            2
+        );
         // A page of them, before the latest: the older.
         let older = store
-            .requests(1, None, Some(to_one[0].id), 10)
+            .requests(1, None, None, Some(to_one[0].id), 10)
             .await
             .unwrap();
         assert!(older.iter().all(|r| r.id < to_one[0].id));
 
-        // Forgotten, but what still waits.
-        let waiting = store
+        // Forgotten, but what still waits and each kind's latest that ended:
+        // two positions given up on, a route traced and another after.
+        let earlier = store
+            .add_request(1, 0x55, RequestKind::Position, 0, 7, 290)
+            .await
+            .unwrap();
+        store.fail_request(1, 7, "NO_RESPONSE").await.unwrap();
+        let later = store
             .add_request(1, 0x55, RequestKind::Position, 0, 3, 300)
             .await
             .unwrap();
-        assert_eq!(store.forget_requests(1, 0x55).await.unwrap(), 1);
-        let left = store.requests(1, Some(0x55), None, 10).await.unwrap();
-        assert_eq!(left.iter().map(|r| r.id).collect::<Vec<_>>(), [waiting.id]);
-        // Those to other nodes stay.
+        store.fail_request(1, 3, "NO_RESPONSE").await.unwrap();
+        let trace = RequestKind::Traceroute;
+        let traced = store.add_request(1, 0x55, trace, 0, 4, 310).await.unwrap();
+        store.fail_request(1, 4, "NO_RESPONSE").await.unwrap();
+        let last_traced = store.add_request(1, 0x55, trace, 0, 5, 320).await.unwrap();
+        store.fail_request(1, 5, "NO_RESPONSE").await.unwrap();
+        let waiting = store
+            .add_request(1, 0x55, RequestKind::Position, 0, 6, 330)
+            .await
+            .unwrap();
+        let ids = |kind| {
+            let store = store.clone();
+            async move {
+                let mut ids: Vec<_> = store
+                    .requests(1, Some(0x55), kind, None, 10)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|r| r.id)
+                    .collect();
+                ids.sort_unstable();
+                ids
+            }
+        };
+        assert_eq!(ids(Some(trace)).await, [traced.id, last_traced.id]);
+        // Of one kind alone: its older one.
         assert_eq!(
-            store.requests(1, Some(0x66), None, 10).await.unwrap().len(),
+            store.forget_requests(1, 0x55, Some(trace)).await.unwrap(),
             1
         );
+        assert_eq!(ids(Some(trace)).await, [last_traced.id]);
+        // Of every kind: the older position; the neighbours asked first,
+        // the only of its kind, stay.
+        let before = ids(None).await;
+        assert_eq!(store.forget_requests(1, 0x55, None).await.unwrap(), 1);
+        let after = ids(None).await;
+        assert!(!after.contains(&earlier.id));
+        assert_eq!(after.len(), before.len() - 1);
+        assert!(
+            [later.id, last_traced.id, waiting.id]
+                .iter()
+                .all(|id| after.contains(id))
+        );
+        // Those to other nodes stay.
+        assert_eq!(
+            store
+                .requests(1, Some(0x66), None, None, 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_traceroute_is_a_request_at_its_pace_answered_with_routes() {
+        let store = store().await;
+        let trace = RequestKind::Traceroute;
+        assert_eq!(
+            store.last_paced_at(1, Pace::Traceroute).await.unwrap(),
+            None
+        );
+        store.add_request(1, 0x55, trace, 0, 41, 100).await.unwrap();
+        assert_eq!(
+            store.last_paced_at(1, Pace::Traceroute).await.unwrap(),
+            Some(100)
+        );
+        // Its routes, as its reply.
+        let hop = meshctl_api::Hop::known;
+        let reply = RequestReply::Traceroute {
+            towards: vec![hop(Some(7), None), hop(Some(0x55), Some(6.0))],
+            back: vec![hop(Some(0x55), None), hop(Some(7), Some(4.5))],
+        };
+        let done = store
+            .reply_request(1, 41, 0x55, &reply, 105)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(done.kind, trace);
+        assert_eq!(done.status, RequestStatus::Answered);
+        assert_eq!(done.reply, Some(reply));
+        let traced = store
+            .requests(1, None, Some(trace), None, 10)
+            .await
+            .unwrap();
+        assert_eq!(traced.len(), 1);
     }
 }

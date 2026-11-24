@@ -147,7 +147,6 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
             node,
             wait_ms,
         },
-        Change::Traceroute(radio, traceroute) => ServerMessage::Traceroute { radio, traceroute },
         Change::Message(radio, message) => ServerMessage::Message { radio, message },
         Change::Packet(radio, packet) => ServerMessage::Packet { radio, packet },
         Change::Request(radio, request) => ServerMessage::Request { radio, request },

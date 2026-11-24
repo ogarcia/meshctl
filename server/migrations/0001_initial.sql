@@ -234,26 +234,6 @@ CREATE TABLE node_password (
     PRIMARY KEY (radio_id, node)
 );
 
--- The traceroutes each radio sent.
-CREATE TABLE traceroute (
-    id INTEGER PRIMARY KEY,
-    radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
-    packet_id INTEGER NOT NULL,
-    -- The radio's own node when it was sent, where the route starts.
-    origin INTEGER NOT NULL,
-    target INTEGER NOT NULL,
-    at INTEGER NOT NULL,
-    -- pending, done or failed.
-    status TEXT NOT NULL,
-    error TEXT,
-    -- The routes, once answered, as JSON arrays of {node, snr}.
-    towards TEXT,
-    back TEXT
-);
-
-CREATE INDEX traceroute_radio ON traceroute (radio_id, id);
-CREATE INDEX traceroute_pending ON traceroute (radio_id, packet_id) WHERE status = 'pending';
-
 -- What is set from the interface and kept for every browser that opens it,
 -- one group of settings to a row, as JSON: the interface's look and language
 -- under 'interface' today.
@@ -376,7 +356,9 @@ CREATE TABLE request (
     radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
     node INTEGER NOT NULL,
     -- node_info, position, device_telemetry, environment_telemetry,
-    -- power_telemetry, local_stats, neighbors or regions.
+    -- power_telemetry, local_stats, neighbors, traceroute; MeshCore's
+    -- regions, status, telemetry, owner, access_list, ping, route or
+    -- series.
     kind TEXT NOT NULL,
     -- The slot it went out on.
     channel INTEGER NOT NULL,
@@ -388,7 +370,8 @@ CREATE TABLE request (
     at INTEGER NOT NULL,
     answered_at INTEGER,
     answer INTEGER REFERENCES packet_seen (id) ON DELETE SET NULL,
-    -- What a node that answers with no packet answered, as JSON.
+    -- What a node that answers with no packet answered, or a traceroute's
+    -- routes, as JSON.
     reply TEXT
 );
 

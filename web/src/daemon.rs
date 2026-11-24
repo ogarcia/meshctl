@@ -4,6 +4,7 @@
 //! Talking to the daemon: the API for reading and changing, the event stream
 //! for following along, and the token when it asks for one.
 
+use crate::traces::{Traceroute, TracerouteId};
 use futures_util::{SinkExt, StreamExt};
 use gloo_net::http::{Request, RequestBuilder, Response};
 use gloo_net::websocket::Message as Frame;
@@ -11,9 +12,9 @@ use gloo_net::websocket::futures::WebSocket;
 use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
     API_V1, Channel, ChannelHistory, ChannelOrder, ChannelSecret, Conversation, Error, ErrorCode,
-    MapView, Message, NewMessage, NewTraceroute, Node, NodeSettings, NodeSettingsChange, Packet,
-    PacketFilter, Peer, Preferences, Radio, RadioId, RadioOrder, RadioSettings, SectionChange,
-    SectionSecret, SettingsApplied, SettingsSection, SightingId, Status, TOKEN_HEADER, Traceroute,
+    MapView, Message, NewMessage, Node, NodeSettings, NodeSettingsChange, Packet, PacketFilter,
+    Peer, Preferences, Radio, RadioId, RadioOrder, RadioSettings, SectionChange, SectionSecret,
+    SettingsApplied, SettingsSection, SightingId, Status, TOKEN_HEADER,
 };
 use serde::de::DeserializeOwned;
 
@@ -348,16 +349,25 @@ pub async fn change_section(
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// A radio's latest traceroutes, to any node: requests of their kind.
 pub async fn traceroutes(radio: RadioId) -> Result<Vec<Traceroute>, Failure> {
-    get(&format!("/radios/{radio}/traceroutes?limit=100")).await
+    let requests: Vec<meshctl_api::Request> = get(&format!(
+        "/radios/{radio}/requests?kind=traceroute&limit=100"
+    ))
+    .await?;
+    Ok(requests.iter().filter_map(Traceroute::of).collect())
 }
 
+/// Traces the route to a node, on a channel: a request of its kind.
 pub async fn trace(radio: RadioId, node: u32, channel: u32) -> Result<Traceroute, Failure> {
-    let request = with_token(Request::post(&url(&format!("/radios/{radio}/traceroutes"))))
-        .json(&NewTraceroute { node, channel })
-        .map_err(|_| Failure::Unreachable)?;
-    let response = answer(request.send().await).await?;
-    response.json().await.map_err(|_| Failure::Unreachable)
+    let new = meshctl_api::NewRequest {
+        node,
+        kind: meshctl_api::RequestKind::Traceroute,
+        channel,
+        seconds: None,
+    };
+    let request = ask(radio, &new).await?;
+    Traceroute::of(&request).ok_or(Failure::Unreachable)
 }
 
 /// What a node was asked for through a radio, the newest first.
@@ -414,13 +424,14 @@ pub async fn node_checks(
 pub async fn traceroutes_to(
     radio: RadioId,
     node: u32,
-    before: Option<meshctl_api::TracerouteId>,
+    before: Option<TracerouteId>,
 ) -> Result<Vec<Traceroute>, Failure> {
     let before = before.map_or_else(String::new, |id| format!("&before={id}"));
-    get(&format!(
-        "/radios/{radio}/traceroutes?node={node}&limit={TRACES_PAGE}{before}"
+    let requests: Vec<meshctl_api::Request> = get(&format!(
+        "/radios/{radio}/requests?node={node}&kind=traceroute&limit={TRACES_PAGE}{before}"
     ))
-    .await
+    .await?;
+    Ok(requests.iter().filter_map(Traceroute::of).collect())
 }
 
 /// A page of what a node was asked for, the newest first: those before one,
@@ -448,7 +459,7 @@ pub async fn forget_requests(radio: RadioId, node: u32) -> Result<(), Failure> {
 /// Forgets the routes traced to a node but the latest, and those waiting.
 pub async fn forget_traceroutes(radio: RadioId, node: u32) -> Result<(), Failure> {
     let request = with_token(Request::delete(&url(&format!(
-        "/radios/{radio}/traceroutes?node={node}"
+        "/radios/{radio}/requests?node={node}&kind=traceroute"
     ))));
     answer(request.send().await).await.map(|_| ())
 }
