@@ -157,6 +157,31 @@ fn NodePage(num: u32) -> impl IntoView {
             }
             .into_any();
         }
+        // A MeshCore companion: where it is when its adverts say, its route
+        // and who it is; none of Meshtastic's telemetry, which it never
+        // sends, nor anything to ask of it but its route.
+        if meshcore {
+            return view! {
+                <div class="node-column">
+                    {move || {
+                        let latest = latest();
+                        let placed = latest.position.is_some()
+                            || live.nodes.with(|n| n.get(&num).is_some_and(|n| n.position.is_some()));
+                        placed.then(|| view! {
+                            <PositionSection at=latest.position.as_ref().map(|p| p.at) />
+                        })
+                    }}
+                    <MeshcorePath />
+                </div>
+                <div class="node-column">
+                    {move || {
+                        let latest = latest();
+                        view! { <Identity at=latest.node_info.as_ref().map(|p| p.at) /> }
+                    }}
+                </div>
+            }
+            .into_any();
+        }
         view! {
             <div class="node-column">
                 {move || {
@@ -169,11 +194,7 @@ fn NodePage(num: u32) -> impl IntoView {
                 }}
             </div>
             <div class="node-column">
-                {if meshcore {
-                    view! { <MeshcorePath /> }.into_any()
-                } else {
-                    view! { <Traces drawer /> }.into_any()
-                }}
+                <Traces drawer />
                 {move || {
                     let latest = latest();
                     view! {
@@ -235,8 +256,12 @@ fn NodePage(num: u32) -> impl IntoView {
             <div class="node-sections" class:balanced=is_own>
                 {move || if is_own.get() { mine() } else { heard() }}
             </div>
-            // Eye-catching, but long: below what is looked at most.
-            {move || view! { <crate::charts::Telemetry num own=is_own.get() /> }}
+            // Eye-catching, but long: below what is looked at most. Of a
+            // MeshCore node but the radio's own, there is none to chart.
+            {move || {
+                (!meshcore || is_own.get())
+                    .then(|| view! { <crate::charts::Telemetry num own=is_own.get() /> })
+            }}
             {move || {
                 (!is_own.get()).then(|| view! {
                     <TracesDrawer open=drawer />
@@ -1664,7 +1689,10 @@ fn Identity(at: Option<i64>) -> impl IntoView {
         };
         // How what is for it alone reaches it: telemetry and neighbours
         // asked, and messages to it.
-        let direct = if licensed(live) {
+        let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
+        let direct = if meshcore {
+            t!(i18n, node_direct_meshcore).into_any()
+        } else if licensed(live) {
             t!(i18n, node_direct_licensed).into_any()
         } else if node.public_key.is_some() {
             t!(i18n, node_direct_pki).into_any()
