@@ -987,9 +987,14 @@ fn TraceHops(hops: Vec<String>, snrs: Vec<f64>) -> impl IntoView {
             } else {
                 Some(t_string!(i18n, route_unknown).to_owned())
             };
+            // Coloured as how well it was heard there; pending, dim.
+            #[allow(clippy::cast_possible_truncation)]
             let heard = snrs.get(at).map_or_else(
-                || t_string!(i18n, packets_trace_pending).to_owned(),
-                |snr| format!("{snr:.1} dB"),
+                || {
+                    view! { <span class="dim">{t_string!(i18n, packets_trace_pending)}</span> }
+                        .into_any()
+                },
+                |snr| crate::node::snr_view(*snr as f32).into_any(),
             );
             view! {
                 <li>
@@ -998,7 +1003,7 @@ fn TraceHops(hops: Vec<String>, snrs: Vec<f64>) -> impl IntoView {
                             {name}
                         </span>
                     </span>
-                    <span class="dim">{heard}</span>
+                    {heard}
                 </li>
             }
         })

@@ -376,6 +376,12 @@ fn duration(seconds: u64) -> String {
     }
 }
 
+/// An SNR, coloured as how well it was heard: as a trace's hops are.
+pub fn snr_view(snr: f32) -> impl IntoView {
+    let quality = crate::traces::quality(Some(snr));
+    view! { <span class=format!("snr {quality}")>{format!("{snr:.1} dB")}</span> }
+}
+
 /// A fact of a section: what it is, and its value.
 fn fact(label: impl IntoView, value: impl IntoView) -> impl IntoView {
     view! {
@@ -2864,6 +2870,17 @@ fn RemotePing() -> impl IntoView {
             .with(|nodes| nodes.get(&asking.num).and_then(|n| n.hops_away))
             == Some(0)
     };
+    // Pinged again: the last one's figures dashed out meanwhile, as like
+    // ones coming would seem none had.
+    let pinging = move || {
+        live.requests.with(|requests| {
+            requests.iter().any(|r| {
+                r.node == asking.num
+                    && r.kind == RequestKind::Ping
+                    && r.status == RequestStatus::Pending
+            })
+        })
+    };
     let body = move || {
         let result = last().and_then(|(reply, _)| match reply {
             meshctl_api::RequestReply::Ping {
@@ -2873,12 +2890,21 @@ fn RemotePing() -> impl IntoView {
             } => Some((round_trip_ms, snr_there, snr_back)),
             _ => None,
         });
+        let dashed = pinging();
+        let value = move |shown: AnyView| {
+            if dashed {
+                view! { <span class="dim">"—"</span> }.into_any()
+            } else {
+                shown
+            }
+        };
         view! {
             {result.map(|(ms, there, back)| view! {
                 <dl class="facts compact three">
-                    {fact(t!(i18n, ping_round_trip), format!("{ms} ms"))}
-                    {fact(t!(i18n, ping_there), format!("{there:.1} dB"))}
-                    {fact(t!(i18n, ping_back), format!("{back:.1} dB"))}
+                    {fact(t!(i18n, ping_round_trip), value(format!("{ms} ms").into_any()))}
+                    // Coloured as how well each way was heard, as a trace's hops.
+                    {fact(t!(i18n, ping_there), value(snr_view(there).into_any()))}
+                    {fact(t!(i18n, ping_back), value(snr_view(back).into_any()))}
                 </dl>
             })}
             {(!direct()).then(|| view! { <p class="hint dim">{t!(i18n, ping_only_direct)}</p> })}
