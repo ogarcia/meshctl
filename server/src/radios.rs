@@ -381,6 +381,149 @@ async fn keep_packet(
     Ok(())
 }
 
+/// Keeps a copy of a packet a MeshCore radio heard raw, read, and tells the
+/// live view: a new packet, or one heard again, with its copies counted.
+async fn keep_raw(
+    store: &Store,
+    changes: &broadcast::Sender<Change>,
+    radio: RadioId,
+    mesh: &Mesh,
+    heard: mesh::RawHeard,
+) -> Result<()> {
+    use mesh::RawInfo;
+    use meshctl_api::PacketKind;
+    use serde_json::json;
+    let node = |num: u32| format!("!{num:08x}");
+    let hash = |byte: u8| format!("{byte:02x}");
+    let (kind, from, to, channel, info) = match &heard.info {
+        RawInfo::Advert {
+            node: num,
+            kind,
+            name,
+            position,
+            timestamp,
+        } => (
+            PacketKind::NodeInfo,
+            Some(*num),
+            None,
+            None,
+            json!({
+                "node": node(*num),
+                "kind": match kind {
+                    1 => "companion",
+                    2 => "repeater",
+                    3 => "room",
+                    4 => "sensor",
+                    _ => "unknown",
+                },
+                "name": name,
+                "latitude": position.map(|(lat, _)| lat),
+                "longitude": position.map(|(_, lon)| lon),
+                "clock": timestamp,
+            }),
+        ),
+        RawInfo::ChannelText {
+            channel,
+            sender,
+            text,
+            timestamp,
+        } => {
+            // Who wrote it, as long as one contact alone has that name.
+            let from = sender.as_ref().and_then(|name| {
+                mesh.read(|state| {
+                    let mut named = state
+                        .nodes
+                        .values()
+                        .filter(|n| n.user.as_ref().is_some_and(|u| &u.long_name == name));
+                    match (named.next(), named.next()) {
+                        (Some(one), None) => Some(one.num),
+                        _ => None,
+                    }
+                })
+            });
+            (
+                PacketKind::Text,
+                from,
+                None,
+                Some(*channel),
+                json!({ "channel": channel, "sender": sender, "text": text, "clock": timestamp }),
+            )
+        }
+        RawInfo::Sealed { channel_hash } => (
+            PacketKind::Encrypted,
+            None,
+            None,
+            None,
+            json!({ "channel_hash": hash(*channel_hash) }),
+        ),
+        RawInfo::Between { to, from } => (
+            // A path found is the mesh's routing; the rest, sealed.
+            if heard.payload_type == 0x08 {
+                PacketKind::Routing
+            } else {
+                PacketKind::Encrypted
+            },
+            None,
+            None,
+            None,
+            json!({ "to": hash(*to), "from": hash(*from) }),
+        ),
+        RawInfo::Anonymous { to, from } => (
+            PacketKind::Encrypted,
+            Some(*from),
+            None,
+            None,
+            json!({ "to": hash(*to), "from": node(*from) }),
+        ),
+        RawInfo::Ack { code } => (
+            PacketKind::Routing,
+            None,
+            None,
+            None,
+            json!({ "code": format!("{code:08x}") }),
+        ),
+        RawInfo::Trace { tag, hashes } => (
+            PacketKind::Traceroute,
+            None,
+            None,
+            None,
+            json!({
+                "tag": format!("{tag:08x}"),
+                "hashes": hashes.iter().map(|b| hash(*b)).collect::<Vec<_>>(),
+                "snrs": heard
+                    .path
+                    .iter()
+                    .map(|b| f32::from(b.cast_signed()) / 4.0)
+                    .collect::<Vec<_>>(),
+            }),
+        ),
+        RawInfo::Other => (PacketKind::Other, None, None, None, json!({})),
+    };
+    let copy = crate::store::NewMeshcoreCopy {
+        key: heard.key,
+        payload_type: heard.payload_type,
+        kind,
+        from,
+        to,
+        channel,
+        info,
+        payload_len: heard.payload_len,
+        at: i64::from(heard.at),
+        snr: heard.snr,
+        rssi: heard.rssi,
+        route: heard.route,
+        scope: match &heard.region {
+            Some(region) => Some(region_name(store, radio, mesh, region).await?),
+            None => None,
+        },
+        path: heard.path,
+        hash_size: heard.hash_size,
+    };
+    let packet = store.add_meshcore_copy(radio, &copy).await?;
+    let _ = changes.send(Change::Packet(radio, packet));
+    Ok(())
+}
+
 /// Takes what a node answered with no packet as the answer to its request.
 async fn keep_reply(
     store: &Store,
@@ -518,9 +661,82 @@ fn lpp_name(kind: u8) -> String {
     .to_owned()
 }
 
-/// Keeps a copy of a message heard and the way it came, its region told by
-/// the regions whose keys are known: found nearby, of a channel, or the
-/// radio's default. Tells of the message, if kept already.
+/// Copies heard as the ways they came: each hop by its hash, with the nodes
+/// the radio knows whose key starts so.
+fn routes_of(mesh: &Mesh, rows: Vec<crate::store::RouteRow>) -> Vec<meshctl_api::MessageRoute> {
+    let keys: Vec<(u32, Vec<u8>)> = mesh.read(|state| {
+        state
+            .nodes
+            .values()
+            .filter_map(|n| Some((n.num, n.user.as_ref()?.public_key.clone())))
+            .filter(|(_, key)| !key.is_empty())
+            .collect()
+    });
+    rows.into_iter()
+        .map(|row| {
+            let size = usize::try_from(row.hash_size).unwrap_or(1).max(1);
+            meshctl_api::MessageRoute {
+                hops: row
+                    .path
+                    .chunks(size)
+                    .map(|hash| meshctl_api::RouteHop {
+                        hash: hash.iter().map(|b| format!("{b:02x}")).collect(),
+                        nodes: keys
+                            .iter()
+                            .filter(|(_, key)| key.starts_with(hash))
+                            .map(|(num, _)| *num)
+                            .collect(),
+                    })
+                    .collect(),
+                flooded: row.flooded,
+                snr: row.snr,
+                rssi: row.rssi,
+                scope: row.scope,
+                at: row.at,
+            }
+        })
+        .collect()
+}
+
+/// The region a packet went in, by its name, told by the regions whose keys
+/// are known: found nearby, of a channel, or the radio's default; `?` when
+/// none of them is it.
+async fn region_name(
+    store: &Store,
+    radio: RadioId,
+    mesh: &Mesh,
+    region: &mesh::RegionCode,
+) -> Result<String> {
+    let mut names: Vec<String> = store
+        .latest_regions(radio)
+        .await?
+        .into_iter()
+        .flat_map(|(_, reply, _)| match reply {
+            meshctl_api::RequestReply::Regions { regions, .. } => regions,
+            _ => Vec::new(),
+        })
+        .collect();
+    names.extend(store.channel_scopes(radio).await?.into_values());
+    names.extend(mesh.read(|state| {
+        state
+            .meshcore
+            .as_ref()
+            .and_then(|s| s.default_scope.clone().flatten())
+            .map(|(name, _)| name)
+    }));
+    let found = names.into_iter().find(|name| {
+        name != "*"
+            && meshctl_core::meshcore::raw::transport_code(
+                &crate::meshcore::hashtag_secret(name),
+                region.payload_type,
+                &region.payload,
+            ) == region.code
+    });
+    Ok(found.unwrap_or_else(|| "?".to_owned()))
+}
+
+/// Keeps a copy of a message heard and the way it came, its region by its
+/// name. Tells of the message, if kept already.
 async fn keep_route(
     store: &Store,
     changes: &broadcast::Sender<Change>,
@@ -530,34 +746,7 @@ async fn keep_route(
 ) -> Result<()> {
     let scope = match &route.region {
         None => None,
-        Some(region) => {
-            let mut names: Vec<String> = store
-                .latest_regions(radio)
-                .await?
-                .into_iter()
-                .flat_map(|(_, reply, _)| match reply {
-                    meshctl_api::RequestReply::Regions { regions, .. } => regions,
-                    _ => Vec::new(),
-                })
-                .collect();
-            names.extend(store.channel_scopes(radio).await?.into_values());
-            names.extend(mesh.read(|state| {
-                state
-                    .meshcore
-                    .as_ref()
-                    .and_then(|s| s.default_scope.clone().flatten())
-                    .map(|(name, _)| name)
-            }));
-            let found = names.into_iter().find(|name| {
-                name != "*"
-                    && meshctl_core::meshcore::raw::transport_code(
-                        &crate::meshcore::hashtag_secret(name),
-                        region.payload_type,
-                        &region.payload,
-                    ) == region.code
-            });
-            Some(found.unwrap_or_else(|| "?".to_owned()))
-        }
+        Some(region) => Some(region_name(store, radio, mesh, region).await?),
     };
     let row = crate::store::RouteRow {
         path: route.hops.concat(),
@@ -1470,43 +1659,23 @@ impl Radios {
         let Some(mesh) = self.mesh(id) else {
             return Ok(None);
         };
-        let Some(rows) = self.store.routes(id, message).await? else {
+        let rows = self.store.routes(id, message).await?;
+        Ok(rows.map(|rows| routes_of(&mesh, rows)))
+    }
+
+    /// The ways a packet a MeshCore radio heard came, each copy: each hop
+    /// with the nodes its hash may be. None if there is no such radio or
+    /// packet.
+    pub async fn packet_routes(
+        &self,
+        id: RadioId,
+        packet: SightingId,
+    ) -> Result<Option<Vec<meshctl_api::MessageRoute>>> {
+        let Some(mesh) = self.mesh(id) else {
             return Ok(None);
         };
-        let keys: Vec<(u32, Vec<u8>)> = mesh.read(|state| {
-            state
-                .nodes
-                .values()
-                .filter_map(|n| Some((n.num, n.user.as_ref()?.public_key.clone())))
-                .filter(|(_, key)| !key.is_empty())
-                .collect()
-        });
-        Ok(Some(
-            rows.into_iter()
-                .map(|row| {
-                    let size = usize::try_from(row.hash_size).unwrap_or(1).max(1);
-                    meshctl_api::MessageRoute {
-                        hops: row
-                            .path
-                            .chunks(size)
-                            .map(|hash| meshctl_api::RouteHop {
-                                hash: hash.iter().map(|b| format!("{b:02x}")).collect(),
-                                nodes: keys
-                                    .iter()
-                                    .filter(|(_, key)| key.starts_with(hash))
-                                    .map(|(num, _)| *num)
-                                    .collect(),
-                            })
-                            .collect(),
-                        flooded: row.flooded,
-                        snr: row.snr,
-                        rssi: row.rssi,
-                        scope: row.scope,
-                        at: row.at,
-                    }
-                })
-                .collect(),
-        ))
+        let rows = self.store.meshcore_routes(id, packet).await?;
+        Ok(rows.map(|rows| routes_of(&mesh, rows)))
     }
 
     /// Every conversation a radio has: its channels, whether or not anything
@@ -2830,6 +2999,14 @@ impl Radios {
         if self.mesh(id).is_none() {
             return Ok(None);
         }
+        // A MeshCore radio's are its own, raw.
+        if self.protocol(id) == Some(Protocol::Meshcore) {
+            return Ok(Some(
+                self.store
+                    .meshcore_packets(id, before, filter, limit)
+                    .await?,
+            ));
+        }
         let rows = self.store.packets(id, before, filter, limit).await?;
         Ok(Some(rows.into_iter().map(crate::packets::packet).collect()))
     }
@@ -3188,6 +3365,9 @@ impl Radios {
                         })
                     }
                     Ok(mesh::Event::Reply(reply)) => keep_reply(&store, &changes, id, &reply).await,
+                    Ok(mesh::Event::RawHeard(heard)) => {
+                        keep_raw(&store, &changes, id, &mesh, heard).await
+                    }
                     Ok(mesh::Event::Route(route)) => {
                         keep_route(&store, &changes, id, &mesh, &route).await
                     }

@@ -1604,6 +1604,16 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             };
             let name = new.name.clone();
             let _ = events.send(Event::Push(contact(0x8a, &new)));
+            // Heard raw too, its advert flooded through Monte.
+            let mut payload = new.key.to_vec();
+            payload.extend(at.to_le_bytes());
+            payload.extend([0; 64]);
+            payload.push(0x80 | 0x10 | new.kind);
+            payload.extend(new.lat.to_le_bytes());
+            payload.extend(new.lon.to_le_bytes());
+            payload.extend(new.name.as_bytes());
+            let packet = flooded(raw::PAYLOAD_ADVERT, &[key(0x52)], None, &payload);
+            let _ = events.send(Event::Push(rx_log(5, -95, &packet)));
             radio.contacts.push(new);
             format!("{name} advertises")
         }

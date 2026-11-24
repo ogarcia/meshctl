@@ -10,7 +10,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Error, ErrorCode, Packet, PacketFilter, PacketKind, PacketReach, RadioId, SightingId,
+    Error, ErrorCode, MessageRoute, Packet, PacketFilter, PacketKind, PacketReach, RadioId,
+    SightingId,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -24,7 +25,9 @@ const PAGE: u32 = 100;
 const PAGE_MAX: u32 = 1000;
 
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(list))
+    OpenApiRouter::new()
+        .routes(routes!(list))
+        .routes(routes!(routes))
 }
 
 /// Which packets to read.
@@ -96,6 +99,46 @@ async fn list(
             .into_response(),
         Err(err) => {
             tracing::error!(error = format_args!("{err:#}"), "packets");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// A packet's routes
+///
+/// Each copy of a packet a MeshCore radio heard, the first first, and the
+/// way it came: the repeaters it went through, from its sender's side, each
+/// by its hash and the nodes the radio knows that it may be; its signal, and
+/// the region it came in. A Meshtastic radio keeps none of its packets'.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/packets/{id}/routes",
+    tag = "packets",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("id" = SightingId, Path, description = "The packet's id"),
+    ),
+    responses(
+        (status = 200, description = "The routes", body = Vec<MessageRoute>),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio or packet", body = Error),
+    )
+)]
+async fn routes(
+    State(state): State<AppState>,
+    Path((radio, id)): Path<(RadioId, SightingId)>,
+) -> Response {
+    match state.radios.packet_routes(radio, id).await {
+        Ok(Some(routes)) => Json(routes).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(Error {
+                error: ErrorCode::NotFound,
+            }),
+        )
+            .into_response(),
+        Err(err) => {
+            tracing::error!(error = format_args!("{err:#}"), "packet routes");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }

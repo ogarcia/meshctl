@@ -20,6 +20,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod meshcore_packets;
+pub use meshcore_packets::NewMeshcoreCopy;
 mod requests;
 mod retention;
 

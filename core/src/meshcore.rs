@@ -731,10 +731,104 @@ impl HeardCopy {
 
 /// A packet the radio heard, raw: told as the message it is a copy of, if
 /// that can be said now; a direct text to it waits for its message.
+/// A copy of a packet heard raw, read as far as the radio's channels and
+/// contacts let: for the live view.
+fn raw_heard(
+    state: &MeshState,
+    packet: &raw::RawPacket,
+    snr: f32,
+    rssi: i8,
+) -> crate::mesh::RawHeard {
+    use crate::mesh::RawInfo;
+    let payload = &packet.payload;
+    let info = match packet.payload_type {
+        raw::PAYLOAD_ADVERT => {
+            raw::advert(payload).map_or(RawInfo::Other, |advert| RawInfo::Advert {
+                node: num_of(&advert.key),
+                kind: advert.kind,
+                name: advert.name,
+                position: advert.position,
+                timestamp: advert.timestamp,
+            })
+        }
+        raw::PAYLOAD_GRP_TXT => {
+            let opened = state.meshcore_channels.as_ref().and_then(|channels| {
+                channels.secrets.iter().find_map(|(index, secret)| {
+                    raw::open_channel_text(secret, payload).map(|(at, text)| (*index, at, text))
+                })
+            });
+            match opened {
+                Some((channel, timestamp, text)) => {
+                    let (sender, text) = match split_sender(&text) {
+                        Some((name, body)) => (Some(name.to_owned()), body.to_owned()),
+                        None => (None, text),
+                    };
+                    RawInfo::ChannelText {
+                        channel,
+                        sender,
+                        text,
+                        timestamp,
+                    }
+                }
+                None => RawInfo::Sealed {
+                    channel_hash: payload.first().copied().unwrap_or(0),
+                },
+            }
+        }
+        // Between two nodes: whom to and from, by a byte of each one's key.
+        0x00 | 0x01 | raw::PAYLOAD_TXT_MSG | 0x08 => match (payload.first(), payload.get(1)) {
+            (Some(&to), Some(&from)) => RawInfo::Between { to, from },
+            _ => RawInfo::Other,
+        },
+        raw::PAYLOAD_ANON_REQ => match (payload.first(), payload.get(1..33)) {
+            (Some(&to), Some(key)) => RawInfo::Anonymous {
+                to,
+                from: num_of(key),
+            },
+            _ => RawInfo::Other,
+        },
+        raw::PAYLOAD_ACK => {
+            payload
+                .get(..4)
+                .and_then(|b| b.try_into().ok())
+                .map_or(RawInfo::Other, |b| RawInfo::Ack {
+                    code: u32::from_le_bytes(b),
+                })
+        }
+        raw::PAYLOAD_TRACE => match payload.get(..4) {
+            Some(tag) => RawInfo::Trace {
+                tag: u32::from_le_bytes(tag.try_into().unwrap_or_default()),
+                hashes: payload.get(9..).unwrap_or_default().to_vec(),
+            },
+            None => RawInfo::Other,
+        },
+        _ => RawInfo::Other,
+    };
+    crate::mesh::RawHeard {
+        key: packet.key(),
+        payload_type: packet.payload_type,
+        route: packet.route,
+        region: packet.transport.map(|codes| crate::mesh::RegionCode {
+            code: codes[0],
+            payload_type: packet.payload_type,
+            payload: packet.payload.clone(),
+        }),
+        path: packet.path.clone(),
+        hash_size: (packet.path_len >> 6) + 1,
+        payload_len: payload.len(),
+        snr,
+        rssi: i32::from(rssi),
+        at: now(),
+        info,
+    }
+}
+
 fn heard_raw(mesh: &Mesh, session: &Session, snr: f32, rssi: i8, bytes: &[u8]) {
     let Some(packet) = raw::RawPacket::parse(bytes) else {
         return;
     };
+    // For the live view, every copy, read as far as it can be.
+    mesh.update(|state| vec![Event::RawHeard(raw_heard(state, &packet, snr, rssi))]);
     let now = Instant::now();
     let copy = HeardCopy {
         packet,

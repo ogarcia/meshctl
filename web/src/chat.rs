@@ -1273,14 +1273,11 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
     let live = expect_context::<Live>();
     let thread = expect_context::<Thread>();
     let packet = RwSignal::new(None::<meshctl_api::Packet>);
-    // The ways it came, on a MeshCore radio: read again as more copies come;
-    // and the one shown on the map.
+    // The ways it came, on a MeshCore radio: read again as more copies come.
     let routes = RwSignal::new(Vec::<meshctl_api::MessageRoute>::new());
-    let shown_route = RwSignal::new(0_usize);
     Effect::new(move |_| {
         let Some(id) = thread.details.get() else {
             routes.set(Vec::new());
-            shown_route.set(0);
             return;
         };
         let heard = live
@@ -1455,8 +1452,7 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                 .into_any(),
             )
         });
-        // Each copy heard, and the way it came: every repeater by its name,
-        // or by its hash and how many it may be.
+        // Each copy heard, and the way it came.
         let outgoing = message.outgoing;
         // Where it set out from: the radio, for one of ours; its sender, if
         // known and placed.
@@ -1471,146 +1467,7 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                 Peer::Channel { .. } => (message.from != 0).then_some(message.from),
             }
         };
-        // The route shown, as points on the map: from its origin, through the
-        // repeaters that can be placed, to the radio.
-        let points = Signal::derive(move || {
-            let at = shown_route.get();
-            let Some(route) = routes.with(|r| r.get(at).cloned()) else {
-                return Vec::new();
-            };
-            live.nodes.with(|nodes| {
-                let point = |num: u32, gap: bool| {
-                    let node = nodes.get(&num)?;
-                    let at = node.position?;
-                    Some(crate::map::RoutePoint {
-                        lat: at.latitude,
-                        lon: at.longitude,
-                        pin: crate::mesh::pin(node, Some(num) == local),
-                        gap,
-                    })
-                };
-                let mut points: Vec<crate::map::RoutePoint> = Vec::new();
-                let mut gap = false;
-                let start = origin.and_then(|num| point(num, false));
-                if start.is_none() {
-                    gap = true;
-                }
-                points.extend(start);
-                for hop in &route.hops {
-                    match hop.nodes.as_slice() {
-                        [one] => match point(*one, gap && !points.is_empty()) {
-                            Some(p) => {
-                                points.push(p);
-                                gap = false;
-                            }
-                            None => gap = true,
-                        },
-                        _ => gap = true,
-                    }
-                }
-                if let Some(end) = local.and_then(|num| point(num, gap && !points.is_empty())) {
-                    points.push(end);
-                }
-                points
-            })
-        });
-        let route_list = move || {
-            let all = routes.get();
-            if all.is_empty() {
-                return None;
-            }
-            let count = all.len();
-            let lines = all
-                .into_iter()
-                .enumerate()
-                .map(|(index, route)| {
-                    let hops = route
-                        .hops
-                        .iter()
-                        .enumerate()
-                        .map(|(at, hop)| {
-                            let (name, title, unsure) = match hop.nodes.as_slice() {
-                                [one] => (node_name(live, *one), None, false),
-                                [] => (format!("··{}", hop.hash), Some(t_string!(i18n, route_unknown).to_owned()), true),
-                                many => (
-                                    t_string!(i18n, route_many)
-                                        .replace("{n}", &many.len().to_string())
-                                        .replace("{hash}", &hop.hash),
-                                    Some(many.iter().map(|n| node_name(live, *n)).collect::<Vec<_>>().join(", ")),
-                                    true,
-                                ),
-                            };
-                            view! {
-                                {(at > 0).then(|| view! { <span class="arrow" aria-hidden="true">"→"</span> })}
-                                <span class="hop" class:unsure=unsure title=title>{name}</span>
-                            }
-                        })
-                        .collect_view();
-                    let way = if route.hops.is_empty() {
-                        if route.flooded {
-                            t_string!(i18n, route_straight).to_owned()
-                        } else {
-                            t_string!(i18n, route_direct).to_owned()
-                        }
-                    } else {
-                        String::new()
-                    };
-                    let mut facts: Vec<String> = Vec::new();
-                    if let Some(snr) = route.snr {
-                        facts.push(format!("{snr:.1} dB"));
-                    }
-                    if let Some(rssi) = route.rssi {
-                        facts.push(format!("{rssi} dBm"));
-                    }
-                    match route.scope.as_deref() {
-                        Some("?") => facts.push(t_string!(i18n, route_region_unknown).to_owned()),
-                        Some(name) => facts.push(format!("#{name}")),
-                        None => {}
-                    }
-                    // Picked for the map, when there are more than one.
-                    view! {
-                        <li
-                            class:pickable={count > 1}
-                            class:on={move || count > 1 && shown_route.get() == index}
-                            on:click=move |_| shown_route.set(index)
-                        >
-                            <span class="hops">
-                                {(!way.is_empty()).then(|| view! { <span class="way">{way}</span> })}
-                                {hops}
-                            </span>
-                            <span class="dim">{facts.join(" · ")}</span>
-                        </li>
-                    }
-                })
-                .collect_view();
-            Some(view! {
-                <section class="routes">
-                    <h3>
-                        {move || {
-                            match (outgoing, count) {
-                                (true, 1) => t_string!(i18n, route_echoes_one).to_owned(),
-                                (false, 1) => t_string!(i18n, route_heard_one).to_owned(),
-                                (true, n) => t_string!(i18n, route_echoes).replace("{n}", &n.to_string()),
-                                (false, n) => t_string!(i18n, route_heard).replace("{n}", &n.to_string()),
-                            }
-                        }}
-                    </h3>
-                    <p class="hint dim">
-                        {move || if outgoing { t!(i18n, route_echoes_hint).into_any() } else { t!(i18n, route_hint).into_any() }}
-                    </p>
-                    <ol>{lines}</ol>
-                    // On the map, while two of its points can be placed.
-                    {move || {
-                        (points.with(Vec::len) >= 2)
-                            .then(|| view! { <crate::map::RouteMap points /> })
-                    }}
-                    {move || {
-                        (points.with(Vec::len) < 2)
-                            .then(|| view! { <p class="hint dim">{t!(i18n, route_unplaced)}</p> })
-                    }}
-                </section>
-            })
-        };
+        let route_list = view! { <RouteList routes origin outgoing /> };
         let packet_id = (message.packet_id != 0).then(|| {
             fact(
                 t!(i18n, chat_packet).into_any(),
@@ -1655,6 +1512,170 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
                     </div>
                 </div>
             </div>
+        })
+    }
+}
+
+/// Each copy heard of a message or a packet, and the way it came: every
+/// repeater by its name, or by its hash and how many it may be; the one
+/// picked on a small map, from where it set out, if known, to the radio.
+#[component]
+pub fn RouteList(
+    routes: RwSignal<Vec<meshctl_api::MessageRoute>>,
+    origin: Option<u32>,
+    outgoing: bool,
+) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let shown_route = RwSignal::new(0_usize);
+    // One that is no more, as the copies are read again: the first.
+    Effect::new(move |_| {
+        let count = routes.with(Vec::len);
+        if shown_route.get_untracked() >= count {
+            shown_route.set(0);
+        }
+    });
+    let local = live
+        .status
+        .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+    // The route shown, as points on the map: from its origin, through the
+    // repeaters that can be placed, to the radio.
+    let points = Signal::derive(move || {
+        let at = shown_route.get();
+        let Some(route) = routes.with(|r| r.get(at).cloned()) else {
+            return Vec::new();
+        };
+        live.nodes.with(|nodes| {
+            let point = |num: u32, gap: bool| {
+                let node = nodes.get(&num)?;
+                let at = node.position?;
+                Some(crate::map::RoutePoint {
+                    lat: at.latitude,
+                    lon: at.longitude,
+                    pin: crate::mesh::pin(node, Some(num) == local),
+                    gap,
+                })
+            };
+            let mut points: Vec<crate::map::RoutePoint> = Vec::new();
+            let mut gap = false;
+            let start = origin.and_then(|num| point(num, false));
+            if start.is_none() {
+                gap = true;
+            }
+            points.extend(start);
+            for hop in &route.hops {
+                match hop.nodes.as_slice() {
+                    [one] => match point(*one, gap && !points.is_empty()) {
+                        Some(p) => {
+                            points.push(p);
+                            gap = false;
+                        }
+                        None => gap = true,
+                    },
+                    _ => gap = true,
+                }
+            }
+            if let Some(end) = local.and_then(|num| point(num, gap && !points.is_empty())) {
+                points.push(end);
+            }
+            points
+        })
+    });
+    move || {
+        let all = routes.get();
+        if all.is_empty() {
+            return None;
+        }
+        let count = all.len();
+        let lines = all
+            .into_iter()
+            .enumerate()
+            .map(|(index, route)| {
+                let hops = route
+                    .hops
+                    .iter()
+                    .enumerate()
+                    .map(|(at, hop)| {
+                        let (name, title, unsure) = match hop.nodes.as_slice() {
+                            [one] => (node_name(live, *one), None, false),
+                            [] => (format!("··{}", hop.hash), Some(t_string!(i18n, route_unknown).to_owned()), true),
+                            many => (
+                                t_string!(i18n, route_many)
+                                    .replace("{n}", &many.len().to_string())
+                                    .replace("{hash}", &hop.hash),
+                                Some(many.iter().map(|n| node_name(live, *n)).collect::<Vec<_>>().join(", ")),
+                                true,
+                            ),
+                        };
+                        view! {
+                            {(at > 0).then(|| view! { <span class="arrow" aria-hidden="true">"→"</span> })}
+                            <span class="hop" class:unsure=unsure title=title>{name}</span>
+                        }
+                    })
+                    .collect_view();
+                let way = if route.hops.is_empty() {
+                    if route.flooded {
+                        t_string!(i18n, route_straight).to_owned()
+                    } else {
+                        t_string!(i18n, route_direct).to_owned()
+                    }
+                } else {
+                    String::new()
+                };
+                let mut facts: Vec<String> = Vec::new();
+                if let Some(snr) = route.snr {
+                    facts.push(format!("{snr:.1} dB"));
+                }
+                if let Some(rssi) = route.rssi {
+                    facts.push(format!("{rssi} dBm"));
+                }
+                match route.scope.as_deref() {
+                    Some("?") => facts.push(t_string!(i18n, route_region_unknown).to_owned()),
+                    Some(name) => facts.push(format!("#{name}")),
+                    None => {}
+                }
+                // Picked for the map, when there are more than one.
+                view! {
+                    <li
+                        class:pickable={count > 1}
+                        class:on={move || count > 1 && shown_route.get() == index}
+                        on:click=move |_| shown_route.set(index)
+                    >
+                        <span class="hops">
+                            {(!way.is_empty()).then(|| view! { <span class="way">{way}</span> })}
+                            {hops}
+                        </span>
+                        <span class="dim">{facts.join(" · ")}</span>
+                    </li>
+                }
+            })
+            .collect_view();
+        Some(view! {
+            <section class="routes">
+                <h3>
+                    {move || {
+                        match (outgoing, count) {
+                            (true, 1) => t_string!(i18n, route_echoes_one).to_owned(),
+                            (false, 1) => t_string!(i18n, route_heard_one).to_owned(),
+                            (true, n) => t_string!(i18n, route_echoes).replace("{n}", &n.to_string()),
+                            (false, n) => t_string!(i18n, route_heard).replace("{n}", &n.to_string()),
+                        }
+                    }}
+                </h3>
+                <p class="hint dim">
+                    {move || if outgoing { t!(i18n, route_echoes_hint).into_any() } else { t!(i18n, route_hint).into_any() }}
+                </p>
+                <ol>{lines}</ol>
+                // On the map, while two of its points can be placed.
+                {move || {
+                    (points.with(Vec::len) >= 2)
+                        .then(|| view! { <crate::map::RouteMap points /> })
+                }}
+                {move || {
+                    (points.with(Vec::len) < 2)
+                        .then(|| view! { <p class="hint dim">{t!(i18n, route_unplaced)}</p> })
+                }}
+            </section>
         })
     }
 }

@@ -2134,18 +2134,20 @@ impl PacketKind {
         Self::Other,
     ];
 
-    /// The ports of it, as the protobufs name them: none for the encrypted
-    /// and the others, which go by what they are not.
+    /// The ports of it, as the protobufs name them, and the kinds of payload
+    /// of MeshCore's, as its firmware names them: what is sealed between two
+    /// nodes is encrypted; the others go by what they are not.
     pub fn ports(self) -> &'static [&'static str] {
         match self {
-            Self::Text => &["TEXT_MESSAGE_APP", "TEXT_MESSAGE_COMPRESSED_APP"],
+            Self::Text => &["TEXT_MESSAGE_APP", "TEXT_MESSAGE_COMPRESSED_APP", "GRP_TXT"],
             Self::Position => &["POSITION_APP"],
-            Self::NodeInfo => &["NODEINFO_APP"],
-            Self::Routing => &["ROUTING_APP"],
+            Self::NodeInfo => &["NODEINFO_APP", "ADVERT"],
+            Self::Routing => &["ROUTING_APP", "ACK", "PATH"],
             Self::Telemetry => &["TELEMETRY_APP"],
-            Self::Traceroute => &["TRACEROUTE_APP"],
+            Self::Traceroute => &["TRACEROUTE_APP", "TRACE"],
             Self::Neighbors => &["NEIGHBORINFO_APP"],
-            Self::Encrypted | Self::Other => &[],
+            Self::Encrypted => &["TXT_MSG", "REQ", "RESPONSE", "ANON_REQ", "GRP_DATA"],
+            Self::Other => &[],
         }
     }
 

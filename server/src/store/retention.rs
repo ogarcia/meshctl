@@ -100,8 +100,14 @@ impl Store {
             .bind(before)
             .execute(&mut *tx)
             .await?;
+        // And MeshCore's, raw, by the last copy heard of each.
+        let raw = sqlx::query("DELETE FROM meshcore_packet WHERE last_at < ?")
+            .bind(before)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
         tx.commit().await?;
-        Ok(packets)
+        Ok(packets + raw)
     }
 
     /// Forgets the messages heard or sent before `before`. How many went.

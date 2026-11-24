@@ -191,6 +191,89 @@ pub fn seal_channel_text(secret: &[u8; 16], timestamp: u32, text: &str) -> Vec<u
     payload
 }
 
+/// What each kind of payload is called, as the firmware's `Packet` names it.
+pub fn payload_name(payload_type: u8) -> &'static str {
+    match payload_type {
+        0x00 => "REQ",
+        0x01 => "RESPONSE",
+        0x02 => "TXT_MSG",
+        0x03 => "ACK",
+        0x04 => "ADVERT",
+        0x05 => "GRP_TXT",
+        0x06 => "GRP_DATA",
+        0x07 => "ANON_REQ",
+        0x08 => "PATH",
+        0x09 => "TRACE",
+        0x0a => "MULTIPART",
+        0x0b => "CONTROL",
+        0x0f => "RAW_CUSTOM",
+        _ => "UNKNOWN",
+    }
+}
+
+/// An advert to its key, its node said what it is, its name and where.
+pub const PAYLOAD_ADVERT: u8 = 0x04;
+/// An acknowledgement: its four bytes of checksum.
+pub const PAYLOAD_ACK: u8 = 0x03;
+/// A request with no login: whom it is to, by its hash, then the key of
+/// whom it is from, then sealed.
+pub const PAYLOAD_ANON_REQ: u8 = 0x07;
+/// A trace along a path: its tag, auth code and flags, then the hashes of
+/// the path; the SNR each hop heard it at goes in its path as it goes.
+pub const PAYLOAD_TRACE: u8 = 0x09;
+
+/// The bytes of a signature, as an advert carries one.
+const SIGNATURE_SIZE: usize = 64;
+
+/// A node's advert, as heard: its key, its clock as it sent it, what kind
+/// of node it is (1 a companion, 2 a repeater, 3 a room, 4 a sensor), and
+/// its name and place when it says them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Advert {
+    pub key: [u8; 32],
+    pub timestamp: u32,
+    pub kind: u8,
+    pub name: Option<String>,
+    /// Latitude and longitude, in degrees.
+    pub position: Option<(f64, f64)>,
+}
+
+/// An advert's payload, as `AdvertDataParser` reads what follows its key,
+/// clock and signature: its flags, its place if they say, two words of
+/// features if they say, and its name if they say.
+pub fn advert(payload: &[u8]) -> Option<Advert> {
+    let key: [u8; 32] = payload.get(..32)?.try_into().ok()?;
+    let timestamp = u32::from_le_bytes(payload.get(32..36)?.try_into().ok()?);
+    let app = payload.get(36 + SIGNATURE_SIZE..)?;
+    let (&flags, mut rest) = app.split_first()?;
+    let mut position = None;
+    if flags & 0x10 != 0 {
+        let lat = i32::from_le_bytes(rest.get(..4)?.try_into().ok()?);
+        let lon = i32::from_le_bytes(rest.get(4..8)?.try_into().ok()?);
+        position = Some((f64::from(lat) / 1e6, f64::from(lon) / 1e6));
+        rest = &rest[8..];
+    }
+    for feature in [0x20, 0x40] {
+        if flags & feature != 0 {
+            rest = rest.get(2..)?;
+        }
+    }
+    let name = (flags & 0x80 != 0)
+        .then(|| {
+            String::from_utf8_lossy(rest)
+                .trim_end_matches('\0')
+                .to_owned()
+        })
+        .filter(|name| !name.is_empty());
+    Some(Advert {
+        key,
+        timestamp,
+        kind: flags & 0x0f,
+        name,
+        position,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,5 +336,26 @@ mod tests {
         let last = bad.len() - 1;
         bad[last] ^= 1;
         assert_eq!(open_channel_text(&secret, &bad), None);
+    }
+
+    #[test]
+    fn an_advert_reads_with_its_name_and_place() {
+        let mut payload = vec![0x52; 32];
+        payload.extend(1_795_519_657u32.to_le_bytes());
+        payload.extend([0; SIGNATURE_SIZE]);
+        // A repeater, with a place, a feature of two bytes and a name.
+        payload.push(0x80 | 0x20 | 0x10 | 2);
+        payload.extend(43_370_000i32.to_le_bytes());
+        payload.extend((-8_400_000i32).to_le_bytes());
+        payload.extend([9, 9]);
+        payload.extend(b"Torre\0");
+        let advert = advert(&payload).unwrap();
+        assert_eq!(advert.key, [0x52; 32]);
+        assert_eq!(advert.timestamp, 1_795_519_657);
+        assert_eq!(advert.kind, 2);
+        assert_eq!(advert.name.as_deref(), Some("Torre"));
+        assert_eq!(advert.position, Some((43.37, -8.4)));
+        // Cut short before its flags, it is no advert.
+        assert!(super::advert(&payload[..36 + SIGNATURE_SIZE]).is_none());
     }
 }

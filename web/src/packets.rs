@@ -14,7 +14,7 @@ use crate::i18n::{Locale, t, t_string, use_i18n};
 use crate::preferences::{Choice, pills};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{BROADCAST, Packet, PacketFilter, PacketKind, PacketReach, Peer};
+use meshctl_api::{BROADCAST, Packet, PacketFilter, PacketKind, PacketReach, Peer, RadioKind};
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -200,7 +200,12 @@ pub fn PacketsView() -> impl IntoView {
                     }
                 >
                     <ol class="packet-list">
-                        <For each=move || live.packets.get() key=|p| p.id let:packet>
+                        // A row drawn again as another copy of its packet comes.
+                        <For
+                            each=move || live.packets.get()
+                            key=|p| (p.id, p.payload.as_ref().and_then(|v| v.get("copies")).and_then(Value::as_u64))
+                            let:packet
+                        >
                             {
                                 let fresh = packet.id > live.packets_mark.get_untracked();
                                 view! { <PacketRow packet fresh /> }
@@ -267,28 +272,38 @@ fn PacketTools() -> impl IntoView {
         filter.update(|f| f.channel = channel);
     };
 
-    // How they came, as the nodes list says it.
-    let reaches: Vec<Choice> = [
-        None,
-        Some(PacketReach::Direct),
-        Some(PacketReach::Mesh),
-        Some(PacketReach::Mqtt),
-    ]
-    .into_iter()
-    .map(|reach| {
-        let label = move || match reach {
-            None => t_string!(i18n, nodes_all).to_owned(),
-            Some(PacketReach::Direct) => t_string!(i18n, nodes_direct).to_owned(),
-            Some(PacketReach::Mesh) => t_string!(i18n, nodes_mesh).to_owned(),
-            Some(PacketReach::Mqtt) => "MQTT".to_owned(),
-        };
-        (
-            Signal::derive(move || filter.with(|f| f.reach) == reach),
-            Box::new(move || filter.update(|f| f.reach = reach)) as Box<dyn Fn() + Send + Sync>,
-            Signal::derive(label),
-        )
-    })
-    .collect();
+    // How they came, as the nodes list says it. MeshCore radios have no
+    // MQTT: no filter for it, and all instead of it.
+    let mqtt = Memo::new(move |_| live.selected_kind() != Some(RadioKind::Meshcore));
+    Effect::new(move |_| {
+        if !mqtt.get() && filter.with_untracked(|f| f.reach) == Some(PacketReach::Mqtt) {
+            filter.update(|f| f.reach = None);
+        }
+    });
+    let reaches = move || {
+        [
+            None,
+            Some(PacketReach::Direct),
+            Some(PacketReach::Mesh),
+            Some(PacketReach::Mqtt),
+        ]
+        .into_iter()
+        .filter(|reach| *reach != Some(PacketReach::Mqtt) || mqtt.get())
+        .map(|reach| {
+            let label = move || match reach {
+                None => t_string!(i18n, nodes_all).to_owned(),
+                Some(PacketReach::Direct) => t_string!(i18n, nodes_direct).to_owned(),
+                Some(PacketReach::Mesh) => t_string!(i18n, nodes_mesh).to_owned(),
+                Some(PacketReach::Mqtt) => "MQTT".to_owned(),
+            };
+            (
+                Signal::derive(move || filter.with(|f| f.reach) == reach),
+                Box::new(move || filter.update(|f| f.reach = reach)) as Box<dyn Fn() + Send + Sync>,
+                Signal::derive(label),
+            )
+        })
+        .collect::<Vec<Choice>>()
+    };
 
     // A node by its name as the list offers it, or by its id written out.
     // The radio's own in the list or not, kept in the preferences.
@@ -346,7 +361,7 @@ fn PacketTools() -> impl IntoView {
                     </option>
                 </For>
             </select>
-            {pills(reaches)}
+            {move || pills(reaches())}
             // The node to follow, as wide as the switch beside it leaves.
             <div class="search">
                 <input
@@ -480,26 +495,81 @@ fn who(live: Live, num: u32) -> String {
 /// the firmware tells: by its short name when only one known node ends so,
 /// or only one heard directly does; by the byte otherwise.
 pub fn relay_name(live: Live, relay: u32) -> String {
+    let ending = |num: u32| num & 0xff == relay;
+    one_of(live, ending).unwrap_or_else(|| format!("··{relay:02x}"))
+}
+
+/// A node MeshCore names by a hash, the start of its key, one to three
+/// bytes as the path is written, as one known node alone starts so, or one
+/// heard directly; the hash itself otherwise. A node's number is its key's
+/// first four bytes.
+fn by_hash(live: Live, hash: &str) -> String {
+    let hash = hash.to_ascii_lowercase();
+    let starting = |num: u32| format!("{num:08x}").starts_with(&hash);
+    one_of(live, starting).unwrap_or(hash)
+}
+
+/// The hash of the repeater a packet MeshCore heard raw came through last.
+fn last_hop(packet: &Packet) -> Option<String> {
+    packet
+        .payload
+        .as_ref()?
+        .get("path")?
+        .as_array()?
+        .last()?
+        .as_str()
+        .map(str::to_owned)
+}
+
+/// By its short name, the one known node that matches, or the one of them
+/// heard directly; none if it cannot be told which.
+fn one_of(live: Live, matches: impl Fn(u32) -> bool) -> Option<String> {
     live.nodes.with(|nodes| {
-        let ending: Vec<_> = nodes.values().filter(|n| n.num & 0xff == relay).collect();
-        let direct: Vec<_> = ending.iter().filter(|n| n.hops_away == Some(0)).collect();
-        let one = match (ending.as_slice(), direct.as_slice()) {
+        let all: Vec<_> = nodes.values().filter(|n| matches(n.num)).collect();
+        let direct: Vec<_> = all.iter().filter(|n| n.hops_away == Some(0)).collect();
+        let one = match (all.as_slice(), direct.as_slice()) {
             ([only], _) => Some(only.num),
             (_, [only]) => Some(only.num),
             _ => None,
-        };
-        one.map_or_else(
-            || format!("··{relay:02x}"),
-            |num| {
-                let short = short_name(live, num);
-                if short.is_empty() {
-                    format!("!{num:08x}")
-                } else {
-                    short
-                }
-            },
-        )
+        }?;
+        let short = short_name(live, one);
+        Some(if short.is_empty() {
+            format!("!{one:08x}")
+        } else {
+            short
+        })
     })
+}
+
+/// The two ends of a packet MeshCore heard raw, as far as it tells them: the
+/// node it names whole, or its hash, by the one known node that has it; the
+/// channel a text went to; everyone for an advert; a dash when it says
+/// nothing.
+fn meshcore_ends(live: Live, packet: &Packet, everyone: &str) -> (String, String) {
+    let field = |name: &str| {
+        packet
+            .payload
+            .as_ref()
+            .and_then(|p| p.get(name))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    let by_hash = |hash: String| by_hash(live, &hash);
+    let none = || "—".to_owned();
+    let from = if packet.from != 0 {
+        who(live, packet.from)
+    } else if let Some(sender) = field("sender") {
+        sender
+    } else {
+        field("from").map_or_else(none, by_hash)
+    };
+    let to = match packet.port.as_deref() {
+        Some("GRP_TXT") => title_of(live, packet.channel),
+        Some("ADVERT") => everyone.to_owned(),
+        None => field("channel_hash").map_or_else(none, |hash| format!("#{hash}")),
+        _ => field("to").map_or_else(none, by_hash),
+    };
+    (from, to)
 }
 
 #[component]
@@ -512,12 +582,25 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
     let channel = packet.channel;
     let kind = PacketKind::of(packet.port.as_deref());
     let source = Source::of(live, &packet);
+    // A packet MeshCore heard raw names its ends its own way.
+    let ends = {
+        let packet = StoredValue::new(packet.clone());
+        move || {
+            (live.selected_kind() == Some(RadioKind::Meshcore)).then(|| {
+                packet.with_value(|p| meshcore_ends(live, p, t_string!(i18n, packets_everyone)))
+            })
+        }
+    };
     let port = packet.port.clone().map(|p| short_port(&p));
     let summary = {
         let packet = packet.clone();
         move || summary(&packet, i18n.get_locale())
     };
     let (hops_away, hop_start, relay) = (packet.hops_away, packet.hop_start, packet.relay_node);
+    // MeshCore's last hop, by its whole hash, as its path has it.
+    let last_hop = (untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore))
+        .then(|| last_hop(&packet))
+        .flatten();
     // How strong: its SNR, and its RSSI apart, which a list too narrow for
     // it in every row leaves out.
     let snr = packet.snr.map(|snr| format!("{snr:.1} dB"));
@@ -538,19 +621,27 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
             } else {
                 t!(i18n, packets_hops, count = hops).into_any()
             };
-            // The relay's byte, when the firmware gives it; a question mark
-            // when it does not, as the node that relayed it did not say.
+            // The relay by its byte, when the firmware gives it, or by its
+            // whole hash, MeshCore's; a question mark when it does not, as
+            // the node that relayed it did not say.
             let relay = format!(
                 " · {}",
-                relay.map_or_else(|| "?".to_owned(), |relay| relay_name(live, relay))
+                match (&last_hop, relay) {
+                    (Some(hash), _) => by_hash(live, hash),
+                    (None, Some(relay)) => relay_name(live, relay),
+                    (None, None) => "?".to_owned(),
+                }
             );
             view! { {count} {relay} }.into_any()
         }
         _ => ().into_any(),
     };
-    // Of how many it could take, as the firmware counts.
+    // Of how many it could take, as the firmware counts; MeshCore sets no
+    // limit.
     let hops_title = move || match hops_away {
-        Some(hops) if source == Source::Lora => {
+        Some(hops)
+            if source == Source::Lora && live.selected_kind() != Some(RadioKind::Meshcore) =>
+        {
             let mut title = format!("{hops}/{hop_start}");
             if hops > 0 && relay.is_none() {
                 title.push_str(" · ");
@@ -594,11 +685,15 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
                     <span class=source.class() title=source_title>{source_label}</span>
                 </span>
                 <span class="route">
-                    <span class="from">{move || who(live, from)}</span>
+                    <span class="from">
+                        {move || ends().map_or_else(|| who(live, from), |(from, _)| from)}
+                    </span>
                     <span class="arrow">"→"</span>
                     <span class="to">
                         {move || {
-                            if to == BROADCAST {
+                            if let Some((_, to)) = ends() {
+                                to
+                            } else if to == BROADCAST {
                                 title(live, Peer::Channel { channel })
                             } else {
                                 who(live, to)
@@ -642,6 +737,30 @@ fn PacketDrawer() -> impl IntoView {
             })
             .unwrap_or_default()
     };
+    // The ways a packet MeshCore heard came, each copy: a trace's path is
+    // no such way.
+    let routes = RwSignal::new(Vec::<meshctl_api::MessageRoute>::new());
+    Effect::new(move |_| {
+        routes.set(Vec::new());
+        let wanted = shown.packet.with(|p| {
+            p.as_ref()
+                .filter(|p| p.port.as_deref() != Some("TRACE"))
+                .map(|p| p.id)
+        });
+        let (Some(id), Some(radio)) = (wanted, live.selected.get_untracked()) else {
+            return;
+        };
+        if untrack(|| live.selected_kind()) != Some(RadioKind::Meshcore) {
+            return;
+        }
+        spawn_local(async move {
+            if let Ok(read) = daemon::packet_routes(radio, id).await
+                && shown.packet.with_untracked(|p| p.as_ref().map(|p| p.id)) == Some(id)
+            {
+                routes.set(read);
+            }
+        });
+    });
     let foot = ViewFn::from(move || {
         view! {
             <button class="with-icon" on:click=move |_| crate::clipboard::copy(&text())>
@@ -658,6 +777,8 @@ fn PacketDrawer() -> impl IntoView {
                     .map(|packet| {
                         let source = Source::of(live, &packet);
                         let (from, to, channel) = (packet.from, packet.to, packet.channel);
+                        // Where it set out from, if it says.
+                        let origin = (from != 0).then_some(from);
                         let fact = |label: String, value: AnyView| {
                             view! {
                                 <div class="fact">
@@ -667,24 +788,36 @@ fn PacketDrawer() -> impl IntoView {
                             }
                         };
                         let text_fact = |label: String, value: String| fact(label, value.into_any());
-                        let mut facts = vec![
-                            text_fact(t_string!(i18n, packets_at).to_owned(), when(packet.at)),
-                            text_fact(
-                                t_string!(i18n, packets_from).to_owned(),
+                        let everyone = t_string!(i18n, packets_everyone);
+                        let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
+                        // MeshCore's has its channel only for a channel's text,
+                        // which goes to everyone on it, as Meshtastic's does.
+                        let (from_text, to_text, channel_text) = if meshcore {
+                            let (mut from_text, mut to_text) = meshcore_ends(live, &packet, everyone);
+                            if from != 0 {
+                                from_text = format!("{from_text} (!{from:08x})");
+                            }
+                            let channel_text = (packet.port.as_deref() == Some("GRP_TXT"))
+                                .then(|| format!("{channel} · {}", title_of(live, channel)));
+                            if channel_text.is_some() {
+                                everyone.clone_into(&mut to_text);
+                            }
+                            (from_text, to_text, channel_text)
+                        } else {
+                            (
                                 format!("{} (!{from:08x})", who(live, from)),
-                            ),
-                            text_fact(
-                                t_string!(i18n, packets_to).to_owned(),
                                 if to == BROADCAST {
-                                    t_string!(i18n, packets_everyone).to_owned()
+                                    everyone.to_owned()
                                 } else {
                                     format!("{} (!{to:08x})", who(live, to))
                                 },
-                            ),
-                            text_fact(
-                                t_string!(i18n, packets_channel).to_owned(),
-                                format!("{channel} · {}", title_of(live, channel)),
-                            ),
+                                Some(format!("{channel} · {}", title_of(live, channel))),
+                            )
+                        };
+                        let mut facts = vec![
+                            text_fact(t_string!(i18n, packets_at).to_owned(), when(packet.at)),
+                            text_fact(t_string!(i18n, packets_from).to_owned(), from_text),
+                            text_fact(t_string!(i18n, packets_to).to_owned(), to_text),
                             text_fact(
                                 t_string!(i18n, packets_source).to_owned(),
                                 match source {
@@ -699,14 +832,27 @@ fn PacketDrawer() -> impl IntoView {
                                 format!("{} (0x{:08x})", packet.packet_id, packet.packet_id),
                             ),
                         ];
+                        if let Some(channel_text) = channel_text {
+                            facts.insert(
+                                3,
+                                text_fact(t_string!(i18n, packets_channel).to_owned(), channel_text),
+                            );
+                        }
                         if let Some(hops) = packet.hops_away {
                             let start = packet.hop_start;
-                            facts.push(fact(
-                                t_string!(i18n, packets_hops_label).to_owned(),
-                                t!(i18n, packets_hops_of, hops = hops, start = start).into_any(),
-                            ));
+                            // MeshCore's has no limit to count them against.
+                            let value = match hops {
+                                _ if !meshcore => {
+                                    t!(i18n, packets_hops_of, hops = hops, start = start).into_any()
+                                }
+                                0 => t!(i18n, packets_direct).into_any(),
+                                1 => t!(i18n, packets_hop).into_any(),
+                                _ => t!(i18n, packets_hops, count = hops).into_any(),
+                            };
+                            facts.push(fact(t_string!(i18n, packets_hops_label).to_owned(), value));
                         }
-                        if packet.hops_away.is_some_and(|h| h > 0) {
+                        // MeshCore's, as its routes tell, below.
+                        if !meshcore && packet.hops_away.is_some_and(|h| h > 0) {
                             facts.push(text_fact(
                                 t_string!(i18n, packets_relay).to_owned(),
                                 packet.relay_node.map_or_else(
@@ -744,6 +890,7 @@ fn PacketDrawer() -> impl IntoView {
                         view! {
                             <div class="packet-detail">
                                 <dl class="packet-facts">{facts}</dl>
+                                {meshcore.then(|| view! { <crate::chat::RouteList routes origin outgoing=false /> })}
                                 <pre class="packet-text mono">{text()}</pre>
                             </div>
                         }
@@ -792,6 +939,39 @@ fn clock(at: i64) -> String {
     )
 }
 
+/// What a MeshCore packet heard raw says, in a line: its name and kind for an
+/// advert, who wrote what for a channel's text, its size for what is sealed;
+/// and how many copies came, past the first.
+fn meshcore_summary(port: &str, payload: &serde_json::Value) -> String {
+    let line = match port {
+        "ADVERT" => {
+            let name = payload["name"].as_str().unwrap_or("?");
+            let kind = payload["kind"].as_str().unwrap_or_default();
+            format!("{name} · {kind}")
+        }
+        "GRP_TXT" => match payload["sender"].as_str() {
+            Some(sender) => format!("{sender}: {}", payload["text"].as_str().unwrap_or_default()),
+            None => payload["text"].as_str().unwrap_or_default().to_owned(),
+        },
+        // A channel's text the radio has no secret for: its channel's hash.
+        "SEALED" => format!(
+            "#{} · {} B",
+            payload["channel_hash"].as_str().unwrap_or("??"),
+            payload["size"].as_u64().unwrap_or(0)
+        ),
+        "ACK" => payload["code"].as_str().unwrap_or_default().to_owned(),
+        "TRACE" => {
+            let hops = payload["hashes"].as_array().map_or(0, Vec::len);
+            format!("{hops} ⇢")
+        }
+        _ => format!("{} B", payload["size"].as_u64().unwrap_or(0)),
+    };
+    match payload["copies"].as_u64() {
+        Some(copies) if copies > 1 => format!("{line} · ×{copies}"),
+        _ => line,
+    }
+}
+
 /// What a packet says, in a line.
 pub fn summary(packet: &Packet, locale: Locale) -> String {
     let Some(payload) = &packet.payload else {
@@ -819,6 +999,13 @@ pub fn summary(packet: &Packet, locale: Locale) -> String {
             let neighbors = payload["neighbors"].as_array().map_or(0, Vec::len);
             Some(format!("{neighbors} ↔"))
         }
+        // MeshCore's, raw: what could be read of each, and how many copies
+        // were heard.
+        "ADVERT" | "GRP_TXT" | "TXT_MSG" | "REQ" | "RESPONSE" | "PATH" | "ANON_REQ" | "ACK"
+        | "TRACE" | "GRP_DATA" | "MULTIPART" | "CONTROL" | "RAW_CUSTOM" => {
+            Some(meshcore_summary(port, payload))
+        }
+        "" if payload.get("channel_hash").is_some() => Some(meshcore_summary("SEALED", payload)),
         "NODE_STATUS_APP" => Some(format!(
             "«{}»",
             payload["status"].as_str().unwrap_or_default()

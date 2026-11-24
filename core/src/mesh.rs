@@ -179,6 +179,9 @@ pub enum Event {
     Reply(Reply),
     /// A copy of a message heard, and the way it came.
     Route(Route),
+    /// A packet a MeshCore radio heard, raw, as it logs every copy: for its
+    /// live view.
+    RawHeard(RawHeard),
     /// What a MeshCore node's console answered the radio, logged in to it as
     /// its admin: kept out of the chat, as it is no message.
     Console {
@@ -186,6 +189,68 @@ pub enum Event {
         text: String,
         at: u32,
     },
+}
+
+/// A copy of a packet a MeshCore radio heard, raw: what names it whatever
+/// way it came, how it came, and what could be read of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawHeard {
+    /// What names the packet in all its copies: its type and payload,
+    /// hashed.
+    pub key: u64,
+    pub payload_type: u8,
+    /// 0 flooded with region codes, 1 flooded, 2 direct, 3 direct with
+    /// region codes.
+    pub route: u8,
+    /// The region it went in, for those sent with one: its code, and what
+    /// it was worked out from.
+    pub region: Option<RegionCode>,
+    /// The hashes of the repeaters it went through, as heard, each
+    /// `hash_size` bytes: for a flood from its sender's side; for a trace,
+    /// the SNR each hop heard it at instead.
+    pub path: Vec<u8>,
+    pub hash_size: u8,
+    pub payload_len: usize,
+    pub snr: f32,
+    pub rssi: i32,
+    /// When it was heard, in seconds since the epoch.
+    pub at: u32,
+    pub info: RawInfo,
+}
+
+/// What could be read of a packet heard raw, by its kind.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RawInfo {
+    /// A node's advert: who it is, by its number, and what it said.
+    Advert {
+        node: u32,
+        kind: u8,
+        name: Option<String>,
+        position: Option<(f64, f64)>,
+        timestamp: u32,
+    },
+    /// A channel's text, opened with its secret: on which slot, who wrote
+    /// it as it says, and what.
+    ChannelText {
+        channel: u32,
+        sender: Option<String>,
+        text: String,
+        timestamp: u32,
+    },
+    /// A channel's text the radio has no secret for: its channel's hash.
+    Sealed { channel_hash: u8 },
+    /// A message, request, answer or path between two nodes, sealed: by the
+    /// hashes of whom it is to and from.
+    Between { to: u8, from: u8 },
+    /// A request with no login: to whom, by its hash, and from whom, by the
+    /// number its key makes.
+    Anonymous { to: u8, from: u32 },
+    /// An acknowledgement: its checksum.
+    Ack { code: u32 },
+    /// A trace: its tag, and the hashes of the path it goes along.
+    Trace { tag: u32, hashes: Vec<u8> },
+    /// Anything else: only its kind and size.
+    Other,
 }
 
 /// A copy of a message the radio heard, and the way it came: as MeshCore

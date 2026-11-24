@@ -2589,6 +2589,8 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
+      /* The ways it came, MeshCore's, as wide as the rest of the drawer. */
+      .packet-detail .routes { margin: 0 20px 16px; padding-top: 14px; }
 
       /* The conversation in a column of its own on a wide screen, its
          background the whole width: what is said, and what is written, no
@@ -2963,25 +2965,26 @@
       .composer .emoji-toggle:hover { color: var(--mc-text); }
       .composer .emoji-toggle.on { color: var(--mc-primary); }
       .channel-regions { margin-top: 2px; }
-      /* The ways a message came, in its details: each copy a line, its
-         repeaters one after the other, its signal and region beside. */
-      .message-details .routes { margin-top: 14px; border-top: 1px solid var(--mc-border); padding-top: 12px; }
-      .message-details .routes h3 { margin: 0 0 4px; font-size: 14px; }
-      .message-details .routes .hint { margin: 0 0 8px; font-size: 12px; }
-      .message-details .routes ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-      .message-details .routes li { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
-      .message-details .routes .hops { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-      .message-details .routes .hop, .message-details .routes .way {
+      /* The ways a message or a packet came, in its details: each copy a
+         line, its repeaters one after the other, its signal and region
+         beside. */
+      .routes { margin-top: 14px; border-top: 1px solid var(--mc-border); padding-top: 12px; }
+      .routes h3 { margin: 0 0 4px; font-size: 14px; }
+      .routes .hint { margin: 0 0 8px; font-size: 12px; }
+      .routes ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+      .routes li { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+      .routes .hops { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+      .routes .hop, .routes .way {
         padding: 2px 8px; border-radius: 999px; background: var(--mc-raised);
       }
-      .message-details .routes .arrow { color: var(--mc-muted); }
-      .message-details .routes .hop.unsure { color: var(--mc-muted); font-style: italic; }
-      .message-details .routes .dim { font-size: 12px; }
+      .routes .arrow { color: var(--mc-muted); }
+      .routes .hop.unsure { color: var(--mc-muted); font-style: italic; }
+      .routes .dim { font-size: 12px; }
       /* With more than one, each picked for the map, the one shown marked. */
-      .message-details .routes li.pickable { cursor: pointer; padding: 6px 8px; margin: 0 -8px; border-radius: 10px; }
-      .message-details .routes li.pickable:hover { background: var(--mc-raised); }
-      .message-details .routes li.pickable.on { background: var(--mc-soft); }
-      .message-details .route-map { height: 200px; margin-top: 10px; border: 1px solid var(--mc-border); border-radius: 10px; overflow: hidden; }
+      .routes li.pickable { cursor: pointer; padding: 6px 8px; margin: 0 -8px; border-radius: 10px; }
+      .routes li.pickable:hover { background: var(--mc-raised); }
+      .routes li.pickable.on { background: var(--mc-soft); }
+      .route-map { height: 200px; margin-top: 10px; border: 1px solid var(--mc-border); border-radius: 10px; overflow: hidden; }
       /* A MeshCore channel's region, in its chat's heading: its menu as the
          heading's others, each region by the world's icon. */
       .channel-region { position: relative; }

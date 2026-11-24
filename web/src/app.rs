@@ -1221,17 +1221,28 @@ impl Live {
                         }
                     }
                     // In the live view if it lets it through: on top, or apart
-                    // while it holds still.
+                    // while it holds still. One already there, as MeshCore's
+                    // is when another copy of it comes, stays where it is.
                     if self.packets_filter().lets(&packet) {
-                        let list = if self.packets_holding() {
-                            self.packets_held
-                        } else {
-                            self.packets
+                        let id = packet.id;
+                        let at = |list: RwSignal<Vec<Packet>>| {
+                            list.with_untracked(|l| l.iter().position(|p| p.id == id))
+                                .map(|at| (list, at))
                         };
-                        list.update(|packets| {
-                            packets.insert(0, packet);
-                            packets.truncate(KEPT);
-                        });
+                        if let Some((list, at)) = at(self.packets_held).or_else(|| at(self.packets))
+                        {
+                            list.update(|packets| packets[at] = packet);
+                        } else {
+                            let list = if self.packets_holding() {
+                                self.packets_held
+                            } else {
+                                self.packets
+                            };
+                            list.update(|packets| {
+                                packets.insert(0, packet);
+                                packets.truncate(KEPT);
+                            });
+                        }
                     }
                     Ok(())
                 }

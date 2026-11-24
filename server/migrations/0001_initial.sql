@@ -322,6 +322,53 @@ CREATE TABLE packet_seen (
 CREATE UNIQUE INDEX packet_seen_once ON packet_seen (packet, radio_id);
 CREATE INDEX packet_seen_radio ON packet_seen (radio_id, id);
 
+-- Every packet a MeshCore radio heard, raw, as it logs them: each once, by
+-- what names it in all its copies, with what could be read of it.
+CREATE TABLE meshcore_packet (
+    id INTEGER PRIMARY KEY,
+    radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
+    -- Its type and payload, hashed: what names it whatever way it came.
+    key INTEGER NOT NULL,
+    -- As the firmware numbers it (4 an advert, 5 a channel's text…).
+    payload_type INTEGER NOT NULL,
+    -- The live view's kind of it: text, node_info, routing, traceroute,
+    -- encrypted or other.
+    kind TEXT NOT NULL,
+    -- Who sent it and to whom, as far as it says: a node, or NULL.
+    from_num INTEGER,
+    to_num INTEGER,
+    -- The slot of the channel it was opened with, for a channel's text.
+    channel INTEGER,
+    -- What could be read of it, as JSON.
+    info TEXT NOT NULL,
+    payload_len INTEGER NOT NULL,
+    -- When it was first heard, and last.
+    at INTEGER NOT NULL,
+    last_at INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX meshcore_packet_once ON meshcore_packet (radio_id, key);
+CREATE INDEX meshcore_packet_radio ON meshcore_packet (radio_id, id);
+CREATE INDEX meshcore_packet_at ON meshcore_packet (at);
+
+-- Each copy of it heard, and the way it came.
+CREATE TABLE meshcore_packet_copy (
+    id INTEGER PRIMARY KEY,
+    packet INTEGER NOT NULL REFERENCES meshcore_packet (id) ON DELETE CASCADE,
+    at INTEGER NOT NULL,
+    snr REAL,
+    rssi INTEGER,
+    -- 0 flooded with region codes, 1 flooded, 2 direct, 3 direct with them.
+    route INTEGER NOT NULL,
+    -- The region it came in, by its name; ? for one whose key is not known.
+    scope TEXT,
+    -- The hashes of the repeaters it went through, each hash_size bytes.
+    path BLOB NOT NULL,
+    hash_size INTEGER NOT NULL
+);
+
+CREATE INDEX meshcore_packet_copy_of ON meshcore_packet_copy (packet, id);
+
 -- What the nodes were asked for through each radio, and what they answered:
 -- the packet that did, as the radio heard it.
 CREATE TABLE request (
