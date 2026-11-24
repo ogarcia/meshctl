@@ -133,6 +133,76 @@ fn channel_name(name: &str) -> String {
     }
 }
 
+/// A link shared to meshctl, as an installed app is shared things: what it
+/// is for, which mesh's apps make it, and the link itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shared {
+    pub want: LinkWant,
+    pub kind: RadioKind,
+    pub url: String,
+}
+
+/// The link among what was shared to meshctl, the address first and then
+/// the text and the title, as each app shares it its own way: none if none
+/// is a node's or channels' link of either mesh.
+pub fn shared_link(parts: &[&str]) -> Option<Shared> {
+    parts
+        .iter()
+        .flat_map(|part| part.split_whitespace())
+        .find_map(|word| {
+            let word =
+                word.trim_matches(|c: char| matches!(c, '<' | '>' | '"' | '\'' | '(' | ')' | ','));
+            let lower = word.to_ascii_lowercase();
+            let meshtastic = lower
+                .strip_prefix("https://meshtastic.org/")
+                .or_else(|| lower.strip_prefix("http://meshtastic.org/"));
+            let (want, kind) = if let Some(rest) = meshtastic {
+                if rest.starts_with("v/") {
+                    (LinkWant::Node, RadioKind::Meshtastic)
+                } else if rest.starts_with("e/") {
+                    (LinkWant::Channels, RadioKind::Meshtastic)
+                } else {
+                    return None;
+                }
+            } else {
+                let rest = lower.strip_prefix("meshcore://")?;
+                if rest.starts_with("contact") {
+                    (LinkWant::Node, RadioKind::Meshcore)
+                } else if rest.starts_with("channel") {
+                    (LinkWant::Channels, RadioKind::Meshcore)
+                } else {
+                    return None;
+                }
+            };
+            Some(Shared {
+                want,
+                kind,
+                url: word.to_owned(),
+            })
+        })
+}
+
+/// The link shared to meshctl as an installed app, when it was opened for
+/// that: at `/share`, with what was shared as the share target in its
+/// manifest says. The address goes back to the start at once, so that a
+/// reload does not share it again.
+fn read_shared() -> Option<Shared> {
+    let window = web_sys::window()?;
+    let location = window.location();
+    if location.pathname().ok()? != "/share" {
+        return None;
+    }
+    let params = web_sys::UrlSearchParams::new_with_str(&location.search().ok()?).ok()?;
+    if let Ok(history) = window.history() {
+        let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/"));
+    }
+    let parts: Vec<String> = ["url", "text", "title"]
+        .iter()
+        .filter_map(|name| params.get(name))
+        .collect();
+    shared_link(&parts.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
 /// Whether a link holds what the window is for.
 fn wanted(want: LinkWant, read: &LinkContents) -> bool {
     matches!(
@@ -157,6 +227,28 @@ pub fn LinkAdder() -> impl IntoView {
     // For channels that replace: whether they do, and bring their LoRa.
     let mode = RwSignal::new(LinkMode::Add);
     let lora = RwSignal::new(false);
+    // A link shared to meshctl: once the radios are known, through one of
+    // the mesh it is of (the selected one if it is), read as if pasted.
+    let shared = StoredValue::new(read_shared());
+    Effect::new(move |_| {
+        if shared.with_value(Option::is_none) {
+            return;
+        }
+        let Some(radios) = live.radios.get() else {
+            return;
+        };
+        let Some(link) = shared.get_value() else {
+            return;
+        };
+        shared.set_value(None);
+        if live.selected_kind() != Some(link.kind)
+            && let Some(radio) = radios.iter().find(|r| r.kind == link.kind && r.enabled)
+        {
+            live.select(radio.id);
+        }
+        url.set(link.url);
+        live.adding_link.set(Some(link.want));
+    });
     // Whether a QR is being read for it.
     let scanning = RwSignal::new(false);
     let close = move || {
@@ -611,5 +703,38 @@ pub fn LinkAdder() -> impl IntoView {
                 </div>
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_link_shared_is_found_wherever_the_app_put_it() {
+        // Alone, as the address.
+        let shared = shared_link(&["https://meshtastic.org/v/#CgsSAQ"]).unwrap();
+        assert_eq!(
+            (shared.want, shared.kind),
+            (LinkWant::Node, RadioKind::Meshtastic)
+        );
+        // In the text, among words.
+        let shared = shared_link(&[
+            "",
+            "Join us: (https://meshtastic.org/e/?add=true#CgsSAQ), see you",
+        ])
+        .unwrap();
+        assert_eq!(shared.want, LinkWant::Channels);
+        assert_eq!(shared.url, "https://meshtastic.org/e/?add=true#CgsSAQ");
+        // MeshCore's, either kind.
+        let contact = shared_link(&["meshcore://contact/add?name=Ana&public_key=41"]).unwrap();
+        assert_eq!(
+            (contact.want, contact.kind),
+            (LinkWant::Node, RadioKind::Meshcore)
+        );
+        let channel = shared_link(&["meshcore://channel/add?name=Moire&secret=00"]).unwrap();
+        assert_eq!(channel.want, LinkWant::Channels);
+        // Anything else: none.
+        assert_eq!(shared_link(&["https://meshtastic.org/docs", "hello"]), None);
     }
 }

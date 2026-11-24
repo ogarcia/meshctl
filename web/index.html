@@ -16,6 +16,23 @@
     <link data-trunk rel="copy-dir" href="vendor/emojibase-data-18.0.0" />
     <link data-trunk rel="copy-file" href="favicon.svg" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- As an app that can be installed, with its icons, and that links can
+         be shared to (scripts/icons.sh draws them). The manifest goes with
+         credentials, or a proxy with HTTP authentication in front refuses it;
+         the service worker at the root, to look after every address. -->
+    <link data-trunk rel="copy-dir" href="pwa" />
+    <link data-trunk rel="copy-file" href="sw.js" />
+    <link rel="manifest" href="/pwa/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#12161c" media="(prefers-color-scheme: dark)" />
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
     <!-- Leaflet's directory carries its version, and map.js gets a hash from
          trunk: both can be kept by browsers for good, as the server says. -->
     <link rel="stylesheet" href="/leaflet-1.9.4/dist/leaflet.css" />

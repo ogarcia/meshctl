@@ -128,15 +128,16 @@ fn themed(html: &str, preferences: &Preferences) -> String {
 fn file(path: &str) -> Option<Response> {
     let file = Interface::get(path)?;
     let mime = file.metadata.mimetype().to_owned();
-    // The bundle's files carry a hash in their names and can be kept forever.
+    let cache = if lasting(path) {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
     Some(
         (
             [
                 (header::CONTENT_TYPE, mime),
-                (
-                    header::CACHE_CONTROL,
-                    "public, max-age=31536000, immutable".to_owned(),
-                ),
+                (header::CACHE_CONTROL, cache.to_owned()),
             ],
             file.data,
         )
@@ -144,9 +145,42 @@ fn file(path: &str) -> Option<Response> {
     )
 }
 
+/// Whether a file of the interface never changes under its name, and can be
+/// kept for good: those trunk names by their hash (`map-c1368161483d3368.js`)
+/// and those in a folder that carries its version (`leaflet-1.9.4/…`). The
+/// rest, as the icons, the manifest or the service worker, are asked for
+/// again each time, and come back only if they changed.
+fn lasting(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or_default();
+    let stem = name.split('.').next().unwrap_or_default();
+    let stem = stem.strip_suffix("_bg").unwrap_or(stem);
+    let hashed = stem
+        .rsplit_once('-')
+        .is_some_and(|(_, hash)| hash.len() == 16 && hash.chars().all(|c| c.is_ascii_hexdigit()));
+    let versioned = path.contains('/')
+        && path.split('/').next().is_some_and(|folder| {
+            folder.rsplit_once('-').is_some_and(|(_, version)| {
+                version.contains('.') && version.split('.').all(|part| part.parse::<u32>().is_ok())
+            })
+        });
+    hashed || versioned
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_what_never_changes_under_its_name_is_kept_for_good() {
+        assert!(lasting("map-c1368161483d3368.js"));
+        assert!(lasting("meshctl-web-3581867ad566c4bb_bg.wasm"));
+        assert!(lasting("leaflet-1.9.4/dist/leaflet.js"));
+        assert!(lasting("tabler-icons-3.51.0/icons/outline/x.svg"));
+        assert!(!lasting("favicon.svg"));
+        assert!(!lasting("sw.js"));
+        assert!(!lasting("pwa/manifest.webmanifest"));
+        assert!(!lasting("pwa/icon-192.png"));
+    }
 
     #[test]
     fn the_page_comes_in_its_colours() {

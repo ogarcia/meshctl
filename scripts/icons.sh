@@ -5,7 +5,8 @@
 # Draws the app's icons from their sources in assets/icons: the PNGs the
 # desktop app and its packages take, and the Windows .ico. Up to 32 px from
 # app-small.svg, the gear of six teeth that still reads that small; from 48
-# px on, from app.svg.
+# px on, from app.svg. And the web app's, in web/pwa: the same, and one to
+# be cut to any shape (maskable), from app-maskable.svg.
 #
 # Needs rsvg-convert (librsvg) and magick (ImageMagick 7).
 set -euo pipefail
@@ -27,4 +28,11 @@ done
 magick "$OUT/16.png" "$OUT/24.png" "$OUT/32.png" "$OUT/48.png" \
   "$OUT/64.png" "$OUT/256.png" "$ICONS/meshctl.ico"
 
-echo "Drawn: $OUT/*.png and $ICONS/meshctl.ico"
+PWA="$ROOT/web/pwa"
+mkdir -p "$PWA"
+rsvg-convert -w 192 -h 192 -o "$PWA/icon-192.png" "$ICONS/app.svg"
+rsvg-convert -w 512 -h 512 -o "$PWA/icon-512.png" "$ICONS/app.svg"
+rsvg-convert -w 512 -h 512 -o "$PWA/icon-maskable-512.png" "$ICONS/app-maskable.svg"
+rsvg-convert -w 180 -h 180 -o "$PWA/apple-touch-icon.png" "$ICONS/app-maskable.svg"
+
+echo "Drawn: $OUT/*.png, $ICONS/meshctl.ico and $PWA/*.png"
