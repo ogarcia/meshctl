@@ -21,6 +21,14 @@
 //!   and the radio.
 //! - `echoes off`: no repeater is heard passing on what the radio sends on a
 //!   channel, as when none heard it; `echoes on`, two are again.
+//! - `post <text>`: someone posts in Sala Coruña, a room: Ana, or someone
+//!   the radio does not know, by turns; sent to the radio once logged in.
+//! - `room strict`: the room says nothing to a wrong password, as one that
+//!   lets nobody in to read; `room open`, it lets them in to read again.
+//!
+//! Sala Coruña takes `admin` as its admin's password and `sala` as its
+//! guests'; after a login it sends the posts the radio does not have, and
+//! takes the radio's own only if it was let in to write.
 //! - `advert`: a contact not known before advertises, and the radio adds it.
 //! - `drop`: the link to every client drops, which reads it all anew.
 //!
@@ -116,6 +124,18 @@ struct Radio {
     with_ana: Option<(String, u32)>,
     /// Whether repeaters are heard passing on what is sent on a channel.
     echoes: bool,
+    /// Sala Coruña's posts, its own among them: who wrote each, by the first
+    /// four bytes of their key, what, and when by its clock.
+    room_posts: Vec<([u8; 4], String, u32)>,
+    /// What the radio logged in to Sala Coruña as, by its access list's
+    /// bits; none until it does.
+    room_access: Option<u8>,
+    /// The newest of its posts the radio has, as it tells the room on
+    /// logging in, which sends it only those after.
+    room_synced: u32,
+    /// Whether the room lets in to read one with a wrong password, or does
+    /// not answer it.
+    room_strict: bool,
     /// Its clock, as an offset from the host's: it goes only forward.
     clock_offset: i64,
     /// When it started, for its uptime.
@@ -226,6 +246,26 @@ impl Radio {
             said: std::collections::HashMap::new(),
             with_ana: None,
             echoes: true,
+            room_posts: vec![
+                (
+                    key_prefix(&key(0x53)),
+                    "Bienvenidos a Sala Coruña".into(),
+                    at - 7200,
+                ),
+                (
+                    key_prefix(&key(0x41)),
+                    "¿Alguien para la quedada del sábado?".into(),
+                    at - 3600,
+                ),
+                (
+                    key_prefix(&key(0x77)),
+                    "Yo me apunto, llevo la antena nueva".into(),
+                    at - 1800,
+                ),
+            ],
+            room_access: None,
+            room_synced: 0,
+            room_strict: false,
             clock_offset: -3600,
             started: at,
             contacts: vec![
@@ -347,6 +387,45 @@ fn hex_of(bytes: &[u8]) -> String {
 /// A whole key, from a command's bytes.
 fn key_in(data: &[u8]) -> Option<[u8; 32]> {
     data.get(..32)?.try_into().ok()
+}
+
+/// A room's post, as the radio gives it: from the room, signed, with the
+/// first four bytes of its author's key before its text, and the room's
+/// clock when it was posted.
+fn room_post(room: &Contact, author: [u8; 4], at: u32, text: &str) -> Vec<u8> {
+    let snr = i8::try_from(20 + random(20)).unwrap_or(0);
+    let mut frame = vec![0x10, snr.cast_unsigned(), 0, 0];
+    frame.extend(&room.key[..6]);
+    frame.extend([room.path_len.cast_unsigned(), 2]);
+    frame.extend(at.to_le_bytes());
+    frame.extend(author);
+    frame.extend(text.as_bytes());
+    frame
+}
+
+/// The posts of Sala Coruña the radio does not have yet, queued as the room
+/// would send them to it, logged in, but not its own; and the newest kept
+/// as had.
+fn room_sync(radio: &mut Radio) -> usize {
+    let Some(room) = radio.contact_named("Sala Coruña").cloned() else {
+        return 0;
+    };
+    let new: Vec<_> = radio
+        .room_posts
+        .iter()
+        .filter(|(author, _, at)| *at > radio.room_synced && author[..] != ME[..4])
+        .cloned()
+        .collect();
+    for (author, text, at) in &new {
+        radio.queued.push_back(room_post(&room, *author, *at, text));
+        radio.room_synced = radio.room_synced.max(*at);
+    }
+    new.len()
+}
+
+/// The first four bytes of a key, as a room's post names its author by.
+fn key_prefix(key: &[u8; 32]) -> [u8; 4] {
+    [key[0], key[1], key[2], key[3]]
 }
 
 /// A direct message from a contact, in the newer form, with its SNR.
@@ -471,6 +550,27 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             let mut sent = vec![0x06, 0];
             sent.extend(tag);
             sent.extend(8_000u32.to_le_bytes());
+            // To Sala Coruña: a post, taken and acknowledged only from one
+            // let in to write; from any other, not even acknowledged.
+            if to.name == "Sala Coruña" {
+                if radio.room_access.is_some_and(|acl| acl >= 2)
+                    && let (Some(at), Some(text)) = (u32_in(data, 2), data.get(12..))
+                {
+                    let text = String::from_utf8_lossy(text).into_owned();
+                    println!("posted to the room: {text}");
+                    radio.room_posts.push((key_prefix(&ME), text, at));
+                    let events = events.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(900)).await;
+                        let mut ack = vec![0x82];
+                        ack.extend(tag);
+                        let _ = events.send(Event::Push(ack));
+                    });
+                } else {
+                    println!("not taken by the room: not let in to write");
+                }
+                return vec![sent];
+            }
             // Delivered after a moment, and now and then answered.
             let events = events.clone();
             let answers = to.kind == 1 && random(3) == 0;
@@ -489,6 +589,63 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                     let _ = events.send(Event::Push(vec![0x83]));
                 }
             });
+            vec![sent]
+        }
+        // SEND_LOGIN: a key, then a password. Sala Coruña takes `admin` as
+        // its admin's and `sala` as its guests', and lets in to read any
+        // other unless strict, when it says nothing; then sends the posts
+        // the radio does not have. Any other node answers no.
+        0x1a => {
+            let Some(key) = key_in(data) else {
+                return error(6);
+            };
+            let Some(to) = radio.contacts.iter().find(|c| c.key == key).cloned() else {
+                return error(2);
+            };
+            let password = String::from_utf8_lossy(data.get(32..).unwrap_or_default()).into_owned();
+            println!("login to {} with {password:?}", to.name);
+            let tag: [u8; 4] = key_prefix(&key);
+            let mut sent = vec![0x06, u8::from(to.path_len < 0)];
+            sent.extend(tag);
+            sent.extend(4_000u32.to_le_bytes());
+            let room = to.name == "Sala Coruña";
+            let acl = match password.as_str() {
+                "admin" if room => Some(3),
+                "sala" if room => Some(2),
+                _ if room && !radio.room_strict => Some(0),
+                _ if room => None,
+                _ => Some(0xff),
+            };
+            let clock = radio.clock();
+            let events = events.clone();
+            match acl {
+                // Not a room: refused.
+                Some(0xff) => {
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(900)).await;
+                        let mut refused = vec![0x86, 0];
+                        refused.extend(&key[..6]);
+                        let _ = events.send(Event::Push(refused));
+                    });
+                }
+                Some(acl) => {
+                    radio.room_access = Some(acl);
+                    let waiting = room_sync(&mut radio);
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(900)).await;
+                        let mut taken = vec![0x85, u8::from(acl == 3)];
+                        taken.extend(&key[..6]);
+                        taken.extend(clock.to_le_bytes());
+                        taken.extend([acl, 1]);
+                        let _ = events.send(Event::Push(taken));
+                        if waiting > 0 {
+                            tokio::time::sleep(Duration::from_millis(1_500)).await;
+                            let _ = events.send(Event::Push(vec![0x83]));
+                        }
+                    });
+                }
+                None => {}
+            }
             vec![sent]
         }
         // SEND_ANON_REQ: a key, then the request: what it asks, and the way
@@ -1028,6 +1185,36 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                 let _ = events.send(Event::Push(rx_log(3, -101, &second)));
             });
             format!("{sender} writes on slot {slot}")
+        }
+        Some("post") => {
+            let text = words.collect::<Vec<_>>().join(" ");
+            if text.is_empty() {
+                return "usage: post <text>".into();
+            }
+            // Ana, or someone the radio does not know, by turns.
+            let author = if radio.room_posts.len().is_multiple_of(2) {
+                key_prefix(&key(0x41))
+            } else {
+                key_prefix(&key(0x77))
+            };
+            radio.room_posts.push((author, text, now()));
+            if radio.room_access.is_some() && room_sync(&mut radio) > 0 {
+                let _ = events.send(Event::Push(vec![0x83]));
+                "posted, and sent to the radio".into()
+            } else {
+                "posted, kept until the radio logs in".into()
+            }
+        }
+        Some("room") => {
+            radio.room_strict = words.next() == Some("strict");
+            format!(
+                "the room {}",
+                if radio.room_strict {
+                    "says nothing to a wrong password"
+                } else {
+                    "lets in to read with a wrong password"
+                }
+            )
         }
         Some("echoes") => {
             radio.echoes = words.next() != Some("off");

@@ -310,6 +310,13 @@ fn answerable(live: Live) -> bool {
     live.selected_kind().is_some()
 }
 
+/// Whether a conversation has reactions: not a room yet, as what its posts
+/// are hashed by there, the room's clock or their author's, is still to be
+/// read in MeshCore's apps.
+fn reactable(live: Live, peer: Peer) -> bool {
+    !matches!(peer, Peer::Node { node } if live.is_room(node))
+}
+
 /// A message's text, each `@[Name]` in it said as a mention; and, for a
 /// reply shown under its quote, the one it starts with left out, as the
 /// quote says whom it answers.
@@ -382,7 +389,7 @@ fn author_of(live: Live, message: &Message) -> String {
     }
     match (&message.sender_name, message.from) {
         (Some(name), 0) => name.clone(),
-        _ => node_name(live, message.from),
+        _ => node_name(live, message.author.unwrap_or(message.from)),
     }
 }
 
@@ -554,7 +561,8 @@ pub fn ChatView() -> impl IntoView {
                     banded = true;
                     before = None;
                 }
-                let author = (!m.outgoing).then(|| (m.from, m.sender_name.clone()));
+                let author =
+                    (!m.outgoing).then(|| (m.author.unwrap_or(m.from), m.sender_name.clone()));
                 let first = match (&before, &author) {
                     (Some((from, name, at)), Some((m_from, m_name))) => {
                         from != m_from || name != m_name || m.at - at > RUN
@@ -707,6 +715,19 @@ pub fn ChatView() -> impl IntoView {
         request_animation_frame(mark_seen);
     });
     on_cleanup(move || live.reading.set(false));
+    // A room open: its login read, and made with the password kept if the
+    // radio has not logged in since it connected; again each time it syncs.
+    let open_room = Memo::new(move |_| match live.open.get() {
+        Some(Peer::Node { node }) if live.is_room(node) => Some(node),
+        _ => None,
+    });
+    Effect::new(move |_| {
+        live.synced.track();
+        match open_room.get() {
+            Some(node) => live.read_room(node),
+            None => live.room.set(None),
+        }
+    });
     let scrolled = move |_| {
         mark_soon();
         let Some(list) = list.try_get_untracked().flatten() else {
@@ -751,7 +772,15 @@ pub fn ChatView() -> impl IntoView {
                             }}
                         </For>
                     </div>
-                    <Composer peer />
+                    {move || match peer {
+                        // A room, while the radio cannot post in it: why, and
+                        // its password.
+                        Peer::Node { node } if open_room.get() == Some(node)
+                            && !crate::rooms::can_post(live, node) => {
+                            view! { <crate::rooms::RoomBar node /> }.into_any()
+                        }
+                        _ => view! { <Composer peer /> }.into_any(),
+                    }}
                     <MessageMenu peer />
                     <MessageDetails peer />
                 }.into_any(),
@@ -766,22 +795,24 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
     let live = expect_context::<Live>();
     let at = u32::try_from(message.at).unwrap_or_default();
     let mine = message.outgoing;
-    // In a channel, who said it, on the first of a run of theirs; in a
-    // direct conversation it is obvious.
-    let channel = !mine && matches!(peer, Peer::Channel { .. });
+    // In a group, a channel or a room, who said it, on the first of a run of
+    // theirs; in a direct conversation it is obvious. A room's post comes
+    // from the room, and says who wrote it.
+    let group = !mine && (matches!(peer, Peer::Channel { .. }) || message.author.is_some());
     // A sender known only by the name the message gives, as on MeshCore
     // channels, is shown by that name. As the node becomes known, its names.
-    let known = message.from != 0;
-    let (from, given) = (message.from, message.sender_name.clone());
+    let from = message.author.unwrap_or(message.from);
+    let known = from != 0;
+    let given = message.sender_name.clone();
     let name = move || match (&given, known) {
         (Some(name), false) => name.clone(),
         _ => node_name(live, from),
     };
-    let author = (channel && first).then(|| view! { <span class="author">{name.clone()}</span> });
+    let author = (group && first).then(|| view! { <span class="author">{name.clone()}</span> });
     // Their short name in an avatar, as the list of nodes draws it, coloured
     // by how far they are: their page, a click away. The rest of a run
     // leaves its room.
-    let avatar = channel.then(|| {
+    let avatar = group.then(|| {
         if !first {
             return view! { <span class="bubble-avatar gap" aria-hidden="true"></span> }.into_any();
         }
@@ -916,6 +947,7 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
     // Replies and reactions refer to its packet: one it has, on a radio
     // that has them.
     let can_answer = packet != 0 && untrack(move || answerable(live));
+    let can_react = can_answer && untrack(move || reactable(live, peer));
     // What it answers, quoted: who, and the start of it.
     let quote = message.reply_id.filter(|_| !message.emoji).map(|to| {
         move || {
@@ -985,7 +1017,7 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                         class="reaction"
                         class:ours=ours
                         title=who.join(", ")
-                        disabled=ours || !can_answer
+                        disabled=ours || !can_react
                         on:click=move |ev| {
                             ev.stop_propagation();
                             react(again.clone());
@@ -1070,7 +1102,7 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                     .into_any()
                 })
             }}
-            {can_answer
+            {can_react
                 .then(|| {
                     view! {
                         <button
@@ -1108,8 +1140,8 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
             class="bubble-row"
             data-id=id
             class:mine=mine
-            class:with-avatar=channel
-            class:goes-on=channel && !first
+            class:with-avatar=group
+            class:goes-on=group && !first
             class:reacting=move || thread.reacting.get() == Some(packet) && packet != 0
         >
             {avatar}
@@ -1614,6 +1646,7 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
             .with_untracked(|t| t.iter().find(|m| m.id == id).cloned())?;
         let packet = message.packet_id;
         let can_answer = packet != 0 && answerable(live);
+        let can_react = can_answer && reactable(live, peer);
         let text = message.text.clone();
         // Ours on a MeshCore channel: sent again, the same packet, only once
         // taken as gone nowhere; as the menu opened.
@@ -1621,7 +1654,7 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
         Some(view! {
             <div class="sheet-back" on:click=move |_| close()>
                 <div class="message-menu" role="menu" on:click=|ev| ev.stop_propagation()>
-                    {can_answer
+                    {can_react
                         .then(|| {
                             view! {
                                 <ReactionPicker pick=Callback::new(move |emoji: String| {

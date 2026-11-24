@@ -100,6 +100,7 @@ pub mod command {
     const SET_OTHER_PARAMS: u8 = 0x26;
     const GET_STATS: u8 = 0x38;
     const SEND_ANON_REQ: u8 = 0x39;
+    const SEND_LOGIN: u8 = 0x1a;
     const SET_FLOOD_SCOPE_KEY: u8 = 0x36;
     const SET_TUNING_PARAMS: u8 = 0x15;
     const GET_TUNING_PARAMS: u8 = 0x2b;
@@ -316,6 +317,22 @@ pub mod command {
         payload
     }
 
+    /// Logs in to a room or a repeater, by its whole key, with a password of
+    /// up to 15 bytes, cut there; an empty one is a guest's, or one the node
+    /// knows already. To a room it says too since when to send its posts,
+    /// which the radio keeps. Answered with `MessageSent`; then pushed
+    /// `LoggedIn` or `NotLoggedIn`, or nothing if the node did not take it.
+    pub fn send_login(key: &[u8; 32], password: &str) -> Vec<u8> {
+        let mut payload = vec![SEND_LOGIN];
+        payload.extend_from_slice(key);
+        let mut end = password.len().min(15);
+        while !password.is_char_boundary(end) {
+            end -= 1;
+        }
+        payload.extend_from_slice(&password.as_bytes()[..end]);
+        payload
+    }
+
     /// The region what it floods next is scoped to, by its key, instead of
     /// its default; with none, back to its default.
     pub fn set_flood_scope(key: Option<&[u8; 16]>) -> Vec<u8> {
@@ -497,6 +514,28 @@ pub struct ContactMessage {
     pub text: String,
     /// Only in the newer form of the message.
     pub snr: Option<f32>,
+    /// Who wrote it, by the first four bytes of their key, when it is signed:
+    /// a room's post, which the room sends as from itself.
+    pub author: Option<[u8; 4]>,
+}
+
+/// What a room or a repeater let in as, by the lowest bits of its access
+/// list's permissions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    /// Reads, and cannot write: a guest, or one let in only to read.
+    ReadOnly,
+    ReadWrite,
+    Admin,
+}
+
+/// A login answered: to whom, by the first six bytes of its key, and as what.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoggedIn {
+    pub prefix: [u8; 6],
+    pub access: Access,
+    /// The node's clock as it answered, from firmware that says it.
+    pub clock: Option<u32>,
 }
 
 /// A channel message, as received: with no sender but what its text says.
@@ -582,6 +621,10 @@ pub enum Response {
     MessagesWaiting,
     /// Pushed: a contact the radio had not heard of before.
     NewContact(Contact),
+    /// Pushed: a login was taken.
+    LoggedIn(LoggedIn),
+    /// Pushed: a login was refused, by the first six bytes of the node's key.
+    NotLoggedIn([u8; 6]),
     /// Anything else, by its code.
     Other(u8),
 }
@@ -598,6 +641,8 @@ impl Response {
                 | Self::NewContact(_)
                 | Self::BinaryResponse { .. }
                 | Self::RxLog { .. }
+                | Self::LoggedIn(_)
+                | Self::NotLoggedIn(_)
         ) || matches!(self, Self::Other(code) if *code >= 0x80)
     }
 
@@ -659,6 +704,8 @@ impl Response {
             0x82 => Self::Ack(bytes_at(data, 0)?),
             0x83 => Self::MessagesWaiting,
             0x8a => Self::NewContact(contact(data)?),
+            0x85 => Self::LoggedIn(logged_in(data)?),
+            0x86 => Self::NotLoggedIn(bytes_at(data, 1)?),
             0x88 => Self::RxLog {
                 snr: snr(*data.first()?),
                 rssi: data.get(1)?.cast_signed(),
@@ -832,6 +879,32 @@ fn contact_message(data: &[u8], newer: bool) -> Option<ContactMessage> {
         timestamp: u32_at(data, at + 8)?,
         text: message_text(data, at + 12, text_type),
         snr: newer.then(|| snr(data[0])),
+        author: if text_type == 2 {
+            Some(bytes_at(data, at + 12)?)
+        } else {
+            None
+        },
+    })
+}
+
+/// A login taken: what the node let in as, in the access list's bits when
+/// its firmware says them, else in the older byte (1 an admin, 2 a guest).
+fn logged_in(data: &[u8]) -> Option<LoggedIn> {
+    let legacy = *data.first()?;
+    let access = match data.get(11).map(|acl| acl & 3) {
+        Some(3) => Access::Admin,
+        Some(2) => Access::ReadWrite,
+        Some(_) => Access::ReadOnly,
+        None => match legacy {
+            1 => Access::Admin,
+            2 => Access::ReadOnly,
+            _ => Access::ReadWrite,
+        },
+    };
+    Some(LoggedIn {
+        prefix: bytes_at(data, 1)?,
+        access,
+        clock: u32_at(data, 7),
     })
 }
 
@@ -995,6 +1068,51 @@ mod tests {
             panic!("a direct message");
         };
         assert_eq!(message.text, "firmado");
+        // A room's post: who wrote it, by the start of their key.
+        assert_eq!(message.author, Some([9, 9, 9, 9]));
+    }
+
+    #[test]
+    fn a_login_says_what_it_let_in_as() {
+        // As newer firmware says it: the access list's bits, and its clock.
+        let mut taken = vec![0x85, 0, 1, 2, 3, 4, 5, 6];
+        taken.extend(1000u32.to_le_bytes());
+        taken.extend([2, 1]);
+        assert_eq!(
+            Response::parse(&taken),
+            Some(Response::LoggedIn(LoggedIn {
+                prefix: [1, 2, 3, 4, 5, 6],
+                access: Access::ReadWrite,
+                clock: Some(1000),
+            }))
+        );
+        // A guest in the access list, though the older byte says nothing.
+        taken[12] = 0;
+        assert!(matches!(
+            Response::parse(&taken),
+            Some(Response::LoggedIn(LoggedIn {
+                access: Access::ReadOnly,
+                ..
+            }))
+        ));
+        // As older firmware says it: only that byte, 1 for an admin.
+        let old = [0x85, 1, 1, 2, 3, 4, 5, 6];
+        assert!(matches!(
+            Response::parse(&old),
+            Some(Response::LoggedIn(LoggedIn {
+                access: Access::Admin,
+                clock: None,
+                ..
+            }))
+        ));
+        assert_eq!(
+            Response::parse(&[0x86, 0, 1, 2, 3, 4, 5, 6]),
+            Some(Response::NotLoggedIn([1, 2, 3, 4, 5, 6]))
+        );
+        assert!(Response::parse(&old).is_some_and(|r| r.is_push()));
+        // A password past 15 bytes cut there, where a character starts.
+        let login = command::send_login(&[7; 32], "contraseñalarguísima");
+        assert_eq!(&login[33..], "contraseñalarg".as_bytes());
     }
 
     #[test]

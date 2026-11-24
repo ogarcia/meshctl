@@ -92,6 +92,10 @@ pub enum ErrorCode {
     /// direct, as MeshCore's anonymous ones: once its path is known, from
     /// its advert or a message, it can be asked.
     NoPath,
+    /// A room or repeater did not take the password.
+    WrongPassword,
+    /// Not a room the radio knows.
+    NotARoom,
 }
 
 /// The body of every error the API answers with.
@@ -1155,6 +1159,49 @@ pub struct Message {
     /// acknowledges, how it is known to have gone out.
     #[serde(default)]
     pub repeaters: u32,
+    /// Who wrote it, for a MeshCore room's post, which comes from the room:
+    /// the node its author's key starts with, known or not.
+    #[serde(default)]
+    pub author: Option<u32>,
+}
+
+/// What a MeshCore room let the radio in as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RoomAccess {
+    /// Reads its posts, and cannot post: a guest, with no password or a
+    /// wrong one, in a room that lets them in.
+    ReadOnly,
+    /// Reads and posts, with the room's password.
+    ReadWrite,
+    /// With its admin's password.
+    Admin,
+}
+
+/// The radio's login to a MeshCore room, which sends its posts only to those
+/// logged in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RoomLogin {
+    /// What it was let in as since the radio last connected; none if it has
+    /// not logged in since. The room forgets those it cannot reach, and a
+    /// guest when it restarts: when its posts stop coming, log in again.
+    pub access: Option<RoomAccess>,
+    /// When it logged in, in seconds since the epoch.
+    pub at: Option<i64>,
+    /// Whether a password is kept for it, which a login with none uses.
+    pub remembered: bool,
+}
+
+/// A login to a MeshCore room.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NewRoomLogin {
+    /// Up to 15 bytes, kept for the next login once the room takes it; none
+    /// for the one kept, or with none kept, as a guest.
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 /// A copy of a message heard, and the way it came.
@@ -2038,6 +2085,9 @@ pub struct Preferences {
     /// Whether the live view shows what the radio itself sends too: by
     /// default it leaves it out.
     pub packets_with_own: bool,
+    /// Whether the rooms are folded away in the sidebar, for those who do not
+    /// use them.
+    pub rooms_folded: bool,
 }
 
 /// A column of the nodes list to sort by, and which way.
@@ -2144,7 +2194,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0,"packets_with_own":false}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0,"packets_with_own":false,"rooms_folded":false}"#
         );
     }
 

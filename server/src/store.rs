@@ -965,8 +965,8 @@ impl Store {
         let id = sqlx::query(
             "INSERT INTO message (radio_id, packet_id, from_num, sender_name, to_num, channel,
                 channel_id, text, at, outgoing, status, reply_id, emoji, snr, rssi, hops_away,
-                via_mqtt, scope, sent_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                via_mqtt, scope, sent_at, author_num)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (radio_id, from_num, packet_id) DO NOTHING",
         )
         .bind(radio)
@@ -988,6 +988,7 @@ impl Store {
         .bind(message.via_mqtt)
         .bind(&message.scope)
         .bind(message.sent_at)
+        .bind(message.author.map(i64::from))
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -1296,6 +1297,54 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(MessageRow::message))
+    }
+
+    /// The password a radio logs in to a room with, if one is kept.
+    pub async fn room_password(&self, radio: RadioId, node: u32) -> Result<Option<String>> {
+        use base64::Engine;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT password FROM room_password WHERE radio_id = ? AND node = ?")
+                .bind(radio)
+                .bind(i64::from(node))
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.and_then(|(kept,)| {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(kept)
+                .ok()?;
+            String::from_utf8(bytes).ok()
+        }))
+    }
+
+    /// Keeps the password a room took, for the next login; none forgets it.
+    pub async fn set_room_password(
+        &self,
+        radio: RadioId,
+        node: u32,
+        password: Option<&str>,
+    ) -> Result<()> {
+        use base64::Engine;
+        match password {
+            Some(password) => {
+                sqlx::query(
+                    "INSERT INTO room_password (radio_id, node, password) VALUES (?, ?, ?)
+                    ON CONFLICT (radio_id, node) DO UPDATE SET password = excluded.password",
+                )
+                .bind(radio)
+                .bind(i64::from(node))
+                .bind(base64::engine::general_purpose::STANDARD.encode(password))
+                .execute(&self.pool)
+                .await?;
+            }
+            None => {
+                sqlx::query("DELETE FROM room_password WHERE radio_id = ? AND node = ?")
+                    .bind(radio)
+                    .bind(i64::from(node))
+                    .execute(&self.pool)
+                    .await?;
+            }
+        }
+        Ok(())
     }
 
     /// A radio's message, as now kept.
@@ -1737,6 +1786,8 @@ pub struct NewMessageRow {
     pub scope: Option<String>,
     /// When its sender says it sent it, by its clock.
     pub sent_at: Option<i64>,
+    /// Who wrote it, for a room's post: its author's node.
+    pub author: Option<u32>,
 }
 
 /// A packet as kept, with one radio's hearing of it.
@@ -1786,6 +1837,7 @@ struct MessageRow {
     heard: i64,
     sent_at: Option<i64>,
     repeaters: i64,
+    author_num: Option<i64>,
 }
 
 impl MessageRow {
@@ -1812,6 +1864,7 @@ impl MessageRow {
             heard: u32::try_from(self.heard).unwrap_or(0),
             sent_at: self.sent_at,
             repeaters: u32::try_from(self.repeaters).unwrap_or(0),
+            author: self.author_num.map(u32_from),
         }
     }
 }
@@ -2303,6 +2356,7 @@ mod tests {
             via_mqtt: false,
             scope: None,
             sent_at: None,
+            author: None,
         }
     }
 
@@ -2728,5 +2782,27 @@ mod tests {
         store.add_radio(&home()).await.unwrap();
         store.close().await;
         assert!(data.join(DATABASE_FILE).exists());
+    }
+
+    #[tokio::test]
+    async fn a_room_password_is_kept_not_in_plain_sight() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        assert_eq!(store.room_password(radio, 7).await.unwrap(), None);
+        store
+            .set_room_password(radio, 7, Some("sésamo"))
+            .await
+            .unwrap();
+        let (kept,): (String,) = sqlx::query_as("SELECT password FROM room_password")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_ne!(kept, "sésamo");
+        assert_eq!(
+            store.room_password(radio, 7).await.unwrap().as_deref(),
+            Some("sésamo")
+        );
+        store.set_room_password(radio, 7, None).await.unwrap();
+        assert_eq!(store.room_password(radio, 7).await.unwrap(), None);
     }
 }

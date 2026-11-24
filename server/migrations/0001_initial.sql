@@ -157,7 +157,10 @@ CREATE TABLE message (
     scope TEXT,
     -- When its sender says it sent it, by its clock: on MeshCore, where
     -- replies and reactions name a message by it.
-    sent_at INTEGER
+    sent_at INTEGER,
+    -- Who wrote it, for a MeshCore room's post, which comes from the room:
+    -- the node its author's key starts with.
+    author_num INTEGER
 );
 
 -- A packet is heard once: the copies a radio or a tasticsplitter replays on
@@ -206,7 +209,7 @@ SELECT
         m.channel
     ) AS channel,
     m.channel_id, m.text, m.at, m.outgoing, m.status, m.error, m.reply_id,
-    m.emoji, m.snr, m.rssi, m.hops_away, m.via_mqtt, m.sent_at,
+    m.emoji, m.snr, m.rssi, m.hops_away, m.via_mqtt, m.sent_at, m.author_num,
     coalesce(m.scope, (
         SELECT r.scope FROM message_route r
         WHERE r.radio_id = m.radio_id AND r.packet_id = m.packet_id AND r.scope IS NOT NULL
@@ -221,6 +224,15 @@ SELECT
         WHERE h.radio_id = m.radio_id AND h.packet_id = m.packet_id
     ) AS repeaters
 FROM message m;
+
+-- The password each radio logs in to a MeshCore room with, kept from the last
+-- login the room took: in base64, so as not to be read at a glance.
+CREATE TABLE room_password (
+    radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
+    node INTEGER NOT NULL,
+    password TEXT NOT NULL,
+    PRIMARY KEY (radio_id, node)
+);
 
 -- The traceroutes each radio sent.
 CREATE TABLE traceroute (

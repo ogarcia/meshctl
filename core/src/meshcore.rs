@@ -35,7 +35,8 @@ use crate::radio::{
     SendError, Sent, now,
 };
 use protocol::{
-    ChannelMessage, Contact, ContactMessage, DeviceInfo, Response, SelfInfo, Stats, command,
+    Access, ChannelMessage, Contact, ContactMessage, DeviceInfo, LoggedIn, Response, SelfInfo,
+    Stats, command,
 };
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -650,10 +651,19 @@ pub(crate) struct Session {
     sending: Arc<tokio::sync::Mutex<()>>,
     /// The packets heard lately, to tell which message each copy is.
     heard: Arc<Mutex<Heard>>,
+    /// Logins waiting for their answer, by the first six bytes of the key of
+    /// the node they went to: what it let in as, or none if it refused.
+    logins: Arc<Mutex<HashMap<[u8; 6], LoginWait>>>,
 }
+
+/// Where a login's answer is told: what the node let in as, or none.
+type LoginWait = tokio::sync::oneshot::Sender<Option<Access>>;
 
 /// How long a packet heard is remembered, for its later copies.
 const HEARD_KEPT: Duration = Duration::from_secs(600);
+/// The least a login waits for its answer: a node far off, flooded to,
+/// takes a while to.
+const LOGIN_WAIT: Duration = Duration::from_secs(15);
 /// How long a direct text heard waits for the message it is.
 const DIRECT_WAIT: Duration = Duration::from_secs(30);
 
@@ -1221,6 +1231,68 @@ impl Mesh {
         Ok(u32::from_le_bytes(tag))
     }
 
+    /// Logs in to a room or a repeater with a password, empty for a guest or
+    /// one the node knows already: on the path the radio knows, or flooded.
+    /// What it let in as; refused as `WRONG_PASSWORD`, and with no answer
+    /// in twice what the radio expects (at least [`LOGIN_WAIT`]) as
+    /// [`AdminError::NoAnswer`], as a node that does not take a password
+    /// says nothing.
+    pub async fn meshcore_login(&self, num: u32, password: &str) -> Result<Access, AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        let mut prefix = [0u8; 6];
+        prefix.copy_from_slice(&key[..6]);
+        let (tell, told) = tokio::sync::oneshot::channel();
+        session
+            .logins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(prefix, tell);
+        let answer = session
+            .client
+            .ask_one(command::send_login(&key, password), |r| {
+                matches!(r, Response::MessageSent { .. })
+            })
+            .await;
+        let forget = || {
+            session
+                .logins
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&prefix);
+        };
+        let wait = match answer {
+            Ok(Response::MessageSent { timeout_ms, .. }) => {
+                Duration::from_millis(u64::from(timeout_ms) * 2).max(LOGIN_WAIT)
+            }
+            Ok(Response::Error(code)) => {
+                forget();
+                return Err(AdminError::Refused(error_name(code).to_owned()));
+            }
+            Ok(_) => {
+                forget();
+                return Err(AdminError::Refused("UNEXPECTED".to_owned()));
+            }
+            Err("the radio did not answer") => {
+                forget();
+                return Err(AdminError::NoAnswer);
+            }
+            Err(_) => {
+                forget();
+                return Err(AdminError::NotConnected);
+            }
+        };
+        match tokio::time::timeout(wait, told).await {
+            Ok(Ok(Some(access))) => Ok(access),
+            Ok(Ok(None)) => Err(AdminError::Refused("WRONG_PASSWORD".to_owned())),
+            Ok(Err(_)) => Err(AdminError::NotConnected),
+            Err(_) => {
+                forget();
+                Err(AdminError::NoAnswer)
+            }
+        }
+    }
+
     /// Has the radio say who it is: to those it hears directly, or flooded
     /// to the whole mesh.
     pub async fn meshcore_advert(&self, flood: bool) -> Result<(), AdminError> {
@@ -1375,6 +1447,7 @@ async fn session(
         asked: Arc::default(),
         sending: Arc::default(),
         heard: Arc::default(),
+        logins: Arc::default(),
     };
     let me_node = Node {
         last_heard: Some(now()),
@@ -1443,6 +1516,10 @@ async fn session(
                     });
                 }
                 Some(Response::Ack(tag)) => acknowledged(mesh, &session, tag),
+                Some(Response::LoggedIn(LoggedIn { prefix, access, .. })) => {
+                    logged_in(&session, prefix, Some(access));
+                }
+                Some(Response::NotLoggedIn(prefix)) => logged_in(&session, prefix, None),
                 Some(Response::BinaryResponse { tag, data }) => {
                     replied(mesh, &session, tag, &data);
                 }
@@ -1555,6 +1632,18 @@ fn acknowledged(mesh: &Mesh, session: &Session, tag: [u8; 4]) {
     }
 }
 
+/// A login answered: to the one waiting for it, if any still is.
+fn logged_in(session: &Session, prefix: [u8; 6], access: Option<Access>) {
+    let waiting = session
+        .logins
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&prefix);
+    if let Some(waiting) = waiting {
+        let _ = waiting.send(access);
+    }
+}
+
 fn remember_keys(session: &Session, contacts: &[Contact]) {
     let mut keys = session.keys.lock().unwrap_or_else(|e| e.into_inner());
     let mut paths = session.paths.lock().unwrap_or_else(|e| e.into_inner());
@@ -1618,6 +1707,7 @@ fn direct(state: &mut MeshState, message: &ContactMessage) -> Vec<Event> {
         hops_away: hops(message.path_len),
         via_mqtt: false,
         sent_at: Some(message.timestamp),
+        author: message.author.map(u32::from_be_bytes),
     }));
     events
 }
@@ -1656,6 +1746,7 @@ fn channel(state: &mut MeshState, message: &ChannelMessage) -> Vec<Event> {
         hops_away: hops(message.path_len),
         via_mqtt: false,
         sent_at: Some(message.timestamp),
+        author: None,
     })]
 }
 
@@ -1831,6 +1922,7 @@ mod tests {
             timestamp: 42,
             text: "hola".into(),
             snr: Some(6.0),
+            author: None,
         };
         let events = direct(&mut state, &message);
         assert!(matches!(&events[0], Event::Node(n) if n.snr == Some(6.0)));

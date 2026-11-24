@@ -26,6 +26,7 @@ mod packets;
 mod phone;
 mod preferences;
 mod radios;
+mod rooms;
 mod sections;
 mod settings;
 mod storage;

@@ -106,6 +106,18 @@ impl Page {
     }
 }
 
+/// A room's login, as the interface knows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoomState {
+    pub node: u32,
+    /// As last read or made; none until read.
+    pub login: Option<meshctl_api::RoomLogin>,
+    /// Whether a login is under way.
+    pub busy: bool,
+    /// Why the last login failed.
+    pub error: Option<Failure>,
+}
+
 /// Everything the interface shows, kept current by [`follow`].
 #[derive(Clone, Copy)]
 pub struct Live {
@@ -217,6 +229,9 @@ pub struct Live {
     pub synced: RwSignal<u32>,
     /// Seconds since the epoch, ticking.
     pub now: RwSignal<u32>,
+    /// The open room's login: as read or made, while one is under way, or
+    /// why the last failed; none while no room is open.
+    pub room: RwSignal<Option<RoomState>>,
 }
 
 impl Live {
@@ -271,6 +286,7 @@ impl Live {
             ready: RwSignal::new(HashMap::new()),
             synced: RwSignal::new(0),
             now: RwSignal::new(now()),
+            room: RwSignal::new(None),
         }
     }
 
@@ -830,6 +846,73 @@ impl Live {
     }
 
     /// Which mesh the selected radio speaks.
+    /// Whether a node of the selected radio is a MeshCore room.
+    pub fn is_room(self, node: u32) -> bool {
+        self.nodes
+            .with(|nodes| nodes.get(&node).and_then(|n| n.role.as_deref()) == Some("ROOM"))
+    }
+
+    /// Reads a room's login, as it is opened or the radio syncs again; not
+    /// logged in since the radio connected, with a password kept, it logs in
+    /// with it, as once each time the radio connects.
+    pub fn read_room(self, node: u32) {
+        let Some(radio) = self.selected.get_untracked() else {
+            return;
+        };
+        let same = self
+            .room
+            .with_untracked(|r| r.as_ref().is_some_and(|r| r.node == node));
+        if !same {
+            self.room.set(Some(RoomState {
+                node,
+                login: None,
+                busy: false,
+                error: None,
+            }));
+        }
+        spawn_local(async move {
+            let Ok(login) = daemon::room_login(radio, node).await else {
+                return;
+            };
+            let again = login.access.is_none() && login.remembered;
+            self.room.update(|r| {
+                if let Some(r) = r.as_mut().filter(|r| r.node == node) {
+                    r.login = Some(login);
+                }
+            });
+            if again {
+                self.log_in_room(node, None);
+            }
+        });
+    }
+
+    /// Logs the selected radio in to a room: with a password, or with the
+    /// one kept, or as a guest.
+    pub fn log_in_room(self, node: u32, password: Option<String>) {
+        let Some(radio) = self.selected.get_untracked() else {
+            return;
+        };
+        let mark =
+            move |busy: bool, error: Option<Failure>, login: Option<meshctl_api::RoomLogin>| {
+                self.room.update(|r| {
+                    if let Some(r) = r.as_mut().filter(|r| r.node == node) {
+                        r.busy = busy;
+                        r.error = error;
+                        if login.is_some() {
+                            r.login = login;
+                        }
+                    }
+                });
+            };
+        mark(true, None, None);
+        spawn_local(async move {
+            match daemon::log_in_room(radio, node, password).await {
+                Ok(login) => mark(false, None, Some(login)),
+                Err(failure) => mark(false, Some(failure), None),
+            }
+        });
+    }
+
     pub fn selected_kind(self) -> Option<RadioKind> {
         let id = self.selected.get()?;
         self.radios
@@ -1386,6 +1469,7 @@ enum Shown {
     Page(Page),
 }
 
+const CHEVRON: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 const GEAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/settings.svg");
 const TRASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/trash.svg");
 const HISTORY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/history.svg");
@@ -1604,9 +1688,55 @@ fn RadioSidebar() -> impl IntoView {
             conversations
                 .iter()
                 .map(|c| c.peer)
-                .filter(|peer| matches!(peer, Peer::Node { .. }))
+                .filter(|peer| matches!(peer, Peer::Node { node } if !live.is_room(*node)))
                 .collect::<Vec<_>>()
         })
+    };
+    // Every room the radio knows: those with something said in them first,
+    // the latest first, then the rest by name.
+    let rooms = move || {
+        let mut rooms: Vec<Peer> = live.conversations.with(|conversations| {
+            conversations
+                .iter()
+                .map(|c| c.peer)
+                .filter(|peer| matches!(peer, Peer::Node { node } if live.is_room(*node)))
+                .collect()
+        });
+        let mut quiet: Vec<(String, u32)> = live.nodes.with(|nodes| {
+            nodes
+                .values()
+                .filter(|n| n.role.as_deref() == Some("ROOM"))
+                .filter(|n| !rooms.contains(&Peer::Node { node: n.num }))
+                .map(|n| {
+                    (
+                        n.long_name.clone().unwrap_or_default().to_lowercase(),
+                        n.num,
+                    )
+                })
+                .collect()
+        });
+        quiet.sort();
+        rooms.extend(quiet.into_iter().map(|(_, node)| Peer::Node { node }));
+        rooms
+    };
+    // Folded away, for those who do not use them: what is unread in them
+    // still said beside their heading.
+    let rooms_folded = move || live.preferences.with(|p| p.rooms_folded);
+    let fold_rooms = move |_| {
+        let mut preferences = live.preferences.get_untracked();
+        preferences.rooms_folded = !preferences.rooms_folded;
+        live.prefer(preferences);
+    };
+    let rooms_unread = move || {
+        let rooms = rooms();
+        let unread: u32 = live.conversations.with(|c| {
+            c.iter()
+                .filter(|c| rooms.contains(&c.peer))
+                .map(|c| c.unread)
+                .sum()
+        });
+        (rooms_folded() && unread > 0)
+            .then(|| view! { <span class="unread">{unread_count(unread)}</span> })
     };
 
     view! {
@@ -1624,6 +1754,24 @@ fn RadioSidebar() -> impl IntoView {
                 <For each=channels key=|peer| *peer let:peer>
                     <PeerItem peer />
                 </For>
+                <Show when=move || !rooms().is_empty()>
+                    <h2 class="folding">
+                        <button
+                            type="button"
+                            aria-expanded=move || (!rooms_folded()).to_string()
+                            on:click=fold_rooms
+                        >
+                            <span>{t!(i18n, nav_rooms)}</span>
+                            {rooms_unread}
+                            <span class="chevron" class:folded=rooms_folded inner_html=CHEVRON></span>
+                        </button>
+                    </h2>
+                    <Show when=move || !rooms_folded()>
+                        <For each=rooms key=|peer| *peer let:peer>
+                            <PeerItem peer />
+                        </For>
+                    </Show>
+                </Show>
                 <h2>{t!(i18n, nav_directs)}</h2>
                 <For each=directs key=|peer| *peer let:peer>
                     <PeerItem peer />
@@ -1977,6 +2125,11 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                     if let Some(reach) = reach_words(i18n, &known, local()) {
                         parts.push(reach.into_any());
                     }
+                    if live.page.get() == Page::Chat && live.is_room(node) {
+                        // First, as what matters most in a room, and what a
+                        // phone has room for.
+                        parts.insert(0, view! { <crate::rooms::AccessWords node /> }.into_any());
+                    }
                     if let Some(heard) = known.last_heard {
                         parts.push(ago(live.now.get(), heard).into_any());
                     }
@@ -2184,7 +2337,11 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                     </h1>
                     <span class="dim">{detail}</span>
                 </div>
-                <div class="actions">{action}</div>
+                <div class="actions">
+                    {move || (live.page.get() == Page::Chat && live.is_room(node))
+                        .then(|| view! { <crate::rooms::LogInAgain node /> })}
+                    {action}
+                </div>
             }
             .into_any()
         }

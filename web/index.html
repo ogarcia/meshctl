@@ -395,6 +395,15 @@
         letter-spacing: 0.06em;
       }
       .sidebar-body .empty { margin: 0; padding: 2px 10px; font-size: 12px; }
+      /* A heading that folds what is under it away, as the rooms': its chevron
+         turned while folded. */
+      .sidebar-body h2.folding { padding: 0; }
+      .sidebar-body h2.folding button { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 0; padding: 2px 10px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+      .sidebar-body h2.folding button:hover { color: var(--mc-text); }
+      .sidebar-body h2.folding .unread { text-transform: none; letter-spacing: 0; }
+      .sidebar-body h2.folding .chevron { display: flex; margin-left: auto; transition: transform 0.15s; }
+      .sidebar-body h2.folding .chevron svg { width: 14px; height: 14px; }
+      .sidebar-body h2.folding .chevron.folded { transform: rotate(-90deg); }
       /* Adding from a link: the link, what it holds, and the buttons. */
       .link-adder { display: flex; flex-direction: column; gap: 12px; width: 480px; max-width: 100%; padding: 16px 20px 20px; }
       .link-adder header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -2835,6 +2844,23 @@
       }
       .unmessagable .icon { display: flex; flex: none; color: var(--mc-warn); }
       .unmessagable svg { width: 18px; height: 18px; }
+      /* A room the radio cannot post in, in place of the composer: why, and
+         its password, in one line while they fit. */
+      .room-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 16px;
+        padding: 12px var(--chat-gutter);
+        border-top: 1px solid var(--mc-border);
+        background: var(--mc-surface);
+      }
+      .room-bar .why { display: flex; align-items: flex-start; gap: 8px; flex: 1 1 280px; margin: 0; color: var(--mc-muted); font-size: 13px; }
+      .room-bar .why .icon { display: flex; flex: none; color: var(--mc-primary); }
+      .room-bar .why .icon svg { width: 18px; height: 18px; }
+      .room-bar .fields { display: flex; gap: 8px; flex: 1 1 260px; }
+      .room-bar input { flex: 1; min-width: 0; }
+      .room-bar .error { flex-basis: 100%; margin: 0; color: var(--mc-danger); font-size: 13px; }
       .composer {
         display: flex;
         gap: 10px;

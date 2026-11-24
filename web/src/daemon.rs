@@ -85,6 +85,11 @@ async fn answer(response: Result<Response, gloo_net::Error>) -> Result<Response,
             .json::<Error>()
             .await
             .map_or(Failure::Unreachable, |e| Failure::Rejected(e.error))),
+        // The radio would not, or did not answer: the daemon says which.
+        502 | 504 => Err(response
+            .json::<Error>()
+            .await
+            .map_or(Failure::Unreachable, |e| Failure::Rejected(e.error))),
         _ => Err(Failure::Unreachable),
     }
 }
@@ -214,6 +219,26 @@ pub async fn forget_message(radio: RadioId, id: meshctl_api::MessageId) -> Resul
         "/radios/{radio}/messages/{id}"
     ))));
     answer(request.send().await).await.map(|_| ())
+}
+
+/// The radio's login to a room.
+pub async fn room_login(radio: RadioId, node: u32) -> Result<meshctl_api::RoomLogin, Failure> {
+    get(&format!("/radios/{radio}/rooms/{node}/login")).await
+}
+
+/// Logs the radio in to a room: with a password, or with the one kept.
+pub async fn log_in_room(
+    radio: RadioId,
+    node: u32,
+    password: Option<String>,
+) -> Result<meshctl_api::RoomLogin, Failure> {
+    let request = with_token(Request::post(&url(&format!(
+        "/radios/{radio}/rooms/{node}/login"
+    ))))
+    .json(&meshctl_api::NewRoomLogin { password })
+    .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
 }
 
 /// Sends again one of ours on a MeshCore channel no repeater was heard

@@ -12,9 +12,9 @@ use meshctl_api::{
     BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkContents,
     LinkState, MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeCheck,
     NodeLatest, NodeSettings, NodeSettingsChange, NodeTelemetry, Pace, Packet, PacketFilter, Peer,
-    Preferences, Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind, SectionSecret,
-    SettingsApplied, SettingsSection, SightingId, Status, TelemetryPoint, TelemetrySeries,
-    Traceroute, TracerouteId, Waits,
+    Preferences, Radio, RadioId, RadioKind, RadioSettings, Request, RequestKind, RoomAccess,
+    RoomLogin, SectionSecret, SettingsApplied, SettingsSection, SightingId, Status, TelemetryPoint,
+    TelemetrySeries, Traceroute, TracerouteId, Waits,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -88,6 +88,32 @@ pub enum Change {
     Retention(meshctl_api::Retention),
     /// Events of a radio were lost on their way here.
     Lagged,
+}
+
+/// What a radio was let in to a room as, and when.
+type RoomIn = (RoomAccess, i64);
+
+/// Why a radio did not log in to a room.
+#[derive(Debug)]
+pub enum RoomFailure {
+    NoSuchRadio,
+    /// Not a room the radio knows.
+    NotARoom,
+    NotConnected,
+    /// The room said no to the password.
+    WrongPassword,
+    /// Nothing came back: the room is out of reach, or it does not take
+    /// the password and lets nobody in to read.
+    NoAnswer,
+    /// The radio would not send it, and said why.
+    Refused(String),
+    Failed(anyhow::Error),
+}
+
+impl From<anyhow::Error> for RoomFailure {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Failed(err)
+    }
 }
 
 /// Why a message was not sent.
@@ -424,9 +450,8 @@ async fn expire(store: &Store, changes: &broadcast::Sender<Change>, radio: Radio
     Ok(())
 }
 
-/// Whether a radio has a channel in that slot that it uses.
-/// Who wrote a message on a MeshCore radio, as named on a channel: the
-/// radio, for ours.
+/// Who wrote a message on a MeshCore radio, as named on a channel or in a
+/// room: the radio, for ours; a room's post, its author.
 fn author(mesh: &Mesh, message: &Message) -> Option<String> {
     if message.outgoing {
         mesh.read(|s| s.meshcore.as_ref().map(|m| m.name.clone()))
@@ -434,7 +459,7 @@ fn author(mesh: &Mesh, message: &Message) -> Option<String> {
         message.sender_name.clone().or_else(|| {
             mesh.read(|s| {
                 s.nodes
-                    .get(&message.from)
+                    .get(&message.author.unwrap_or(message.from))
                     .and_then(|n| n.user.as_ref())
                     .map(|u| u.long_name.clone())
             })
@@ -442,6 +467,7 @@ fn author(mesh: &Mesh, message: &Message) -> Option<String> {
     }
 }
 
+/// Whether a radio has a channel in that slot that it uses.
 fn has_channel(mesh: &Mesh, channel: u32) -> bool {
     mesh.read(|state| {
         state
@@ -560,6 +586,9 @@ pub struct Radios {
     /// The radios searching for regions, and how many repeaters each has
     /// still to ask.
     searching: Arc<Mutex<HashMap<RadioId, u32>>>,
+    /// The rooms each radio logged in to since it last connected: what each
+    /// let it in as, and when.
+    rooms: Arc<Mutex<HashMap<(RadioId, u32), RoomIn>>>,
     changes: broadcast::Sender<Change>,
     stopped: watch::Sender<bool>,
 }
@@ -571,6 +600,7 @@ impl Radios {
             store,
             running: Arc::default(),
             searching: Arc::default(),
+            rooms: Arc::default(),
             changes: broadcast::channel(EVENT_BACKLOG).0,
             stopped: watch::channel(false).0,
         };
@@ -825,6 +855,20 @@ impl Radios {
         // apps send them: what goes on the air, kept as it went; and a reply
         // in the region its message came in, unless another is asked for.
         let meshcore = self.protocol(id) == Some(Protocol::Meshcore);
+        // No reactions in a room yet: what its posts are hashed by there, the
+        // room's clock or their author's, is still to be read in its apps, and
+        // one that names nothing would go as a post.
+        let to_room = meshcore
+            && mesh.read(|state| {
+                state
+                    .nodes
+                    .get(&to)
+                    .and_then(|n| n.user.as_ref())
+                    .is_some_and(|u| u.role == "ROOM")
+            });
+        if to_room && message.emoji {
+            return Err(SendFailure::Invalid);
+        }
         let mut wire = message.text.clone();
         let mut region_of_reply = None;
         if meshcore && let Some(answered) = message.reply_id {
@@ -835,6 +879,8 @@ impl Radios {
                 .ok_or(SendFailure::Invalid)?;
             let sender = author(&mesh, &target);
             let on_channel = to == mesh::BROADCAST;
+            // A reply in a group, a channel or a room, names whom it answers.
+            let group = on_channel || to_room;
             if message.emoji {
                 let at = target
                     .sent_at
@@ -847,7 +893,7 @@ impl Radios {
                 };
                 wire = crate::reactions::build(message.text.trim(), named, &target.text, at)
                     .ok_or(SendFailure::Invalid)?;
-            } else if on_channel && let Some(sender) = &sender {
+            } else if group && let Some(sender) = &sender {
                 wire = format!("@[{sender}]: {}", message.text);
             }
             region_of_reply = target.scope.filter(|s| s != "?");
@@ -942,6 +988,7 @@ impl Radios {
             via_mqtt: false,
             scope: scope_kept,
             sent_at: sent.sent_at.map(i64::from),
+            author: None,
         };
         let kept = self
             .store
@@ -950,6 +997,106 @@ impl Radios {
             .ok_or_else(|| anyhow::anyhow!("a packet id was used twice"))?;
         let _ = self.changes.send(Change::Message(id, kept.clone()));
         Ok(kept)
+    }
+
+    /// A MeshCore room the radio knows: its mesh, or why not.
+    fn room_mesh(&self, id: RadioId, node: u32) -> Result<Mesh, RoomFailure> {
+        let mesh = self.mesh(id).ok_or(RoomFailure::NoSuchRadio)?;
+        let room = self.protocol(id) == Some(Protocol::Meshcore)
+            && mesh.read(|state| {
+                state
+                    .nodes
+                    .get(&node)
+                    .and_then(|n| n.user.as_ref())
+                    .is_some_and(|u| u.role == "ROOM")
+            });
+        if room {
+            Ok(mesh)
+        } else {
+            Err(RoomFailure::NotARoom)
+        }
+    }
+
+    /// The radio's login to a room: what it was let in as since it last
+    /// connected, and whether a password is kept for it.
+    pub async fn room_login(&self, id: RadioId, node: u32) -> Result<RoomLogin, RoomFailure> {
+        self.room_mesh(id, node)?;
+        let now = self
+            .rooms
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&(id, node))
+            .copied();
+        Ok(RoomLogin {
+            access: now.map(|(access, _)| access),
+            at: now.map(|(_, at)| at),
+            remembered: self.store.room_password(id, node).await?.is_some(),
+        })
+    }
+
+    /// Logs the radio in to a room: with the password given, kept once the
+    /// room takes it; with none, with the one kept, or as a guest. The room
+    /// then sends it the posts it does not have.
+    pub async fn log_in_room(
+        &self,
+        id: RadioId,
+        node: u32,
+        password: Option<String>,
+    ) -> Result<RoomLogin, RoomFailure> {
+        let mesh = self.room_mesh(id, node)?;
+        if self.link(id) != LinkState::Ready {
+            return Err(RoomFailure::NotConnected);
+        }
+        let given = password.is_some();
+        let password = match password {
+            Some(password) => password,
+            None => self
+                .store
+                .room_password(id, node)
+                .await?
+                .unwrap_or_default(),
+        };
+        let access = mesh
+            .meshcore_login(node, &password)
+            .await
+            .map_err(|error| match error {
+                AdminError::NotConnected => RoomFailure::NotConnected,
+                AdminError::NoAnswer => RoomFailure::NoAnswer,
+                AdminError::UnknownNode | AdminError::OwnNode => RoomFailure::NotARoom,
+                AdminError::Refused(why) if why == "WRONG_PASSWORD" => RoomFailure::WrongPassword,
+                AdminError::Refused(why) => RoomFailure::Refused(why),
+                AdminError::Unsupported | AdminError::NoPath => {
+                    RoomFailure::Refused("UNSUPPORTED".to_owned())
+                }
+            })?;
+        let access = match access {
+            meshctl_core::meshcore::protocol::Access::ReadOnly => RoomAccess::ReadOnly,
+            meshctl_core::meshcore::protocol::Access::ReadWrite => RoomAccess::ReadWrite,
+            meshctl_core::meshcore::protocol::Access::Admin => RoomAccess::Admin,
+        };
+        // A password given is kept when it let in to more than a guest is.
+        if given && access != RoomAccess::ReadOnly {
+            self.store
+                .set_room_password(id, node, Some(&password))
+                .await?;
+        }
+        let at = now();
+        self.rooms
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((id, node), (access, at));
+        self.room_login(id, node).await
+    }
+
+    /// Forgets the password kept for a room; the login, if any, stays.
+    pub async fn forget_room_password(
+        &self,
+        id: RadioId,
+        node: u32,
+    ) -> Result<RoomLogin, RoomFailure> {
+        self.room_mesh(id, node)?;
+        self.store.set_room_password(id, node, None).await?;
+        self.room_login(id, node).await
     }
 
     /// Sends again one of ours on a MeshCore channel that no repeater was
@@ -2612,6 +2759,7 @@ impl Radios {
         let mesh = mesh.clone();
         let store = self.store.clone();
         let changes = self.changes.clone();
+        let rooms = Arc::clone(&self.rooms);
         tokio::spawn(async move {
             let mut connected = false;
             let mut expiry = tokio::time::interval(TRACEROUTE_EXPIRY_TICK);
@@ -2706,6 +2854,11 @@ impl Radios {
                     Err(RecvError::Lagged(_)) if connected => save_all(&store, id, &mesh).await,
                     Ok(mesh::Event::Link(link)) if connected && link != mesh::LinkState::Ready => {
                         connected = false;
+                        // Logged in to no room again until it logs in again.
+                        rooms
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .retain(|(radio, _), _| *radio != id);
                         store.set_last_connected(id, now()).await
                     }
                     Err(RecvError::Closed) => return,
@@ -2833,6 +2986,7 @@ fn heard_row(heard: mesh::TextMessage, local: Option<u32>) -> NewMessageRow {
         via_mqtt: heard.via_mqtt,
         scope: None,
         sent_at: heard.sent_at.map(i64::from),
+        author: heard.author,
     }
 }
 
@@ -3103,6 +3257,7 @@ mod tests {
             hops_away: None,
             via_mqtt: false,
             sent_at: None,
+            author: None,
         };
         let ours = heard_row(heard.clone(), Some(7));
         assert!(ours.outgoing);
