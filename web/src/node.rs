@@ -2406,6 +2406,9 @@ fn RequestRow(request: Request) -> impl IntoView {
     let open = RwSignal::new(false);
     let at = u32::try_from(request.at).unwrap_or_default();
     let error = request.error.clone();
+    // A ping is given up on sooner than other requests, as it comes back
+    // in a second or two.
+    let ping = request.kind == RequestKind::Ping;
     let status = move || match request.status {
         RequestStatus::Pending => view! {
             <span class="badge syncing">{t!(i18n, request_pending)}</span>
@@ -2417,6 +2420,7 @@ fn RequestRow(request: Request) -> impl IntoView {
         .into_any(),
         RequestStatus::Failed => {
             let why = match error.as_deref() {
+                Some("TIMEOUT") if ping => t_string!(i18n, request_ping_timeout).to_owned(),
                 Some("TIMEOUT") => t_string!(i18n, request_timeout).to_owned(),
                 Some("NO_RESPONSE") => t_string!(i18n, request_no_response).to_owned(),
                 Some("PKI_SEND_FAIL_PUBLIC_KEY") => t_string!(i18n, request_no_key).to_owned(),
@@ -2864,7 +2868,23 @@ fn RemotePing() -> impl IntoView {
     let live = expect_context::<Live>();
     let asking = expect_context::<Asking>();
     let last = move || last_reply(live, asking.num, RequestKind::Ping);
-    let at = Signal::derive(move || last().map(|(_, at)| at));
+    // When the latest ping that ended came to nothing: its figures, the last
+    // one's that came back, are no more what the node is now.
+    let lost = move || {
+        live.requests.with(|requests| {
+            requests
+                .iter()
+                .filter(|r| {
+                    r.node == asking.num
+                        && r.kind == RequestKind::Ping
+                        && r.status != RequestStatus::Pending
+                })
+                .max_by_key(|r| r.id)
+                .filter(|r| r.status == RequestStatus::Failed)
+                .map(|r| r.answered_at.unwrap_or(r.at))
+        })
+    };
+    let at = Signal::derive(move || lost().or_else(|| last().map(|(_, at)| at)));
     let direct = move || {
         live.nodes
             .with(|nodes| nodes.get(&asking.num).and_then(|n| n.hops_away))
@@ -2890,7 +2910,9 @@ fn RemotePing() -> impl IntoView {
             } => Some((round_trip_ms, snr_there, snr_back)),
             _ => None,
         });
-        let dashed = pinging();
+        let pinging = pinging();
+        let lost = lost().is_some();
+        let dashed = pinging || lost;
         let value = move |shown: AnyView| {
             if dashed {
                 view! { <span class="dim">"—"</span> }.into_any()
@@ -2907,6 +2929,7 @@ fn RemotePing() -> impl IntoView {
                     {fact(t!(i18n, ping_back), value(snr_view(back).into_any()))}
                 </dl>
             })}
+            {(lost && !pinging).then(|| view! { <p class="hint dim">{t!(i18n, ping_lost)}</p> })}
             {(!direct()).then(|| view! { <p class="hint dim">{t!(i18n, ping_only_direct)}</p> })}
         }
     };

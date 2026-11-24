@@ -121,7 +121,8 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
             | mesh::Event::AdminAnswer { .. }
             | mesh::Event::Reply(_)
             | mesh::Event::Route(_)
-            | mesh::Event::RawHeard(_),
+            | mesh::Event::RawHeard(_)
+            | mesh::Event::Unanswered { .. },
         ) => return None,
         Change::MessageHeard {
             radio,

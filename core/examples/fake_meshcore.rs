@@ -128,6 +128,8 @@ struct Radio {
     with_ana: Option<(String, u32)>,
     /// Whether repeaters are heard passing on what is sent on a channel.
     echoes: bool,
+    /// Whether a ping comes back.
+    pings: bool,
     /// Sala Coruña's posts, its own among them: who wrote each, by the first
     /// four bytes of their key, what, and when by its clock.
     room_posts: Vec<([u8; 4], String, u32)>,
@@ -255,6 +257,7 @@ impl Radio {
             said: std::collections::HashMap::new(),
             with_ana: None,
             echoes: true,
+            pings: true,
             room_posts: vec![
                 (
                     key_prefix(&key(0x53)),
@@ -977,7 +980,8 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             let mut sent = vec![0x06, 0];
             sent.extend(tag);
             sent.extend(1_500u32.to_le_bytes());
-            let back = path.len() == size
+            let back = radio.pings
+                && path.len() == size
                 && radio
                     .contacts
                     .iter()
@@ -1529,6 +1533,10 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                     "lets in to read with a wrong password"
                 }
             )
+        }
+        Some("pings") => {
+            radio.pings = words.next() != Some("off");
+            format!("pings {}", if radio.pings { "back" } else { "lost" })
         }
         Some("echoes") => {
             radio.echoes = words.next() != Some("off");

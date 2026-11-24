@@ -966,6 +966,10 @@ const NEIGHBOURS_ASKED: u8 = 14;
 /// another.
 const ASK_WAIT: Duration = Duration::from_secs(15);
 
+/// The least a ping waits for its trace back before it is given up on: one
+/// heard straight comes back in a second or two.
+const PING_WAIT: Duration = Duration::from_secs(10);
+
 /// A ping's tag: of whom and when, as a trace goes by one of its own.
 fn ping_tag(num: u32) -> u32 {
     let nanos = std::time::SystemTime::now()
@@ -1574,20 +1578,41 @@ impl Mesh {
                 matches!(r, Response::MessageSent { .. })
             })
             .await;
-        match answer {
-            Ok(Response::MessageSent { .. }) => {}
+        let timeout_ms = match answer {
+            Ok(Response::MessageSent { timeout_ms, .. }) => timeout_ms,
             Ok(Response::Error(code)) => {
                 return Err(AdminError::Refused(error_name(code).to_owned()));
             }
             Ok(_) => return Err(AdminError::Refused("UNEXPECTED".to_owned())),
             Err("the radio did not answer") => return Err(AdminError::NoAnswer),
             Err(_) => return Err(AdminError::NotConnected),
-        }
+        };
+        let key = tag.to_le_bytes();
         session
             .pinged
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(tag.to_le_bytes(), (num, std::time::Instant::now()));
+            .insert(key, (num, std::time::Instant::now()));
+        // Given up on when twice as long as the radio expects has gone by,
+        // and at least [`PING_WAIT`], if it has not come back by then.
+        let wait = Duration::from_millis(u64::from(timeout_ms) * 2).max(PING_WAIT);
+        let (pinged, mesh) = (Arc::clone(&session.pinged), self.clone());
+        tokio::spawn(async move {
+            tokio::time::sleep(wait).await;
+            let lost = pinged
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&key)
+                .is_some();
+            if lost {
+                mesh.update(|_| {
+                    vec![Event::Unanswered {
+                        request_id: tag,
+                        from: num,
+                    }]
+                });
+            }
+        });
         Ok(tag)
     }
 

@@ -189,6 +189,12 @@ pub enum Event {
         text: String,
         at: u32,
     },
+    /// A request to a node given up on, as long as the radio expects its
+    /// answer to take gone by with none: by its id, and the node asked.
+    Unanswered {
+        request_id: u32,
+        from: u32,
+    },
 }
 
 /// A copy of a packet a MeshCore radio heard, raw: what names it whatever

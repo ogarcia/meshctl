@@ -3420,6 +3420,16 @@ impl Radios {
                         })
                     }
                     Ok(mesh::Event::Reply(reply)) => keep_reply(&store, &changes, id, &reply).await,
+                    Ok(mesh::Event::Unanswered { request_id, from }) => {
+                        match store.unanswered_request(id, request_id, from).await {
+                            Ok(Some(request)) => {
+                                let _ = changes.send(Change::Request(id, request));
+                                Ok(())
+                            }
+                            Ok(None) => Ok(()),
+                            Err(err) => Err(err),
+                        }
+                    }
                     Ok(mesh::Event::RawHeard(heard)) => {
                         keep_raw(&store, &changes, id, &mesh, heard).await
                     }

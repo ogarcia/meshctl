@@ -267,6 +267,30 @@ impl Store {
         }
     }
 
+    /// Gives up on a request a node did not answer in time, by the id it
+    /// went with: none if it is not waited for any longer.
+    pub async fn unanswered_request(
+        &self,
+        radio: RadioId,
+        request_id: u32,
+        from: u32,
+    ) -> Result<Option<Request>> {
+        let row: Option<RequestRow> = sqlx::query_as(
+            "UPDATE request SET status = 'failed', error = 'TIMEOUT'
+            WHERE radio_id = ? AND packet_id = ? AND node = ? AND status = 'pending'
+            RETURNING id, node, kind, channel, status, error, at, answered_at, answer, reply",
+        )
+        .bind(radio)
+        .bind(i64::from(request_id))
+        .bind(i64::from(from))
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(row) => Ok(Some(self.request_of(row).await?)),
+            None => Ok(None),
+        }
+    }
+
     /// Each node's latest answer to a regions request through a radio, and
     /// when it came.
     pub async fn latest_regions(&self, radio: RadioId) -> Result<Vec<(u32, RequestReply, i64)>> {
@@ -517,6 +541,37 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_ping_not_back_is_given_up_on_only_while_waited_for() {
+        let store = store().await;
+        store
+            .add_request(1, 0x55, RequestKind::Ping, 0, 90, 10)
+            .await
+            .unwrap();
+        // Not from another node.
+        assert!(
+            store
+                .unanswered_request(1, 90, 0x66)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let lost = store
+            .unanswered_request(1, 90, 0x55)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(lost.status, RequestStatus::Failed);
+        assert_eq!(lost.error.as_deref(), Some("TIMEOUT"));
+        // Once only.
+        assert!(
+            store
+                .unanswered_request(1, 90, 0x55)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
     #[tokio::test]
     async fn each_nodes_latest_regions_are_gathered() {
         let store = store().await;
