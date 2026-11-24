@@ -1942,16 +1942,29 @@ pub(crate) fn PeerItem(peer: Peer) -> impl IntoView {
     let marker = match peer {
         Peer::Channel { .. } => view! { <span class="mark-channel">"#"</span> }.into_any(),
         Peer::Node { node } => {
+            let i18n = use_i18n();
             let hops = move || live.nodes.with(|n| n.get(&node).and_then(|n| n.hops_away));
-            view! {
-                <span class=move || match hops() {
-                    Some(0) => "mark-node direct",
-                    Some(1..=2) => "mark-node near",
-                    Some(3..=4) => "mark-node mid",
-                    _ => "mark-node far",
-                }></span>
-            }
-            .into_any()
+            // MeshCore's hops are the way the radio keeps to the node, not how
+            // far it heard it: what matters is whether it has one, as what is
+            // sent floods to find one when it does not.
+            let meshcore = move || live.selected_kind() == Some(RadioKind::Meshcore);
+            let class = move || match (meshcore(), hops()) {
+                (_, Some(0)) => "mark-node direct",
+                (true, Some(_)) => "mark-node routed",
+                (true, None) => "mark-node no-route",
+                (false, Some(1..=2)) => "mark-node near",
+                (false, Some(3..=4)) => "mark-node mid",
+                (false, _) => "mark-node far",
+            };
+            let title = move || {
+                meshcore().then(|| match hops() {
+                    Some(0) => t_string!(i18n, mark_direct).to_owned(),
+                    Some(1) => t_string!(i18n, mark_routed_one).to_owned(),
+                    Some(hops) => t_string!(i18n, mark_routed).replace("{n}", &hops.to_string()),
+                    None => t_string!(i18n, mark_no_route).to_owned(),
+                })
+            };
+            view! { <span class=class title=title></span> }.into_any()
         }
     };
     let label = move || {

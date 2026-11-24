@@ -479,6 +479,10 @@
       .mark-node.direct { background: var(--mc-node-direct); }
       .mark-node.near { background: var(--mc-node-near); }
       .mark-node.mid { background: var(--mc-node-mid); }
+      /* MeshCore's: a way kept to it, of however many hops, in the text's
+         dim colour; none, hollow, as what is sent floods to find one. */
+      .mark-node.routed { background: var(--mc-muted); }
+      .mark-node.no-route { background: transparent; box-shadow: inset 0 0 0 1.5px var(--mc-muted); }
 
       .avatar {
         flex: none;
