@@ -40,6 +40,7 @@ fn kind_name(kind: RequestKind) -> &'static str {
         RequestKind::AccessList => "access_list",
         RequestKind::Ping => "ping",
         RequestKind::Route => "route",
+        RequestKind::Series => "series",
     }
 }
 
@@ -58,6 +59,7 @@ fn kind_from(name: &str) -> RequestKind {
         "access_list" => RequestKind::AccessList,
         "ping" => RequestKind::Ping,
         "route" => RequestKind::Route,
+        "series" => RequestKind::Series,
         _ => RequestKind::NodeInfo,
     }
 }
@@ -79,7 +81,8 @@ fn port_of(kind: RequestKind) -> Option<PortNum> {
         | RequestKind::Owner
         | RequestKind::AccessList
         | RequestKind::Ping
-        | RequestKind::Route => return None,
+        | RequestKind::Route
+        | RequestKind::Series => return None,
     })
 }
 

@@ -113,6 +113,13 @@ fn NodePage(num: u32) -> impl IntoView {
     let is_own = Memo::new(move |_| own(live, num));
     // The page is drawn again for another radio, and so is read once.
     let meshcore = untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore);
+    // A MeshCore sensor keeps its readings over time.
+    let senses = meshcore
+        && untrack(|| {
+            live.nodes
+                .with(|nodes| nodes.get(&num).and_then(|n| n.role.clone()))
+        })
+        .is_some_and(|role| role == "SENSOR");
     // A MeshCore repeater or room says which regions it repeats on.
     let serves = meshcore
         && untrack(|| {
@@ -142,6 +149,7 @@ fn NodePage(num: u32) -> impl IntoView {
                     }}
                     {serves.then(|| view! { <RemoteStatus /> })}
                     <RemoteTelemetry />
+                    {senses.then(|| view! { <RemoteSeries /> })}
                     {serves.then(|| view! { <RemoteNeighbors /> })}
                 </div>
                 <div class="node-column">
@@ -366,6 +374,7 @@ fn meshcore_kind(kind: RequestKind) -> bool {
             | RequestKind::AccessList
             | RequestKind::Ping
             | RequestKind::Route
+            | RequestKind::Series
     )
 }
 
@@ -2680,6 +2689,11 @@ fn reply_summary(
             snr_there,
             snr_back,
         } => format!("{round_trip_ms} ms · ↑ {snr_there:.1} dB · ↓ {snr_back:.1} dB"),
+        RequestReply::Series { readings, .. } => readings
+            .iter()
+            .map(|r| series_words(i18n, r))
+            .collect::<Vec<_>>()
+            .join(" · "),
         RequestReply::Route { there, back } => t_string!(i18n, route_found)
             .replace("{there}", &there.len().to_string())
             .replace("{back}", &back.len().to_string()),
@@ -2775,53 +2789,83 @@ fn last_reply(live: Live, num: u32, kind: RequestKind) -> Option<(meshctl_api::R
 
 /// A sensor's reading, in words: what, how much, and of which sensor when
 /// not the node's own.
-fn reading_words(i18n: I18nContext<Locale>, reading: &meshctl_api::SensorReading) -> String {
-    let value = |decimals: usize| {
-        reading
-            .values
-            .first()
-            .map_or_else(String::new, |v| format!("{v:.decimals$}"))
+/// What a kind of reading is called, its unit and how many decimals it is
+/// told with; none for a place or a kind not known.
+fn measure(i18n: I18nContext<Locale>, kind: &str) -> Option<(&'static str, &'static str, usize)> {
+    Some(match kind {
+        "voltage" => (t_string!(i18n, reading_voltage), "V", 2),
+        "temperature" => (t_string!(i18n, reading_temperature), "°C", 1),
+        "humidity" => (t_string!(i18n, reading_humidity), "%", 0),
+        "pressure" => (t_string!(i18n, reading_pressure), "hPa", 1),
+        "current" => (t_string!(i18n, reading_current), "A", 3),
+        "power" => (t_string!(i18n, reading_power), "W", 0),
+        "illuminance" => (t_string!(i18n, reading_illuminance), "lux", 0),
+        "altitude" => (t_string!(i18n, reading_altitude), "m", 0),
+        "percentage" => (t_string!(i18n, reading_percentage), "%", 0),
+        "energy" => (t_string!(i18n, reading_energy), "kWh", 3),
+        "distance" => (t_string!(i18n, reading_distance), "m", 3),
+        _ => return None,
+    })
+}
+
+/// A reading's name, and its sensor's when not the node's own.
+fn reading_name(i18n: I18nContext<Locale>, kind: &str, channel: u32) -> String {
+    let name = match measure(i18n, kind) {
+        Some((name, _, _)) => name.to_owned(),
+        None if kind == "place" => t_string!(i18n, reading_place).to_owned(),
+        None => kind.to_owned(),
     };
-    let words = match reading.kind.as_str() {
-        "voltage" => format!("{} {} V", t_string!(i18n, reading_voltage), value(2)),
-        "temperature" => format!("{} {} °C", t_string!(i18n, reading_temperature), value(1)),
-        "humidity" => format!("{} {} %", t_string!(i18n, reading_humidity), value(0)),
-        "pressure" => format!("{} {} hPa", t_string!(i18n, reading_pressure), value(1)),
-        "current" => format!("{} {} A", t_string!(i18n, reading_current), value(3)),
-        "power" => format!("{} {} W", t_string!(i18n, reading_power), value(0)),
-        "illuminance" => format!("{} {} lux", t_string!(i18n, reading_illuminance), value(0)),
-        "altitude" => format!("{} {} m", t_string!(i18n, reading_altitude), value(0)),
-        "percentage" => format!("{} {} %", t_string!(i18n, reading_percentage), value(0)),
-        "energy" => format!("{} {} kWh", t_string!(i18n, reading_energy), value(3)),
-        "distance" => format!("{} {} m", t_string!(i18n, reading_distance), value(3)),
-        "place" => {
-            let v = &reading.values;
-            format!(
-                "{} {:.5}, {:.5}",
-                t_string!(i18n, reading_place),
-                v.first().copied().unwrap_or_default(),
-                v.get(1).copied().unwrap_or_default()
-            )
-        }
-        other => format!(
-            "{} {}",
-            other,
-            reading
-                .values
-                .iter()
-                .map(|v| format!("{v}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    };
-    if reading.channel == 1 {
-        words
+    if channel == 1 {
+        name
     } else {
         format!(
-            "{words} ({})",
-            t_string!(i18n, reading_sensor).replace("{n}", &reading.channel.to_string())
+            "{name} ({})",
+            t_string!(i18n, reading_sensor).replace("{n}", &channel.to_string())
         )
     }
+}
+
+/// A value of a kind of reading with its unit, as many decimals as it is
+/// told with.
+fn reading_value(i18n: I18nContext<Locale>, kind: &str, value: f64) -> String {
+    match measure(i18n, kind) {
+        Some((_, unit, decimals)) => format!("{value:.decimals$} {unit}"),
+        None => format!("{value}"),
+    }
+}
+
+/// What a sensor kept of a reading, in words: its name, from its lowest to
+/// its highest, and its mean.
+fn series_words(i18n: I18nContext<Locale>, reading: &meshctl_api::SeriesReading) -> String {
+    format!(
+        "{} {} – {} ({} {})",
+        reading_name(i18n, &reading.kind, reading.channel),
+        reading_value(i18n, &reading.kind, reading.min),
+        reading_value(i18n, &reading.kind, reading.max),
+        t_string!(i18n, series_mean).to_lowercase(),
+        reading_value(i18n, &reading.kind, reading.mean),
+    )
+}
+
+fn reading_words(i18n: I18nContext<Locale>, reading: &meshctl_api::SensorReading) -> String {
+    let name = reading_name(i18n, &reading.kind, reading.channel);
+    let values = &reading.values;
+    let value = match reading.kind.as_str() {
+        "place" => format!(
+            "{:.5}, {:.5}",
+            values.first().copied().unwrap_or_default(),
+            values.get(1).copied().unwrap_or_default()
+        ),
+        kind if measure(i18n, kind).is_some() => values
+            .first()
+            .map_or_else(String::new, |v| reading_value(i18n, kind, *v)),
+        _ => values
+            .iter()
+            .map(|v| format!("{v}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    };
+    format!("{name} {value}")
 }
 
 /// How a MeshCore repeater or room says it is doing, asked of it.
@@ -2912,6 +2956,154 @@ fn RemoteTelemetry() -> impl IntoView {
                 asked=Some(Asked::Request(RequestKind::Telemetry))
             >
                 {body}
+            </Section>
+        }
+    }
+}
+
+/// How far back a sensor is asked what it kept: an hour, a day, a week.
+const SERIES_PERIODS: [u32; 3] = [3600, 24 * 3600, 7 * 24 * 3600];
+
+/// What a MeshCore sensor kept of its readings over a time, asked of it: the
+/// lowest, the mean and the highest of each, over the last hour, day or
+/// week, picked before asking.
+#[component]
+fn RemoteSeries() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let period = RwSignal::new(SERIES_PERIODS[1]);
+    let last = move || last_reply(live, asking.num, RequestKind::Series);
+    let pending = move || {
+        live.requests.with(|requests| {
+            requests.iter().any(|r| {
+                r.node == asking.num
+                    && r.kind == RequestKind::Series
+                    && r.status == RequestStatus::Pending
+            })
+        })
+    };
+    let busy = move || pending() || live.logging_in_to(asking.num) || !connected(live);
+    // When the latest one asked that ended came to nothing, if it did.
+    let lost_at = move || {
+        live.requests.with(|requests| {
+            requests
+                .iter()
+                .filter(|r| {
+                    r.node == asking.num
+                        && r.kind == RequestKind::Series
+                        && r.status != RequestStatus::Pending
+                })
+                .max_by_key(|r| r.id)
+                .filter(|r| r.status == RequestStatus::Failed)
+                .map(|r| r.answered_at.unwrap_or(r.at))
+        })
+    };
+    let lost = move || lost_at().is_some();
+    let periods = move || -> Vec<crate::preferences::Choice> {
+        SERIES_PERIODS
+            .into_iter()
+            .map(|seconds| {
+                let label = move || match seconds {
+                    3600 => t_string!(i18n, series_hour).to_owned(),
+                    86_400 => t_string!(i18n, series_day).to_owned(),
+                    _ => t_string!(i18n, series_week).to_owned(),
+                };
+                (
+                    Signal::derive(move || period.get() == seconds),
+                    Box::new(move || period.set(seconds)) as Box<dyn Fn() + Send + Sync>,
+                    Signal::derive(label),
+                )
+            })
+            .collect()
+    };
+    let over = move |seconds: u32| match seconds {
+        3600 => t_string!(i18n, series_over_hour).to_owned(),
+        86_400 => t_string!(i18n, series_over_day).to_owned(),
+        604_800 => t_string!(i18n, series_over_week).to_owned(),
+        other => t_string!(i18n, series_over).replace("{n}", &other.to_string()),
+    };
+    // Asked anew: the last one's figures dashed out meanwhile, under the
+    // time now asked, as like ones coming would seem none had.
+    let body = move || {
+        let Some((
+            meshctl_api::RequestReply::Series {
+                seconds, readings, ..
+            },
+            _,
+        )) = last()
+        else {
+            return view! { <p class="nothing">{t!(i18n, series_none)}</p> }.into_any();
+        };
+        let lost = lost();
+        let dashed = pending() || live.logging_in_to(asking.num) || lost;
+        let seconds = if dashed { period.get() } else { seconds };
+        let shown = move |text: String| {
+            if dashed {
+                view! { <span class="dim">"—"</span> }.into_any()
+            } else {
+                text.into_any()
+            }
+        };
+        if readings.is_empty() && !dashed {
+            return view! { <p class="nothing">{over(seconds)} ": " {t!(i18n, series_empty)}</p> }
+                .into_any();
+        }
+        let rows = readings
+            .into_iter()
+            .map(|r| {
+                view! {
+                    <tr>
+                        <th scope="row">{reading_name(i18n, &r.kind, r.channel)}</th>
+                        <td>{shown(reading_value(i18n, &r.kind, r.min))}</td>
+                        <td>{shown(reading_value(i18n, &r.kind, r.mean))}</td>
+                        <td>{shown(reading_value(i18n, &r.kind, r.max))}</td>
+                    </tr>
+                }
+            })
+            .collect_view();
+        view! {
+            <table class="series">
+                <caption>{over(seconds)}</caption>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th scope="col">{t!(i18n, series_min)}</th>
+                        <th scope="col">{t!(i18n, series_mean)}</th>
+                        <th scope="col">{t!(i18n, series_max)}</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </table>
+        }
+        .into_any()
+    };
+    move || {
+        let at = lost_at().or_else(|| last().map(|(_, at)| at));
+        view! {
+            <Section title=t!(i18n, remote_series).into_any() at class="series-section">
+                <div class="series-ask">
+                    {crate::preferences::pills(periods())}
+                    <button type="button" class="ask" disabled=busy on:click=move |_| {
+                        live.ask_series(asking.num, period.get_untracked());
+                    }>
+                        {move || {
+                            if live.logging_in_to(asking.num) {
+                                t!(i18n, room_logging_in).into_any()
+                            } else if pending() {
+                                t!(i18n, node_asking).into_any()
+                            } else {
+                                t!(i18n, node_ask_button).into_any()
+                            }
+                        }}
+                    </button>
+                </div>
+                {body}
+                {move || {
+                    (lost() && !pending())
+                        .then(|| view! { <p class="hint dim">{t!(i18n, series_lost)}</p> })
+                }}
+                <p class="hint dim">{t!(i18n, series_hint)}</p>
             </Section>
         }
     }
@@ -3521,6 +3713,7 @@ fn KindLabel(kind: RequestKind) -> impl IntoView {
         RequestKind::AccessList => t!(i18n, ask_access_list).into_any(),
         RequestKind::Ping => t!(i18n, ask_ping).into_any(),
         RequestKind::Route => t!(i18n, ask_route).into_any(),
+        RequestKind::Series => t!(i18n, ask_series).into_any(),
     }
 }
 

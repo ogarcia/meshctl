@@ -174,6 +174,10 @@ const TRACEROUTE_TIMEOUT: i64 = 120;
 /// How often traceroutes waited for too long are looked for.
 const TRACEROUTE_EXPIRY_TICK: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// How far back a sensor's kept readings are asked for when not said: a
+/// day.
+const SERIES_SECONDS: u32 = 24 * 3600;
+
 /// How long a request is waited for before it is given up on.
 const REQUEST_TIMEOUT: i64 = 120;
 
@@ -668,6 +672,24 @@ fn reply_of(mesh: &Mesh, answer: &mesh::Answer) -> meshctl_api::RequestReply {
                     channel: u32::from(r.channel),
                     kind: lpp_name(r.kind),
                     values: r.values.clone(),
+                })
+                .collect(),
+        },
+        mesh::Answer::Series {
+            seconds,
+            clock,
+            readings,
+        } => RequestReply::Series {
+            seconds: *seconds,
+            clock: (*clock > 0).then_some(i64::from(*clock)),
+            readings: readings
+                .iter()
+                .map(|r| meshctl_api::SeriesReading {
+                    channel: u32::from(r.channel),
+                    kind: lpp_name(r.kind),
+                    min: r.min,
+                    max: r.max,
+                    mean: r.mean,
                 })
                 .collect(),
         },
@@ -2008,6 +2030,7 @@ impl Radios {
                 | RequestKind::AccessList
                 | RequestKind::Ping
                 | RequestKind::Route
+                | RequestKind::Series
         );
         if meshcore_kind && !meshcore
             || meshcore && !meshcore_kind && new.kind != RequestKind::Neighbors
@@ -2029,6 +2052,7 @@ impl Radios {
             let logged = match new.kind {
                 RequestKind::Status => Some(request::STATUS),
                 RequestKind::Telemetry => Some(request::TELEMETRY),
+                RequestKind::Series => Some(request::SERIES),
                 RequestKind::Neighbors => Some(request::NEIGHBOURS),
                 RequestKind::Owner => Some(request::OWNER),
                 RequestKind::AccessList => Some(request::ACCESS_LIST),
@@ -2067,6 +2091,10 @@ impl Radios {
                 (Some(asked), _, _) => asked,
                 (None, RequestKind::Ping, _) => mesh.meshcore_ping(new.node).await,
                 (None, RequestKind::Route, _) => mesh.meshcore_discover(new.node).await,
+                (None, RequestKind::Series, _) => {
+                    mesh.meshcore_series(new.node, new.seconds.unwrap_or(SERIES_SECONDS))
+                        .await
+                }
                 (None, _, Some(what)) => mesh.meshcore_request(new.node, what).await,
                 (None, _, None) => mesh.meshcore_ask(new.node, anonymous::REGIONS).await,
             };
@@ -2105,7 +2133,8 @@ impl Radios {
             | RequestKind::Owner
             | RequestKind::AccessList
             | RequestKind::Ping
-            | RequestKind::Route => return Err(AskFailure::Unsupported),
+            | RequestKind::Route
+            | RequestKind::Series => return Err(AskFailure::Unsupported),
         };
         let packet_id =
             mesh.send_request(new.node, new.channel, ask)
@@ -2925,6 +2954,7 @@ impl Radios {
                         node,
                         kind: RequestKind::Regions,
                         channel: 0,
+                        seconds: None,
                     },
                 )
                 .await;

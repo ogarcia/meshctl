@@ -124,6 +124,48 @@ fn be(bytes: &[u8], signed: bool) -> f64 {
     value
 }
 
+/// What a sensor kept of one of its readings over a time: the lowest, the
+/// highest and the mean of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeriesReading {
+    pub channel: u8,
+    pub kind: u8,
+    pub min: f64,
+    pub max: f64,
+    pub mean: f64,
+}
+
+/// A sensor's answer to what it kept over a time: its clock as it answered,
+/// then each reading's channel and LPP type and its lowest, highest and
+/// mean, each as many bytes as one of its type takes, up to the first of a
+/// type not known. `None` for one too short to hold the clock.
+pub fn series(data: &[u8]) -> Option<(u32, Vec<SeriesReading>)> {
+    let clock = u32::from_le_bytes(data.get(..4)?.try_into().ok()?);
+    let mut readings = Vec::new();
+    let mut at = 4;
+    while let (Some(&channel), Some(&kind)) = (data.get(at), data.get(at + 1)) {
+        at += 2;
+        // A value of its type as one number, however many it has.
+        let Some((size, count, divisor, signed)) = lpp_type(kind) else {
+            break;
+        };
+        let size = size * count;
+        let Some(bytes) = data.get(at..at + size * 3) else {
+            break;
+        };
+        at += size * 3;
+        let value = |i: usize| be(&bytes[i * size..(i + 1) * size], signed) / divisor;
+        readings.push(SeriesReading {
+            channel,
+            kind,
+            min: value(0),
+            max: value(1),
+            mean: value(2),
+        });
+    }
+    Some((clock, readings))
+}
+
 /// A telemetry answer, in Cayenne LPP: each reading, up to the first of a
 /// type not known, where what follows cannot be told apart.
 pub fn telemetry(data: &[u8]) -> Vec<Reading> {
@@ -255,6 +297,41 @@ mod tests {
         assert_eq!((status.posted, status.pushed), (Some(12), Some(30)));
         assert_eq!(status.receive_airtime, None);
         assert_eq!(super::status(&room[..40], true), None);
+    }
+
+    #[test]
+    fn a_series_reads_with_its_clock() {
+        // Its clock; its battery between 3.70 and 4.12 V, 3.95 on average;
+        // a sensor's temperature between -3.5 and 21.5 °C, 8.0 on average;
+        // then a type not known.
+        let mut data = 1_795_000_000u32.to_le_bytes().to_vec();
+        data.extend([1, 116, 0x01, 0x72, 0x01, 0x9c, 0x01, 0x8b]);
+        data.extend([2, 103, 0xff, 0xdd, 0x00, 0xd7, 0x00, 0x50]);
+        data.extend([3, 250, 1, 2]);
+        let (clock, readings) = series(&data).unwrap();
+        assert_eq!(clock, 1_795_000_000);
+        assert_eq!(
+            readings,
+            [
+                SeriesReading {
+                    channel: 1,
+                    kind: 116,
+                    min: 3.70,
+                    max: 4.12,
+                    mean: 3.95,
+                },
+                SeriesReading {
+                    channel: 2,
+                    kind: 103,
+                    min: -3.5,
+                    max: 21.5,
+                    mean: 8.0,
+                },
+            ]
+        );
+        // Nothing kept: its clock alone.
+        assert_eq!(series(&data[..4]), Some((1_795_000_000, Vec::new())));
+        assert_eq!(series(&data[..3]), None);
     }
 
     #[test]

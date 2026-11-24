@@ -643,12 +643,14 @@ struct Asked {
 type Pinged = (u32, std::time::Instant, Option<Vec<Vec<u8>>>);
 
 /// What a request asks: anonymously, or of a node logged in to, as the
-/// firmware numbers each; or the way to a node and back.
+/// firmware numbers each; the way to a node and back; or what a sensor kept
+/// over so many seconds back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Asking {
     Anonymous(u8),
     LoggedIn(u8),
     Route,
+    Series(u32),
 }
 
 /// The open session with a radio: what sending needs.
@@ -952,6 +954,9 @@ pub mod request {
     pub const STATUS: u8 = 0x01;
     /// What its sensors read; a guest, only its own.
     pub const TELEMETRY: u8 = 0x03;
+    /// What a sensor kept of its readings over a time: the lowest, the
+    /// highest and the mean of each. One logged in to read, at least.
+    pub const SERIES: u8 = 0x04;
     /// Who may log in to it, and as what: only its admin may ask.
     pub const ACCESS_LIST: u8 = 0x05;
     /// The nodes it hears straight.
@@ -1023,6 +1028,14 @@ fn answer_of(asked: Asking, data: &[u8], room: bool) -> Option<crate::mesh::Answ
                 .map(|entry| (num_of(&entry[..6]), entry[6]))
                 .collect();
             return Some(Answer::AccessList(listed));
+        }
+        Asking::Series(seconds) => {
+            let (clock, readings) = answers::series(data)?;
+            return Some(Answer::Series {
+                seconds,
+                clock,
+                readings,
+            });
         }
         // Its answer comes as no binary one.
         Asking::LoggedIn(_) | Asking::Route => return None,
@@ -1383,6 +1396,27 @@ impl Mesh {
             None => Vec::new(),
         });
         Ok(())
+    }
+
+    /// Asks a sensor the radio logged in to what it kept of its readings
+    /// over the last `seconds`: the lowest, the highest and the mean of each.
+    /// The id it goes by, which its answer comes as a [`Event::Reply`] with.
+    pub async fn meshcore_series(&self, num: u32, seconds: u32) -> Result<u32, AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        // From so long ago until now, and two bytes the firmware keeps for
+        // what it may take besides, none yet.
+        let mut data = vec![request::SERIES];
+        data.extend_from_slice(&seconds.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&[0, 0]);
+        self.send_asked(
+            &session,
+            num,
+            Asking::Series(seconds),
+            command::send_binary_request(&key, &data),
+        )
+        .await
     }
 
     /// Asks a contact the way to it and back, flooded: found, they come as

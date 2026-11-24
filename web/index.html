@@ -1672,6 +1672,17 @@
       /* What a MeshCore node said, asked of it: its readings, one a line; a
          password to log in to it with; what went wrong. */
       .readings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+      /* What a sensor kept over a time: the period picked and asked for over
+         it, then each reading by its name, its lowest, mean and highest. */
+      .series-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+      .series-ask .segmented { flex: 1 1 200px; max-width: 300px; }
+      .series-ask .ask { margin-left: auto; }
+      .series { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .series caption { margin-bottom: 6px; color: var(--mc-muted); font-size: 12px; text-align: left; }
+      .series th, .series td { padding: 4px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+      .series thead th { color: var(--mc-muted); font-weight: 600; font-size: 12px; }
+      .series tbody th { text-align: left; font-weight: 500; }
+      .series tbody tr + tr { border-top: 1px solid var(--mc-border); }
       .access-form { display: flex; gap: 8px; margin: 10px 0 6px; }
       .access-form input { flex: 1; min-width: 0; }
       /* A node's console: what was sent and answered, the latest last, in

@@ -761,6 +761,15 @@ impl Live {
 
     /// Asks a node for something, on a channel of the selected radio.
     pub fn ask(self, node: u32, kind: RequestKind, channel: u32) {
+        self.ask_over(node, kind, channel, None);
+    }
+
+    /// Asks a MeshCore sensor what it kept over the last `seconds`.
+    pub fn ask_series(self, node: u32, seconds: u32) {
+        self.ask_over(node, RequestKind::Series, 0, Some(seconds));
+    }
+
+    fn ask_over(self, node: u32, kind: RequestKind, channel: u32, seconds: Option<u32>) {
         let Some(radio) = self.selected.get_untracked() else {
             return;
         };
@@ -770,6 +779,7 @@ impl Live {
                 node,
                 kind,
                 channel,
+                seconds,
             };
             let done = daemon::ask(radio, &new).await;
             // A login it went first with is over, either way.

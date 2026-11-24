@@ -1431,6 +1431,11 @@ pub enum RequestKind {
     /// What a MeshCore node's sensors read: its own to a guest, all to its
     /// admin. Logged in to, as for `status`.
     Telemetry,
+    /// What a MeshCore sensor kept of its readings over a time: the lowest,
+    /// the highest and the mean of each, over the `seconds` asked. Logged in
+    /// to, as for `status`, to read at least. Its own firmware keeps its
+    /// battery's voltage alone; others may keep more.
+    Series,
     /// Who runs a MeshCore node: its name and what its owner says, and its
     /// firmware when logged in to. Not logged in to since the radio
     /// connected, it goes with no login where its path is known, and comes
@@ -1463,7 +1468,8 @@ impl RequestKind {
             | Self::Owner
             | Self::AccessList
             | Self::Ping
-            | Self::Route => None,
+            | Self::Route
+            | Self::Series => None,
             Self::Position => Some(Pace::Position),
             Self::DeviceTelemetry
             | Self::EnvironmentTelemetry
@@ -1543,6 +1549,10 @@ pub struct NewRequest {
     /// channel too, and answers on it.
     #[serde(default)]
     pub channel: u32,
+    /// For `series`: how far back, in seconds; a day if not said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(example = 86_400))]
+    pub seconds: Option<u32>,
 }
 
 pub type RequestId = i64;
@@ -1614,6 +1624,14 @@ pub enum RequestReply {
         /// The SNR the radio heard it back at, in dB.
         snr_back: f32,
     },
+    /// What a MeshCore sensor kept of its readings over the `seconds` asked:
+    /// the lowest, the highest and the mean of each; and its clock as it
+    /// answered, in seconds since the epoch.
+    Series {
+        seconds: u32,
+        clock: Option<i64>,
+        readings: Vec<SeriesReading>,
+    },
     /// The way to a MeshCore node and back, as a path discovery found them:
     /// each hop by its hash, with the nodes it may be and the one it most
     /// likely is; there from the radio's side, back from the node's.
@@ -1674,6 +1692,20 @@ pub struct SensorReading {
     /// One value, or three for a place, an acceleration, a rotation or a
     /// colour.
     pub values: Vec<f64>,
+}
+
+/// What a sensor kept of one of its readings over a time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SeriesReading {
+    /// 1 the node's own; the rest, its sensors.
+    pub channel: u32,
+    /// What it reads, as a [`SensorReading`]'s kind.
+    #[cfg_attr(feature = "openapi", schema(example = "voltage"))]
+    pub kind: String,
+    pub min: f64,
+    pub max: f64,
+    pub mean: f64,
 }
 
 /// A node another hears straight.

@@ -570,6 +570,30 @@ fn node_telemetry(admin: bool) -> Vec<u8> {
     data
 }
 
+/// What a sensor kept over the last `seconds`: its clock, then its battery
+/// and a sensor's temperature, each its lowest, highest and mean, wider
+/// apart the longer back.
+fn node_series(clock: u32, seconds: u32) -> Vec<u8> {
+    let spread = u16::try_from((seconds / 3600).clamp(1, 168)).unwrap_or(1);
+    let mut data = clock.to_le_bytes().to_vec();
+    let volts = 400u16;
+    data.extend([1, 116]);
+    for value in [
+        volts - spread.min(30),
+        volts + spread.min(12),
+        volts - spread.min(30) / 3,
+    ] {
+        data.extend(value.to_be_bytes());
+    }
+    let tenths = 160i16;
+    let swing = i16::try_from(spread.min(120)).unwrap_or(0);
+    data.extend([2, 103]);
+    for value in [tenths - swing, tenths + swing, tenths + swing / 4] {
+        data.extend(value.to_be_bytes());
+    }
+    data
+}
+
 /// The nodes a repeater or a room hears straight: the radio's other
 /// contacts but itself, each by the first four bytes of its key, the
 /// strongest first.
@@ -795,10 +819,10 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             sent.extend(tag);
             sent.extend(4_000u32.to_le_bytes());
             let room = to.name == "Sala Coruña";
-            // A repeater takes `admin` as its admin's password, and no
-            // password as a guest's, as one with no guest password set does;
-            // to any other it says nothing.
-            let repeater = to.kind == 2;
+            // A repeater or a sensor takes `admin` as its admin's password,
+            // and no password as a guest's, as one with no guest password set
+            // does; to any other it says nothing.
+            let repeater = matches!(to.kind, 2 | 4);
             let acl = match password.as_str() {
                 "admin" if room || repeater => Some(3),
                 "sala" if room => Some(2),
@@ -956,6 +980,11 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                 (Some(_), 0x01) => Some(node_status(&to, to.kind == 3)),
                 (Some(acl), 0x03) => Some(node_telemetry(acl == 3)),
                 (Some(_), 0x06) => Some(node_neighbours(&radio, &to)),
+                // A sensor's kept readings, over the seconds asked.
+                (Some(_), 0x04) if to.kind == 4 => {
+                    let seconds = u32_in(data, 33).unwrap_or(86_400);
+                    Some(node_series(radio.clock(), seconds))
+                }
                 (Some(_), 0x07) => {
                     Some(format!("v1.18.0-fake\n{}\nmeshctl, A Coruña", to.name).into_bytes())
                 }

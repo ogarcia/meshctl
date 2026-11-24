@@ -351,6 +351,14 @@ pub enum Answer {
         snr_there: f32,
         snr_back: f32,
     },
+    /// What a MeshCore sensor kept of its readings over the `seconds` asked:
+    /// its clock as it answered, and the lowest, the highest and the mean
+    /// of each.
+    Series {
+        seconds: u32,
+        clock: u32,
+        readings: Vec<crate::meshcore::answers::SeriesReading>,
+    },
     /// The way to a MeshCore node and back, as a path discovery found them:
     /// each hop by its hash, from the radio's side there, from the node's
     /// back.
