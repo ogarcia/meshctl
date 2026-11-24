@@ -1127,7 +1127,8 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
         Some(view! { <div class="reactions">{chips} {more}</div> })
     };
     // With a mouse, what can be done with it, at its foot on the right, on
-    // hovering: answering it, reacting to it, forgetting it. By touch, its
+    // hovering: answering it, reacting to it, forgetting it; one at a time,
+    // any of the others closing the emojis to react with. By touch, its
     // menu instead.
     let actions = view! {
         <div class="answer" on:click=|ev| ev.stop_propagation()>
@@ -1145,7 +1146,10 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                                         title=move || t_string!(i18n, chat_resend)
                                         aria-label=move || t_string!(i18n, chat_resend)
                                         inner_html=RESEND
-                                        on:click=move |_| send_again(live, thread, sent_id)
+                                        on:click=move |_| {
+                                            thread.reacting.set(None);
+                                            send_again(live, thread, sent_id);
+                                        }
                                     ></button>
                                 }
                             })
@@ -1164,7 +1168,10 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                             title=move || t_string!(i18n, chat_resend)
                             aria-label=move || t_string!(i18n, chat_resend)
                             inner_html=RESEND
-                            on:click=move |_| resend(live, peer, again.clone(), answered, region.clone())
+                            on:click=move |_| {
+                                thread.reacting.set(None);
+                                resend(live, peer, again.clone(), answered, region.clone());
+                            }
                         ></button>
                     }
                     .into_any(),
@@ -1179,7 +1186,10 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                             title=move || t_string!(i18n, chat_reply)
                             aria-label=move || t_string!(i18n, chat_reply)
                             inner_html=REPLY
-                            on:click=move |_| reply_to(thread, packet)
+                            on:click=move |_| {
+                                thread.reacting.set(None);
+                                reply_to(thread, packet);
+                            }
                         ></button>
                     }
                     .into_any()
@@ -1209,7 +1219,14 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                 title=move || t_string!(i18n, chat_delete)
                 aria-label=move || t_string!(i18n, chat_delete)
                 inner_html=TRASH
-                on:click=move |_| forget(live, i18n, id)
+                on:click=move |_| {
+                    // Its question asked once the emojis are gone from the
+                    // screen, a frame drawn after: it holds the page still.
+                    thread.reacting.set(None);
+                    request_animation_frame(move || {
+                        request_animation_frame(move || forget(live, i18n, id));
+                    });
+                }
             ></button>
         </div>
     };
