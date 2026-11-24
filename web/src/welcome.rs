@@ -540,3 +540,109 @@ const CIRCLE_CHECK: &str =
 const ALERT: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/alert-triangle.svg");
 const LANGUAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/language.svg");
 const LOADER: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/loader-2.svg");
+
+const EYE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye.svg");
+const EYE_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye-off.svg");
+
+/// What meshctl shows when it asks for its access token: the whole screen,
+/// as the welcome, as nothing else can be read without it. The token typed,
+/// shown or not, kept in this browser once it goes in; and why the last one
+/// did not, when one was given.
+#[component]
+pub fn TokenScreen() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let value = RwSignal::new(String::new());
+    let shown = RwSignal::new(false);
+    let checking = RwSignal::new(false);
+    let unreachable = RwSignal::new(false);
+    // Tried here first, so that one refused says so in place: kept, and
+    // the interface opened, only once it goes in.
+    let submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let token = value.get_untracked().trim().to_owned();
+        if token.is_empty() || checking.get_untracked() {
+            return;
+        }
+        checking.set(true);
+        unreachable.set(false);
+        spawn_local(async move {
+            let taken = daemon::check_token(&token).await;
+            checking.try_set(false);
+            match taken {
+                Ok(true) => {
+                    daemon::set_token(&token);
+                    live.token_refused.set(false);
+                    live.daemon.set(crate::app::Daemon::Connecting);
+                }
+                Ok(false) => live.token_refused.set(true),
+                Err(_) => {
+                    unreachable.try_set(true);
+                }
+            }
+        });
+    };
+    view! {
+        <div class="welcome-screen">
+            <div class="welcome-top"></div>
+            <div class="welcome-body">
+                <form class="welcome-hello token-screen" on:submit=submit>
+                    <svg class="welcome-logo" viewBox="0 0 24 24" role="img" aria-label="meshctl">
+                        <circle cx="5" cy="12" r="2.5"></circle>
+                        <circle cx="19" cy="5" r="2.5"></circle>
+                        <circle cx="19" cy="19" r="2.5"></circle>
+                        <path d="M7.3 11 16.7 6M7.3 13l9.4 5"></path>
+                    </svg>
+                    <h1>{t!(i18n, token_title)}</h1>
+                    <p class="welcome-lead">{t!(i18n, token_needed)}</p>
+                    <div class="token-field">
+                        <input
+                            type=move || if shown.get() { "text" } else { "password" }
+                            name="token"
+                            autocomplete="current-password"
+                            autocapitalize="off"
+                            spellcheck="false"
+                            required=true
+                            placeholder=move || t_string!(i18n, token_placeholder)
+                            aria-label=move || t_string!(i18n, token_placeholder)
+                            prop:value=move || value.get()
+                            on:input=move |ev| {
+                                value.set(event_target_value(&ev));
+                                live.token_refused.set(false);
+                                unreachable.set(false);
+                            }
+                        />
+                        <button
+                            type="button"
+                            class="icon-button"
+                            title=move || {
+                                if shown.get() { t_string!(i18n, token_hide) } else { t_string!(i18n, token_show) }
+                            }
+                            aria-label=move || {
+                                if shown.get() { t_string!(i18n, token_hide) } else { t_string!(i18n, token_show) }
+                            }
+                            inner_html=move || if shown.get() { EYE_OFF } else { EYE }
+                            on:click=move |_| shown.update(|s| *s = !*s)
+                        ></button>
+                    </div>
+                    {move || {
+                        live.token_refused
+                            .get()
+                            .then(|| view! { <p class="problem" role="alert">{t!(i18n, token_wrong)}</p> })
+                    }}
+                    {move || {
+                        unreachable
+                            .get()
+                            .then(|| view! { <p class="problem" role="alert">{t!(i18n, token_unreachable)}</p> })
+                    }}
+                    // Held while it is tried, as it was: it takes a moment.
+                    <button type="submit" class="primary welcome-go" disabled=move || checking.get()>
+                        {t!(i18n, token_use)}
+                        <span class="icon" inner_html=ARROW_RIGHT></span>
+                    </button>
+                    <p class="welcome-small">{t!(i18n, token_hint)}</p>
+                </form>
+            </div>
+        </div>
+    }
+}

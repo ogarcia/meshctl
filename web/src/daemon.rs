@@ -71,6 +71,21 @@ fn with_token(request: RequestBuilder) -> RequestBuilder {
     }
 }
 
+/// Whether the daemon takes this token: asked of it before it is kept,
+/// with a call that needs one. Unreachable when it cannot be told.
+pub async fn check_token(token: &str) -> Result<bool, Failure> {
+    let response = Request::get(&url("/version"))
+        .header(TOKEN_HEADER, token)
+        .send()
+        .await
+        .map_err(|_| Failure::Unreachable)?;
+    match response.status() {
+        200..=299 => Ok(true),
+        401 => Ok(false),
+        _ => Err(Failure::Unreachable),
+    }
+}
+
 fn url(path: &str) -> String {
     format!("{API_V1}{path}")
 }

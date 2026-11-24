@@ -896,8 +896,6 @@
         font-size: 12px;
         text-align: center;
       }
-      .token { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-      .token p { margin: 0 auto 0 0; }
       .actions { text-align: right; }
       .actions button { margin-left: 6px; }
       .note { border-left: 3px solid var(--mc-warn); color: var(--mc-muted); margin: 0; }
@@ -3174,6 +3172,13 @@
       .welcome-lead { max-width: 440px; color: var(--mc-muted); font-size: 16px; }
       .welcome-hello .welcome-go { margin-top: 8px; }
       .welcome-small { max-width: 400px; color: var(--mc-muted); font-size: 13px; }
+
+      /* Its access token, asked for: the field as wide as the lead, with
+         the eye to show what is typed inside it, at its end. */
+      .token-screen .token-field { position: relative; width: 100%; max-width: 360px; margin-top: 8px; }
+      .token-screen .token-field input { width: 100%; min-height: 44px; padding-right: 48px; font-size: 16px; }
+      .token-screen .token-field .icon-button { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); }
+      .token-screen .problem { max-width: 360px; margin: 0; color: var(--mc-danger); }
 
       /* The radio: what it is, how it is reached, its address, its name. */
       .welcome-radio { display: flex; flex-direction: column; gap: 20px; }

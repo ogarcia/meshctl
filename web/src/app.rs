@@ -237,6 +237,8 @@ pub struct Live {
     pub pressed: RwSignal<Option<(u32, crate::node::ButtonId)>>,
     /// Why the last request or traceroute was not sent.
     pub ask_error: RwSignal<Option<Failure>>,
+    /// Whether the token given, typed or kept in this browser, was refused.
+    pub token_refused: RwSignal<bool>,
     /// The MeshCore nodes of the selected radio it logs in to now, as asked
     /// for something first: until when, by this browser's clock, in
     /// milliseconds, and how long in all.
@@ -308,6 +310,7 @@ impl Live {
             checks: RwSignal::new(Vec::new()),
             pressed: RwSignal::new(None),
             ask_error: RwSignal::new(None),
+            token_refused: RwSignal::new(false),
             logging_in: RwSignal::new(HashMap::new()),
             login_failed: RwSignal::new(HashMap::new()),
             ready: RwSignal::new(HashMap::new()),
@@ -1316,6 +1319,8 @@ fn follow(live: Live) {
         loop {
             match live.session().await {
                 Failure::Unauthorized => {
+                    // Refused, when one was given: not the one it asks.
+                    live.token_refused.set(daemon::token().is_some());
                     live.daemon.set(Daemon::NeedsToken);
                     // Until a token is given.
                     while live.daemon.get_untracked() == Daemon::NeedsToken {
@@ -1446,8 +1451,23 @@ fn Shell() -> impl IntoView {
                 && live.daemon.get() != Daemon::NeedsToken
                 && !live.page.get().is_meshctl())
     });
+    // Asked for its token, it too over the whole screen, as nothing else
+    // can be read without it.
+    let needs_token = Memo::new(move |_| live.daemon.get() == Daemon::NeedsToken);
+    // Not known yet whether there are radios: neither the interface nor the
+    // welcome, the one giving way to the other as soon as it is; unless the
+    // daemon cannot be reached, which the interface says.
+    let undecided = Memo::new(move |_| {
+        live.radios.with(Option::is_none)
+            && live.daemon.get() != Daemon::Unreachable
+            && !live.page.get().is_meshctl()
+    });
     move || {
-        if welcome.get() {
+        if needs_token.get() {
+            view! { <crate::welcome::TokenScreen /> }.into_any()
+        } else if undecided.get() {
+            view! { <div class="welcome-screen"></div> }.into_any()
+        } else if welcome.get() {
             view! { <crate::welcome::Welcome welcoming /> }.into_any()
         } else {
             view! { <Frame /> }.into_any()
@@ -1543,7 +1563,7 @@ fn Content() -> impl IntoView {
             live.radios.with(|r| r.as_ref().map(Vec::len)),
             live.page.get(),
         ) {
-            (Daemon::NeedsToken, _, _) => Shown::Token,
+            (Daemon::NeedsToken, _, _) => Shown::Nothing,
             (Daemon::Unreachable, None, _) => Shown::Down,
             (_, None, _) => Shown::Nothing,
             (_, _, Page::Preferences) => Shown::Page(Page::Preferences),
@@ -1555,7 +1575,6 @@ fn Content() -> impl IntoView {
         }
     });
     move || match shown.get() {
-        Shown::Token => view! { <TokenForm /> }.into_any(),
         Shown::Down => view! {
             <EmptyState
                 icon=crate::empty::SERVER_OFF
@@ -1582,7 +1601,6 @@ fn Content() -> impl IntoView {
 /// What [`Content`] shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shown {
-    Token,
     Down,
     Nothing,
     Page(Page),
@@ -2596,30 +2614,6 @@ pub fn LinkLabel(#[prop(into)] link: Signal<LinkState>) -> impl IntoView {
         LinkState::Syncing => t!(i18n, link_syncing).into_any(),
         LinkState::Connecting => t!(i18n, link_connecting).into_any(),
         LinkState::Disconnected => t!(i18n, link_radio_down).into_any(),
-    }
-}
-
-#[component]
-fn TokenForm() -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let value = RwSignal::new(String::new());
-    let submit = move |ev: leptos::ev::SubmitEvent| {
-        ev.prevent_default();
-        daemon::set_token(value.get_untracked().trim());
-        live.daemon.set(Daemon::Connecting);
-    };
-    view! {
-        <form class="token card" on:submit=submit>
-            <p>{t!(i18n, token_needed)}</p>
-            <input
-                type="password"
-                autocomplete="current-password"
-                prop:value=move || value.get()
-                on:input=move |ev| value.set(event_target_value(&ev))
-            />
-            <button type="submit">{t!(i18n, token_use)}</button>
-        </form>
     }
 }
 
