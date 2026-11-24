@@ -819,6 +819,7 @@
   "access_list_none": "Aún no se ha pedido quién puede entrar.",
   "console_title": "Consola",
   "console_hint": "Los comandos van a la consola del nodo, como en su CLI: ver, clock, get name, neighbors…",
+  "console_hint_own": "Los comandos van a la consola de la propia radio, como en su CLI: ver, board, get name, set name…",
   "console_send": "Enviar",
   "console_risky": "«{command}» puede dejar el nodo sin servicio o sin acceso. ¿Enviarlo?",
   "console_not_admin": "Solo su administrador puede usar la consola: entra con su contraseña.",

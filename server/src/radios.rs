@@ -1327,11 +1327,30 @@ impl Radios {
         node: u32,
         command: &str,
     ) -> Result<(), LoginFailure> {
-        let mesh = self.login_mesh(id, node)?;
         let command = command.trim();
         if command.is_empty() || command.len() > meshctl_core::radio::MAX_TEXT_BYTES {
             return Err(LoginFailure::Invalid);
         }
+        // The radio's own: its console, at once, with no login and nothing
+        // sent.
+        let mesh = self.mesh(id).ok_or(LoginFailure::NoSuchRadio)?;
+        let own = mesh.read(|state| state.local.as_ref().map(|l| l.num)) == Some(node);
+        if own && self.protocol(id) == Some(Protocol::Meshcore) {
+            if self.link(id) != LinkState::Ready {
+                return Err(LoginFailure::NotConnected);
+            }
+            return mesh
+                .meshcore_run(command)
+                .await
+                .map(|_| ())
+                .map_err(|error| match error {
+                    AdminError::NoAnswer | AdminError::NotConnected => LoginFailure::NotConnected,
+                    AdminError::Unsupported => LoginFailure::Refused("UNSUPPORTED".to_owned()),
+                    AdminError::Refused(why) => LoginFailure::Refused(why),
+                    _ => LoginFailure::NoLogin,
+                });
+        }
+        let mesh = self.login_mesh(id, node)?;
         if self.link(id) != LinkState::Ready {
             return Err(LoginFailure::NotConnected);
         }

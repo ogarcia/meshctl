@@ -103,6 +103,7 @@ pub mod command {
     const SEND_LOGIN: u8 = 0x1a;
     const SEND_BINARY_REQ: u8 = 0x32;
     const SEND_TRACE_PATH: u8 = 0x24;
+    const RUN_CLI_COMMAND: u8 = 0x42;
     const SET_FLOOD_SCOPE_KEY: u8 = 0x36;
     const SET_TUNING_PARAMS: u8 = 0x15;
     const GET_TUNING_PARAMS: u8 = 0x2b;
@@ -158,6 +159,14 @@ pub mod command {
         let mut payload = vec![SEND_TEXT, TEXT_PLAIN, 0];
         payload.extend_from_slice(&timestamp.to_le_bytes());
         payload.extend_from_slice(prefix);
+        payload.extend_from_slice(text.as_bytes());
+        payload
+    }
+
+    /// A command for the radio's own console, as its CLI takes them, from
+    /// firmware 14 on: answered with `CliReply`, at once, sending nothing.
+    pub fn run_command(text: &str) -> Vec<u8> {
+        let mut payload = vec![RUN_CLI_COMMAND];
         payload.extend_from_slice(text.as_bytes());
         payload
     }
@@ -639,6 +648,8 @@ pub enum Response {
     },
     /// The frequency ranges it repeats on, in kHz, both ends included.
     RepeatFrequencies(Vec<(u32, u32)>),
+    /// What the radio's own console answered a command.
+    CliReply(String),
     /// The region what it floods is scoped to, name and key; none if none.
     DefaultScope(Option<(String, [u8; 16])>),
     /// Pushed: a packet the radio heard, raw, every copy of it: the SNR and
@@ -745,6 +756,11 @@ impl Response {
                     .iter()
                     .filter_map(|range| Some((u32_at(range, 0)?, u32_at(range, 4)?)))
                     .collect(),
+            ),
+            0x1d => Self::CliReply(
+                String::from_utf8_lossy(data)
+                    .trim_end_matches('\0')
+                    .to_owned(),
             ),
             0x1c => Self::DefaultScope(
                 (data.len() >= 31 + 16)

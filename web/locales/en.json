@@ -819,6 +819,7 @@
   "access_list_none": "Not asked yet who may log in.",
   "console_title": "Console",
   "console_hint": "Commands go to the node's console, as in its CLI: ver, clock, get name, neighbors…",
+  "console_hint_own": "Commands go to the radio's own console, as in its CLI: ver, board, get name, set name…",
   "console_send": "Send",
   "console_risky": "“{command}” may leave the node out of service or out of reach. Send it?",
   "console_not_admin": "Only its admin may use the console: log in with its password.",

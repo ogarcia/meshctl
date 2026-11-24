@@ -885,6 +885,31 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             }
             vec![sent]
         }
+        // RUN_CLI_COMMAND: its own console, answered at once with what it
+        // says, as firmware 14 does.
+        0x42 => {
+            let command = String::from_utf8_lossy(data).trim().to_owned();
+            println!("own console: {command:?}");
+            let mut words = command.split_whitespace();
+            let answer = match (words.next(), words.next()) {
+                (Some("ver"), _) => "v1.18.0-fake (Build: 24-Nov-2026)".to_owned(),
+                (Some("get"), Some("name")) => format!("> {}", radio.name),
+                (Some("get"), Some("radio")) => format!(
+                    "> {}.{:03},{},{},{}",
+                    radio.frequency / 1000,
+                    radio.frequency % 1000,
+                    f64::from(radio.bandwidth) / 1000.0,
+                    radio.spreading_factor,
+                    radio.coding_rate
+                ),
+                (Some("get"), Some("tx")) => format!("> {}", radio.tx_power),
+                (Some("get"), Some(other)) => format!("??: {other}"),
+                _ => "Unknown command".to_owned(),
+            };
+            let mut reply = vec![0x1d];
+            reply.extend(answer.as_bytes());
+            vec![reply]
+        }
         // SEND_BINARY_REQ: a key, then a request to a node logged in to.
         // Its repeaters and its room answer as the firmware does, as far as
         // the login lets: nothing to one not logged in, the access list

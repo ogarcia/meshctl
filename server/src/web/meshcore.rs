@@ -133,7 +133,9 @@ async fn log_in_node(
 /// over the air, as its firmware's CLI takes them: as its admin, logged in
 /// to first with the password kept if the radio has not since it
 /// connected. Its answer arrives on the event stream, as `console`; nothing
-/// says the command arrived, and a node answers only its admin.
+/// says the command arrived, and a node answers only its admin. To the
+/// radio's own node, from firmware 14 on, it runs on its own console, with
+/// no login and nothing sent over the air.
 #[utoipa::path(
     post,
     path = "/radios/{radio}/nodes/{node}/console",

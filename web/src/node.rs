@@ -219,7 +219,7 @@ fn NodePage(num: u32) -> impl IntoView {
                 }
             }}
             <Shortcuts />
-            {meshcore.then(|| view! { <Advert /> })}
+            {meshcore.then(|| view! { <Advert /> <ConsoleSection own=true /> })}
             <Share />
         }
         .into_any()
@@ -3107,7 +3107,11 @@ const RISKY_COMMANDS: [&str; 8] = [
 /// The console of a MeshCore node, for its admin: a command, as its
 /// firmware's CLI takes it, and what it answered, as it comes.
 #[component]
-fn ConsoleSection() -> impl IntoView {
+fn ConsoleSection(
+    /// The radio's own, whose console needs no login.
+    #[prop(optional)]
+    own: bool,
+) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let asking = expect_context::<Asking>();
@@ -3150,6 +3154,17 @@ fn ConsoleSection() -> impl IntoView {
             }
         }
         busy.set(true);
+        // In the log as it goes, before what answers it, which may come
+        // before the daemon says it went, as the radio's own console does.
+        live.console.update(|lines| {
+            lines.push(crate::app::ConsoleLine {
+                radio,
+                node: asking.num,
+                mine: true,
+                text: text.clone(),
+                at: i64::from(crate::app::now()),
+            });
+        });
         problem.set(None);
         spawn_local(async move {
             let sent = daemon::node_command(radio, asking.num, &text).await;
@@ -3157,17 +3172,16 @@ fn ConsoleSection() -> impl IntoView {
             match sent {
                 Ok(()) => {
                     command.try_set(String::new());
-                    live.console.update(|lines| {
-                        lines.push(crate::app::ConsoleLine {
-                            radio,
-                            node: asking.num,
-                            mine: true,
-                            text,
-                            at: i64::from(crate::app::now()),
-                        });
-                    });
                 }
+                // Not sent: out of the log again.
                 Err(failure) => {
+                    live.console.update(|lines| {
+                        if let Some(at) = lines.iter().rposition(|l| {
+                            l.mine && l.radio == radio && l.node == asking.num && l.text == text
+                        }) {
+                            lines.remove(at);
+                        }
+                    });
                     problem.try_set(Some(failure));
                 }
             }
@@ -3182,7 +3196,7 @@ fn ConsoleSection() -> impl IntoView {
         })
     };
     move || {
-        admin_here().then(|| {
+        (own || admin_here()).then(|| {
             view! {
                 <Section title=t!(i18n, console_title).into_any()>
                     <ol class="console mono">
@@ -3190,17 +3204,32 @@ fn ConsoleSection() -> impl IntoView {
                             let lines = lines();
                             if lines.is_empty() {
                                 return view! {
-                                    <li class="dim">{t!(i18n, console_hint)}</li>
+                                    <li class="dim">
+                                        {if own {
+                                            t!(i18n, console_hint_own).into_any()
+                                        } else {
+                                            t!(i18n, console_hint).into_any()
+                                        }}
+                                    </li>
                                 }
                                 .into_any();
                             }
                             lines
                                 .into_iter()
                                 .map(|line| {
+                                    // An answer without the "> " its firmware puts before
+                                    // what it gets, which reads as one of the commands.
+                                    let text = if line.mine {
+                                        line.text
+                                    } else {
+                                        line.text
+                                            .strip_prefix("> ")
+                                            .map_or_else(|| line.text.clone(), str::to_owned)
+                                    };
                                     view! {
                                         <li class:mine=line.mine>
                                             {line.mine.then_some("> ")}
-                                            {line.text}
+                                            {text}
                                         </li>
                                     }
                                 })
@@ -3216,7 +3245,7 @@ fn ConsoleSection() -> impl IntoView {
                             autocomplete="off"
                             autocapitalize="off"
                             spellcheck="false"
-                            placeholder="ver, clock, get name…"
+                            placeholder=if own { "ver, board, get name…" } else { "ver, clock, get name…" }
                             aria-label=move || t_string!(i18n, console_title)
                             prop:value=move || command.get()
                             on:input=move |ev| command.set(event_target_value(&ev))

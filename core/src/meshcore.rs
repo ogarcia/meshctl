@@ -1390,6 +1390,41 @@ impl Mesh {
         Ok(u32::from_le_bytes(tag))
     }
 
+    /// Runs a command on the radio's own console, as its CLI takes them: its
+    /// answer, told as an [`Event::Console`] of its own node too.
+    /// [`AdminError::Unsupported`] on firmware before 14, which has none.
+    pub async fn meshcore_run(&self, command: &str) -> Result<String, AdminError> {
+        let session = self.meshcore_session()?;
+        let answer = session
+            .client
+            .ask_one(command::run_command(command), |r| {
+                matches!(r, Response::CliReply(_))
+            })
+            .await;
+        let text = match answer {
+            Ok(Response::CliReply(text)) => text,
+            Ok(Response::Error(1)) => return Err(AdminError::Unsupported),
+            Ok(Response::Error(code)) => {
+                return Err(AdminError::Refused(error_name(code).to_owned()));
+            }
+            Ok(_) => return Err(AdminError::Refused("UNEXPECTED".to_owned())),
+            Err("the radio did not answer") => return Err(AdminError::NoAnswer),
+            Err(_) => return Err(AdminError::NotConnected),
+        };
+        let me = self.read(|state| state.local.as_ref().map(|l| l.num));
+        if let Some(me) = me {
+            let told = text.clone();
+            self.update(|_| {
+                vec![Event::Console {
+                    from: me,
+                    text: told,
+                    at: now(),
+                }]
+            });
+        }
+        Ok(text)
+    }
+
     /// Sends a command to the console of a node the radio logged in to as
     /// its admin: it answers, to its admin only, as an [`Event::Console`].
     /// Nothing says it arrived.
