@@ -1300,10 +1300,10 @@ impl Store {
     }
 
     /// The password a radio logs in to a room with, if one is kept.
-    pub async fn room_password(&self, radio: RadioId, node: u32) -> Result<Option<String>> {
+    pub async fn node_password(&self, radio: RadioId, node: u32) -> Result<Option<String>> {
         use base64::Engine;
         let row: Option<(String,)> =
-            sqlx::query_as("SELECT password FROM room_password WHERE radio_id = ? AND node = ?")
+            sqlx::query_as("SELECT password FROM node_password WHERE radio_id = ? AND node = ?")
                 .bind(radio)
                 .bind(i64::from(node))
                 .fetch_optional(&self.pool)
@@ -1317,7 +1317,7 @@ impl Store {
     }
 
     /// Keeps the password a room took, for the next login; none forgets it.
-    pub async fn set_room_password(
+    pub async fn set_node_password(
         &self,
         radio: RadioId,
         node: u32,
@@ -1327,7 +1327,7 @@ impl Store {
         match password {
             Some(password) => {
                 sqlx::query(
-                    "INSERT INTO room_password (radio_id, node, password) VALUES (?, ?, ?)
+                    "INSERT INTO node_password (radio_id, node, password) VALUES (?, ?, ?)
                     ON CONFLICT (radio_id, node) DO UPDATE SET password = excluded.password",
                 )
                 .bind(radio)
@@ -1337,7 +1337,7 @@ impl Store {
                 .await?;
             }
             None => {
-                sqlx::query("DELETE FROM room_password WHERE radio_id = ? AND node = ?")
+                sqlx::query("DELETE FROM node_password WHERE radio_id = ? AND node = ?")
                     .bind(radio)
                     .bind(i64::from(node))
                     .execute(&self.pool)
@@ -2788,21 +2788,21 @@ mod tests {
     async fn a_room_password_is_kept_not_in_plain_sight() {
         let store = Store::in_memory().await;
         let radio = store.add_radio(&home()).await.unwrap().id;
-        assert_eq!(store.room_password(radio, 7).await.unwrap(), None);
+        assert_eq!(store.node_password(radio, 7).await.unwrap(), None);
         store
-            .set_room_password(radio, 7, Some("sésamo"))
+            .set_node_password(radio, 7, Some("sésamo"))
             .await
             .unwrap();
-        let (kept,): (String,) = sqlx::query_as("SELECT password FROM room_password")
+        let (kept,): (String,) = sqlx::query_as("SELECT password FROM node_password")
             .fetch_one(&store.pool)
             .await
             .unwrap();
         assert_ne!(kept, "sésamo");
         assert_eq!(
-            store.room_password(radio, 7).await.unwrap().as_deref(),
+            store.node_password(radio, 7).await.unwrap().as_deref(),
             Some("sésamo")
         );
-        store.set_room_password(radio, 7, None).await.unwrap();
-        assert_eq!(store.room_password(radio, 7).await.unwrap(), None);
+        store.set_node_password(radio, 7, None).await.unwrap();
+        assert_eq!(store.node_password(radio, 7).await.unwrap(), None);
     }
 }

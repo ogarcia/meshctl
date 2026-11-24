@@ -222,32 +222,32 @@ pub async fn forget_message(radio: RadioId, id: meshctl_api::MessageId) -> Resul
 }
 
 /// The radio's login to a room.
-pub async fn room_login(radio: RadioId, node: u32) -> Result<meshctl_api::RoomLogin, Failure> {
-    get(&format!("/radios/{radio}/rooms/{node}/login")).await
+pub async fn node_login(radio: RadioId, node: u32) -> Result<meshctl_api::NodeLogin, Failure> {
+    get(&format!("/radios/{radio}/nodes/{node}/login")).await
 }
 
 /// Logs the radio in to a room: with a password, or with the one kept.
-pub async fn log_in_room(
+pub async fn log_in_node(
     radio: RadioId,
     node: u32,
     password: Option<String>,
-) -> Result<meshctl_api::RoomLogin, Failure> {
+) -> Result<meshctl_api::NodeLogin, Failure> {
     let request = with_token(Request::post(&url(&format!(
-        "/radios/{radio}/rooms/{node}/login"
+        "/radios/{radio}/nodes/{node}/login"
     ))))
-    .json(&meshctl_api::NewRoomLogin { password })
+    .json(&meshctl_api::NewNodeLogin { password })
     .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
 /// Forgets the password kept for a room.
-pub async fn forget_room_password(
+pub async fn forget_node_password(
     radio: RadioId,
     node: u32,
-) -> Result<meshctl_api::RoomLogin, Failure> {
+) -> Result<meshctl_api::NodeLogin, Failure> {
     let request = with_token(Request::delete(&url(&format!(
-        "/radios/{radio}/rooms/{node}/login"
+        "/radios/{radio}/nodes/{node}/login"
     ))));
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)

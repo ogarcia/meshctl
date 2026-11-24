@@ -10,7 +10,7 @@ use crate::daemon::Failure;
 use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{ErrorCode, RoomAccess};
+use meshctl_api::{ErrorCode, NodeAccess};
 
 const LOCK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/lock.svg");
 const LOGIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/login-2.svg");
@@ -18,7 +18,7 @@ const KEY_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/
 
 /// What the selected radio was let in to the open room as, if it logged in
 /// since it connected.
-pub fn access(live: Live, node: u32) -> Option<RoomAccess> {
+pub fn access(live: Live, node: u32) -> Option<NodeAccess> {
     live.room.with(|r| {
         r.as_ref()
             .filter(|r| r.node == node)
@@ -29,7 +29,7 @@ pub fn access(live: Live, node: u32) -> Option<RoomAccess> {
 
 /// Whether the radio can post in the open room: logged in to more than read.
 pub fn can_post(live: Live, node: u32) -> bool {
-    access(live, node).is_some_and(|a| a != RoomAccess::ReadOnly)
+    access(live, node).is_some_and(|a| a != NodeAccess::ReadOnly)
 }
 
 /// What the radio was let in to a room as, in words, for under its name.
@@ -45,9 +45,9 @@ pub fn AccessWords(node: u32) -> impl IntoView {
             return t_string!(i18n, room_logging_in).to_owned();
         }
         match access(live, node) {
-            Some(RoomAccess::Admin) => t_string!(i18n, room_admin),
-            Some(RoomAccess::ReadWrite) => t_string!(i18n, room_read_write),
-            Some(RoomAccess::ReadOnly) => t_string!(i18n, room_read_only),
+            Some(NodeAccess::Admin) => t_string!(i18n, room_admin),
+            Some(NodeAccess::ReadWrite) => t_string!(i18n, room_read_write),
+            Some(NodeAccess::ReadOnly) => t_string!(i18n, room_read_only),
             None => t_string!(i18n, room_out),
         }
         .to_owned()
@@ -78,7 +78,7 @@ pub fn LogInAgain(node: u32) -> impl IntoView {
             aria-label=label
             disabled=busy
             inner_html=LOGIN
-            on:click=move |_| live.log_in_room(node, None)
+            on:click=move |_| live.log_in_node(node, None)
         ></button>
     }
 }
@@ -269,7 +269,7 @@ pub fn ForgetPassword(node: u32) -> impl IntoView {
                     aria-label=move || t_string!(i18n, room_forget_password)
                     inner_html=KEY_OFF
                     on:click=move |_| {
-                        live.forget_room_password(node, t_string!(i18n, room_forget_sure));
+                        live.forget_node_password(node, t_string!(i18n, room_forget_sure));
                     }
                 ></button>
             }
@@ -289,10 +289,10 @@ pub fn RoomBar(node: u32) -> impl IntoView {
     let submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let given = password.get_untracked();
-        live.log_in_room(node, (!given.is_empty()).then_some(given));
+        live.log_in_node(node, (!given.is_empty()).then_some(given));
     };
     let why = move || match access(live, node) {
-        Some(RoomAccess::ReadOnly) => t_string!(i18n, room_why_read_only),
+        Some(NodeAccess::ReadOnly) => t_string!(i18n, room_why_read_only),
         _ => t_string!(i18n, room_why_out),
     };
     let error = move || {

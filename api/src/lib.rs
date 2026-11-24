@@ -92,10 +92,11 @@ pub enum ErrorCode {
     /// direct, as MeshCore's anonymous ones: once its path is known, from
     /// its advert or a message, it can be asked.
     NoPath,
-    /// A room or repeater did not take the password.
+    /// A room, repeater or sensor did not take the password.
     WrongPassword,
-    /// Not a room the radio knows.
-    NotARoom,
+    /// Not a node the radio knows that takes logins: a room, a repeater or a
+    /// sensor.
+    NoLogin,
     /// A node the radio no longer has in its own list: meshctl alone keeps
     /// it, as heard before.
     NotOnRadio,
@@ -1172,36 +1173,37 @@ pub struct Message {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum RoomAccess {
-    /// Reads its posts, and cannot post: a guest, with no password or a
-    /// wrong one, in a room that lets them in.
+pub enum NodeAccess {
+    /// A guest: in a room, reads its posts and cannot post, with no password
+    /// or a wrong one where it lets them in; on a repeater or a sensor, is
+    /// told the basics.
     ReadOnly,
-    /// Reads and posts, with the room's password.
+    /// In a room, reads and posts, with its password.
     ReadWrite,
     /// With its admin's password.
     Admin,
 }
 
-/// The radio's login to a MeshCore room, which sends its posts only to those
-/// logged in.
+/// The radio's login to a MeshCore node: a room, which sends its posts only
+/// to those logged in, or a repeater or a sensor, which tell only them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct RoomLogin {
+pub struct NodeLogin {
     /// What it was let in as since the radio last connected; none if it has
-    /// not logged in since. The room forgets those it cannot reach, and a
-    /// guest when it restarts: when its posts stop coming, log in again.
-    pub access: Option<RoomAccess>,
+    /// not logged in since. A node forgets those it cannot reach, and a
+    /// guest when it restarts: when it stops answering, log in again.
+    pub access: Option<NodeAccess>,
     /// When it logged in, in seconds since the epoch.
     pub at: Option<i64>,
     /// Whether a password is kept for it, which a login with none uses.
     pub remembered: bool,
 }
 
-/// A login to a MeshCore room.
+/// A login to a MeshCore room, repeater or sensor.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct NewRoomLogin {
-    /// Up to 15 bytes, kept for the next login once the room takes it; none
+pub struct NewNodeLogin {
+    /// Up to 15 bytes, kept for the next login once known to be right; none
     /// for the one kept, or with none kept, as a guest.
     #[serde(default)]
     pub password: Option<String>,

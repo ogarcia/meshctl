@@ -6,15 +6,15 @@
 
 use super::AppState;
 use super::settings::refused;
-use crate::radios::RoomFailure;
+use crate::radios::LoginFailure;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
     Advert, ChannelOrder, Contact, Error, ErrorCode, MeshcoreChannelChange, MeshcoreChannelScope,
-    MeshcoreChannels, MeshcoreRegions, MeshcoreSettings, MeshcoreStatus, NewRoomLogin, RadioId,
-    RoomLogin,
+    MeshcoreChannels, MeshcoreRegions, MeshcoreSettings, MeshcoreStatus, NewNodeLogin, NodeLogin,
+    RadioId,
 };
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -32,121 +32,123 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(advert))
         .routes(routes!(regions))
         .routes(routes!(search_regions))
-        .routes(routes!(room_login, log_in_room, forget_room_password))
+        .routes(routes!(node_login, log_in_node, forget_node_password))
 }
 
-fn room_failed(failure: RoomFailure) -> Response {
+fn login_failed(failure: LoginFailure) -> Response {
     let (status, error) = match failure {
-        RoomFailure::NoSuchRadio => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
-        RoomFailure::NotARoom => (StatusCode::NOT_FOUND, ErrorCode::NotARoom),
-        RoomFailure::NotOnRadio => (StatusCode::CONFLICT, ErrorCode::NotOnRadio),
-        RoomFailure::NotConnected => (StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
-        RoomFailure::WrongPassword => (StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::WrongPassword),
-        RoomFailure::NoAnswer => (StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer),
-        RoomFailure::Refused(why) => {
-            tracing::info!(why, "a room login refused by the radio");
+        LoginFailure::NoSuchRadio => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        LoginFailure::NoLogin => (StatusCode::NOT_FOUND, ErrorCode::NoLogin),
+        LoginFailure::NotOnRadio => (StatusCode::CONFLICT, ErrorCode::NotOnRadio),
+        LoginFailure::NotConnected => (StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
+        LoginFailure::WrongPassword => (StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::WrongPassword),
+        LoginFailure::NoAnswer => (StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer),
+        LoginFailure::Refused(why) => {
+            tracing::info!(why, "a login refused by the radio");
             (StatusCode::BAD_GATEWAY, ErrorCode::RadioRefused)
         }
-        RoomFailure::Failed(err) => {
-            tracing::error!(error = format_args!("{err:#}"), "room");
+        LoginFailure::Failed(err) => {
+            tracing::error!(error = format_args!("{err:#}"), "login");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
     (status, Json(Error { error })).into_response()
 }
 
-/// A room's login
+/// A node's login
 ///
-/// The radio's login to a MeshCore room, which sends its posts only to those
-/// logged in: what it was let in as since it last connected, if it logged
-/// in, and whether a password is kept for it.
+/// The radio's login to a MeshCore node that takes one: a room, which sends
+/// its posts only to those logged in, or a repeater or a sensor, which tell
+/// what they are asked only to them. What it was let in as since it last
+/// connected, if it logged in, and whether a password is kept for it.
 #[utoipa::path(
     get,
-    path = "/radios/{radio}/rooms/{node}/login",
-    tag = "chat",
+    path = "/radios/{radio}/nodes/{node}/login",
+    tag = "nodes",
     params(
         ("radio" = RadioId, Path, description = "The radio's id"),
-        ("node" = u32, Path, description = "The room's node number"),
+        ("node" = u32, Path, description = "The node's number"),
     ),
     responses(
-        (status = 200, description = "The login", body = RoomLogin),
+        (status = 200, description = "The login", body = NodeLogin),
         (status = 401, description = "The access token is missing or wrong", body = Error),
-        (status = 404, description = "There is no such radio, or it knows no such room: `not_a_room`", body = Error),
+        (status = 404, description = "There is no such radio, or it knows no such node that takes logins: `no_login`", body = Error),
     )
 )]
-async fn room_login(
+async fn node_login(
     State(state): State<AppState>,
     Path((radio, node)): Path<(RadioId, u32)>,
 ) -> Response {
-    match state.radios.room_login(radio, node).await {
+    match state.radios.node_login(radio, node).await {
         Ok(login) => Json(login).into_response(),
-        Err(failure) => room_failed(failure),
+        Err(failure) => login_failed(failure),
     }
 }
 
-/// Log in to a room
+/// Log in to a node
 ///
-/// Logs the radio in to a MeshCore room, over the air: with the password
-/// given, kept for the next login once the room lets it in to post; with
-/// none, with the one kept, or as a guest. The room then sends the radio the
-/// posts it does not have, which arrive as messages from the room, each with
-/// its `author`. A room that does not take the password says no, or, if it
-/// lets nobody in to read, nothing, and then the radio stops waiting.
+/// Logs the radio in to a MeshCore room, repeater or sensor, over the air:
+/// with the password given, kept for the next login once known to be right;
+/// with none, with the one kept, or as a guest. A room then sends the radio
+/// the posts it does not have, which arrive as messages from the room, each
+/// with its `author`. A room that does not take the password says no, or, if
+/// it lets nobody in to read, nothing, as a repeater or a sensor does; and
+/// then the radio stops waiting.
 #[utoipa::path(
     post,
-    path = "/radios/{radio}/rooms/{node}/login",
-    tag = "chat",
+    path = "/radios/{radio}/nodes/{node}/login",
+    tag = "nodes",
     params(
         ("radio" = RadioId, Path, description = "The radio's id"),
-        ("node" = u32, Path, description = "The room's node number"),
+        ("node" = u32, Path, description = "The node's number"),
     ),
-    request_body = NewRoomLogin,
+    request_body = NewNodeLogin,
     responses(
-        (status = 200, description = "Logged in", body = RoomLogin),
+        (status = 200, description = "Logged in", body = NodeLogin),
         (status = 401, description = "The access token is missing or wrong", body = Error),
-        (status = 404, description = "There is no such radio, or it knows no such room: `not_a_room`", body = Error),
-        (status = 409, description = "The radio is not connected: `radio_not_connected`; or no longer has the room, which meshctl alone keeps: `not_on_radio`, with nothing sent", body = Error),
-        (status = 422, description = "The room did not take the password: `wrong_password`", body = Error),
+        (status = 404, description = "There is no such radio, or it knows no such node that takes logins: `no_login`", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`; or no longer has the node, which meshctl alone keeps: `not_on_radio`, with nothing sent", body = Error),
+        (status = 422, description = "The node did not take the password: `wrong_password`", body = Error),
         (status = 502, description = "The radio would not send it: `radio_refused`", body = Error),
-        (status = 504, description = "The room did not answer: `radio_did_not_answer`", body = Error),
+        (status = 504, description = "The node did not answer: `radio_did_not_answer`", body = Error),
     )
 )]
-async fn log_in_room(
+async fn log_in_node(
     State(state): State<AppState>,
     Path((radio, node)): Path<(RadioId, u32)>,
-    Json(login): Json<NewRoomLogin>,
+    Json(login): Json<NewNodeLogin>,
 ) -> Response {
-    match state.radios.log_in_room(radio, node, login.password).await {
+    match state.radios.log_in_node(radio, node, login.password).await {
         Ok(login) => Json(login).into_response(),
-        Err(failure) => room_failed(failure),
+        Err(failure) => login_failed(failure),
     }
 }
 
-/// Forget a room's password
+/// Forget a node's password
 ///
-/// Forgets the password kept for a MeshCore room; a login made with it
+/// Forgets the password kept for a MeshCore node; a login made with it
 /// stays.
 #[utoipa::path(
     delete,
-    path = "/radios/{radio}/rooms/{node}/login",
-    tag = "chat",
+    path = "/radios/{radio}/nodes/{node}/login",
+    tag = "nodes",
     params(
         ("radio" = RadioId, Path, description = "The radio's id"),
-        ("node" = u32, Path, description = "The room's node number"),
+        ("node" = u32, Path, description = "The node's number"),
     ),
     responses(
-        (status = 200, description = "Forgotten", body = RoomLogin),
+        (status = 200, description = "Forgotten", body = NodeLogin),
         (status = 401, description = "The access token is missing or wrong", body = Error),
-        (status = 404, description = "There is no such radio, or it knows no such room: `not_a_room`", body = Error),
+        (status = 404, description = "There is no such radio, or it knows no such node that takes logins: `no_login`", body = Error),
     )
 )]
-async fn forget_room_password(
+async fn forget_node_password(
     State(state): State<AppState>,
     Path((radio, node)): Path<(RadioId, u32)>,
 ) -> Response {
-    match state.radios.forget_room_password(radio, node).await {
+    match state.radios.forget_node_password(radio, node).await {
         Ok(login) => Json(login).into_response(),
-        Err(failure) => room_failed(failure),
+        Err(failure) => login_failed(failure),
     }
 }
 

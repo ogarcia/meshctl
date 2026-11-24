@@ -30,7 +30,9 @@
 //!
 //! Sala Coruña takes `admin` as its admin's password and `sala` as its
 //! guests'; after a login it sends the posts the radio does not have, and
-//! takes the radio's own only if it was let in to write.
+//! takes the radio's own only if it was let in to write. Its repeaters take
+//! `admin` as their admin's password and none as a guest's, and say nothing
+//! to any other.
 //! - `advert`: a contact not known before advertises, and the radio adds it.
 //! - `drop`: the link to every client drops, which reads it all anew.
 //!
@@ -141,6 +143,8 @@ struct Radio {
     /// Whether the radio lists the room but does not find it to log in to,
     /// as when a splitter in between keeps contacts of its own.
     room_missing: bool,
+    /// What the radio logged in to each repeater as, by its name.
+    logins: std::collections::HashMap<String, u8>,
     /// Its clock, as an offset from the host's: it goes only forward.
     clock_offset: i64,
     /// When it started, for its uptime.
@@ -272,6 +276,7 @@ impl Radio {
             room_synced: 0,
             room_strict: false,
             room_missing: false,
+            logins: std::collections::HashMap::new(),
             clock_offset: -3600,
             started: at,
             contacts: vec![
@@ -620,11 +625,16 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             sent.extend(tag);
             sent.extend(4_000u32.to_le_bytes());
             let room = to.name == "Sala Coruña";
+            // A repeater takes `admin` as its admin's password, and no
+            // password as a guest's, as one with no guest password set does;
+            // to any other it says nothing.
+            let repeater = to.kind == 2;
             let acl = match password.as_str() {
-                "admin" if room => Some(3),
+                "admin" if room || repeater => Some(3),
                 "sala" if room => Some(2),
                 _ if room && !radio.room_strict => Some(0),
-                _ if room => None,
+                "" if repeater => Some(0),
+                _ if room || repeater => None,
                 _ => Some(0xff),
             };
             let clock = radio.clock();
@@ -640,8 +650,13 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                     });
                 }
                 Some(acl) => {
-                    radio.room_access = Some(acl);
-                    let waiting = room_sync(&mut radio);
+                    let waiting = if room {
+                        radio.room_access = Some(acl);
+                        room_sync(&mut radio)
+                    } else {
+                        radio.logins.insert(to.name.clone(), acl);
+                        0
+                    };
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_millis(900)).await;
                         let mut taken = vec![0x85, u8::from(acl == 3)];

@@ -111,7 +111,7 @@ impl Page {
 pub struct RoomState {
     pub node: u32,
     /// As last read or made; none until read.
-    pub login: Option<meshctl_api::RoomLogin>,
+    pub login: Option<meshctl_api::NodeLogin>,
     /// Whether a login is under way.
     pub busy: bool,
     /// When, by this browser's clock in milliseconds, the login under way
@@ -875,7 +875,7 @@ impl Live {
             }));
         }
         spawn_local(async move {
-            let Ok(login) = daemon::room_login(radio, node).await else {
+            let Ok(login) = daemon::node_login(radio, node).await else {
                 return;
             };
             let again = login.access.is_none() && login.remembered;
@@ -885,19 +885,19 @@ impl Live {
                 }
             });
             if again {
-                self.log_in_room(node, None);
+                self.log_in_node(node, None);
             }
         });
     }
 
     /// Logs the selected radio in to a room: with a password, or with the
     /// one kept, or as a guest.
-    pub fn log_in_room(self, node: u32, password: Option<String>) {
+    pub fn log_in_node(self, node: u32, password: Option<String>) {
         let Some(radio) = self.selected.get_untracked() else {
             return;
         };
         let mark =
-            move |busy: bool, error: Option<Failure>, login: Option<meshctl_api::RoomLogin>| {
+            move |busy: bool, error: Option<Failure>, login: Option<meshctl_api::NodeLogin>| {
                 self.room.update(|r| {
                     if let Some(r) = r.as_mut().filter(|r| r.node == node) {
                         r.busy = busy;
@@ -910,7 +910,7 @@ impl Live {
             };
         mark(true, None, None);
         spawn_local(async move {
-            match daemon::log_in_room(radio, node, password).await {
+            match daemon::log_in_node(radio, node, password).await {
                 Ok(login) => mark(false, None, Some(login)),
                 Err(failure) => mark(false, Some(failure), None),
             }
@@ -919,7 +919,7 @@ impl Live {
 
     /// Forgets the password kept for a room, once sure; the login made with
     /// it stays until the radio connects again.
-    pub fn forget_room_password(self, node: u32, sure: &str) {
+    pub fn forget_node_password(self, node: u32, sure: &str) {
         let Some(radio) = self.selected.get_untracked() else {
             return;
         };
@@ -930,7 +930,7 @@ impl Live {
             return;
         }
         spawn_local(async move {
-            if let Ok(login) = daemon::forget_room_password(radio, node).await {
+            if let Ok(login) = daemon::forget_node_password(radio, node).await {
                 self.room.update(|r| {
                     if let Some(r) = r.as_mut().filter(|r| r.node == node) {
                         r.login = Some(login);
@@ -1144,7 +1144,7 @@ impl Live {
                     });
                     Ok(())
                 }
-                ServerMessage::RoomLoginWaiting {
+                ServerMessage::LoginWaiting {
                     radio,
                     node,
                     wait_ms,

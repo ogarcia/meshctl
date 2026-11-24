@@ -227,7 +227,7 @@ FROM message m;
 
 -- The password each radio logs in to a MeshCore room with, kept from the last
 -- login the room took: in base64, so as not to be read at a glance.
-CREATE TABLE room_password (
+CREATE TABLE node_password (
     radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
     node INTEGER NOT NULL,
     password TEXT NOT NULL,

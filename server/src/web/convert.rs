@@ -129,11 +129,11 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
             repeaters,
             scope,
         },
-        Change::RoomLoginWaiting {
+        Change::LoginWaiting {
             radio,
             node,
             wait_ms,
-        } => ServerMessage::RoomLoginWaiting {
+        } => ServerMessage::LoginWaiting {
             radio,
             node,
             wait_ms,
