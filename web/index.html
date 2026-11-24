@@ -2567,6 +2567,8 @@
       .packet .route > .from,
       .packet .route > .to { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
       .packet .route > .arrow { flex: none; }
+      /* A last hop guessed, told apart, its title saying so. */
+      .packet .hops .guess { text-decoration: underline dashed; text-underline-offset: 3px; }
       /* A packet whole, in its drawer: what is known of it, and its text. */
       .packet-facts {
         display: grid;
@@ -2979,6 +2981,9 @@
       }
       .routes .arrow { color: var(--mc-muted); }
       .routes .hop.unsure { color: var(--mc-muted); font-style: italic; }
+      /* A guess, told apart: its border dashed, as the note under them says. */
+      .routes .hop.guess { box-shadow: none; outline: 1px dashed var(--mc-muted); outline-offset: -1px; }
+      .routes .hint.guessed { margin: 8px 0 0; }
       .routes .dim { font-size: 12px; }
       /* With more than one, each picked for the map, the one shown marked. */
       .routes li.pickable { cursor: pointer; padding: 6px 8px; margin: 0 -8px; border-radius: 10px; }

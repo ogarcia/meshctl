@@ -9,6 +9,7 @@ mod meshcore;
 mod packets;
 mod radios;
 mod reactions;
+mod routes;
 mod sections;
 mod settings;
 mod store;

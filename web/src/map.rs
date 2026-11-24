@@ -51,14 +51,17 @@ extern "C" {
     fn map_mini_route(element: &web_sys::HtmlElement, json: &str);
 }
 
-/// A point of a route on a small map: where, its pin's colour, and whether
-/// repeaters that could not be placed came before it.
+/// A point of a route on a small map: where, its pin's colour, whether
+/// repeaters that could not be placed came before it, and whether it is a
+/// guess.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RoutePoint {
     pub lat: f64,
     pub lon: f64,
     pub pin: &'static str,
     pub gap: bool,
+    /// Whether which node it is was guessed.
+    pub guess: bool,
 }
 
 /// The way a message came, on a small map: its points joined in order.

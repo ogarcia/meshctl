@@ -500,13 +500,21 @@ pub fn relay_name(live: Live, relay: u32) -> String {
 }
 
 /// A node MeshCore names by a hash, the start of its key, one to three
-/// bytes as the path is written, as one known node alone starts so, or one
-/// heard directly; the hash itself otherwise. A node's number is its key's
-/// first four bytes.
-fn by_hash(live: Live, hash: &str) -> String {
+/// bytes as the path is written: as one known node alone starts so, or one
+/// heard directly; the hash itself otherwise. Whether it is a guess besides:
+/// it is unless one known node alone has a hash of two bytes or more, as a
+/// node not known may have it too. A node's number is its key's first four
+/// bytes.
+fn by_hash(live: Live, hash: &str) -> (String, bool) {
     let hash = hash.to_ascii_lowercase();
     let starting = |num: u32| format!("{num:08x}").starts_with(&hash);
-    one_of(live, starting).unwrap_or(hash)
+    let only = live
+        .nodes
+        .with(|nodes| nodes.values().filter(|n| starting(n.num)).count() == 1);
+    match one_of(live, starting) {
+        Some(name) => (name, !(only && hash.len() >= 4)),
+        None => (hash, false),
+    }
 }
 
 /// The hash of the repeater a packet MeshCore heard raw came through last.
@@ -554,7 +562,11 @@ fn meshcore_ends(live: Live, packet: &Packet, everyone: &str) -> (String, String
             .and_then(Value::as_str)
             .map(str::to_owned)
     };
-    let by_hash = |hash: String| by_hash(live, &hash);
+    // A guess is not told here: the hash itself instead.
+    let by_hash = |hash: String| match by_hash(live, &hash) {
+        (name, false) => name,
+        (_, true) => hash,
+    };
     let none = || "—".to_owned();
     let from = if packet.from != 0 {
         who(live, packet.from)
@@ -622,17 +634,24 @@ fn PacketRow(packet: Packet, fresh: bool) -> impl IntoView {
                 t!(i18n, packets_hops, count = hops).into_any()
             };
             // The relay by its byte, when the firmware gives it, or by its
-            // whole hash, MeshCore's; a question mark when it does not, as
-            // the node that relayed it did not say.
-            let relay = format!(
-                " · {}",
-                match (&last_hop, relay) {
-                    (Some(hash), _) => by_hash(live, hash),
-                    (None, Some(relay)) => relay_name(live, relay),
-                    (None, None) => "?".to_owned(),
-                }
-            );
-            view! { {count} {relay} }.into_any()
+            // whole hash, MeshCore's, its node a guess as it may be; a
+            // question mark when it does not, as the node that relayed it
+            // did not say.
+            let (relay, guess) = match (&last_hop, relay) {
+                (Some(hash), _) => by_hash(live, hash),
+                (None, Some(relay)) => (relay_name(live, relay), false),
+                (None, None) => ("?".to_owned(), false),
+            };
+            let title = guess.then(|| {
+                let hash = last_hop.clone().unwrap_or_default();
+                t_string!(i18n, packets_relay_guess).replace("{hash}", &hash)
+            });
+            view! {
+                {count}
+                " · "
+                <span class:guess=guess title=title>{relay}</span>
+            }
+            .into_any()
         }
         _ => ().into_any(),
     };

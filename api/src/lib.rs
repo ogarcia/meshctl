@@ -1247,8 +1247,8 @@ pub struct MessageRoute {
     /// When it was heard, in seconds since the epoch.
     pub at: i64,
 }
-
-/// A repeater on a route: its hash, and the nodes it may be.
+/// A repeater on a route: its hash, the nodes it may be, and the one it
+/// most likely is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RouteHop {
@@ -1258,6 +1258,12 @@ pub struct RouteHop {
     /// The nodes the radio knows whose key starts so: none, one, or more
     /// than one it cannot tell apart.
     pub nodes: Vec<u32>,
+    /// The node it most likely is, as the route as a whole tells: the
+    /// nodes that repeat over those that do not, each hop within reach of
+    /// the one before, the last one heard by the radio. A guess, not a
+    /// certainty; none when it is likely a node the radio does not know.
+    #[serde(default)]
+    pub likely: Option<u32>,
 }
 
 /// A message to send: to a channel, or to a node.

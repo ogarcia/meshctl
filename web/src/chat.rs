@@ -1516,6 +1516,24 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
     }
 }
 
+/// What a hop of a route is known to be: a node only one known has its
+/// hash, of two bytes or more, and the route agrees; a node guessed, among
+/// several, or the only one known of a hash so short that it may be
+/// another; or one not known.
+enum HopIs {
+    Sure(u32),
+    Guess(u32),
+    Unknown,
+}
+
+fn hop_is(hop: &meshctl_api::RouteHop) -> HopIs {
+    match (hop.likely, hop.nodes.as_slice()) {
+        (Some(num), [only]) if *only == num && hop.hash.len() >= 4 => HopIs::Sure(num),
+        (Some(num), _) => HopIs::Guess(num),
+        (None, _) => HopIs::Unknown,
+    }
+}
+
 /// Each copy heard of a message or a packet, and the way it came: every
 /// repeater by its name, or by its hash and how many it may be; the one
 /// picked on a small map, from where it set out, if known, to the radio.
@@ -1546,7 +1564,7 @@ pub fn RouteList(
             return Vec::new();
         };
         live.nodes.with(|nodes| {
-            let point = |num: u32, gap: bool| {
+            let point = |num: u32, gap: bool, guess: bool| {
                 let node = nodes.get(&num)?;
                 let at = node.position?;
                 Some(crate::map::RoutePoint {
@@ -1554,28 +1572,34 @@ pub fn RouteList(
                     lon: at.longitude,
                     pin: crate::mesh::pin(node, Some(num) == local),
                     gap,
+                    guess,
                 })
             };
             let mut points: Vec<crate::map::RoutePoint> = Vec::new();
             let mut gap = false;
-            let start = origin.and_then(|num| point(num, false));
+            let start = origin.and_then(|num| point(num, false, false));
             if start.is_none() {
                 gap = true;
             }
             points.extend(start);
             for hop in &route.hops {
-                match hop.nodes.as_slice() {
-                    [one] => match point(*one, gap && !points.is_empty()) {
-                        Some(p) => {
-                            points.push(p);
-                            gap = false;
-                        }
-                        None => gap = true,
-                    },
-                    _ => gap = true,
+                let (num, guess) = match hop_is(hop) {
+                    HopIs::Sure(num) => (num, false),
+                    HopIs::Guess(num) => (num, true),
+                    HopIs::Unknown => {
+                        gap = true;
+                        continue;
+                    }
+                };
+                match point(num, gap && !points.is_empty(), guess) {
+                    Some(p) => {
+                        points.push(p);
+                        gap = false;
+                    }
+                    None => gap = true,
                 }
             }
-            if let Some(end) = local.and_then(|num| point(num, gap && !points.is_empty())) {
+            if let Some(end) = local.and_then(|num| point(num, gap && !points.is_empty(), false)) {
                 points.push(end);
             }
             points
@@ -1587,6 +1611,9 @@ pub fn RouteList(
             return None;
         }
         let count = all.len();
+        let guessed = all
+            .iter()
+            .any(|r| r.hops.iter().any(|h| matches!(hop_is(h), HopIs::Guess(_))));
         let lines = all
             .into_iter()
             .enumerate()
@@ -1596,20 +1623,36 @@ pub fn RouteList(
                     .iter()
                     .enumerate()
                     .map(|(at, hop)| {
-                        let (name, title, unsure) = match hop.nodes.as_slice() {
-                            [one] => (node_name(live, *one), None, false),
-                            [] => (format!("··{}", hop.hash), Some(t_string!(i18n, route_unknown).to_owned()), true),
-                            many => (
-                                t_string!(i18n, route_many)
-                                    .replace("{n}", &many.len().to_string())
-                                    .replace("{hash}", &hop.hash),
-                                Some(many.iter().map(|n| node_name(live, *n)).collect::<Vec<_>>().join(", ")),
+                        let known = hop.nodes.len();
+                        let fill = |text: &str| {
+                            text.replace("{n}", &known.to_string()).replace("{hash}", &hop.hash)
+                        };
+                        let (name, title, guess, unsure) = match hop_is(hop) {
+                            HopIs::Sure(num) => (node_name(live, num), None, false, false),
+                            HopIs::Guess(num) => {
+                                let why = if known == 1 {
+                                    fill(t_string!(i18n, route_guess_only))
+                                } else {
+                                    fill(t_string!(i18n, route_guess))
+                                };
+                                (node_name(live, num), Some(why), true, false)
+                            }
+                            HopIs::Unknown if known == 0 => {
+                                (hop.hash.clone(), Some(t_string!(i18n, route_unknown).to_owned()), false, true)
+                            }
+                            // A direct route's, which is not guessed: how
+                            // many it may be.
+                            HopIs::Unknown if !route.flooded => (
+                                fill(t_string!(i18n, route_many)),
+                                Some(hop.nodes.iter().map(|n| node_name(live, *n)).collect::<Vec<_>>().join(", ")),
+                                false,
                                 true,
                             ),
+                            HopIs::Unknown => (hop.hash.clone(), Some(fill(t_string!(i18n, route_misfit))), false, true),
                         };
                         view! {
                             {(at > 0).then(|| view! { <span class="arrow" aria-hidden="true">"→"</span> })}
-                            <span class="hop" class:unsure=unsure title=title>{name}</span>
+                            <span class="hop" class:guess=guess class:unsure=unsure title=title>{name}</span>
                         }
                     })
                     .collect_view();
@@ -1666,6 +1709,7 @@ pub fn RouteList(
                     {move || if outgoing { t!(i18n, route_echoes_hint).into_any() } else { t!(i18n, route_hint).into_any() }}
                 </p>
                 <ol>{lines}</ol>
+                {guessed.then(|| view! { <p class="hint dim guessed">{t!(i18n, route_guess_hint)}</p> })}
                 // On the map, while two of its points can be placed.
                 {move || {
                     (points.with(Vec::len) >= 2)

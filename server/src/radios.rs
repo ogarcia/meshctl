@@ -662,30 +662,76 @@ fn lpp_name(kind: u8) -> String {
 }
 
 /// Copies heard as the ways they came: each hop by its hash, with the nodes
-/// the radio knows whose key starts so.
+/// the radio knows whose key starts so, and the one it most likely is.
 fn routes_of(mesh: &Mesh, rows: Vec<crate::store::RouteRow>) -> Vec<meshctl_api::MessageRoute> {
-    let keys: Vec<(u32, Vec<u8>)> = mesh.read(|state| {
-        state
+    use crate::routes::{Candidate, Repeats};
+    // Each node known by its key, and where the radio is.
+    type Known = (Vec<(Vec<u8>, Candidate)>, Option<(f64, f64)>);
+    let (known, radio): Known = mesh.read(|state| {
+        let at = |n: &mesh::Node| n.position.map(|p| (p.latitude, p.longitude));
+        let known = state
             .nodes
             .values()
-            .filter_map(|n| Some((n.num, n.user.as_ref()?.public_key.clone())))
-            .filter(|(_, key)| !key.is_empty())
-            .collect()
+            .filter_map(|n| {
+                let user = n.user.as_ref()?;
+                (!user.public_key.is_empty()).then(|| {
+                    let candidate = Candidate {
+                        num: n.num,
+                        at: at(n),
+                        repeats: match user.role.as_str() {
+                            "REPEATER" => Repeats::Yes,
+                            "ROOM" => Repeats::Maybe,
+                            _ => Repeats::No,
+                        },
+                        direct: n.hops_away == Some(0),
+                    };
+                    (user.public_key.clone(), candidate)
+                })
+            })
+            .collect();
+        let radio = state
+            .local
+            .as_ref()
+            .and_then(|l| state.nodes.get(&l.num))
+            .and_then(at);
+        (known, radio)
     });
     rows.into_iter()
         .map(|row| {
             let size = usize::try_from(row.hash_size).unwrap_or(1).max(1);
+            let hashes: Vec<&[u8]> = row.path.chunks(size).collect();
+            let candidates: Vec<Vec<Candidate>> = hashes
+                .iter()
+                .map(|hash| {
+                    known
+                        .iter()
+                        .filter(|(key, _)| key.starts_with(hash))
+                        .map(|(_, c)| c.clone())
+                        .collect()
+                })
+                .collect();
+            // A flood's path ends at the radio; a direct one's goes on to
+            // where it is sent, so only a hash one known node has is told.
+            let likely = if row.flooded {
+                crate::routes::likely(&candidates, radio)
+            } else {
+                candidates
+                    .iter()
+                    .map(|c| match c.as_slice() {
+                        [one] => Some(one.num),
+                        _ => None,
+                    })
+                    .collect()
+            };
             meshctl_api::MessageRoute {
-                hops: row
-                    .path
-                    .chunks(size)
-                    .map(|hash| meshctl_api::RouteHop {
+                hops: hashes
+                    .iter()
+                    .zip(candidates)
+                    .zip(likely)
+                    .map(|((hash, candidates), likely)| meshctl_api::RouteHop {
                         hash: hash.iter().map(|b| format!("{b:02x}")).collect(),
-                        nodes: keys
-                            .iter()
-                            .filter(|(_, key)| key.starts_with(hash))
-                            .map(|(num, _)| *num)
-                            .collect(),
+                        nodes: candidates.iter().map(|c| c.num).collect(),
+                        likely,
                     })
                     .collect(),
                 flooded: row.flooded,

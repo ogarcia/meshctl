@@ -808,13 +808,15 @@ window.meshctlMap = (() => {
           interactive: false,
         }).addTo(small.drawn);
       }
+      // A guessed one hollow, its ring dashed.
       drawn.points.forEach((p, i) => {
         L.circleMarker(points[i], {
           radius: 6,
-          color: color("--mc-surface"),
+          color: p.guess ? color(p.pin) : color("--mc-surface"),
           weight: 2,
           fillColor: color(p.pin),
-          fillOpacity: 1,
+          fillOpacity: p.guess ? 0.25 : 1,
+          dashArray: p.guess ? "3 2" : null,
           interactive: false,
         }).addTo(small.drawn);
       });
