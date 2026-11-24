@@ -188,6 +188,8 @@ CREATE TABLE message_route (
 );
 
 CREATE INDEX message_route_packet ON message_route (radio_id, packet_id, id);
+-- The oldest heard, to clean away first.
+CREATE INDEX message_route_at ON message_route (at);
 
 -- The repeaters a message was heard through, each once whatever copies went
 -- through it: how many carried it.
@@ -198,6 +200,8 @@ CREATE TABLE message_relay (
     at INTEGER NOT NULL,
     PRIMARY KEY (radio_id, packet_id, hop)
 );
+
+CREATE INDEX message_relay_at ON message_relay (at);
 
 -- The messages as shown: a channel message with the slot its channel has
 -- now, if any.
@@ -225,8 +229,9 @@ SELECT
     ) AS repeaters
 FROM message m;
 
--- The password each radio logs in to a MeshCore room with, kept from the last
--- login the room took: in base64, so as not to be read at a glance.
+-- The password each radio logs in to a MeshCore room, repeater or sensor with,
+-- kept from the last login the node took: in base64, so as not to be read at
+-- a glance.
 CREATE TABLE node_password (
     radio_id INTEGER NOT NULL REFERENCES radio (id) ON DELETE CASCADE,
     node INTEGER NOT NULL,
@@ -329,7 +334,8 @@ CREATE TABLE meshcore_packet (
 
 CREATE UNIQUE INDEX meshcore_packet_once ON meshcore_packet (radio_id, key);
 CREATE INDEX meshcore_packet_radio ON meshcore_packet (radio_id, id);
-CREATE INDEX meshcore_packet_at ON meshcore_packet (at);
+-- The last heard longest ago, to clean away first.
+CREATE INDEX meshcore_packet_last_at ON meshcore_packet (last_at);
 
 -- Each copy of it heard, and the way it came.
 CREATE TABLE meshcore_packet_copy (
