@@ -15,8 +15,9 @@ if ! cargo fmt --all -- --check; then
 fi
 
 # Keep this line identical to the CI's: a lint the hook lets through and CI
-# catches is the one thing the hook exists to stop.
-if ! cargo clippy --workspace --all-targets --all-features -- -D warnings; then
+# catches is the one thing the hook exists to stop. The desktop app is left
+# out, as it needs WebKitGTK: CI checks it on its own.
+if ! cargo clippy --workspace --exclude meshctl-desktop --all-targets --all-features -- -D warnings; then
     echo
     echo "✗ clippy reported warnings. Fix them before committing." >&2
     exit 1

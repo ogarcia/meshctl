@@ -3,14 +3,17 @@
 #   proto   the Meshtastic protobufs and the stream framing; pure, no I/O
 #   core    the link to a radio (TCP or serial) and, later, the domain model
 #   api     the types the daemon and every client share; compiles to WASM
-#   server  the daemon: the binary called meshctl
+#   server  the daemon, meshctld, as a library and its binary
 #   web     the Leptos (CSR) interface, built with trunk and embedded in server
+#   desktop the daemon in a window of its own, with Tauri: the desktop app
 #
 # `web` is left out of the default members: it is built for the browser by
 # trunk, and a plain `cargo build` does not need to compile it for the host.
-# `--workspace` (clippy, tests) still includes it.
+# `--workspace` (clippy, tests) still includes it. `desktop` is left out of
+# both: it needs WebKitGTK on Linux, which a daemon's build host need not
+# have; CI checks it on its own, and the desktop packages build it.
 [workspace]
-members = ["proto", "core", "api", "server", "web"]
+members = ["proto", "core", "api", "server", "web", "desktop"]
 default-members = ["proto", "core", "api", "server"]
 resolver = "3"
 

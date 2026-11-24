@@ -1,0 +1,2 @@
+# What tauri-build writes on each build, for the platform it builds on.
+/gen/schemas

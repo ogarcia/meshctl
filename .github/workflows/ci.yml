@@ -40,10 +40,41 @@ jobs:
         run: cargo fmt --all -- --check
       # Keep this line identical to the pre-commit hook's (.githooks).
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude meshctl-desktop --all-targets --all-features -- -D warnings
       # The interface as the browser runs it, which the line above builds for
       # the host instead.
       - name: Clippy (interface, wasm)
         run: cargo clippy -p meshctl-web --target wasm32-unknown-unknown -- -D warnings
       - name: Test
-        run: cargo test --workspace --no-fail-fast
+        run: cargo test --workspace --exclude meshctl-desktop --no-fail-fast
+
+  # The desktop app, left out of the check above as it needs WebKitGTK:
+  # checked here on Linux, so that it does not rot between releases.
+  desktop:
+    name: Desktop app (Clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load build versions
+        shell: bash
+        run: grep -E '^[A-Za-z_]+=' versions.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop
+      - name: Install Tauri's system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev librsvg2-dev build-essential
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@${{ env.TRUNK_VERSION }}
+      - name: Build the interface
+        run: cd web && trunk build --release
+      - name: Clippy
+        run: cargo clippy -p meshctl-desktop --all-targets -- -D warnings
