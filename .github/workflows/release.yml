@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    # Bare semver tags: 0.1.0, 0.1.1, 1.2.3-rc.1 (no "v" prefix).
+    tags: ["[0-9]*.[0-9]*.[0-9]*"]
+  # By hand, to try the whole pipeline without publishing anything: the
+  # archives land on the run, to be downloaded, and the release job below
+  # runs only for a tag.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Build-tool versions (TRUNK_VERSION, …) come from versions.env, loaded into
+  # $GITHUB_ENV by the "Load build versions" step in each job below.
+
+# Least-privilege default for GITHUB_TOKEN; the release job raises it to
+# `contents: write` to publish the release.
+permissions:
+  contents: read
+
+jobs:
+  # ── The daemon, with its interface embedded, once per target ───────────────
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    # aarch64 musl is a cross build from the arm runner's gnu host, so the cc
+    # crate looks for aarch64-linux-musl-gcc (not shipped by musl-tools) to
+    # build SQLite. Point its C compiler and the linker at musl-gcc. These vars
+    # are target-scoped, so they are inert for every other job.
+    env:
+      CC_aarch64_unknown_linux_musl: musl-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          # Both from the ARM runner: Apple's toolchain builds for Intel too.
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Load build versions
+        shell: bash
+        run: grep -E '^[A-Za-z_]+=' versions.env >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }},wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: contains(matrix.target, 'linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
+
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@${{ env.TRUNK_VERSION }}
+
+      # The interface first: web/dist, which the daemon embeds as it is
+      # compiled.
+      - name: Build the interface
+        run: cd web && trunk build --release
+
+      - name: Build the daemon
+        run: cargo build --release --locked --target ${{ matrix.target }} -p meshctld
+
+      - name: Package
+        shell: bash
+        run: |
+          NAME=meshctl-${{ github.ref_name }}-${{ matrix.target }}
+          mkdir "$NAME"
+          cp target/${{ matrix.target }}/release/meshctld LICENSE README.md "$NAME"/
+          tar -czf "$NAME.tar.gz" "$NAME"
+          echo "ARCHIVE=$NAME.tar.gz" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: meshctl-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+  # ── The release, with every archive and their checksums ────────────────────
+  release:
+    name: GitHub release
+    needs: [build]
+    # Only for a tag: run by hand, this is skipped, and the archives stay on
+    # the run.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd artifacts && sha256sum * > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          # A tag with a suffix (0.2.0-rc.1) is a prerelease.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: artifacts/*
