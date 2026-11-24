@@ -202,7 +202,7 @@ pub fn RoomGone(node: u32) -> impl IntoView {
             </button>
         </div>
         <Show when=move || asking.get()>
-            <div class="modal-back" on:click=move |_| asking.set(false)>
+            <div class="modal-back in-thread" on:click=move |_| asking.set(false)>
                 <div
                     class="card contact-modal room-gone"
                     role="dialog"

@@ -3404,6 +3404,9 @@
         overflow-y: auto;
       }
       .modal-back > .radio-editor { --modal-pad: 24px; }
+      /* A dialog that belongs to the conversation, as a room's: over it alone,
+         in its middle, with what is around it still in sight. */
+      .modal-back.in-thread { position: absolute; z-index: 6; }
       .link-adder .modal-body { display: flex; flex-direction: column; gap: 12px; }
       .radio-editor {
         width: 500px;
