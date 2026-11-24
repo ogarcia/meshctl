@@ -122,11 +122,23 @@ const ES: &[(&str, &str, &str)] = &[
     (
         "config.power.wait_bluetooth_secs",
         "Espera del Bluetooth",
-        "",
+        "Cuánto se espera antes de apagar el Bluetooth cuando no hay nada conectado. Solo ESP32.",
     ),
-    ("config.power.sds_secs", "Sueño profundo", ""),
-    ("config.power.ls_secs", "Sueño ligero", ""),
-    ("config.power.min_wake_secs", "Tiempo mínimo despierto", ""),
+    (
+        "config.power.sds_secs",
+        "Sueño profundo",
+        "Si el sueño ligero se alarga, baja a sueño profundo durante este tiempo o hasta pulsar el botón. Solo ESP32.",
+    ),
+    (
+        "config.power.ls_secs",
+        "Sueño ligero",
+        "Cuánto dura el sueño ligero: la CPU parada, el LoRa y el GPS encendidos y el Bluetooth apagado. Solo ESP32.",
+    ),
+    (
+        "config.power.min_wake_secs",
+        "Tiempo mínimo despierto",
+        "Al recibir un paquete en sueño ligero, cuánto sigue despierto, sin Bluetooth, antes de volver a dormir. Solo ESP32.",
+    ),
     (
         "config.power.device_battery_ina_address",
         "Dirección del INA de la batería",
@@ -771,7 +783,7 @@ const ES: &[(&str, &str, &str)] = &[
     (
         "module.telemetry.health_update_interval",
         "Intervalo de métricas de salud",
-        "",
+        "Cada cuánto se envían las métricas de salud por la malla.",
     ),
     (
         "module.telemetry.health_screen_enabled",
@@ -1111,6 +1123,19 @@ pub fn intervals(id: &str) -> Option<(&'static [i64], Option<Special>)> {
     const SCREEN: &[i64] = &[15, 30, 60, 300, 600, 900, 1800, 3600];
     match id {
         "config.power.wait_bluetooth_secs" | "config.power.min_wake_secs" => Some((WAITS, None)),
+        // In seconds, though the protobufs do not say so.
+        "config.power.ls_secs" | "module.telemetry.health_update_interval" => {
+            Some((crate::sections::INTERVALS, None))
+        }
+        // MAXUINT sleeps until the button wakes it.
+        "config.power.sds_secs" => Some((
+            crate::sections::INTERVALS,
+            Some((
+                i64::from(u32::MAX),
+                "Hasta pulsar el botón",
+                "Until the button is pressed",
+            )),
+        )),
         // MAXUINT, as the protobufs say, keeps it on.
         "config.display.screen_on_secs" => Some((
             SCREEN,
@@ -1120,16 +1145,92 @@ pub fn intervals(id: &str) -> Option<(&'static [i64], Option<Special>)> {
     }
 }
 
-/// Whether a field is shown, as others are now: the static addresses only
-/// with a static address mode.
+/// What an interval at zero means, in the interface's language: off for
+/// those the protobufs say zero turns off, the firmware's default for the
+/// rest.
+pub fn zero(locale: Locale, id: &str) -> String {
+    let (es, en) = match id {
+        "config.power.on_battery_shutdown_after_secs"
+        | "config.display.auto_screen_carousel_secs"
+        | "module.external_notification.nag_timeout"
+        | "module.traffic_management.position_min_interval_secs"
+        | "module.traffic_management.rate_limit_window_secs" => ("Desactivado", "Off"),
+        "module.detection_sensor.state_broadcast_secs" => ("Solo al cambiar", "Only on a change"),
+        _ => ("Por defecto", "Default"),
+    };
+    match locale {
+        Locale::es => es.to_owned(),
+        Locale::en => en.to_owned(),
+    }
+}
+
+/// Whether a field is shown, as others are now: what only matters with
+/// something on, only with it on. A switch the radio does not say, as an
+/// older firmware may not, hides nothing.
 pub fn shown(
     section: &str,
     field: &str,
     value_of: impl Fn(&str) -> Option<serde_json::Value>,
 ) -> bool {
+    let off = |name: &str| value_of(name).and_then(|v| v.as_bool()) == Some(false);
+    let is = |name: &str, code: &str| {
+        value_of(name)
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .is_none_or(|v| v == code)
+    };
+    let has_flag = |name: &str, flag: &str| {
+        value_of(name)
+            .as_ref()
+            .and_then(|v| v.as_array())
+            .is_none_or(|flags| flags.iter().any(|f| f.as_str() == Some(flag)))
+    };
+    // A section turned off: only its switch.
+    if field != "enabled" && off("enabled") {
+        return false;
+    }
     match (section, field) {
         ("config.network", name) if name.starts_with("ipv4_config.") => {
             value_of("address_mode").as_ref().and_then(|v| v.as_str()) == Some("STATIC")
+                && !(off("wifi_enabled") && off("eth_enabled"))
+        }
+        ("config.network", "wifi_ssid" | "wifi_psk") => !off("wifi_enabled"),
+        (
+            "config.network",
+            "ntp_server" | "address_mode" | "rsyslog_server" | "enabled_protocols" | "ipv6_enabled",
+        ) => !(off("wifi_enabled") && off("eth_enabled")),
+        (
+            "config.position",
+            "broadcast_smart_minimum_distance" | "broadcast_smart_minimum_interval_secs",
+        ) => !off("position_broadcast_smart_enabled"),
+        ("config.position", "gps_update_interval") => is("gps_mode", "ENABLED"),
+        ("config.bluetooth", "fixed_pin") => is("mode", "FIXED_PIN"),
+        ("module.audio", name) if name != "codec2_enabled" => !off("codec2_enabled"),
+        ("module.canned_message", name) if name.starts_with("inputbroker_") => {
+            !(off("rotary1_enabled") && off("updown1_enabled"))
+        }
+        ("module.mesh_beacon", name) if name.starts_with("broadcast_") => {
+            has_flag("flags", "FLAG_BROADCAST_ENABLED")
+        }
+        ("module.mqtt", name) if name.starts_with("map_report_settings.") => {
+            !off("map_reporting_enabled")
+        }
+        (
+            "module.store_forward",
+            "heartbeat" | "records" | "history_return_max" | "history_return_window",
+        ) => !off("is_server"),
+        ("module.telemetry", "device_update_interval") => !off("device_telemetry_enabled"),
+        ("module.telemetry", name) if name.starts_with("environment_") => {
+            name == "environment_measurement_enabled" || !off("environment_measurement_enabled")
+        }
+        ("module.telemetry", name) if name.starts_with("air_quality_") => {
+            name == "air_quality_enabled" || !off("air_quality_enabled")
+        }
+        ("module.telemetry", name) if name.starts_with("power_") => {
+            name == "power_measurement_enabled" || !off("power_measurement_enabled")
+        }
+        ("module.telemetry", name) if name.starts_with("health_") => {
+            name == "health_measurement_enabled" || !off("health_measurement_enabled")
         }
         _ => true,
     }
@@ -1192,6 +1293,90 @@ pub fn choice(locale: Locale, field: &str, code: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The fields' values, as a section's form reads them.
+    fn values(
+        pairs: &[(&str, serde_json::Value)],
+    ) -> impl Fn(&str) -> Option<serde_json::Value> + use<> {
+        let map: std::collections::HashMap<String, serde_json::Value> = pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), value.clone()))
+            .collect();
+        move |name| map.get(name).cloned()
+    }
+
+    #[test]
+    fn what_only_matters_with_something_on_shows_only_then() {
+        use serde_json::json;
+        // A module off: only its switch.
+        let off = values(&[("enabled", json!(false))]);
+        assert!(shown("module.serial", "enabled", &off));
+        assert!(!shown("module.serial", "baud", &off));
+        let on = values(&[("enabled", json!(true))]);
+        assert!(shown("module.serial", "baud", &on));
+        // A switch the radio does not say hides nothing.
+        let unsaid = values(&[]);
+        assert!(shown("module.telemetry", "device_update_interval", &unsaid));
+        assert!(shown("config.position", "gps_update_interval", &unsaid));
+        // Each measurement's own, by its switch.
+        let telemetry = values(&[
+            ("environment_measurement_enabled", json!(false)),
+            ("power_measurement_enabled", json!(true)),
+        ]);
+        assert!(shown(
+            "module.telemetry",
+            "environment_measurement_enabled",
+            &telemetry
+        ));
+        assert!(!shown(
+            "module.telemetry",
+            "environment_update_interval",
+            &telemetry
+        ));
+        assert!(shown(
+            "module.telemetry",
+            "power_update_interval",
+            &telemetry
+        ));
+        // A GPS not there takes no interval.
+        let no_gps = values(&[("gps_mode", json!("NOT_PRESENT"))]);
+        assert!(!shown("config.position", "gps_update_interval", &no_gps));
+        // The beacon's broadcast, by its flag.
+        let listening = values(&[("flags", json!(["FLAG_LISTEN_ENABLED"]))]);
+        assert!(!shown(
+            "module.mesh_beacon",
+            "broadcast_message",
+            &listening
+        ));
+        assert!(shown("module.mesh_beacon", "flags", &listening));
+        let broadcasting = values(&[("flags", json!(["FLAG_BROADCAST_ENABLED"]))]);
+        assert!(shown(
+            "module.mesh_beacon",
+            "broadcast_message",
+            &broadcasting
+        ));
+        // The network's, with Wi-Fi or Ethernet; static addresses only so.
+        let wired = values(&[
+            ("wifi_enabled", json!(false)),
+            ("eth_enabled", json!(true)),
+            ("address_mode", json!("STATIC")),
+        ]);
+        assert!(!shown("config.network", "wifi_ssid", &wired));
+        assert!(shown("config.network", "ntp_server", &wired));
+        assert!(shown("config.network", "ipv4_config.ip", &wired));
+    }
+
+    #[test]
+    fn an_interval_at_zero_says_what_it_means() {
+        assert_eq!(
+            zero(Locale::es, "module.telemetry.device_update_interval"),
+            "Por defecto"
+        );
+        assert_eq!(
+            zero(Locale::en, "config.power.on_battery_shutdown_after_secs"),
+            "Off"
+        );
+    }
 
     #[test]
     fn choices_read_as_people_read_them() {

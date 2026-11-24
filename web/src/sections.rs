@@ -11,7 +11,7 @@ use crate::names;
 use crate::radios::Switch;
 
 /// Intervals common enough to offer, in seconds.
-const INTERVALS: &[i64] = &[
+pub const INTERVALS: &[i64] = &[
     30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 14400, 21600, 43200, 86400, 129600,
     172800, 259200,
 ];
@@ -348,7 +348,10 @@ fn FieldInput(
     );
     let label = Signal::derive(move || said.with(|s| s.0.clone()));
     let title = Signal::derive(move || said.with(|s| s.1.clone()));
-    let unit = field.unit.clone();
+    // An interval's options say their own unit.
+    let interval = field.kind == FieldKind::Integer
+        && (field.unit.as_deref() == Some("s") || crate::fields::intervals(&field_id).is_some());
+    let unit = field.unit.clone().filter(|_| !interval);
     let original = field.value.clone().unwrap_or(Json::Null);
 
     // The edit of it, if any.
@@ -537,10 +540,7 @@ fn FieldInput(
             .into_any()
         }
         // An interval in seconds: common ones to pick, or one's own.
-        FieldKind::Integer
-            if field.unit.as_deref() == Some("s")
-                || crate::fields::intervals(&field_id).is_some() =>
-        {
+        FieldKind::Integer if interval => {
             let floor = field.min.unwrap_or(0.0);
             // Its own, for the few that are short waits or have a value that
             // means more; the common ones otherwise.
@@ -592,11 +592,13 @@ fn FieldInput(
             let options = steps
                 .iter()
                 .map(|&secs| {
+                    let field_id = field_id.clone();
                     let label = move || match special {
                         Some((value, es, en)) if value == secs => match i18n.get_locale() {
                             Locale::es => es.to_owned(),
                             Locale::en => en.to_owned(),
                         },
+                        _ if secs == 0 => crate::fields::zero(i18n.get_locale(), &field_id),
                         _ => interval_label(secs),
                     };
                     view! { <option value=secs.to_string()>{label}</option> }
