@@ -114,6 +114,9 @@ pub struct RoomState {
     pub login: Option<meshctl_api::RoomLogin>,
     /// Whether a login is under way.
     pub busy: bool,
+    /// When, by this browser's clock in milliseconds, the login under way
+    /// stops being waited for, and for how long in all, once the daemon says.
+    pub until: Option<(f64, f64)>,
     /// Why the last login failed.
     pub error: Option<Failure>,
 }
@@ -867,6 +870,7 @@ impl Live {
                 node,
                 login: None,
                 busy: false,
+                until: None,
                 error: None,
             }));
         }
@@ -1136,6 +1140,19 @@ impl Live {
                             message.heard = heard;
                             message.repeaters = repeaters;
                             message.scope = scope;
+                        }
+                    });
+                    Ok(())
+                }
+                ServerMessage::RoomLoginWaiting {
+                    radio,
+                    node,
+                    wait_ms,
+                } if self.is_selected(radio) => {
+                    let until = js_sys::Date::now() + f64::from(wait_ms);
+                    self.room.update(|r| {
+                        if let Some(r) = r.as_mut().filter(|r| r.node == node && r.busy) {
+                            r.until = Some((until, f64::from(wait_ms)));
                         }
                     });
                     Ok(())

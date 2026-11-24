@@ -1231,13 +1231,11 @@ impl Mesh {
         Ok(u32::from_le_bytes(tag))
     }
 
-    /// Logs in to a room or a repeater with a password, empty for a guest or
-    /// one the node knows already: on the path the radio knows, or flooded.
-    /// What it let in as; refused as `WRONG_PASSWORD`, and with no answer
-    /// in twice what the radio expects (at least [`LOGIN_WAIT`]) as
-    /// [`AdminError::NoAnswer`], as a node that does not take a password
-    /// says nothing.
-    pub async fn meshcore_login(&self, num: u32, password: &str) -> Result<Access, AdminError> {
+    /// Sends a login to a room or a repeater, with a password, empty for a
+    /// guest or one the node knows already: on the path the radio knows, or
+    /// flooded. Its answer, to wait for with [`LoginSent::answer`], and how
+    /// long to: twice what the radio expects, at least [`LOGIN_WAIT`].
+    pub async fn meshcore_login(&self, num: u32, password: &str) -> Result<LoginSent, AdminError> {
         let session = self.meshcore_session()?;
         let key = self.meshcore_key(&session, num)?;
         let mut prefix = [0u8; 6];
@@ -1254,43 +1252,26 @@ impl Mesh {
                 matches!(r, Response::MessageSent { .. })
             })
             .await;
-        let forget = || {
-            session
-                .logins
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&prefix);
-        };
-        let wait = match answer {
+        let failed = match answer {
             Ok(Response::MessageSent { timeout_ms, .. }) => {
-                Duration::from_millis(u64::from(timeout_ms) * 2).max(LOGIN_WAIT)
+                return Ok(LoginSent {
+                    wait: Duration::from_millis(u64::from(timeout_ms) * 2).max(LOGIN_WAIT),
+                    told,
+                    logins: Arc::clone(&session.logins),
+                    prefix,
+                });
             }
-            Ok(Response::Error(code)) => {
-                forget();
-                return Err(AdminError::Refused(error_name(code).to_owned()));
-            }
-            Ok(_) => {
-                forget();
-                return Err(AdminError::Refused("UNEXPECTED".to_owned()));
-            }
-            Err("the radio did not answer") => {
-                forget();
-                return Err(AdminError::NoAnswer);
-            }
-            Err(_) => {
-                forget();
-                return Err(AdminError::NotConnected);
-            }
+            Ok(Response::Error(code)) => AdminError::Refused(error_name(code).to_owned()),
+            Ok(_) => AdminError::Refused("UNEXPECTED".to_owned()),
+            Err("the radio did not answer") => AdminError::NoAnswer,
+            Err(_) => AdminError::NotConnected,
         };
-        match tokio::time::timeout(wait, told).await {
-            Ok(Ok(Some(access))) => Ok(access),
-            Ok(Ok(None)) => Err(AdminError::Refused("WRONG_PASSWORD".to_owned())),
-            Ok(Err(_)) => Err(AdminError::NotConnected),
-            Err(_) => {
-                forget();
-                Err(AdminError::NoAnswer)
-            }
-        }
+        session
+            .logins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&prefix);
+        Err(failed)
     }
 
     /// Has the radio say who it is: to those it hears directly, or flooded
@@ -1629,6 +1610,35 @@ fn acknowledged(mesh: &Mesh, session: &Session, tag: [u8; 4]) {
                 error: None,
             })]
         });
+    }
+}
+
+/// A login sent, its answer still to come.
+pub struct LoginSent {
+    /// How long to wait for it.
+    pub wait: Duration,
+    told: tokio::sync::oneshot::Receiver<Option<Access>>,
+    logins: Arc<Mutex<HashMap<[u8; 6], LoginWait>>>,
+    prefix: [u8; 6],
+}
+
+impl LoginSent {
+    /// What the node let in as; refused as `WRONG_PASSWORD`, and with no
+    /// answer in time as [`AdminError::NoAnswer`], as a node that does not
+    /// take a password says nothing.
+    pub async fn answer(self) -> Result<Access, AdminError> {
+        match tokio::time::timeout(self.wait, self.told).await {
+            Ok(Ok(Some(access))) => Ok(access),
+            Ok(Ok(None)) => Err(AdminError::Refused("WRONG_PASSWORD".to_owned())),
+            Ok(Err(_)) => Err(AdminError::NotConnected),
+            Err(_) => {
+                self.logins
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&self.prefix);
+                Err(AdminError::NoAnswer)
+            }
+        }
     }
 }
 

@@ -82,6 +82,76 @@ pub fn LogInAgain(node: u32) -> impl IntoView {
     }
 }
 
+/// Whether a login to a room is under way.
+pub fn logging_in(live: Live, node: u32) -> bool {
+    live.room
+        .with(|r| r.as_ref().is_some_and(|r| r.node == node && r.busy))
+}
+
+/// The circumference of the ring that empties as a login is waited for,
+/// at its radius of 26.
+const RING: f64 = 2.0 * std::f64::consts::PI * 26.0;
+
+/// While a login to a room is waited for, in the middle of the conversation:
+/// a ring that empties as the time runs out, and the seconds left; until
+/// the daemon says how long, a ring that turns.
+#[component]
+pub fn LoggingIn(node: u32) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let now = RwSignal::new(js_sys::Date::now());
+    let ticking = set_interval_with_handle(
+        move || now.set(js_sys::Date::now()),
+        std::time::Duration::from_millis(200),
+    )
+    .ok();
+    on_cleanup(move || {
+        if let Some(ticking) = ticking {
+            ticking.clear();
+        }
+    });
+    let until = move || {
+        live.room
+            .with(|r| r.as_ref().filter(|r| r.node == node).and_then(|r| r.until))
+    };
+    let left = move || until().map(|(until, _)| ((until - now.get()) / 1000.0).max(0.0));
+    let offset = move || {
+        until().map_or(RING * 0.75, |(until, wait)| {
+            RING * (1.0 - ((until - now.get()) / wait).clamp(0.0, 1.0))
+        })
+    };
+    view! {
+        <div class="logging-in" role="status">
+            <div class="ring" class:turning=move || until().is_none()>
+                <svg viewBox="0 0 60 60" aria-hidden="true">
+                    <circle class="track" cx="30" cy="30" r="26"></circle>
+                    <circle
+                        class="left"
+                        cx="30"
+                        cy="30"
+                        r="26"
+                        stroke-dasharray=RING.to_string()
+                        stroke-dashoffset=move || offset().to_string()
+                    ></circle>
+                </svg>
+                <span class="seconds">
+                    {move || left().map(|left| format!("{}", left.ceil()))}
+                </span>
+            </div>
+            <p>{t!(i18n, room_logging_in)}</p>
+            <p class="dim">
+                {move || {
+                    if until().is_some() {
+                        t_string!(i18n, room_waiting)
+                    } else {
+                        t_string!(i18n, room_sending)
+                    }
+                }}
+            </p>
+        </div>
+    }
+}
+
 /// Forgetting the password kept for a room: there only while one is.
 #[component]
 pub fn ForgetPassword(node: u32) -> impl IntoView {
@@ -148,9 +218,19 @@ pub fn RoomBar(node: u32) -> impl IntoView {
             </p>
             <div class="fields">
                 <input
-                    type="password"
+                    // Text, hidden by its style, not a password field: a room's
+                    // password is meshctl's to keep, not the browser's to offer
+                    // to save, nor a password manager's.
+                    type="text"
+                    class="secret"
                     maxlength="15"
                     autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
                     placeholder=move || t_string!(i18n, room_password)
                     aria-label=move || t_string!(i18n, room_password)
                     prop:value=move || password.get()

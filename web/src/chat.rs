@@ -755,6 +755,13 @@ pub fn ChatView() -> impl IntoView {
                             }}
                         </button>
                     </Show>
+                    // A login to the room under way: in the middle, counting down.
+                    {move || match open_room.get() {
+                        Some(node) if crate::rooms::logging_in(live, node) => {
+                            Some(view! { <crate::rooms::LoggingIn node /> })
+                        }
+                        _ => None,
+                    }}
                     <div class="messages" node_ref=list on:scroll=scrolled>
                         <For each=shown key=Item::key let:item>
                             {match item {

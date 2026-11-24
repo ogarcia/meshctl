@@ -202,6 +202,8 @@
   "room_read_write": "Lectura y escritura",
   "room_admin": "Administrador",
   "room_logging_in": "Entrando…",
+  "room_sending": "Enviando el acceso a la sala",
+  "room_waiting": "Esperando a que la sala conteste",
   "room_log_in": "Entrar",
   "room_log_in_again": "Volver a entrar, si dejan de llegar mensajes",
   "room_password": "Contraseña de la sala",

@@ -202,6 +202,8 @@
   "room_read_write": "Read and write",
   "room_admin": "Admin",
   "room_logging_in": "Logging in…",
+  "room_sending": "Sending the login to the room",
+  "room_waiting": "Waiting for the room to answer",
   "room_log_in": "Log in",
   "room_log_in_again": "Log in again, if messages stop coming",
   "room_password": "Room password",

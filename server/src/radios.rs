@@ -48,6 +48,12 @@ pub enum Change {
     Mesh(RadioId, mesh::Event),
     /// A message heard or sent, as kept.
     Message(RadioId, Message),
+    /// A login to a room sent, and how long its answer is waited for.
+    RoomLoginWaiting {
+        radio: RadioId,
+        node: u32,
+        wait_ms: u32,
+    },
     /// Another copy of a message heard.
     MessageHeard {
         radio: RadioId,
@@ -1055,19 +1061,27 @@ impl Radios {
                 .await?
                 .unwrap_or_default(),
         };
-        let access = mesh
+        let failure = |error| match error {
+            AdminError::NotConnected => RoomFailure::NotConnected,
+            AdminError::NoAnswer => RoomFailure::NoAnswer,
+            AdminError::UnknownNode | AdminError::OwnNode => RoomFailure::NotARoom,
+            AdminError::Refused(why) if why == "WRONG_PASSWORD" => RoomFailure::WrongPassword,
+            AdminError::Refused(why) => RoomFailure::Refused(why),
+            AdminError::Unsupported | AdminError::NoPath => {
+                RoomFailure::Refused("UNSUPPORTED".to_owned())
+            }
+        };
+        let sent = mesh
             .meshcore_login(node, &password)
             .await
-            .map_err(|error| match error {
-                AdminError::NotConnected => RoomFailure::NotConnected,
-                AdminError::NoAnswer => RoomFailure::NoAnswer,
-                AdminError::UnknownNode | AdminError::OwnNode => RoomFailure::NotARoom,
-                AdminError::Refused(why) if why == "WRONG_PASSWORD" => RoomFailure::WrongPassword,
-                AdminError::Refused(why) => RoomFailure::Refused(why),
-                AdminError::Unsupported | AdminError::NoPath => {
-                    RoomFailure::Refused("UNSUPPORTED".to_owned())
-                }
-            })?;
+            .map_err(failure)?;
+        // How long it is waited for, for whoever watches it.
+        let _ = self.changes.send(Change::RoomLoginWaiting {
+            radio: id,
+            node,
+            wait_ms: u32::try_from(sent.wait.as_millis()).unwrap_or(u32::MAX),
+        });
+        let access = sent.answer().await.map_err(failure)?;
         let access = match access {
             meshctl_core::meshcore::protocol::Access::ReadOnly => RoomAccess::ReadOnly,
             meshctl_core::meshcore::protocol::Access::ReadWrite => RoomAccess::ReadWrite,

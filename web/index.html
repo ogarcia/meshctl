@@ -2864,6 +2864,44 @@
       .room-bar .fields { display: flex; gap: 8px; flex: 1 1 260px; }
       .room-bar input { flex: 1; min-width: 0; }
       .room-bar .error { flex-basis: 100%; margin: 0; color: var(--mc-danger); font-size: 13px; }
+      /* A field whose text is hidden, as a password's, without being one the
+         browser offers to save. */
+      .secret { -webkit-text-security: disc; text-security: disc; }
+      /* A login to a room under way, in the middle of the conversation: a
+         ring that empties as the time runs out, the seconds left in it;
+         turning until how long is known. */
+      .logging-in {
+        position: absolute;
+        top: 45%;
+        left: 50%;
+        z-index: 4;
+        transform: translate(-50%, -50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        max-width: calc(100% - 32px);
+        padding: 20px 28px;
+        border: 1px solid var(--mc-border);
+        border-radius: 16px;
+        background: var(--mc-surface);
+        box-shadow: var(--mc-shadow);
+        text-align: center;
+      }
+      .logging-in p { margin: 0; }
+      .logging-in .dim { font-size: 13px; }
+      .logging-in .ring { position: relative; width: 64px; height: 64px; margin-bottom: 8px; }
+      .logging-in .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+      .logging-in .ring circle { fill: none; stroke-width: 4; }
+      .logging-in .ring .track { stroke: var(--mc-border); }
+      .logging-in .ring .left { stroke: var(--mc-primary); stroke-linecap: round; transition: stroke-dashoffset 0.2s linear; }
+      .logging-in .ring.turning svg { animation: ring-turn 1s linear infinite; }
+      .logging-in .ring .seconds { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+      @keyframes ring-turn { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        .logging-in .ring.turning svg { animation-duration: 3s; }
+        .logging-in .ring .left { transition: none; }
+      }
       .composer {
         display: flex;
         gap: 10px;

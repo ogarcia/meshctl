@@ -88,6 +88,14 @@ pub enum ServerMessage {
         status: MessageStatus,
         error: Option<String>,
     },
+    /// A login to a MeshCore room sent through a radio, and how long, in
+    /// milliseconds from now, its answer is waited for: the login's request
+    /// answers when it comes, or when that runs out.
+    RoomLoginWaiting {
+        radio: RadioId,
+        node: u32,
+        wait_ms: u32,
+    },
     /// Another copy of a message heard, through a MeshCore radio: how many
     /// times it was heard now, and the region it came in.
     MessageHeard {
