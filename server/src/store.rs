@@ -14,7 +14,9 @@ use meshctl_core::mesh::{Heard, LocalNode, Node, Position, PositionSource, User}
 use sqlx::SqliteConnection;
 use sqlx::sqlite::{
     SqliteAutoVacuum, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
+    SqliteSynchronous,
 };
+use sqlx::{ConnectOptions, Connection};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -262,14 +264,26 @@ impl Store {
     pub async fn open(data: &Path) -> Result<Self> {
         std::fs::create_dir_all(data)
             .with_context(|| format!("cannot create the data directory {}", data.display()))?;
-        let options = SqliteConnectOptions::new()
+        let base = SqliteConnectOptions::new()
             .filename(data.join(DATABASE_FILE))
             .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            // What is cleaned away given back to the disk, a little at a
-            // time: set as the database is made.
-            .auto_vacuum(SqliteAutoVacuum::Incremental)
             .foreign_keys(true);
+        // Once, as it opens: what the file keeps for good, its write-ahead
+        // log and what is cleaned away given back to the disk a little at a
+        // time. Set on every connection, as before, a new one had to wait
+        // for the file alone, and failed if another wrote for long.
+        let first = base
+            .clone()
+            .auto_vacuum(SqliteAutoVacuum::Incremental)
+            .journal_mode(SqliteJournalMode::Wal)
+            .connect()
+            .await
+            .with_context(|| format!("cannot open the database in {}", data.display()))?;
+        first.close().await?;
+        // With the log, a write waits for the disk at its checkpoints, not
+        // at each one: what a power cut can lose is the last few, never the
+        // database.
+        let options = base.synchronous(SqliteSynchronous::Normal);
         let pool = SqlitePoolOptions::new()
             .connect_with(options)
             .await
