@@ -9,6 +9,7 @@
 use crate::app::Live;
 use crate::daemon::{self, Failure};
 use crate::i18n::{Locale, t, t_string, use_i18n};
+use crate::qr::QrScanner;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_i18n::I18nContext;
@@ -20,6 +21,7 @@ use meshctl_api::{ChannelKey, ErrorCode, LinkContents, LinkMode, RadioKind};
 const ANTENNA_PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v8" /><path d="M16 4.5v7" /><path d="M12 5v16" /><path d="M8 5.5v5" /><path d="M4 6v4" /><path d="M20 8h-16" /><path d="M16 19h6" /><path d="M19 16v6" /></svg>"#;
 const LINK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/link.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
+const QRCODE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/qrcode.svg");
 
 /// What a window is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,8 +133,11 @@ pub fn LinkAdder() -> impl IntoView {
     // For channels that replace: whether they do, and bring their LoRa.
     let mode = RwSignal::new(LinkMode::Add);
     let lora = RwSignal::new(false);
+    // Whether a QR is being read for it.
+    let scanning = RwSignal::new(false);
     let close = move || {
         live.adding_link.set(None);
+        scanning.set(false);
         url.set(String::new());
         contents.set(None);
         problem.set(None);
@@ -427,26 +432,66 @@ pub fn LinkAdder() -> impl IntoView {
                             ></button>
                         </header>
                         <div class="modal-body">
-                            <p class="hint dim">
-                                {move || match want {
-                                    LinkWant::Node => t_string!(i18n, link_hint_node),
-                                    LinkWant::Channels => t_string!(i18n, link_hint_channels),
+                            <div
+                                class="segmented link-source"
+                                role="tablist"
+                                style=move || format!("--at: {}; --n: 2", u8::from(scanning.get()))
+                            >
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    class:on=move || !scanning.get()
+                                    aria-selected=move || (!scanning.get()).to_string()
+                                    on:click=move |_| scanning.set(false)
+                                >
+                                    <span class="icon" inner_html=LINK></span>
+                                    {t!(i18n, link_tab_paste)}
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    class:on=move || scanning.get()
+                                    aria-selected=move || scanning.get().to_string()
+                                    on:click=move |_| scanning.set(true)
+                                >
+                                    <span class="icon" inner_html=QRCODE></span>
+                                    {t!(i18n, link_tab_qr)}
+                                </button>
+                            </div>
+                            {move || {
+                                if scanning.get() {
+                                    // Once read, back to the link, to see what it holds.
+                                    let found = Callback::new(move |text: String| {
+                                        scanning.set(false);
+                                        url.set(text.trim().to_owned());
+                                    });
+                                    view! { <QrScanner found=found /> }.into_any()
+                                } else {
+                                    view! {
+                                        <textarea
+                                            class="mono"
+                                            rows="3"
+                                            placeholder=match (want, meshcore) {
+                                                (LinkWant::Node, false) => "https://meshtastic.org/v/#…",
+                                                (LinkWant::Channels, false) => "https://meshtastic.org/e/#…",
+                                                (LinkWant::Node, true) => "meshcore://contact/add?…",
+                                                (LinkWant::Channels, true) => "meshcore://channel/add?…",
+                                            }
+                                            prop:value=move || url.get()
+                                            on:input=move |ev| url.set(event_target_value(&ev))
+                                        ></textarea>
+                                        <p class="hint dim">
+                                            {match want {
+                                                LinkWant::Node => t_string!(i18n, link_hint_node),
+                                                LinkWant::Channels => t_string!(i18n, link_hint_channels),
+                                            }
+                                            .replace("{apps}", apps)}
+                                        </p>
+                                    }
+                                    .into_any()
                                 }
-                                .replace("{apps}", apps)}
-                            </p>
-                            <textarea
-                                class="mono"
-                                rows="3"
-                                placeholder=match (want, meshcore) {
-                                    (LinkWant::Node, false) => "https://meshtastic.org/v/#…",
-                                    (LinkWant::Channels, false) => "https://meshtastic.org/e/#…",
-                                    (LinkWant::Node, true) => "meshcore://contact/add?…",
-                                    (LinkWant::Channels, true) => "meshcore://channel/add?…",
-                                }
-                                prop:value=move || url.get()
-                                on:input=move |ev| url.set(event_target_value(&ev))
-                            ></textarea>
-                            {shown}
+                            }}
+                            {move || (!scanning.get()).then(shown)}
                             {move || problem.get().map(|p| view! { <p class="error">{failure_words(i18n, p)}</p> })}
                         </div>
                         <div class="buttons">

@@ -25,6 +25,7 @@ mod offline;
 mod packets;
 mod phone;
 mod preferences;
+mod qr;
 mod radios;
 mod rooms;
 mod sections;

@@ -117,8 +117,8 @@
   "link_add_node": "Add node from a link",
   "node_add": "Add node",
   "link_add_channels_title": "Add channels from a link",
-  "link_hint_node": "Paste a node's contact link, as the {apps} apps share it. It is read as it is pasted, and nothing is added until you confirm.",
-  "link_hint_channels": "Paste a channels link, as the {apps} apps share it. It is read as it is pasted, and nothing changes until you confirm.",
+  "link_hint_node": "A node's contact link, as the {apps} apps share it. Nothing is added until you confirm.",
+  "link_hint_channels": "A channels link, as the {apps} apps share it. Nothing changes until you confirm.",
   "link_from": "From a link",
   "link_for_channels": "It is a channels link: channels are added from Settings → Channels.",
   "link_for_nodes": "It is a contact link: it is added from the list of nodes.",
@@ -980,5 +980,14 @@
   "chat_repeaters": "{n} repeaters carried it",
   "chat_unheard": "No repeater heard it: it can be sent again",
   "chat_waiting_repeaters": "Sent: waiting to hear a repeater pass it on",
-  "chat_reaction_orphan": "reacted to a message not here"
+  "chat_reaction_orphan": "reacted to a message not here",
+  "qr_photo": "or read it from a photo",
+  "qr_starting": "Opening the camera…",
+  "qr_camera_hint": "Frame the QR and it reads by itself",
+  "qr_no_camera": "The browser only allows the live camera over HTTPS.",
+  "qr_denied": "The camera was not allowed.",
+  "qr_not_found": "No QR found in the photo.",
+  "link_tab_paste": "Paste link",
+  "link_tab_qr": "Scan QR",
+  "qr_photo_pick": "Pick or take a photo of the QR"
 }

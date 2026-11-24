@@ -117,8 +117,8 @@
   "link_add_node": "Añadir nodo desde un enlace",
   "node_add": "Añadir nodo",
   "link_add_channels_title": "Añadir canales desde un enlace",
-  "link_hint_node": "Pega el enlace de contacto de un nodo, como lo comparten las apps de {apps}. Se lee al pegarlo y no se añade nada hasta que lo confirmes.",
-  "link_hint_channels": "Pega un enlace de canales, como lo comparten las apps de {apps}. Se lee al pegarlo y no cambia nada hasta que lo confirmes.",
+  "link_hint_node": "El enlace de contacto de un nodo, como lo comparten las apps de {apps}. No se añade nada hasta que lo confirmes.",
+  "link_hint_channels": "Un enlace de canales, como lo comparten las apps de {apps}. No cambia nada hasta que lo confirmes.",
   "link_from": "Desde un enlace",
   "link_for_channels": "Es un enlace de canales: se añaden desde Ajustes → Canales.",
   "link_for_nodes": "Es un enlace de contacto: se añade desde la lista de nodos.",
@@ -980,5 +980,14 @@
   "chat_repeaters": "Lo llevaron {n} repetidores",
   "chat_unheard": "Ningún repetidor lo oyó: se puede volver a enviar",
   "chat_waiting_repeaters": "Enviado: a la espera de oír a algún repetidor pasarlo",
-  "chat_reaction_orphan": "reaccionó a un mensaje que no está aquí"
+  "chat_reaction_orphan": "reaccionó a un mensaje que no está aquí",
+  "qr_photo": "o léelo de una foto",
+  "qr_starting": "Abriendo la cámara…",
+  "qr_camera_hint": "Encuadra el QR y se lee solo",
+  "qr_no_camera": "El navegador solo deja usar la cámara en vivo por HTTPS.",
+  "qr_denied": "No se ha dado permiso para usar la cámara.",
+  "qr_not_found": "No se encuentra ningún QR en la foto.",
+  "link_tab_paste": "Pegar enlace",
+  "link_tab_qr": "Escanear QR",
+  "qr_photo_pick": "Elegir o hacer una foto del QR"
 }
