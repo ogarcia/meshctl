@@ -198,6 +198,68 @@ enum Carried {
     Nowhere,
 }
 
+/// How far one's own message went, as its mark says it, the same on both
+/// kinds of radio: not in the radio yet; out, with nobody known to have
+/// heard it; got by someone, a node that passed it on along a channel or
+/// the one it went to; heard by nobody; or failed otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Went {
+    Pending,
+    Out,
+    /// Out, a Meshtastic direct message a relay passed on: still on its way.
+    OnItsWay,
+    Got,
+    Delivered,
+    Unheard,
+    Failed,
+}
+
+impl Went {
+    /// A status read so. A Meshtastic radio has it the moment it is handed
+    /// over; another node passing on a channel message of it is someone who
+    /// got it. Given up on as nobody answered, it was heard by nobody.
+    fn of(meshcore: bool, status: MessageStatus, error: Option<&str>, to_channel: bool) -> Self {
+        match status {
+            MessageStatus::Sending if meshcore => Self::Pending,
+            MessageStatus::Sending => Self::Out,
+            MessageStatus::Sent if meshcore => Self::Out,
+            MessageStatus::Sent if to_channel => Self::Got,
+            MessageStatus::Sent => Self::OnItsWay,
+            MessageStatus::Delivered => Self::Delivered,
+            MessageStatus::Failed
+                if matches!(error, Some("MAX_RETRANSMIT" | "NO_RESPONSE" | "TIMEOUT")) =>
+            {
+                Self::Unheard
+            }
+            _ => Self::Failed,
+        }
+    }
+
+    /// Its mark: the icon, its class, and its words.
+    fn look(self, i18n: I18nContext<Locale>) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Self::Pending => (CLOCK, "pending", t_string!(i18n, chat_sending)),
+            Self::Out => (CHECK, "sent", t_string!(i18n, chat_sent)),
+            Self::OnItsWay => (CHECK, "sent", t_string!(i18n, chat_on_its_way)),
+            Self::Got => (CHECKS, "delivered", t_string!(i18n, chat_got)),
+            Self::Delivered => (CHECKS, "delivered", t_string!(i18n, chat_delivered)),
+            Self::Unheard => (UNHEARD, "unheard", t_string!(i18n, chat_nobody)),
+            Self::Failed => (ALERT, "failed", t_string!(i18n, chat_failed)),
+        }
+    }
+}
+
+/// How far one of ours went, as the selected radio tells it.
+fn went(live: Live, message: &meshctl_api::Message) -> Went {
+    let meshcore = untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore);
+    Went::of(
+        meshcore,
+        message.status,
+        message.error.as_deref(),
+        message.to == meshctl_api::BROADCAST,
+    )
+}
+
 /// What became of a message, if it is ours on a MeshCore channel: counted
 /// from when it was sent, or sent again.
 fn carried(live: Live, thread: Thread, id: i64) -> Option<Carried> {
@@ -946,22 +1008,13 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
             })
             .into_any();
         }
-        let (icon, class) = match status {
-            MessageStatus::Sending => (CLOCK, "pending"),
-            MessageStatus::Sent => (CHECK, "sent"),
-            MessageStatus::Delivered => (CHECKS, "delivered"),
-            _ => (ALERT, "failed"),
-        };
+        let went = went(live, &message);
+        let (icon, class, _) = went.look(i18n);
         let words = move || {
-            let words = match status {
-                MessageStatus::Sending => t_string!(i18n, chat_sending),
-                MessageStatus::Sent => t_string!(i18n, chat_sent),
-                MessageStatus::Delivered => t_string!(i18n, chat_delivered),
-                _ => t_string!(i18n, chat_failed),
-            };
+            let (_, _, words) = went.look(i18n);
             match &error {
-                Some(error) => format!("{words}: {error}"),
-                None => words.to_owned(),
+                Some(error) if went == Went::Failed => format!("{words}: {error}"),
+                _ => words.to_owned(),
             }
         };
         view! {
@@ -1099,7 +1152,8 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                     })
                         .into_any(),
                 )
-            } else if mine {
+            } else if mine && status == MessageStatus::Failed {
+                // Ours that got nowhere: written anew, as a new message.
                 let (again, answered, region) =
                     (message.text.clone(), message.reply_id, message.scope.clone());
                 Some(
@@ -1357,15 +1411,11 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
             .clone()
             .map(|s| fact(t!(i18n, chat_scope).into_any(), format!("#{s}").into_any()));
         let status = message.outgoing.then(|| {
-            let words = match message.status {
-                MessageStatus::Sending => t_string!(i18n, chat_sending),
-                MessageStatus::Sent => t_string!(i18n, chat_sent),
-                MessageStatus::Delivered => t_string!(i18n, chat_delivered),
-                _ => t_string!(i18n, chat_failed),
-            };
+            let went = went(live, &message);
+            let (_, _, words) = went.look(i18n);
             let words = match &message.error {
-                Some(error) => format!("{words}: {error}"),
-                None => words.to_owned(),
+                Some(error) if went == Went::Failed => format!("{words}: {error}"),
+                _ => words.to_owned(),
             };
             fact(t!(i18n, chat_status).into_any(), words.into_any())
         });
@@ -1797,7 +1847,7 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
                             }
                             .into_any()
                         })
-                    } else if message.outgoing {
+                    } else if message.outgoing && message.status == MessageStatus::Failed {
                         let (again, answered, region) =
                             (message.text.clone(), message.reply_id, message.scope.clone());
                         Some(

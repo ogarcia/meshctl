@@ -748,7 +748,11 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                 }
                 return vec![sent];
             }
-            // Delivered after a moment, and now and then answered.
+            // Delivered after a moment, and now and then answered; with
+            // answers off, never acknowledged.
+            if !radio.answers {
+                return vec![sent];
+            }
             let events = events.clone();
             let answers = to.kind == 1 && random(3) == 0;
             if answers {
