@@ -245,7 +245,3 @@ cargo run -p meshctl-core --example probe -- <host> [port] [seconds]
 Translations are in `web/locales/`, one JSON file per language, English being
 the reference. Using a key English does not declare is a compile error; one
 another language lacks is a build warning, and shows in English meanwhile.
-
-## License
-
-GPL-3.0-or-later. See [LICENSE](LICENSE).
