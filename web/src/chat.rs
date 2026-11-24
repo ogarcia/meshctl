@@ -1170,7 +1170,8 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                     .into_any(),
                 )
             } else {
-                can_answer.then(|| {
+                // Others' answered; one's own, not.
+                (can_answer && !mine).then(|| {
                     view! {
                         <button
                             type="button"
@@ -1863,7 +1864,8 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
                             .into_any(),
                         )
                     } else {
-                        can_answer.then(|| {
+                        // Others' answered; one's own, not.
+                        (can_answer && !message.outgoing).then(|| {
                             view! {
                                 <button role="menuitem" on:click=move |_| {
                                     close();
