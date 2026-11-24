@@ -1,0 +1,55 @@
+# meshctl's desktop app as a Flatpak of its own, as Rucio's: not Flathub's.
+#
+# It packs the release binary build.sh makes (the interface with trunk, then
+# `cargo build --release -p meshctl-desktop`) instead of building it from
+# source in the sandbox, so no crates are vendored: that is what a bundle of
+# one's own saves over a Flathub submission.
+#
+#   desktop/flatpak/build.sh
+#   flatpak-builder --user --install --force-clean build-dir desktop/flatpak/me.ogarcia.meshctl.yml
+app-id: me.ogarcia.meshctl
+runtime: org.gnome.Platform
+# With WebKitGTK 4.1, which Tauri takes. Raise it as GNOME's runtimes go out
+# of support; CI reads it from here, for the SDK to install.
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: meshctl-desktop
+
+finish-args:
+  # Radios over the network.
+  - --share=network
+  # The webview, on Wayland or X11, with its GPU.
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Radios on a cable: their serial ports (/dev/ttyACM*, /dev/ttyUSB*), which
+  # no narrower permission reaches; it gives the GPU too. Nothing of the
+  # user's files: what meshctl keeps stays in the sandbox.
+  - --device=all
+
+modules:
+  - name: meshctl
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 meshctl-desktop /app/bin/meshctl-desktop
+      - install -Dm644 me.ogarcia.meshctl.desktop /app/share/applications/me.ogarcia.meshctl.desktop
+      - install -Dm644 me.ogarcia.meshctl.metainfo.xml /app/share/metainfo/me.ogarcia.meshctl.metainfo.xml
+      - install -Dm644 32.png /app/share/icons/hicolor/32x32/apps/me.ogarcia.meshctl.png
+      - install -Dm644 128.png /app/share/icons/hicolor/128x128/apps/me.ogarcia.meshctl.png
+      - install -Dm644 256.png /app/share/icons/hicolor/256x256/apps/me.ogarcia.meshctl.png
+      - install -Dm644 512.png /app/share/icons/hicolor/512x512/apps/me.ogarcia.meshctl.png
+    sources:
+      - type: file
+        path: ../../target/release/meshctl-desktop
+      - type: file
+        path: me.ogarcia.meshctl.desktop
+      - type: file
+        path: me.ogarcia.meshctl.metainfo.xml
+      - type: file
+        path: ../../assets/icons/png/32.png
+      - type: file
+        path: ../../assets/icons/png/128.png
+      - type: file
+        path: ../../assets/icons/png/256.png
+      - type: file
+        path: ../../assets/icons/png/512.png

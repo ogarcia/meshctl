@@ -91,10 +91,143 @@ jobs:
           path: ${{ env.ARCHIVE }}
           if-no-files-found: error
 
+  # ── The desktop app for Windows, portable: a ZIP to unzip and run ─────────
+  # What it keeps goes beside meshctl.exe, so the folder carries it all. It
+  # takes WebView2, which Windows 10 and 11 have.
+  windows:
+    name: Build Windows desktop (portable)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Load build versions
+        shell: bash
+        run: grep -E '^[A-Za-z_]+=' versions.env >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc,wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-desktop
+
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@${{ env.TRUNK_VERSION }}
+
+      - name: Build the interface
+        run: cd web && trunk build --release
+
+      # With the target named, so that the C runtime is linked statically in
+      # the program alone (see .cargo/config.toml).
+      - name: Build the desktop app
+        run: cargo build --release --locked -p meshctl-desktop --target x86_64-pc-windows-msvc
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "meshctl-${{ github.ref_name }}-windows-x86_64-portable"
+          New-Item -ItemType Directory -Force $name | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/meshctl-desktop.exe "$name/meshctl.exe"
+          Copy-Item LICENSE "$name/LICENSE.txt"
+          @"
+          meshctl, portable.
+
+          Unzip this folder somewhere you can write to (the Desktop, Documents;
+          not Program Files) and run meshctl.exe. What it keeps goes into the
+          data folder beside it: removing the folder removes it all.
+
+          Closing its window keeps it running, and listening to your radios, in
+          the tray by the clock: Quit there stops it. meshcore:// links open in
+          it, to add the node or channel they hold.
+
+          It needs Microsoft Edge's WebView2, which Windows 10 and 11 have.
+
+          https://meshctl.ogarcia.me
+          "@ | Set-Content -Encoding UTF8 "$name/README.txt"
+          Compress-Archive -Path $name -DestinationPath "$name.zip" -Force
+          "ARCHIVE=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: meshctl-windows
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+  # ── The desktop app for Linux, as a Flatpak of its own ─────────────────────
+  # The release binary, built here as desktop/flatpak/build.sh does, packed by
+  # flatpak-builder into one .flatpak file. On Ubuntu 24.04, whose glibc the
+  # GNOME runtime's is not older than; the runtime's version comes from the
+  # manifest, so that the two do not drift.
+  flatpak:
+    name: Build Linux desktop (Flatpak)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Load build versions
+        shell: bash
+        run: grep -E '^[A-Za-z_]+=' versions.env >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-flatpak
+
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@${{ env.TRUNK_VERSION }}
+
+      # WebKitGTK's development files, to link the desktop app.
+      - name: Install Tauri's system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev librsvg2-dev build-essential
+
+      - name: Build the interface
+        run: cd web && trunk build --release
+
+      - name: Build the desktop app
+        run: cargo build --release --locked -p meshctl-desktop
+
+      # Ubuntu 24.04 keeps unprivileged user namespaces to AppArmor, which
+      # stops bubblewrap, and so flatpak-builder: let them be.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Install Flatpak and the GNOME runtime
+        run: |
+          sudo apt-get install -y flatpak flatpak-builder
+          GNOME=$(grep '^runtime-version:' desktop/flatpak/me.ogarcia.meshctl.yml | grep -oE '[0-9]+')
+          flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --user flathub "org.gnome.Platform//$GNOME" "org.gnome.Sdk//$GNOME"
+
+      - name: Build the bundle
+        shell: bash
+        run: |
+          flatpak-builder --user --force-clean --repo=repo build-dir \
+            desktop/flatpak/me.ogarcia.meshctl.yml
+          BUNDLE=meshctl-${{ github.ref_name }}-linux-x86_64.flatpak
+          flatpak build-bundle repo "$BUNDLE" me.ogarcia.meshctl
+          echo "ARCHIVE=$BUNDLE" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: meshctl-flatpak
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+
   # ── The release, with every archive and their checksums ────────────────────
   release:
     name: GitHub release
-    needs: [build]
+    needs: [build, windows, flatpak]
     # Only for a tag: run by hand, this is skipped, and the archives stay on
     # the run.
     if: startsWith(github.ref, 'refs/tags/')

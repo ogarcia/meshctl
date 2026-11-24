@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>me.ogarcia.meshctl</id>
+
+  <name>meshctl</name>
+  <summary>A lean control panel for your Meshtastic and MeshCore radios</summary>
+  <summary xml:lang="es">Un panel de control ligero para tus radios Meshtastic y MeshCore</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <developer id="me.ogarcia">
+    <name>Óscar García Amor</name>
+  </developer>
+
+  <description>
+    <p>
+      meshctl connects to your mesh radios, Meshtastic and MeshCore, over the
+      network or a cable, and lets you talk on their channels and in private,
+      see their nodes on a map, follow the packets they hear and set them up.
+    </p>
+    <p>
+      The desktop app runs meshctl's daemon within itself and shows its panel
+      in a window of its own; what it keeps stays inside the Flatpak's
+      sandbox. Closing the window keeps it listening to your radios in the
+      background; stop it from your desktop's background apps. meshcore://
+      links open in it, to add the node or channel they hold.
+    </p>
+  </description>
+  <description xml:lang="es">
+    <p>
+      meshctl se conecta a tus radios de malla, Meshtastic y MeshCore, por red
+      o por cable, y te deja hablar en sus canales y en privado, ver sus nodos
+      en el mapa, seguir los paquetes que oyen y ajustarlas.
+    </p>
+    <p>
+      La app de escritorio lleva dentro el daemon de meshctl y muestra su panel
+      en una ventana propia; lo que guarda se queda dentro del sandbox del
+      Flatpak. Al cerrar la ventana sigue escuchando tus radios en segundo
+      plano; se para desde las apps en segundo plano de tu escritorio. Los
+      enlaces meshcore:// se abren en ella, para añadir el nodo o el canal que
+      traen.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">me.ogarcia.meshctl.desktop</launchable>
+
+  <url type="homepage">https://meshctl.ogarcia.me</url>
+  <url type="bugtracker">https://github.com/ogarcia/meshctl/issues</url>
+  <url type="vcs-browser">https://github.com/ogarcia/meshctl</url>
+
+  <categories>
+    <category>Network</category>
+    <category>HamRadio</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <!-- One per release, the newest first, added as it is tagged. -->
+  <releases>
+  </releases>
+</component>

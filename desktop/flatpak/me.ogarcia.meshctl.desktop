@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=meshctl
+GenericName=Mesh radio control panel
+GenericName[es]=Panel de control de radios de malla
+Comment=A lean control panel for your Meshtastic and MeshCore radios
+Comment[es]=Un panel de control ligero para tus radios Meshtastic y MeshCore
+Exec=meshctl-desktop %u
+Icon=me.ogarcia.meshctl
+Terminal=false
+Categories=Network;HamRadio;
+Keywords=meshtastic;meshcore;mesh;lora;radio;
+MimeType=x-scheme-handler/meshcore;
+StartupNotify=true
+StartupWMClass=me.ogarcia.meshctl

@@ -1,3 +1,11 @@
+# Link the MSVC C runtime statically on Windows, so that the portable desktop
+# app runs as it is unzipped, without Visual C++'s redistributable (no
+# VCRUNTIME140.dll, no MSVCP140.dll). Only for that target: build it with
+# `--target x86_64-pc-windows-msvc`, so that build scripts and proc-macros,
+# which run on the host, are left as they are.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
 # Keep the shipped x86_64 Linux binaries runnable on any x86_64 CPU, including
 # older ones without AVX (e.g. the Intel "Goldmont" Celeron/Atom families, which
 # is what a lot of small home servers running this are).
