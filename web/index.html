@@ -3811,8 +3811,11 @@
        * A phone, last: over the rules of each page above, at the same weight.
        */
       @media (max-width: 835px), (max-height: 500px) and (pointer: coarse) {
-        /* The LoRa from a link by its icon, beside saving. */
-        .save-bar .from-link { padding: 0 12px; }
+        /* Saving across the width, as the channels' foot is; the LoRa from
+           a link by its icon, beside it. */
+        .save-bar button { flex: 1 1 0; min-width: 0; padding-inline: 8px; white-space: nowrap; }
+        .save-bar .start { flex: none; }
+        .save-bar .from-link { flex: none; padding-inline: 12px; }
         .save-bar .from-link .label { display: none; }
         /* The columns one under the other: the first's last keeps its line. */
         .node-page > .node-sections:last-child > .node-column:first-child > .node-section:last-child {
