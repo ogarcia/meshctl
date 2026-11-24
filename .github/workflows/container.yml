@@ -90,9 +90,9 @@ jobs:
 
       - name: Build the daemon
         run: |
-          cargo build --release --locked --target ${{ matrix.target }} -p meshctl-server
+          cargo build --release --locked --target ${{ matrix.target }} -p meshctld
           mkdir -p dist/${{ matrix.arch }}
-          cp target/${{ matrix.target }}/release/meshctl dist/${{ matrix.arch }}/
+          cp target/${{ matrix.target }}/release/meshctld dist/${{ matrix.arch }}/
 
       - uses: actions/upload-artifact@v7
         with:

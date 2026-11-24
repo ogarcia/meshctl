@@ -2586,7 +2586,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "meshctl-server"
+name = "meshctl-web"
+version = "0.1.0-dev"
+dependencies = [
+ "console_error_panic_hook",
+ "futures-util",
+ "gloo-net",
+ "gloo-timers",
+ "js-sys",
+ "leptos",
+ "leptos_i18n",
+ "leptos_i18n_build",
+ "meshctl-api",
+ "qrcode",
+ "rqrr",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "meshctld"
 version = "0.1.0-dev"
 dependencies = [
  "anyhow",
@@ -2617,28 +2639,6 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "utoipa-scalar",
-]
-
-[[package]]
-name = "meshctl-web"
-version = "0.1.0-dev"
-dependencies = [
- "console_error_panic_hook",
- "futures-util",
- "gloo-net",
- "gloo-timers",
- "js-sys",
- "leptos",
- "leptos_i18n",
- "leptos_i18n_build",
- "meshctl-api",
- "qrcode",
- "rqrr",
- "serde",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]

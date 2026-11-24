@@ -1,5 +1,5 @@
 [package]
-name = "meshctl-server"
+name = "meshctld"
 description = "A lean control panel for your mesh radios"
 readme = "../README.md"
 version.workspace = true
@@ -12,7 +12,7 @@ categories = ["web-programming::http-server"]
 publish = false
 
 [[bin]]
-name = "meshctl"
+name = "meshctld"
 path = "src/main.rs"
 
 [dependencies]

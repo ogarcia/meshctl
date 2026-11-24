@@ -1,27 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
-mod channels;
-mod keys;
-mod links;
-mod lora;
-mod meshcore;
-mod packets;
-mod radios;
-mod reactions;
-mod routes;
-mod sections;
-mod settings;
-mod store;
-mod web;
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
-use radios::Radios;
+use meshctld::Config;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use store::Store;
-use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 /// A lean control panel for your mesh radios.
@@ -55,51 +39,12 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let token = cli.token.filter(|token| !token.is_empty());
-
-    info!(
-        "{} {} — free software under the GPL, version 3 or later",
-        env!("CARGO_BIN_NAME"),
-        env!("CARGO_PKG_VERSION"),
-    );
-
-    if !cli.listen.ip().is_loopback() && token.is_none() {
-        warn!(
-            "listening on {} with no access token: anyone who reaches it can use the radios. \
-             Put a proxy with authentication in front, or set MESHCTL_TOKEN",
-            cli.listen
-        );
-    }
-
-    let store = Store::open(&cli.data).await?;
-    let radios = Radios::start(store.clone()).await?;
-    match radios.list().await?.len() {
-        0 => info!("no radios yet: add one from the panel"),
-        n => info!(radios = n, "radios loaded"),
-    }
-
-    let listener = tokio::net::TcpListener::bind(cli.listen)
-        .await
-        .with_context(|| format!("cannot listen on {}", cli.listen))?;
-    info!("serving on http://{}", cli.listen);
-
-    let state = web::AppState {
-        auth: web::Auth::new(token),
-        radios: radios.clone(),
+    let config = Config {
+        data: cli.data,
+        listen: cli.listen,
+        token: cli.token,
     };
-    let stopping = radios.clone();
-    axum::serve(listener, web::router(state))
-        .with_graceful_shutdown(async move {
-            shutdown().await;
-            // Ends the event streams too, which would otherwise keep the
-            // server waiting for them forever.
-            stopping.stop().await;
-        })
-        .await?;
-
-    store.close().await;
-    info!("stopped");
-    Ok(())
+    meshctld::run_until(config, shutdown()).await
 }
 
 /// Resolves on Ctrl+C, or on the SIGTERM a service manager or a container
@@ -125,5 +70,4 @@ async fn shutdown() {
         () = interrupt => {},
         () = terminate => {},
     }
-    info!("stopping");
 }

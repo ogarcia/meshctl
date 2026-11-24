@@ -146,7 +146,7 @@ meshctl warns at startup when it listens beyond this machine without a token.
 cargo build --release
 ```
 
-The binary is `target/release/meshctl`. Built without the interface, it still
+The daemon is `target/release/meshctld`. Built without the interface, it still
 serves the API and tells you at `/` what is missing.
 
 The web interface needs [trunk](https://trunkrs.dev) and the

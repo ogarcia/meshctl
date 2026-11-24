@@ -63,8 +63,8 @@ COPY . .
 # The interface first: web/dist, which the daemon embeds as it is compiled.
 RUN cd web && trunk build --release
 
-RUN cargo build --release --locked -p meshctl-server && \
-    cp target/release/meshctl /usr/bin/meshctl
+RUN cargo build --release --locked -p meshctld && \
+    cp target/release/meshctld /usr/bin/meshctld
 
 # ── Stage 1b: pre-built binaries injected from CI (dist/ in build context) ───
 
@@ -73,7 +73,7 @@ RUN cargo build --release --locked -p meshctl-server && \
 # produced by the container.yml build matrix.
 FROM scratch AS prebuilt
 ARG TARGETARCH
-COPY --chmod=0755 dist/${TARGETARCH}/meshctl /usr/bin/meshctl
+COPY --chmod=0755 dist/${TARGETARCH}/meshctld /usr/bin/meshctld
 
 # ── Stage 1c: indirection — points to 'builder' or 'prebuilt' via build arg ──
 
@@ -91,7 +91,7 @@ RUN addgroup -S -g 10001 meshctl && \
     mkdir -p /var/lib/meshctl && \
     chown -R meshctl:meshctl /var/lib/meshctl
 
-COPY --from=bins /usr/bin/meshctl /usr/bin/meshctl
+COPY --from=bins /usr/bin/meshctld /usr/bin/meshctld
 
 USER meshctl
 WORKDIR /var/lib/meshctl
@@ -102,4 +102,4 @@ ENV MESHCTL_DATA=/var/lib/meshctl
 # The panel and the API: http://<host>:7434/
 EXPOSE 7434/tcp
 
-ENTRYPOINT ["/usr/bin/meshctl"]
+ENTRYPOINT ["/usr/bin/meshctld"]
