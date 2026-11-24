@@ -1771,7 +1771,8 @@ pub(crate) fn Conversations() -> impl IntoView {
         let mut quiet: Vec<(String, u32)> = live.nodes.with(|nodes| {
             nodes
                 .values()
-                .filter(|n| n.role.as_deref() == Some("ROOM"))
+                // One the radio no longer has, only with something said in it.
+                .filter(|n| n.role.as_deref() == Some("ROOM") && n.on_radio != Some(false))
                 .filter(|n| !rooms.contains(&Peer::Node { node: n.num }))
                 .map(|n| {
                     (

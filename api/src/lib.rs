@@ -96,6 +96,9 @@ pub enum ErrorCode {
     WrongPassword,
     /// Not a room the radio knows.
     NotARoom,
+    /// A node the radio no longer has in its own list: meshctl alone keeps
+    /// it, as heard before.
+    NotOnRadio,
 }
 
 /// The body of every error the API answers with.

@@ -1153,7 +1153,13 @@ impl Mesh {
             return Err(AdminError::OwnNode);
         }
         let key = self.meshcore_key(&session, num)?;
-        session.client.done(command::remove_contact(&key)).await?;
+        // One it says it does not have, though it listed it, as a splitter in
+        // between that keeps contacts of its own may: as gone as removed.
+        match session.client.done(command::remove_contact(&key)).await {
+            Ok(()) => {}
+            Err(AdminError::Refused(why)) if why == "NOT_FOUND" => {}
+            Err(error) => return Err(error),
+        }
         session
             .keys
             .lock()

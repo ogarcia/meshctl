@@ -720,6 +720,16 @@ pub fn ChatView() -> impl IntoView {
         Some(Peer::Node { node }) if live.is_room(node) => Some(node),
         _ => None,
     });
+    // What the open room allows, drawn anew only when that changes: not at
+    // each node heard, nor as a login is under way, which would lose what
+    // was typed.
+    let room_gone =
+        Memo::new(move |_| open_room.get().is_some_and(|n| crate::rooms::gone(live, n)));
+    let room_posting = Memo::new(move |_| {
+        open_room
+            .get()
+            .is_some_and(|n| crate::rooms::can_post(live, n))
+    });
     Effect::new(move |_| {
         live.synced.track();
         match open_room.get() {
@@ -779,10 +789,14 @@ pub fn ChatView() -> impl IntoView {
                         </For>
                     </div>
                     {move || match peer {
+                        // A room the radio no longer has: said so, and offered
+                        // to be removed.
+                        Peer::Node { node } if room_gone.get() && open_room.get() == Some(node) => {
+                            view! { <crate::rooms::RoomGone node /> }.into_any()
+                        }
                         // A room, while the radio cannot post in it: why, and
                         // its password.
-                        Peer::Node { node } if open_room.get() == Some(node)
-                            && !crate::rooms::can_post(live, node) => {
+                        Peer::Node { node } if !room_posting.get() && open_room.get() == Some(node) => {
                             view! { <crate::rooms::RoomBar node /> }.into_any()
                         }
                         _ => view! { <Composer peer /> }.into_any(),

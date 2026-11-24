@@ -105,6 +105,9 @@ pub enum RoomFailure {
     NoSuchRadio,
     /// Not a room the radio knows.
     NotARoom,
+    /// A room the radio no longer has: meshctl alone keeps it, as heard
+    /// before.
+    NotOnRadio,
     NotConnected,
     /// The room said no to the password.
     WrongPassword,
@@ -1049,6 +1052,10 @@ impl Radios {
         password: Option<String>,
     ) -> Result<RoomLogin, RoomFailure> {
         let mesh = self.room_mesh(id, node)?;
+        // One the radio no longer has: said so, with nothing sent.
+        if mesh.read(|state| state.nodes.get(&node).and_then(|n| n.on_radio)) == Some(false) {
+            return Err(RoomFailure::NotOnRadio);
+        }
         if self.link(id) != LinkState::Ready {
             return Err(RoomFailure::NotConnected);
         }
@@ -1066,6 +1073,7 @@ impl Radios {
             AdminError::NoAnswer => RoomFailure::NoAnswer,
             AdminError::UnknownNode | AdminError::OwnNode => RoomFailure::NotARoom,
             AdminError::Refused(why) if why == "WRONG_PASSWORD" => RoomFailure::WrongPassword,
+            AdminError::Refused(why) if why == "NOT_FOUND" => RoomFailure::NotOnRadio,
             AdminError::Refused(why) => RoomFailure::Refused(why),
             AdminError::Unsupported | AdminError::NoPath => {
                 RoomFailure::Refused("UNSUPPORTED".to_owned())

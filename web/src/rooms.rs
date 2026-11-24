@@ -9,6 +9,7 @@ use crate::app::Live;
 use crate::daemon::Failure;
 use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use meshctl_api::{ErrorCode, RoomAccess};
 
 const LOCK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/lock.svg");
@@ -149,6 +150,90 @@ pub fn LoggingIn(node: u32) -> impl IntoView {
                 }}
             </p>
         </div>
+    }
+}
+
+/// Whether a room is one the radio no longer has, which meshctl alone keeps:
+/// as its contacts were read, or as a login found.
+pub fn gone(live: Live, node: u32) -> bool {
+    live.nodes
+        .with(|nodes| nodes.get(&node).and_then(|n| n.on_radio))
+        == Some(false)
+        || live.room.with(|r| {
+            r.as_ref().is_some_and(|r| {
+                r.node == node && r.error == Some(Failure::Rejected(ErrorCode::NotOnRadio))
+            })
+        })
+}
+
+/// In place of the composer, for a room the radio no longer has: said so,
+/// and offered to be removed for good, at once in a dialog, then from here.
+#[component]
+pub fn RoomGone(node: u32) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = RwSignal::new(true);
+    let busy = RwSignal::new(false);
+    let problem = RwSignal::new(false);
+    let remove = move |_| {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        busy.set(true);
+        problem.set(false);
+        spawn_local(async move {
+            let done = crate::daemon::remove_node(radio, node, true).await;
+            busy.set(false);
+            // The conversation goes as the node does, as every client hears.
+            match done {
+                Ok(()) => asking.set(false),
+                Err(_) => problem.set(true),
+            }
+        });
+    };
+    view! {
+        <div class="room-bar forgotten">
+            <p class="why">
+                <span class="icon" inner_html=LOCK></span>
+                <span>{t!(i18n, room_gone_short)}</span>
+            </p>
+            <button type="button" class="danger-outline" on:click=move |_| asking.set(true)>
+                {t!(i18n, room_remove)}
+            </button>
+        </div>
+        <Show when=move || asking.get()>
+            <div class="modal-back" on:click=move |_| asking.set(false)>
+                <div
+                    class="card contact-modal room-gone"
+                    role="dialog"
+                    aria-modal="true"
+                    on:click=|ev| ev.stop_propagation()
+                >
+                    <header>
+                        <h2>{t!(i18n, room_gone_title)}</h2>
+                    </header>
+                    <div class="modal-body">
+                        <p>{t!(i18n, room_gone_text)}</p>
+                        <Show when=move || problem.get()>
+                            <p class="error">{t!(i18n, error_failed)}</p>
+                        </Show>
+                    </div>
+                    <div class="buttons">
+                        <button type="button" on:click=move |_| asking.set(false)>
+                            {t!(i18n, room_keep)}
+                        </button>
+                        <button
+                            type="button"
+                            class="danger-outline"
+                            disabled=move || busy.get()
+                            on:click=remove
+                        >
+                            {t!(i18n, room_remove)}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Show>
     }
 }
 

@@ -39,6 +39,7 @@ fn room_failed(failure: RoomFailure) -> Response {
     let (status, error) = match failure {
         RoomFailure::NoSuchRadio => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
         RoomFailure::NotARoom => (StatusCode::NOT_FOUND, ErrorCode::NotARoom),
+        RoomFailure::NotOnRadio => (StatusCode::CONFLICT, ErrorCode::NotOnRadio),
         RoomFailure::NotConnected => (StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
         RoomFailure::WrongPassword => (StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::WrongPassword),
         RoomFailure::NoAnswer => (StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer),
@@ -104,7 +105,7 @@ async fn room_login(
         (status = 200, description = "Logged in", body = RoomLogin),
         (status = 401, description = "The access token is missing or wrong", body = Error),
         (status = 404, description = "There is no such radio, or it knows no such room: `not_a_room`", body = Error),
-        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`; or no longer has the room, which meshctl alone keeps: `not_on_radio`, with nothing sent", body = Error),
         (status = 422, description = "The room did not take the password: `wrong_password`", body = Error),
         (status = 502, description = "The radio would not send it: `radio_refused`", body = Error),
         (status = 504, description = "The room did not answer: `radio_did_not_answer`", body = Error),
