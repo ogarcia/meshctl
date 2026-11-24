@@ -167,7 +167,8 @@ pub fn gone(live: Live, node: u32) -> bool {
 }
 
 /// In place of the composer, for a room the radio no longer has: said so,
-/// and offered to be removed for good, at once in a dialog, then from here.
+/// and offered to be removed for good, at once in a dialog; once that is
+/// closed, still from here, and once removed, nothing more.
 #[component]
 pub fn RoomGone(node: u32) -> impl IntoView {
     let i18n = use_i18n();
@@ -175,6 +176,7 @@ pub fn RoomGone(node: u32) -> impl IntoView {
     let asking = RwSignal::new(true);
     let busy = RwSignal::new(false);
     let problem = RwSignal::new(false);
+    let removed = RwSignal::new(false);
     let remove = move |_| {
         let Some(radio) = live.selected.get_untracked() else {
             return;
@@ -186,21 +188,26 @@ pub fn RoomGone(node: u32) -> impl IntoView {
             busy.set(false);
             // The conversation goes as the node does, as every client hears.
             match done {
-                Ok(()) => asking.set(false),
+                Ok(()) => {
+                    removed.set(true);
+                    asking.set(false);
+                }
                 Err(_) => problem.set(true),
             }
         });
     };
     view! {
-        <div class="room-bar forgotten">
-            <p class="why">
-                <span class="icon" inner_html=LOCK></span>
-                <span>{t!(i18n, room_gone_short)}</span>
-            </p>
-            <button type="button" class="danger-outline" on:click=move |_| asking.set(true)>
-                {t!(i18n, room_remove)}
-            </button>
-        </div>
+        <Show when=move || !asking.get() && !removed.get()>
+            <div class="room-bar forgotten">
+                <p class="why">
+                    <span class="icon" inner_html=LOCK></span>
+                    <span>{t!(i18n, room_gone_short)}</span>
+                </p>
+                <button type="button" class="danger-outline" on:click=move |_| asking.set(true)>
+                    {t!(i18n, room_remove)}
+                </button>
+            </div>
+        </Show>
         <Show when=move || asking.get()>
             <div class="modal-back in-thread" on:click=move |_| asking.set(false)>
                 <div
