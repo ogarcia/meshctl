@@ -23,6 +23,8 @@
 //!   channel, as when none heard it; `echoes on`, two are again.
 //! - `post <text>`: someone posts in Sala Coruña, a room: Ana, or someone
 //!   the radio does not know, by turns; sent to the radio once logged in.
+//! - `room missing`: the room is listed but not found to log in to, as a
+//!   splitter in between may list a contact the radio no longer has.
 //! - `room strict`: the room says nothing to a wrong password, as one that
 //!   lets nobody in to read; `room open`, it lets them in to read again.
 //!
@@ -136,6 +138,9 @@ struct Radio {
     /// Whether the room lets in to read one with a wrong password, or does
     /// not answer it.
     room_strict: bool,
+    /// Whether the radio lists the room but does not find it to log in to,
+    /// as when a splitter in between keeps contacts of its own.
+    room_missing: bool,
     /// Its clock, as an offset from the host's: it goes only forward.
     clock_offset: i64,
     /// When it started, for its uptime.
@@ -266,6 +271,7 @@ impl Radio {
             room_access: None,
             room_synced: 0,
             room_strict: false,
+            room_missing: false,
             clock_offset: -3600,
             started: at,
             contacts: vec![
@@ -599,7 +605,12 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             let Some(key) = key_in(data) else {
                 return error(6);
             };
-            let Some(to) = radio.contacts.iter().find(|c| c.key == key).cloned() else {
+            let Some(to) = radio
+                .contacts
+                .iter()
+                .find(|c| c.key == key && !(radio.room_missing && c.name == "Sala Coruña"))
+                .cloned()
+            else {
                 return error(2);
             };
             let password = String::from_utf8_lossy(data.get(32..).unwrap_or_default()).into_owned();
@@ -1206,10 +1217,14 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             }
         }
         Some("room") => {
-            radio.room_strict = words.next() == Some("strict");
+            let word = words.next();
+            radio.room_strict = word == Some("strict");
+            radio.room_missing = word == Some("missing");
             format!(
                 "the room {}",
-                if radio.room_strict {
+                if radio.room_missing {
+                    "is listed, but the radio does not find it to log in to"
+                } else if radio.room_strict {
                     "says nothing to a wrong password"
                 } else {
                     "lets in to read with a wrong password"

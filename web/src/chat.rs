@@ -1851,7 +1851,8 @@ fn Composer(peer: Peer) -> impl IntoView {
         field.track();
         // Measured once the field holds the text, which it takes after this.
         request_animation_frame(move || {
-            let Some(field) = field.get_untracked() else {
+            // Unless it went in the meantime, as with its conversation.
+            let Some(field) = field.try_get_untracked().flatten() else {
                 return;
             };
             let style = web_sys::HtmlElement::style(&field);

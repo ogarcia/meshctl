@@ -259,7 +259,11 @@ pub fn slide(strip: NodeRef<leptos::html::Div>, at: Memo<usize>) -> RwSignal<Str
         if strip.get().is_none() {
             return;
         }
-        request_animation_frame(move || place(at, sliding.get_untracked()));
+        request_animation_frame(move || {
+            if let Some(sliding) = sliding.try_get_untracked() {
+                place(at, sliding);
+            }
+        });
     });
 
     // Its size changed: placed at once, as its size is known and before

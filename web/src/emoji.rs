@@ -251,7 +251,7 @@ pub fn EmojiPicker(
     let scrolls = StoredValue::new(Vec::<(u8, i32)>::new());
     let scroll_to = move |top: i32| {
         request_animation_frame(move || {
-            if let Some(grid) = grid.get_untracked() {
+            if let Some(grid) = grid.try_get_untracked().flatten() {
                 grid.set_scroll_top(top);
             }
         });
