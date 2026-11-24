@@ -418,6 +418,8 @@
       .link-contents .what { color: var(--mc-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
       .link-contents .ok { color: var(--mc-ok); }
       .link-contents .warn { color: var(--mc-warn); }
+      .link-lora-values { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0; font-size: 13px; }
+      .link-lora-values dd { margin: 0; }
       .link-node { display: flex; align-items: center; gap: 10px; min-width: 0; }
       .link-node .short {
         flex: none;
@@ -1167,6 +1169,10 @@
       .icon-button svg { width: 18px; height: 18px; }
       .save-bar { display: flex; justify-content: flex-end; gap: 8px; }
       .save-bar button { min-width: 110px; }
+      .save-bar .start { display: flex; margin-right: auto; }
+      .save-bar .from-link { min-width: 0; display: inline-flex; align-items: center; gap: 6px; }
+      .save-bar .from-link .icon { display: flex; color: var(--mc-muted); }
+      .save-bar .from-link svg { width: 16px; height: 16px; }
       .sections-tab {
         display: grid;
         grid-template-columns: 220px minmax(0, 1fr);
@@ -3805,6 +3811,9 @@
        * A phone, last: over the rules of each page above, at the same weight.
        */
       @media (max-width: 835px), (max-height: 500px) and (pointer: coarse) {
+        /* The LoRa from a link by its icon, beside saving. */
+        .save-bar .from-link { padding: 0 12px; }
+        .save-bar .from-link .label { display: none; }
         /* The columns one under the other: the first's last keeps its line. */
         .node-page > .node-sections:last-child > .node-column:first-child > .node-section:last-child {
           margin-bottom: 18px;

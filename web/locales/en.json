@@ -989,5 +989,14 @@
   "qr_not_found": "No QR found in the photo.",
   "link_tab_paste": "Paste link",
   "link_tab_qr": "Scan QR",
-  "qr_photo_pick": "Pick or take a photo of the QR"
+  "qr_photo_pick": "Pick or take a photo of the QR",
+  "link_lora_title": "LoRa from a link",
+  "link_hint_lora": "A configuration link, as the Meshtastic apps share it. Only its LoRa is taken: into the form, for you to look over and save.",
+  "link_use_lora": "Use this LoRa",
+  "link_lora": "Its LoRa",
+  "link_lora_modem": "Modem",
+  "link_lora_will_change": "It is not what your radio uses: once saved, the radio restarts and only hears those on these settings.",
+  "link_lora_same": "Its region and modem are what your radio already uses.",
+  "link_no_lora": "This link brings only channels, no LoRa.",
+  "link_for_lora": "It is a contact link: it is added from the list of nodes."
 }

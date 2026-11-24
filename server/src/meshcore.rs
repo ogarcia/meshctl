@@ -565,6 +565,7 @@ pub fn link_contents(
             region: None,
             replaces: false,
             removed: Vec::new(),
+            lora: None,
         },
     }
 }

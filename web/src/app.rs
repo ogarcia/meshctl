@@ -207,6 +207,8 @@ pub struct Live {
     pub removing: RwSignal<bool>,
     /// Whether the window to add from a link is open.
     pub adding_link: RwSignal<Option<crate::links::LinkWant>>,
+    /// A link's LoRa settings, taken for the LoRa tab to put in its form.
+    pub lora_from_link: RwSignal<Option<meshctl_api::LoraSettings>>,
     /// Turned whenever what meshctl keeps was cleaned, or how long it keeps
     /// it changed: for the Data page to read it again.
     pub storage_turn: RwSignal<u32>,
@@ -298,6 +300,7 @@ impl Live {
             history: RwSignal::new(false),
             removing: RwSignal::new(false),
             adding_link: RwSignal::new(None),
+            lora_from_link: RwSignal::new(None),
             storage_turn: RwSignal::new(0),
             interface: StoredValue::new(None),
             newer: RwSignal::new(false),

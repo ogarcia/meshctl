@@ -9,6 +9,7 @@
 use crate::app::Live;
 use crate::daemon::{self, Failure};
 use crate::i18n::{Locale, t, t_string, use_i18n};
+use crate::names;
 use crate::qr::QrScanner;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -28,6 +29,8 @@ const QRCODE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/q
 pub enum LinkWant {
     Node,
     Channels,
+    /// A configuration's LoRa settings, for the form of the radio's.
+    Lora,
 }
 
 /// The action of the list of nodes, in its heading, that adds one from its
@@ -69,6 +72,26 @@ pub fn AddChannelsLink() -> impl IntoView {
         >
             <span class="icon" inner_html=LINK></span>
             {t!(i18n, link_from)}
+        </button>
+    }
+}
+
+/// The button in a Meshtastic radio's LoRa settings that takes them from a
+/// configuration's link, into the form.
+#[component]
+pub fn LoraLink() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    view! {
+        <button
+            type="button"
+            class="with-icon from-link"
+            title=move || t_string!(i18n, link_lora_title)
+            aria-label=move || t_string!(i18n, link_lora_title)
+            on:click=move |_| live.adding_link.set(Some(LinkWant::Lora))
+        >
+            <span class="icon" inner_html=LINK></span>
+            <span class="label">{t!(i18n, link_from)}</span>
         </button>
     }
 }
@@ -116,6 +139,7 @@ fn wanted(want: LinkWant, read: &LinkContents) -> bool {
         (want, read),
         (LinkWant::Node, LinkContents::Contact { .. })
             | (LinkWant::Channels, LinkContents::Channels { .. })
+            | (LinkWant::Lora, LinkContents::Channels { lora: Some(_), .. })
     )
 }
 
@@ -179,6 +203,17 @@ pub fn LinkAdder() -> impl IntoView {
         else {
             return;
         };
+        // A LoRa taken goes into the form, not to the radio: saved from there.
+        if live.adding_link.get_untracked() == Some(LinkWant::Lora) {
+            if let LinkContents::Channels {
+                lora: Some(lora), ..
+            } = read
+            {
+                live.lora_from_link.set(Some(lora));
+                close();
+            }
+            return;
+        }
         let link = meshctl_api::Link {
             url: url.get_untracked().trim().to_owned(),
             mode: mode.get_untracked(),
@@ -247,6 +282,7 @@ pub fn LinkAdder() -> impl IntoView {
             region,
             replaces,
             removed,
+            ..
         } = read
         else {
             return ().into_any();
@@ -361,12 +397,69 @@ pub fn LinkAdder() -> impl IntoView {
         }
         .into_any()
     };
+    // A link's LoRa: what the form would take, and whether the radio has it.
+    let lora_of = move |read: LinkContents| {
+        let LinkContents::Channels {
+            lora: Some(lora),
+            lora_differs,
+            ..
+        } = read
+        else {
+            return ().into_any();
+        };
+        let locale = i18n.get_locale_untracked();
+        let modem = if lora.use_preset {
+            names::preset(locale, &lora.modem_preset)
+        } else {
+            format!(
+                "{} · SF{} · 4/{}",
+                crate::settings::bandwidth_label(lora.bandwidth),
+                lora.spread_factor,
+                lora.coding_rate
+            )
+        };
+        let rows = [
+            (
+                t_string!(i18n, settings_region).to_owned(),
+                names::region(locale, &lora.region),
+            ),
+            (t_string!(i18n, link_lora_modem).to_owned(), modem),
+            (
+                t_string!(i18n, settings_hop_limit).to_owned(),
+                lora.hop_limit.to_string(),
+            ),
+        ];
+        view! {
+            <div class="link-contents">
+                <p class="what">{t!(i18n, link_lora)}</p>
+                <dl class="link-lora-values">
+                    {rows
+                        .into_iter()
+                        .map(|(name, value)| view! { <dt class="dim">{name}</dt> <dd>{value}</dd> })
+                        .collect_view()}
+                </dl>
+                {if lora_differs {
+                    view! { <p class="warn">{t!(i18n, link_lora_will_change)}</p> }.into_any()
+                } else {
+                    view! { <p class="dim">{t!(i18n, link_lora_same)}</p> }.into_any()
+                }}
+            </div>
+        }
+        .into_any()
+    };
     let shown = move || {
         let want = live.adding_link.get()?;
         let read = contents.get()?;
         Some(match (want, read) {
             (LinkWant::Node, read @ LinkContents::Contact { .. }) => contact(read),
             (LinkWant::Channels, read @ LinkContents::Channels { .. }) => channels(read),
+            (LinkWant::Lora, read @ LinkContents::Channels { lora: Some(_), .. }) => lora_of(read),
+            (LinkWant::Lora, LinkContents::Channels { .. }) => {
+                view! { <p class="error">{t!(i18n, link_no_lora)}</p> }.into_any()
+            }
+            (LinkWant::Lora, _) => {
+                view! { <p class="error">{t!(i18n, link_for_lora)}</p> }.into_any()
+            }
             // Not what it is for: where it goes.
             (LinkWant::Node, _) => {
                 view! { <p class="error">{t!(i18n, link_for_channels)}</p> }.into_any()
@@ -384,6 +477,7 @@ pub fn LinkAdder() -> impl IntoView {
         !busy.get()
             && contents.with(|read| match read {
                 Some(read) if !wanted(want, read) => false,
+                Some(LinkContents::Channels { .. }) if want == LinkWant::Lora => true,
                 Some(LinkContents::Contact { .. }) => true,
                 Some(LinkContents::Channels { .. }) if mode.get() == LinkMode::Replace => true,
                 Some(LinkContents::Channels {
@@ -400,6 +494,7 @@ pub fn LinkAdder() -> impl IntoView {
     let action = move || match (live.adding_link.get(), mode.get()) {
         (Some(LinkWant::Channels), LinkMode::Replace) => t_string!(i18n, link_replace_channels),
         (Some(LinkWant::Channels), LinkMode::Add) => t_string!(i18n, link_add_channels),
+        (Some(LinkWant::Lora), _) => t_string!(i18n, link_use_lora),
         _ => t_string!(i18n, link_add_contact),
     };
 
@@ -421,6 +516,7 @@ pub fn LinkAdder() -> impl IntoView {
                                 {match want {
                                     LinkWant::Node => t!(i18n, link_add_node).into_any(),
                                     LinkWant::Channels => t!(i18n, link_add_channels_title).into_any(),
+                                    LinkWant::Lora => t!(i18n, link_lora_title).into_any(),
                                 }}
                             </h2>
                             <button
@@ -473,7 +569,10 @@ pub fn LinkAdder() -> impl IntoView {
                                             rows="3"
                                             placeholder=match (want, meshcore) {
                                                 (LinkWant::Node, false) => "https://meshtastic.org/v/#…",
-                                                (LinkWant::Channels, false) => "https://meshtastic.org/e/#…",
+                                                (LinkWant::Channels | LinkWant::Lora, false) => {
+                                                    "https://meshtastic.org/e/#…"
+                                                }
+                                                (LinkWant::Lora, true) => "",
                                                 (LinkWant::Node, true) => "meshcore://contact/add?…",
                                                 (LinkWant::Channels, true) => "meshcore://channel/add?…",
                                             }
@@ -483,6 +582,7 @@ pub fn LinkAdder() -> impl IntoView {
                                         <p class="hint dim">
                                             {match want {
                                                 LinkWant::Node => t_string!(i18n, link_hint_node),
+                                                LinkWant::Lora => t_string!(i18n, link_hint_lora),
                                                 LinkWant::Channels => t_string!(i18n, link_hint_channels),
                                             }
                                             .replace("{apps}", apps)}

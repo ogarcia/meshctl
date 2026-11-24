@@ -322,7 +322,19 @@ pub fn SettingsView() -> impl IntoView {
         };
         match this {
             Tab::User => view! { <UserTab draft /> {bar()} }.into_any(),
-            Tab::Lora => view! { <LoraTab draft /> {bar()} }.into_any(),
+            // Its settings, from a link too.
+            Tab::Lora => view! {
+                <LoraTab draft />
+                <SaveBar
+                    dirty
+                    busy=Signal::derive(move || busy.get())
+                    save=move || save(this)
+                    undo=move || undo(this)
+                >
+                    <crate::links::LoraLink />
+                </SaveBar>
+            }
+            .into_any(),
             Tab::Channels => view! { <ChannelsTab loaded notice /> }.into_any(),
             Tab::Device => {
                 view! { <SectionsTab sections module=false edits=section_edits /> }.into_any()
@@ -556,7 +568,7 @@ fn UserTab(draft: Draft) -> impl IntoView {
 
 /// A bandwidth as the radio keeps it, in kHz: a few codes stand for a
 /// fraction.
-fn bandwidth_label(code: u32) -> String {
+pub fn bandwidth_label(code: u32) -> String {
     let khz = match code {
         8 => "7.8".to_owned(),
         10 => "10.4".to_owned(),
@@ -699,6 +711,23 @@ fn LoraTab(draft: Draft) -> impl IntoView {
             )
         })
         .collect::<Vec<_>>();
+
+    // A link's, once taken: in the form, to be looked over and saved, what
+    // few need to touch as it is.
+    let live = expect_context::<Live>();
+    Effect::new(move |_| {
+        if let Some(theirs) = live.lora_from_link.get() {
+            live.lora_from_link.set(None);
+            draft.update(|d| {
+                if let Some(d) = d {
+                    d.lora = meshctl_api::LoraSettings {
+                        advanced: d.lora.advanced.clone(),
+                        ..theirs
+                    };
+                }
+            });
+        }
+    });
 
     view! {
         <p class="dim tab-hint">{t!(i18n, settings_reboot_hint)}</p>

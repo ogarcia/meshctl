@@ -407,7 +407,7 @@ pub enum LinkMode {
 }
 
 /// What a link holds, read before anything is added from it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LinkContents {
@@ -445,6 +445,11 @@ pub enum LinkContents {
         replaces: bool,
         /// The radio's channels a replacing would take away, by name.
         removed: Vec<String>,
+        /// The radio's LoRa settings as the link's would leave them: its
+        /// region, if it says one, and its modem; the rest as they are.
+        /// None if it says nothing of them.
+        #[serde(default)]
+        lora: Option<LoraSettings>,
     },
 }
 

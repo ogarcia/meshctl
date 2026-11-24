@@ -99,10 +99,14 @@ pub fn SaveBar(
     busy: Signal<bool>,
     save: impl Fn() + Send + Sync + 'static,
     undo: impl Fn() + Send + Sync + 'static,
+    /// What goes at its start, away from saving: another way to fill it.
+    #[prop(optional)]
+    children: Option<Children>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     view! {
         <div class="save-bar">
+            {children.map(|start| view! { <div class="start">{start()}</div> })}
             <button type="button" disabled=move || !dirty.get() on:click=move |_| undo()>
                 {t!(i18n, settings_undo)}
             </button>

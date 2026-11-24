@@ -172,6 +172,7 @@ pub fn contents(parsed: &Parsed, radio: &Settings, nodes: &BTreeMap<u32, Node>) 
                     .map(|r| r.as_str_name().to_owned()),
                 replaces: *replaces,
                 removed,
+                lora: lora_settings(set, radio),
             }
         }
     }
@@ -404,6 +405,7 @@ mod tests {
             preset,
             lora_differs,
             removed,
+            lora: read_lora,
             ..
         } = contents(&parsed, &radio, &BTreeMap::new())
         else {
@@ -426,6 +428,8 @@ mod tests {
             (lora.modem_preset.as_str(), lora.region.as_str()),
             ("MEDIUM_FAST", "EU_868")
         );
+        // As read, the same: what the LoRa tab takes from the link.
+        assert_eq!(read_lora, Some(lora));
         // Its unnamed one goes by the link's preset, which is not the radio's.
         assert_eq!(channels[0].name, "MediumFast");
         assert!(!channels[0].present);
