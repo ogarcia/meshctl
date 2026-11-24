@@ -120,6 +120,10 @@ pub enum LoginFailure {
     /// Nothing came back: the room is out of reach, or it does not take
     /// the password and lets nobody in to read.
     NoAnswer,
+    /// Logged in to as less than its admin, for what only its admin may do.
+    NotAdmin,
+    /// Not a command a console takes: empty, or longer than a message.
+    Invalid,
     /// The radio would not send it, and said why.
     Refused(String),
     Failed(anyhow::Error),
@@ -135,6 +139,8 @@ impl LoginFailure {
             Self::NotConnected => Self::NotConnected,
             Self::WrongPassword => Self::WrongPassword,
             Self::NoAnswer => Self::NoAnswer,
+            Self::NotAdmin => Self::NotAdmin,
+            Self::Invalid => Self::Invalid,
             Self::Refused(why) => Self::Refused(why.clone()),
             Self::Failed(err) => Self::Failed(anyhow::anyhow!("{err:#}")),
         }
@@ -452,6 +458,19 @@ fn reply_of(answer: &mesh::Answer) -> meshctl_api::RequestReply {
             firmware: owner.firmware.clone(),
             name: owner.name.clone(),
             owner: owner.owner.clone(),
+        },
+        mesh::Answer::AccessList(listed) => RequestReply::AccessList {
+            nodes: listed
+                .iter()
+                .map(|(node, bits)| meshctl_api::ListedAccess {
+                    node: *node,
+                    access: match bits & 3 {
+                        3 => NodeAccess::Admin,
+                        2 => NodeAccess::ReadWrite,
+                        _ => NodeAccess::ReadOnly,
+                    },
+                })
+                .collect(),
         },
         mesh::Answer::Ping {
             round_trip_ms,
@@ -1298,6 +1317,52 @@ impl Radios {
         }
     }
 
+    /// Sends a command to the console of a node, as its admin: logged in to
+    /// first with the password kept, if the radio has not since it
+    /// connected. Its answer comes as a console event; nothing says it
+    /// arrived.
+    pub async fn node_command(
+        &self,
+        id: RadioId,
+        node: u32,
+        command: &str,
+    ) -> Result<(), LoginFailure> {
+        let mesh = self.login_mesh(id, node)?;
+        let command = command.trim();
+        if command.is_empty() || command.len() > meshctl_core::radio::MAX_TEXT_BYTES {
+            return Err(LoginFailure::Invalid);
+        }
+        if self.link(id) != LinkState::Ready {
+            return Err(LoginFailure::NotConnected);
+        }
+        let held = |radios: &Self| {
+            radios
+                .logins
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&(id, node))
+                .map(|(access, _)| *access)
+        };
+        if held(self).is_none() {
+            self.log_in_once(id, node, std::time::Instant::now())
+                .await?;
+        }
+        if held(self) != Some(NodeAccess::Admin) {
+            return Err(LoginFailure::NotAdmin);
+        }
+        mesh.meshcore_command(node, command)
+            .await
+            .map_err(|error| match error {
+                AdminError::NoAnswer | AdminError::NotConnected => LoginFailure::NotConnected,
+                AdminError::UnknownNode | AdminError::OwnNode => LoginFailure::NoLogin,
+                AdminError::Refused(why) if why == "NOT_FOUND" => LoginFailure::NotOnRadio,
+                AdminError::Refused(why) => LoginFailure::Refused(why),
+                AdminError::Unsupported | AdminError::NoPath => {
+                    LoginFailure::Refused("UNSUPPORTED".to_owned())
+                }
+            })
+    }
+
     /// Forgets the password kept for a node; the login, if any, stays.
     pub async fn forget_node_password(
         &self,
@@ -1568,6 +1633,7 @@ impl Radios {
                 | RequestKind::Status
                 | RequestKind::Telemetry
                 | RequestKind::Owner
+                | RequestKind::AccessList
                 | RequestKind::Ping
         );
         if meshcore_kind && !meshcore
@@ -1592,6 +1658,7 @@ impl Radios {
                 RequestKind::Telemetry => Some(request::TELEMETRY),
                 RequestKind::Neighbors => Some(request::NEIGHBOURS),
                 RequestKind::Owner => Some(request::OWNER),
+                RequestKind::AccessList => Some(request::ACCESS_LIST),
                 _ => None,
             };
             let held = self
@@ -1652,6 +1719,7 @@ impl Radios {
             | RequestKind::Status
             | RequestKind::Telemetry
             | RequestKind::Owner
+            | RequestKind::AccessList
             | RequestKind::Ping => return Err(AskFailure::Unsupported),
         };
         let packet_id =

@@ -100,6 +100,9 @@ pub enum ErrorCode {
     /// A node the radio no longer has in its own list: meshctl alone keeps
     /// it, as heard before.
     NotOnRadio,
+    /// What only a node's admin may do: the radio is logged in to it as
+    /// less.
+    NotAdmin,
 }
 
 /// The body of every error the API answers with.
@@ -1199,6 +1202,24 @@ pub struct NodeLogin {
     pub remembered: bool,
 }
 
+/// One who may log in to a MeshCore node, and as what.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ListedAccess {
+    /// The node its key starts with, known or not.
+    pub node: u32,
+    pub access: NodeAccess,
+}
+
+/// A command for the console of a MeshCore node the radio is logged in to
+/// as its admin, as its firmware's CLI takes them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NewCommand {
+    #[cfg_attr(feature = "openapi", schema(example = "ver"))]
+    pub command: String,
+}
+
 /// A login to a MeshCore room, repeater or sensor.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -1388,6 +1409,9 @@ pub enum RequestKind {
     /// connected, it goes with no login where its path is known, and comes
     /// with no firmware; with no path known, it logs in as for `status`.
     Owner,
+    /// Who may log in to a MeshCore node, and as what: only its admin is
+    /// told, logged in to as for `status`, with the password kept.
+    AccessList,
     /// A MeshCore node heard straight, pinged, with no login: how long there
     /// and back, and how each end heard the other.
     Ping,
@@ -1404,6 +1428,7 @@ impl RequestKind {
             | Self::Status
             | Self::Telemetry
             | Self::Owner
+            | Self::AccessList
             | Self::Ping => None,
             Self::Position => Some(Pace::Position),
             Self::DeviceTelemetry
@@ -1544,6 +1569,8 @@ pub enum RequestReply {
         /// What its owner wrote of themselves; empty for nothing.
         owner: String,
     },
+    /// Who may log in to a MeshCore node, and as what, as its admin is told.
+    AccessList { nodes: Vec<ListedAccess> },
     /// A MeshCore node heard straight, pinged: how long there and back, and
     /// how each end heard the other.
     Ping {

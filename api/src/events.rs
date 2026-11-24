@@ -88,6 +88,14 @@ pub enum ServerMessage {
         status: MessageStatus,
         error: Option<String>,
     },
+    /// What the console of a MeshCore node answered a radio logged in to it as
+    /// its admin, as each comes: when, by the radio's clock in seconds.
+    Console {
+        radio: RadioId,
+        node: u32,
+        text: String,
+        at: i64,
+    },
     /// A login to a MeshCore node sent through a radio, and how long, in
     /// milliseconds from now, its answer is waited for: the login's request
     /// answers when it comes, or when that runs out.

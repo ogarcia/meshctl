@@ -37,6 +37,7 @@ fn kind_name(kind: RequestKind) -> &'static str {
         RequestKind::Status => "status",
         RequestKind::Telemetry => "telemetry",
         RequestKind::Owner => "owner",
+        RequestKind::AccessList => "access_list",
         RequestKind::Ping => "ping",
     }
 }
@@ -53,6 +54,7 @@ fn kind_from(name: &str) -> RequestKind {
         "status" => RequestKind::Status,
         "telemetry" => RequestKind::Telemetry,
         "owner" => RequestKind::Owner,
+        "access_list" => RequestKind::AccessList,
         "ping" => RequestKind::Ping,
         _ => RequestKind::NodeInfo,
     }
@@ -73,6 +75,7 @@ fn port_of(kind: RequestKind) -> Option<PortNum> {
         | RequestKind::Status
         | RequestKind::Telemetry
         | RequestKind::Owner
+        | RequestKind::AccessList
         | RequestKind::Ping => return None,
     })
 }

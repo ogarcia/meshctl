@@ -114,6 +114,8 @@ pub mod command {
     const GET_DEFAULT_FLOOD_SCOPE: u8 = 0x40;
     /// Plain text, as opposed to a CLI command or a signed message.
     const TEXT_PLAIN: u8 = 0;
+    /// A command for a node's console, and its answer.
+    const TEXT_COMMAND: u8 = 1;
     /// The protocol version the client speaks, which the radio answers to.
     const PROTOCOL_VERSION: u8 = 8;
 
@@ -155,6 +157,19 @@ pub mod command {
     pub fn send_text(prefix: &[u8; 6], timestamp: u32, text: &str) -> Vec<u8> {
         let mut payload = vec![SEND_TEXT, TEXT_PLAIN, 0];
         payload.extend_from_slice(&timestamp.to_le_bytes());
+        payload.extend_from_slice(prefix);
+        payload.extend_from_slice(text.as_bytes());
+        payload
+    }
+
+    /// A command for the console of a node logged in to as its admin, as a
+    /// direct message of the console's kind: the radio dates it by its own
+    /// clock, and waits for no acknowledgement. Answered with
+    /// `MessageSent`; the node answers, to its admin only, with a message of
+    /// the same kind.
+    pub fn send_command(prefix: &[u8; 6], text: &str) -> Vec<u8> {
+        let mut payload = vec![SEND_TEXT, TEXT_COMMAND, 0];
+        payload.extend_from_slice(&0u32.to_le_bytes());
         payload.extend_from_slice(prefix);
         payload.extend_from_slice(text.as_bytes());
         payload

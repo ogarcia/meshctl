@@ -911,6 +911,16 @@ fn answer_of(asked: Asking, data: &[u8], room: bool) -> Option<crate::mesh::Answ
             return Some(Answer::Neighbours { total, heard });
         }
         Asking::LoggedIn(request::OWNER) => return answers::owner(data).map(Answer::Owner),
+        // Each one by the first six bytes of its key, and its bits.
+        Asking::LoggedIn(request::ACCESS_LIST) => {
+            let listed = data
+                .as_chunks::<7>()
+                .0
+                .iter()
+                .map(|entry| (num_of(&entry[..6]), entry[6]))
+                .collect();
+            return Some(Answer::AccessList(listed));
+        }
         Asking::LoggedIn(_) => return None,
         Asking::Anonymous(kind) => kind,
     };
@@ -1380,6 +1390,29 @@ impl Mesh {
         Ok(u32::from_le_bytes(tag))
     }
 
+    /// Sends a command to the console of a node the radio logged in to as
+    /// its admin: it answers, to its admin only, as an [`Event::Console`].
+    /// Nothing says it arrived.
+    pub async fn meshcore_command(&self, num: u32, command: &str) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        let mut prefix = [0u8; 6];
+        prefix.copy_from_slice(&key[..6]);
+        let answer = session
+            .client
+            .ask_one(command::send_command(&prefix, command), |r| {
+                matches!(r, Response::MessageSent { .. })
+            })
+            .await;
+        match answer {
+            Ok(Response::MessageSent { .. }) => Ok(()),
+            Ok(Response::Error(code)) => Err(AdminError::Refused(error_name(code).to_owned())),
+            Ok(_) => Err(AdminError::Refused("UNEXPECTED".to_owned())),
+            Err("the radio did not answer") => Err(AdminError::NoAnswer),
+            Err(_) => Err(AdminError::NotConnected),
+        }
+    }
+
     /// Pings a node the radio hears straight, a repeater's or a room's: a
     /// trace there and back, which needs no login. Its tag, which its answer
     /// comes as a [`Event::Reply`] with; [`AdminError::NoPath`] for one not
@@ -1787,6 +1820,17 @@ fn put_channels(state: &mut MeshState, slots: u8, channels: Vec<(u8, String, [u8
 async fn drain(mesh: &Mesh, client: &Client, session: &Session) -> Result<(), &'static str> {
     while let Some(message) = client.next_message().await? {
         match message {
+            // A node's console answering: no message, out of the chat.
+            Response::ContactMessage(message) if message.text_type == 1 => {
+                let from = num_of(&message.prefix);
+                mesh.update(|_| {
+                    vec![Event::Console {
+                        from,
+                        text: message.text.clone(),
+                        at: now(),
+                    }]
+                });
+            }
             Response::ContactMessage(message) => {
                 mesh.update(|state| direct(state, &message));
                 let id = message_id(&message.prefix, message.timestamp, &message.text);
@@ -2124,6 +2168,17 @@ mod tests {
             Some(crate::mesh::Answer::Owner(o)) if o.name == "Torre"
         ));
         assert_eq!(answer_of(Asking::LoggedIn(0x7f), owner, false), None);
+        // Its access list: by the first six bytes of each key, and the bits.
+        let listed = [
+            0xc0, 0xc0, 0xc0, 0xc0, 1, 2, 3, 0x41, 0x48, 0x4f, 0x56, 5, 6, 0,
+        ];
+        assert_eq!(
+            answer_of(Asking::LoggedIn(request::ACCESS_LIST), &listed, false),
+            Some(crate::mesh::Answer::AccessList(vec![
+                (0xc0c0_c0c0, 3),
+                (0x4148_4f56, 0)
+            ]))
+        );
     }
 
     #[test]

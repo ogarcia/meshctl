@@ -101,6 +101,12 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
         Change::ConversationRead { radio, peer, up_to } => {
             ServerMessage::ConversationRead { radio, peer, up_to }
         }
+        Change::Mesh(radio, mesh::Event::Console { from, text, at }) => ServerMessage::Console {
+            radio,
+            node: from,
+            text,
+            at: i64::from(at),
+        },
         Change::Mesh(radio, mesh::Event::Node(n)) => ServerMessage::Node {
             radio,
             node: node(&n),

@@ -1659,6 +1659,11 @@
       .readings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
       .access-form { display: flex; gap: 8px; margin: 10px 0 6px; }
       .access-form input { flex: 1; min-width: 0; }
+      /* A node's console: what was sent and answered, the latest last, in
+         a box of its own that scrolls. */
+      .console { list-style: none; margin: 0 0 8px; padding: 8px 10px; max-height: 240px; overflow-y: auto; border: 1px solid var(--mc-border); border-radius: 8px; background: var(--mc-page); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .console li { padding: 1px 0; }
+      .console li.mine { color: var(--mc-primary); }
       .node-section .problem { margin: 4px 0; color: var(--mc-danger); font-size: 13px; }
       .node-page button.link:disabled { color: inherit; cursor: default; text-decoration: none; }
       .node-traces .trace { padding: 4px 0 10px; border-bottom: 0; }

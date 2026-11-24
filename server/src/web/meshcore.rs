@@ -13,8 +13,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
     Advert, ChannelOrder, Contact, Error, ErrorCode, MeshcoreChannelChange, MeshcoreChannelScope,
-    MeshcoreChannels, MeshcoreRegions, MeshcoreSettings, MeshcoreStatus, NewNodeLogin, NodeLogin,
-    RadioId,
+    MeshcoreChannels, MeshcoreRegions, MeshcoreSettings, MeshcoreStatus, NewCommand, NewNodeLogin,
+    NodeLogin, RadioId,
 };
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -33,6 +33,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(regions))
         .routes(routes!(search_regions))
         .routes(routes!(node_login, log_in_node, forget_node_password))
+        .routes(routes!(node_command))
 }
 
 pub(super) fn login_failed(failure: LoginFailure) -> Response {
@@ -42,6 +43,8 @@ pub(super) fn login_failed(failure: LoginFailure) -> Response {
         LoginFailure::NotOnRadio => (StatusCode::CONFLICT, ErrorCode::NotOnRadio),
         LoginFailure::NotConnected => (StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
         LoginFailure::WrongPassword => (StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::WrongPassword),
+        LoginFailure::NotAdmin => (StatusCode::FORBIDDEN, ErrorCode::NotAdmin),
+        LoginFailure::Invalid => (StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::BadRequest),
         LoginFailure::NoAnswer => (StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer),
         LoginFailure::Refused(why) => {
             tracing::info!(why, "a login refused by the radio");
@@ -120,6 +123,43 @@ async fn log_in_node(
 ) -> Response {
     match state.radios.log_in_node(radio, node, login.password).await {
         Ok(login) => Json(login).into_response(),
+        Err(failure) => login_failed(failure),
+    }
+}
+
+/// Send a command to a node's console
+///
+/// Sends a command to the console of a MeshCore repeater, room or sensor,
+/// over the air, as its firmware's CLI takes them: as its admin, logged in
+/// to first with the password kept if the radio has not since it
+/// connected. Its answer arrives on the event stream, as `console`; nothing
+/// says the command arrived, and a node answers only its admin.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/nodes/{node}/console",
+    tag = "nodes",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = u32, Path, description = "The node's number"),
+    ),
+    request_body = NewCommand,
+    responses(
+        (status = 202, description = "Handed to the radio"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 403, description = "The radio is logged in to it as less than its admin: `not_admin`", body = Error),
+        (status = 404, description = "There is no such radio, or it knows no such node that takes logins: `no_login`", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`; or no longer has the node: `not_on_radio`", body = Error),
+        (status = 422, description = "Not a command: empty, or longer than 200 bytes: `bad_request`; or the node did not take the password kept: `wrong_password`", body = Error),
+        (status = 504, description = "The node did not answer the login: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn node_command(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, u32)>,
+    Json(new): Json<NewCommand>,
+) -> Response {
+    match state.radios.node_command(radio, node, &new.command).await {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(failure) => login_failed(failure),
     }
 }

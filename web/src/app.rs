@@ -106,6 +106,18 @@ impl Page {
     }
 }
 
+/// A line of a node's console: a command sent, or what it answered.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConsoleLine {
+    pub radio: RadioId,
+    pub node: u32,
+    /// A command sent, rather than an answer.
+    pub mine: bool,
+    pub text: String,
+    /// In seconds since the epoch.
+    pub at: i64,
+}
+
 /// A room's login, as the interface knows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RoomState {
@@ -235,6 +247,9 @@ pub struct Live {
     /// The open room's login: as read or made, while one is under way, or
     /// why the last failed; none while no room is open.
     pub room: RwSignal<Option<RoomState>>,
+    /// What was said with the consoles of nodes the radios are logged in to
+    /// as their admin, since the page opened: each radio's, each node's.
+    pub console: RwSignal<Vec<ConsoleLine>>,
 }
 
 impl Live {
@@ -290,6 +305,7 @@ impl Live {
             synced: RwSignal::new(0),
             now: RwSignal::new(now()),
             room: RwSignal::new(None),
+            console: RwSignal::new(Vec::new()),
         }
     }
 
@@ -1141,6 +1157,23 @@ impl Live {
                             message.repeaters = repeaters;
                             message.scope = scope;
                         }
+                    });
+                    Ok(())
+                }
+                ServerMessage::Console {
+                    radio,
+                    node,
+                    text,
+                    at,
+                } => {
+                    self.console.update(|lines| {
+                        lines.push(ConsoleLine {
+                            radio,
+                            node,
+                            mine: false,
+                            text,
+                            at,
+                        });
                     });
                     Ok(())
                 }

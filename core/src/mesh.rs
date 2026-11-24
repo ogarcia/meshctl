@@ -179,6 +179,13 @@ pub enum Event {
     Reply(Reply),
     /// A copy of a message heard, and the way it came.
     Route(Route),
+    /// What a MeshCore node's console answered the radio, logged in to it as
+    /// its admin: kept out of the chat, as it is no message.
+    Console {
+        from: u32,
+        text: String,
+        at: u32,
+    },
 }
 
 /// A copy of a message the radio heard, and the way it came: as MeshCore
@@ -246,6 +253,10 @@ pub enum Answer {
     Neighbours { total: u16, heard: Vec<Neighbour> },
     /// Who runs a MeshCore node, as it says.
     Owner(crate::meshcore::answers::Owner),
+    /// Who may log in to a MeshCore node, as its admin is told: each by its
+    /// number, as far as the start of its key tells, and the access list's
+    /// bits it has.
+    AccessList(Vec<(u32, u8)>),
     /// A MeshCore node heard straight, pinged: how long there and back, in
     /// milliseconds, the SNR it heard the radio at, and the SNR the radio
     /// heard it back at.

@@ -68,6 +68,11 @@ impl Asked {
     }
 }
 
+/// The radio's login to the node of the page, as last read: which of its
+/// sections show, as some are its admin's only.
+#[derive(Clone, Copy)]
+struct NodeLoginState(RwSignal<Option<meshctl_api::NodeLogin>>);
+
 /// A button of the page: what it sends, and where it is, as two may send
 /// the same (its node info, over all while its name is not known, and in
 /// its section).
@@ -97,6 +102,7 @@ fn NodePage(num: u32) -> impl IntoView {
         on_cleanup(move || ticking.clear());
     }
     provide_context(Asking { num, clock });
+    provide_context(NodeLoginState(RwSignal::new(None)));
     // One channel menu open at a time, closed by a click anywhere else.
     let menu = RwSignal::new(None::<ButtonId>);
     provide_context(OpenMenu(menu));
@@ -144,6 +150,8 @@ fn NodePage(num: u32) -> impl IntoView {
                     {serves.then(|| view! { <Regions /> })}
                     <RemoteOwner />
                     <NodeAccessSection />
+                    <AccessListSection />
+                    <ConsoleSection />
                 </div>
             }
             .into_any();
@@ -322,6 +330,7 @@ fn meshcore_kind(kind: RequestKind) -> bool {
             | RequestKind::Status
             | RequestKind::Telemetry
             | RequestKind::Owner
+            | RequestKind::AccessList
             | RequestKind::Ping
     )
 }
@@ -2493,6 +2502,9 @@ fn reply_summary(
         RequestReply::Neighbors { total, nodes } => t_string!(i18n, neighbors_told)
             .replace("{n}", &nodes.len().to_string())
             .replace("{total}", &total.to_string()),
+        RequestReply::AccessList { nodes } => {
+            t_string!(i18n, access_list_told).replace("{n}", &nodes.len().to_string())
+        }
         RequestReply::Owner { firmware, name, .. } if firmware.is_empty() => name.clone(),
         RequestReply::Owner { firmware, name, .. } => format!("{name} · {firmware}"),
         RequestReply::Ping {
@@ -2898,7 +2910,7 @@ fn NodeAccessSection() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let asking = expect_context::<Asking>();
-    let login = RwSignal::new(None::<meshctl_api::NodeLogin>);
+    let login = expect_context::<NodeLoginState>().0;
     let busy = RwSignal::new(false);
     let problem = RwSignal::new(None::<Failure>);
     let password = RwSignal::new(String::new());
@@ -3013,6 +3025,213 @@ fn NodeAccessSection() -> impl IntoView {
     }
 }
 
+/// Whether the radio is logged in to the node of the page as its admin.
+fn admin_here() -> bool {
+    expect_context::<NodeLoginState>()
+        .0
+        .with(|l| l.as_ref().and_then(|l| l.access))
+        == Some(meshctl_api::NodeAccess::Admin)
+}
+
+/// Who may log in to a MeshCore node, and as what: its admin's to ask.
+#[component]
+fn AccessListSection() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let last = move || last_reply(live, asking.num, RequestKind::AccessList);
+    let at = Signal::derive(move || last().map(|(_, at)| at));
+    let body = move || {
+        let Some((meshctl_api::RequestReply::AccessList { nodes }, _)) = last() else {
+            return view! { <p class="nothing">{t!(i18n, access_list_none)}</p> }.into_any();
+        };
+        view! {
+            <ul class="neighbours">
+                {nodes
+                    .into_iter()
+                    .map(|listed| {
+                        let node = listed.node;
+                        let known = live.nodes.with_untracked(|nodes| nodes.contains_key(&node));
+                        let access = match listed.access {
+                            meshctl_api::NodeAccess::Admin => t_string!(i18n, access_admin),
+                            meshctl_api::NodeAccess::ReadWrite => t_string!(i18n, access_read_write),
+                            meshctl_api::NodeAccess::ReadOnly => t_string!(i18n, access_guest),
+                        };
+                        view! {
+                            <li>
+                                <button
+                                    type="button"
+                                    class="link"
+                                    disabled=!known
+                                    on:click=move |_| live.open_node(node)
+                                >
+                                    {crate::chat::node_name(live, node)}
+                                </button>
+                                <span class="snr">{access}</span>
+                            </li>
+                        }
+                    })
+                    .collect_view()}
+            </ul>
+        }
+        .into_any()
+    };
+    move || {
+        admin_here().then(|| {
+            view! {
+                <Section
+                    title=t!(i18n, access_list).into_any()
+                    at=at.get()
+                    asked=Some(Asked::Request(RequestKind::AccessList))
+                >
+                    {body}
+                </Section>
+            }
+        })
+    }
+}
+
+/// Commands a console takes that are past undoing, or lock its admin out:
+/// asked again before they go.
+const RISKY_COMMANDS: [&str; 8] = [
+    "reboot",
+    "erase",
+    "shutdown",
+    "poweroff",
+    "start ota",
+    "password",
+    "prv.key",
+    "clkreboot",
+];
+
+/// The console of a MeshCore node, for its admin: a command, as its
+/// firmware's CLI takes it, and what it answered, as it comes.
+#[component]
+fn ConsoleSection() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let command = RwSignal::new(String::new());
+    let busy = RwSignal::new(false);
+    let problem = RwSignal::new(None::<Failure>);
+    let lines = move || {
+        let radio = live.selected.get();
+        live.console.with(|lines| {
+            lines
+                .iter()
+                .filter(|l| Some(l.radio) == radio && l.node == asking.num)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    };
+    let send = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        let text = command.get_untracked().trim().to_owned();
+        if text.is_empty() {
+            return;
+        }
+        let risky = RISKY_COMMANDS
+            .iter()
+            .any(|risky| text == *risky || text.starts_with(&format!("{risky} ")));
+        if risky {
+            let sure = web_sys::window()
+                .and_then(|w| {
+                    w.confirm_with_message(
+                        &t_string!(i18n, console_risky).replace("{command}", &text),
+                    )
+                    .ok()
+                })
+                .unwrap_or(false);
+            if !sure {
+                return;
+            }
+        }
+        busy.set(true);
+        problem.set(None);
+        spawn_local(async move {
+            let sent = daemon::node_command(radio, asking.num, &text).await;
+            busy.try_set(false);
+            match sent {
+                Ok(()) => {
+                    command.try_set(String::new());
+                    live.console.update(|lines| {
+                        lines.push(crate::app::ConsoleLine {
+                            radio,
+                            node: asking.num,
+                            mine: true,
+                            text,
+                            at: i64::from(crate::app::now()),
+                        });
+                    });
+                }
+                Err(failure) => {
+                    problem.try_set(Some(failure));
+                }
+            }
+        });
+    };
+    let problem_words = move || {
+        problem.get().map(|failure| match failure {
+            Failure::Rejected(ErrorCode::NotAdmin) => t_string!(i18n, console_not_admin),
+            Failure::Rejected(ErrorCode::RadioDidNotAnswer) => t_string!(i18n, access_no_answer),
+            Failure::Rejected(ErrorCode::RadioNotConnected) => t_string!(i18n, node_not_connected),
+            _ => t_string!(i18n, error_failed),
+        })
+    };
+    move || {
+        admin_here().then(|| {
+            view! {
+                <Section title=t!(i18n, console_title).into_any()>
+                    <ol class="console mono">
+                        {move || {
+                            let lines = lines();
+                            if lines.is_empty() {
+                                return view! {
+                                    <li class="dim">{t!(i18n, console_hint)}</li>
+                                }
+                                .into_any();
+                            }
+                            lines
+                                .into_iter()
+                                .map(|line| {
+                                    view! {
+                                        <li class:mine=line.mine>
+                                            {line.mine.then_some("> ")}
+                                            {line.text}
+                                        </li>
+                                    }
+                                })
+                                .collect_view()
+                                .into_any()
+                        }}
+                    </ol>
+                    <form class="access-form" on:submit=send>
+                        <input
+                            type="text"
+                            class="mono"
+                            maxlength="200"
+                            autocomplete="off"
+                            autocapitalize="off"
+                            spellcheck="false"
+                            placeholder="ver, clock, get name…"
+                            aria-label=move || t_string!(i18n, console_title)
+                            prop:value=move || command.get()
+                            on:input=move |ev| command.set(event_target_value(&ev))
+                        />
+                        <button type="submit" disabled=move || busy.get()>
+                            {t!(i18n, console_send)}
+                        </button>
+                    </form>
+                    {move || problem_words().map(|w| view! { <p class="problem">{w}</p> })}
+                </Section>
+            }
+        })
+    }
+}
+
 /// What a kind of request is called.
 #[component]
 fn KindLabel(kind: RequestKind) -> impl IntoView {
@@ -3029,6 +3248,7 @@ fn KindLabel(kind: RequestKind) -> impl IntoView {
         RequestKind::Status => t!(i18n, ask_status).into_any(),
         RequestKind::Telemetry => t!(i18n, ask_telemetry).into_any(),
         RequestKind::Owner => t!(i18n, ask_owner).into_any(),
+        RequestKind::AccessList => t!(i18n, ask_access_list).into_any(),
         RequestKind::Ping => t!(i18n, ask_ping).into_any(),
     }
 }

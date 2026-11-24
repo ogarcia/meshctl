@@ -241,6 +241,18 @@ pub async fn log_in_node(
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// Sends a command to a node's console, as its admin.
+pub async fn node_command(radio: RadioId, node: u32, command: &str) -> Result<(), Failure> {
+    let request = with_token(Request::post(&url(&format!(
+        "/radios/{radio}/nodes/{node}/console"
+    ))))
+    .json(&meshctl_api::NewCommand {
+        command: command.to_owned(),
+    })
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// Forgets the password kept for a room.
 pub async fn forget_node_password(
     radio: RadioId,

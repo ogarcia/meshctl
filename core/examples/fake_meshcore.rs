@@ -434,6 +434,80 @@ fn room_sync(radio: &mut Radio) -> usize {
     new.len()
 }
 
+/// A command for the console of one of the radio's repeaters: answered, to
+/// its admin only, after a moment, as a message of the console's kind.
+fn console(radio: &mut Radio, data: &[u8], events: &broadcast::Sender<Event>) -> Vec<Vec<u8>> {
+    let (Some(prefix), Some(text)) = (data.get(6..12), data.get(12..)) else {
+        return vec![vec![0x01, 6]];
+    };
+    let Some(to) = radio
+        .contacts
+        .iter()
+        .find(|c| &c.key[..6] == prefix)
+        .cloned()
+    else {
+        return vec![vec![0x01, 2]];
+    };
+    let command = String::from_utf8_lossy(text).trim().to_owned();
+    let admin = radio.logins.get(&to.name) == Some(&3);
+    println!(
+        "console of {:?}: {command:?}, {}",
+        to.name,
+        if admin { "its admin" } else { "not its admin" }
+    );
+    let mut sent = vec![0x06, 0];
+    sent.extend([0; 4]);
+    sent.extend(4_000u32.to_le_bytes());
+    if !admin {
+        return vec![sent];
+    }
+    let mut words = command.split_whitespace();
+    let answer = match (words.next(), words.next()) {
+        (Some("ver"), _) => "v1.18.0-fake (Build: 24-Nov-2026)".to_owned(),
+        (Some("clock"), None) => {
+            let clock = radio.clock();
+            format!(
+                "{:02}:{:02} - fake clock UTC",
+                clock / 3600 % 24,
+                clock / 60 % 60
+            )
+        }
+        (Some("get"), Some("name")) => to.name.clone(),
+        (Some("get"), Some("radio")) => "869.618,62.5,8,8".to_owned(),
+        (Some("get"), Some(other)) => format!("??: {other}"),
+        (Some("set"), Some(_)) => "OK".to_owned(),
+        (Some("neighbors"), _) => radio
+            .contacts
+            .iter()
+            .filter(|c| c.kind == 2 && c.key != to.key)
+            .map(|c| {
+                format!(
+                    "{:02X}{:02X}{:02X}{:02X}:120:28",
+                    c.key[0], c.key[1], c.key[2], c.key[3]
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        (Some("advert"), _) => "OK - Advert sent".to_owned(),
+        (Some("reboot"), _) => "OK - rebooting".to_owned(),
+        (Some("password"), Some(new)) => format!("password now: {new}"),
+        _ => "Unknown command".to_owned(),
+    };
+    let snr = i8::try_from(20 + random(20)).unwrap_or(0);
+    let mut frame = vec![0x10, snr.cast_unsigned(), 0, 0];
+    frame.extend(&to.key[..6]);
+    frame.extend([to.path_len.cast_unsigned(), 1]);
+    frame.extend(now().to_le_bytes());
+    frame.extend(answer.as_bytes());
+    radio.queued.push_back(frame);
+    let events = events.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(800 + random(800))).await;
+        let _ = events.send(Event::Push(vec![0x83]));
+    });
+    vec![sent]
+}
+
 /// How a repeater or a room is doing, as the firmware's `RepeaterStats` or
 /// `ServerStats` lay it out: figures that change a little each time.
 fn node_status(node: &Contact, room: bool) -> Vec<u8> {
@@ -609,6 +683,11 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         // SEND_TEXT: to the contact its key prefix names.
         0x02 => {
             println!("direct text, {}", radio.scope_words());
+            // A command for a node's console: answered to its admin only, as
+            // the firmware does, and acknowledged never.
+            if data.first() == Some(&1) {
+                return console(&mut radio, data, events);
+            }
             // To Ana: kept, for her to react to.
             if let (Some(at), Some(prefix), Some(text)) =
                 (u32_in(data, 2), data.get(6..12), data.get(12..))
