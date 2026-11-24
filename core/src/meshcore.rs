@@ -22,6 +22,7 @@
 //! behaves it learned from loratrix and coresplitter, which have been running
 //! against real radios.
 
+pub mod answers;
 pub mod protocol;
 pub mod raw;
 
@@ -629,7 +630,24 @@ fn hops(path_len: u8) -> Option<u32> {
 type Path = (u8, Vec<u8>);
 
 /// A request waiting for its answer: who it went to, and what it asked.
-type Asked = (u32, u8);
+/// What was asked of a node, by the tag it went by: of whom, what, and
+/// where to say it was answered, which frees the radio for the next.
+struct Asked {
+    from: u32,
+    what: Asking,
+    answered: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+/// A ping sent: to whom, and when.
+type Pinged = (u32, std::time::Instant);
+
+/// What a request asks: anonymously, or of a node logged in to, as the
+/// firmware numbers each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asking {
+    Anonymous(u8),
+    LoggedIn(u8),
+}
 
 /// The open session with a radio: what sending needs.
 #[derive(Clone)]
@@ -646,6 +664,11 @@ pub(crate) struct Session {
     /// Requests waiting for their answer: the tag the radio gave, who they
     /// went to and what they asked.
     asked: Arc<Mutex<HashMap<[u8; 4], Asked>>>,
+    /// Held while the radio waits for an answer to a request or a login:
+    /// it waits for one at a time, and another would make it forget it.
+    waiting: Arc<tokio::sync::Mutex<()>>,
+    /// Pings waiting for their trace back, by its tag: to whom, and when.
+    pinged: Arc<Mutex<HashMap<[u8; 4], Pinged>>>,
     /// Held while a message is sent with a region of its own, set before it
     /// and back after: another is not sent in between.
     sending: Arc<tokio::sync::Mutex<()>>,
@@ -824,15 +847,70 @@ fn matched_direct(mesh: &Mesh, session: &Session, from: u8, packet_id: u32) {
     });
 }
 
+/// What a request asks a node logged in to, as the firmware numbers it.
+pub mod request {
+    /// How it is doing, a repeater or a room: guests may ask.
+    pub const STATUS: u8 = 0x01;
+    /// What its sensors read; a guest, only its own.
+    pub const TELEMETRY: u8 = 0x03;
+    /// Who may log in to it, and as what: only its admin may ask.
+    pub const ACCESS_LIST: u8 = 0x05;
+    /// The nodes it hears straight.
+    pub const NEIGHBOURS: u8 = 0x06;
+    /// Its firmware, its name and its owner.
+    pub const OWNER: u8 = 0x07;
+}
+
+/// How many neighbours are asked for at once: as many as an answer holds,
+/// each in nine bytes.
+const NEIGHBOURS_ASKED: u8 = 14;
+
+/// The least a request waits for its answer before the radio is let ask
+/// another.
+const ASK_WAIT: Duration = Duration::from_secs(15);
+
+/// A ping's tag: of whom and when, as a trace goes by one of its own.
+fn ping_tag(num: u32) -> u32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    num.rotate_left(7) ^ nanos
+}
+
 /// What an anonymous request asks a node for, as the firmware numbers it.
 pub mod anonymous {
     /// The regions it repeats on.
     pub const REGIONS: u8 = 0x01;
 }
 
-/// What a node answered a request with, read by what was asked: its first
-/// four bytes are its clock.
-fn answer_of(asked: u8, data: &[u8]) -> Option<crate::mesh::Answer> {
+/// What a node answered a request with, read by what was asked: an
+/// anonymous answer starts with its clock; one logged in to, with nothing
+/// before. A room's status is a room's.
+fn answer_of(asked: Asking, data: &[u8], room: bool) -> Option<crate::mesh::Answer> {
+    use crate::mesh::Answer;
+    let asked = match asked {
+        Asking::LoggedIn(request::STATUS) => {
+            return answers::status(data, room).map(Answer::Status);
+        }
+        Asking::LoggedIn(request::TELEMETRY) => {
+            return Some(Answer::Telemetry(answers::telemetry(data)));
+        }
+        Asking::LoggedIn(request::NEIGHBOURS) => {
+            let (total, heard) = answers::neighbours(data, 4)?;
+            let heard = heard
+                .into_iter()
+                .map(|n| crate::mesh::Neighbour {
+                    node: num_of(&n.prefix),
+                    seconds_ago: n.seconds_ago,
+                    snr: n.snr,
+                })
+                .collect();
+            return Some(Answer::Neighbours { total, heard });
+        }
+        Asking::LoggedIn(request::OWNER) => return answers::owner(data).map(Answer::Owner),
+        Asking::LoggedIn(_) => return None,
+        Asking::Anonymous(kind) => kind,
+    };
     let clock = data
         .get(..4)
         .and_then(|b| b.try_into().ok())
@@ -1208,14 +1286,64 @@ impl Mesh {
         for hash in path.chunks(size).rev() {
             request.extend_from_slice(hash);
         }
+        self.send_asked(
+            &session,
+            num,
+            Asking::Anonymous(kind),
+            command::send_anon_request(&key, &request),
+        )
+        .await
+    }
+
+    /// Asks a node the radio logged in to something, as the firmware numbers
+    /// it in [`request`]: what a guest may ask, or an admin. The id it goes
+    /// by, which its answer comes as a [`Event::Reply`] with; a node that
+    /// does not take it, or one not logged in to, says nothing.
+    pub async fn meshcore_request(&self, num: u32, what: u8) -> Result<u32, AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        let data = match what {
+            // All the sensors it lets this login read: the mask the firmware
+            // takes inverted, none masked.
+            request::TELEMETRY => vec![what, 0, 0, 0],
+            // As many as an answer holds, the strongest first, each by the
+            // four bytes of its key a node number is made of, and four bytes
+            // of chance to make the packet one of its own.
+            request::NEIGHBOURS => {
+                let chance = now().to_le_bytes();
+                let mut data = vec![what, 0, NEIGHBOURS_ASKED, 0, 0, 2, 4];
+                data.extend_from_slice(&chance);
+                data
+            }
+            request::ACCESS_LIST => vec![what, 0, 0],
+            _ => vec![what],
+        };
+        self.send_asked(
+            &session,
+            num,
+            Asking::LoggedIn(what),
+            command::send_binary_request(&key, &data),
+        )
+        .await
+    }
+
+    /// Sends a request once the radio waits for no other answer, and keeps
+    /// it waiting for this one, as long as the radio expects it to take and
+    /// at least [`ASK_WAIT`]: another would make it forget it. Its tag.
+    async fn send_asked(
+        &self,
+        session: &Session,
+        num: u32,
+        what: Asking,
+        command: Vec<u8>,
+    ) -> Result<u32, AdminError> {
+        let waiting = Arc::clone(&session.waiting).lock_owned().await;
         let answer = session
             .client
-            .ask_one(command::send_anon_request(&key, &request), |r| {
-                matches!(r, Response::MessageSent { .. })
-            })
+            .ask_one(command, |r| matches!(r, Response::MessageSent { .. }))
             .await;
-        let tag = match answer {
-            Ok(Response::MessageSent { tag, .. }) => tag,
+        let (tag, timeout_ms) = match answer {
+            Ok(Response::MessageSent { tag, timeout_ms }) => (tag, timeout_ms),
             Ok(Response::Error(code)) => {
                 return Err(AdminError::Refused(error_name(code).to_owned()));
             }
@@ -1223,12 +1351,71 @@ impl Mesh {
             Err("the radio did not answer") => return Err(AdminError::NoAnswer),
             Err(_) => return Err(AdminError::NotConnected),
         };
+        let (answered, told) = tokio::sync::oneshot::channel();
         session
             .asked
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(tag, (num, kind));
+            .insert(
+                tag,
+                Asked {
+                    from: num,
+                    what,
+                    answered: Some(answered),
+                },
+            );
+        let wait = Duration::from_millis(u64::from(timeout_ms) * 2).max(ASK_WAIT);
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(wait, told).await;
+            drop(waiting);
+        });
         Ok(u32::from_le_bytes(tag))
+    }
+
+    /// Pings a node the radio hears straight, a repeater's or a room's: a
+    /// trace there and back, which needs no login. Its tag, which its answer
+    /// comes as a [`Event::Reply`] with; [`AdminError::NoPath`] for one not
+    /// heard straight.
+    pub async fn meshcore_ping(&self, num: u32) -> Result<u32, AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        let direct = session
+            .paths
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&num)
+            .is_some_and(|(path_len, _)| *path_len & 0x3f == 0 && *path_len != NO_PATH);
+        if !direct {
+            return Err(AdminError::NoPath);
+        }
+        // Its hash as the radio writes hashes: one, two or three bytes.
+        let mode = self
+            .read(|state| state.meshcore.as_ref().and_then(|s| s.path_hash_mode))
+            .unwrap_or(0)
+            .min(2);
+        let size = usize::from(mode) + 1;
+        let tag = ping_tag(num);
+        let answer = session
+            .client
+            .ask_one(command::send_trace_path(tag, mode, &key[..size]), |r| {
+                matches!(r, Response::MessageSent { .. })
+            })
+            .await;
+        match answer {
+            Ok(Response::MessageSent { .. }) => {}
+            Ok(Response::Error(code)) => {
+                return Err(AdminError::Refused(error_name(code).to_owned()));
+            }
+            Ok(_) => return Err(AdminError::Refused("UNEXPECTED".to_owned())),
+            Err("the radio did not answer") => return Err(AdminError::NoAnswer),
+            Err(_) => return Err(AdminError::NotConnected),
+        }
+        session
+            .pinged
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(tag.to_le_bytes(), (num, std::time::Instant::now()));
+        Ok(tag)
     }
 
     /// Sends a login to a room or a repeater, with a password, empty for a
@@ -1240,6 +1427,8 @@ impl Mesh {
         let key = self.meshcore_key(&session, num)?;
         let mut prefix = [0u8; 6];
         prefix.copy_from_slice(&key[..6]);
+        // The radio waits for one answer at a time: this one, until it comes.
+        let waiting = Arc::clone(&session.waiting).lock_owned().await;
         let (tell, told) = tokio::sync::oneshot::channel();
         session
             .logins
@@ -1258,6 +1447,7 @@ impl Mesh {
                     wait: Duration::from_millis(u64::from(timeout_ms) * 2).max(LOGIN_WAIT),
                     told,
                     logins: Arc::clone(&session.logins),
+                    _waiting: waiting,
                     prefix,
                 });
             }
@@ -1426,6 +1616,8 @@ async fn session(
         pending: Arc::default(),
         paths: Arc::default(),
         asked: Arc::default(),
+        waiting: Arc::default(),
+        pinged: Arc::default(),
         sending: Arc::default(),
         heard: Arc::default(),
         logins: Arc::default(),
@@ -1501,6 +1693,9 @@ async fn session(
                     logged_in(&session, prefix, Some(access));
                 }
                 Some(Response::NotLoggedIn(prefix)) => logged_in(&session, prefix, None),
+                Some(Response::TraceData { tag, snrs, last_snr, .. }) => {
+                    traced(mesh, &session, tag, &snrs, last_snr);
+                }
                 Some(Response::BinaryResponse { tag, data }) => {
                     replied(mesh, &session, tag, &data);
                 }
@@ -1620,6 +1815,8 @@ pub struct LoginSent {
     told: tokio::sync::oneshot::Receiver<Option<Access>>,
     logins: Arc<Mutex<HashMap<[u8; 6], LoginWait>>>,
     prefix: [u8; 6],
+    /// The radio held waiting for this answer, let go as it comes or not.
+    _waiting: tokio::sync::OwnedMutexGuard<()>,
 }
 
 impl LoginSent {
@@ -1685,11 +1882,27 @@ fn replied(mesh: &Mesh, session: &Session, tag: [u8; 4], data: &[u8]) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&tag);
-    let Some((from, kind)) = asked else {
+    let Some(Asked {
+        from,
+        what,
+        answered,
+    }) = asked
+    else {
         return;
     };
-    let Some(answer) = answer_of(kind, data) else {
-        tracing::debug!(from, kind, "unreadable answer");
+    // The radio is free for the next request.
+    if let Some(answered) = answered {
+        let _ = answered.send(());
+    }
+    let room = mesh.read(|state| {
+        state
+            .nodes
+            .get(&from)
+            .and_then(|n| n.user.as_ref())
+            .is_some_and(|u| u.role == "ROOM")
+    });
+    let Some(answer) = answer_of(what, data, room) else {
+        tracing::debug!(from, ?what, "unreadable answer");
         return;
     };
     mesh.update(|_| {
@@ -1697,6 +1910,31 @@ fn replied(mesh: &Mesh, session: &Session, tag: [u8; 4], data: &[u8]) {
             request_id: u32::from_le_bytes(tag),
             from,
             answer,
+        })]
+    });
+}
+
+/// A ping's trace come back: how long it took, and how it was heard each
+/// way.
+fn traced(mesh: &Mesh, session: &Session, tag: [u8; 4], snrs: &[f32], last_snr: f32) {
+    let pinged = session
+        .pinged
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&tag);
+    let Some((from, sent)) = pinged else {
+        return;
+    };
+    let round_trip_ms = u32::try_from(sent.elapsed().as_millis()).unwrap_or(u32::MAX);
+    mesh.update(|_| {
+        vec![Event::Reply(crate::mesh::Reply {
+            request_id: u32::from_le_bytes(tag),
+            from,
+            answer: crate::mesh::Answer::Ping {
+                round_trip_ms,
+                snr_there: snrs.first().copied().unwrap_or(last_snr),
+                snr_back: last_snr,
+            },
         })]
     });
 }
@@ -1846,7 +2084,7 @@ mod tests {
         let mut data = 1_718_789_276u32.to_le_bytes().to_vec();
         data.extend(b"*,europe,#galicia,\0\0\0\0");
         assert_eq!(
-            answer_of(anonymous::REGIONS, &data),
+            answer_of(Asking::Anonymous(anonymous::REGIONS), &data, false),
             Some(crate::mesh::Answer::Regions {
                 names: vec!["europe".into(), "galicia".into()],
                 unscoped: true,
@@ -1856,14 +2094,21 @@ mod tests {
         // None at all, and what was not asked.
         let none = 1u32.to_le_bytes();
         assert_eq!(
-            answer_of(anonymous::REGIONS, &none),
+            answer_of(Asking::Anonymous(anonymous::REGIONS), &none, false),
             Some(crate::mesh::Answer::Regions {
                 names: Vec::new(),
                 unscoped: false,
                 clock: Some(1),
             })
         );
-        assert_eq!(answer_of(0x7f, &none), None);
+        assert_eq!(answer_of(Asking::Anonymous(0x7f), &none, false), None);
+        // Logged in: as asked, with nothing before.
+        let owner = b"v1.18.0\nTorre\nAlguien";
+        assert!(matches!(
+            answer_of(Asking::LoggedIn(request::OWNER), owner, false),
+            Some(crate::mesh::Answer::Owner(o)) if o.name == "Torre"
+        ));
+        assert_eq!(answer_of(Asking::LoggedIn(0x7f), owner, false), None);
     }
 
     #[test]

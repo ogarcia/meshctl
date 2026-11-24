@@ -114,10 +114,40 @@ fn NodePage(num: u32) -> impl IntoView {
                 .with(|nodes| nodes.get(&num).and_then(|n| n.role.clone()))
         })
         .is_some_and(|role| role == "REPEATER" || role == "ROOM");
+    // And with a sensor, they are asked what they tell, logged in to.
+    let takes_login = meshcore
+        && untrack(|| {
+            live.nodes
+                .with(|nodes| nodes.get(&num).and_then(|n| n.role.clone()))
+        })
+        .is_some_and(|role| matches!(role.as_str(), "REPEATER" | "ROOM" | "SENSOR"));
     // Two columns, headed by what is looked at most: where it is, and the
     // routes to it: what comes of its own accord on the left, what is asked
     // for on the right, the least likely to answer last.
     let heard = move || {
+        // A MeshCore repeater, room or sensor: what is asked of it, logged
+        // in to, as it tells nothing of its own accord.
+        if takes_login {
+            return view! {
+                <div class="node-column">
+                    {move || {
+                        let latest = latest();
+                        view! { <PositionSection at=latest.position.as_ref().map(|p| p.at) /> }
+                    }}
+                    {serves.then(|| view! { <RemoteStatus /> })}
+                    <RemoteTelemetry />
+                    {serves.then(|| view! { <RemoteNeighbors /> })}
+                </div>
+                <div class="node-column">
+                    <MeshcorePath />
+                    <RemotePing />
+                    {serves.then(|| view! { <Regions /> })}
+                    <RemoteOwner />
+                    <NodeAccessSection />
+                </div>
+            }
+            .into_any();
+        }
         view! {
             <div class="node-column">
                 {move || {
@@ -131,7 +161,7 @@ fn NodePage(num: u32) -> impl IntoView {
             </div>
             <div class="node-column">
                 {if meshcore {
-                    view! { <MeshcorePath /> {serves.then(|| view! { <Regions /> })} }.into_any()
+                    view! { <MeshcorePath /> }.into_any()
                 } else {
                     view! { <Traces drawer /> }.into_any()
                 }}
@@ -278,17 +308,33 @@ fn needs_key(live: Live, num: u32) -> bool {
             .with(|nodes| nodes.get(&num).is_some_and(|n| n.public_key.is_none()))
 }
 
-/// Whether the selected radio can ask nodes for anything yet: MeshCore's
-/// requests are still to come.
+/// Whether the selected radio is a Meshtastic one, which asks a node with
+/// no name for its node info.
 fn supported(live: Live) -> bool {
     live.selected_kind() != Some(RadioKind::Meshcore)
 }
 
+/// What only MeshCore nodes are asked, and on no channel.
+fn meshcore_kind(kind: RequestKind) -> bool {
+    matches!(
+        kind,
+        RequestKind::Regions
+            | RequestKind::Status
+            | RequestKind::Telemetry
+            | RequestKind::Owner
+            | RequestKind::Ping
+    )
+}
+
 /// Whether the selected radio asks nodes for this: a MeshCore radio only
-/// what MeshCore nodes answer, and the other way round.
+/// what MeshCore nodes answer, its neighbours too, and the other way round.
 fn can_ask(live: Live, asked: Asked) -> bool {
     let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
-    meshcore == (asked == Asked::Request(RequestKind::Regions))
+    match asked {
+        Asked::Request(kind) if meshcore => meshcore_kind(kind) || kind == RequestKind::Neighbors,
+        Asked::Request(kind) => !meshcore_kind(kind),
+        Asked::Trace => !meshcore,
+    }
 }
 
 /// The object a packet's payload carries under a key, as telemetry carries
@@ -371,8 +417,15 @@ fn Checks() -> impl IntoView {
     let asking = expect_context::<Asking>();
     move || {
         let checks = live.checks.get();
-        let note = if !supported(live) {
-            Some(t!(i18n, meshcore_not_yet).into_any())
+        let companion = !supported(live)
+            && !live.nodes.with(|nodes| {
+                nodes
+                    .get(&asking.num)
+                    .and_then(|n| n.role.as_deref())
+                    .is_some_and(|role| matches!(role, "REPEATER" | "ROOM" | "SENSOR"))
+            });
+        let note = if companion {
+            Some(t!(i18n, meshcore_companion).into_any())
         } else if !connected(live) {
             // Said over the page, as on every other.
             None
@@ -675,7 +728,7 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
     let by_channel = move || !asked.private() || licensed(live);
     // MeshCore's go to the node, on no channel.
     let has_menu = move || {
-        by_channel() && channels().len() > 1 && asked != Asked::Request(RequestKind::Regions)
+        by_channel() && channels().len() > 1 && live.selected_kind() != Some(RadioKind::Meshcore)
     };
     let open = move || menu.get() == Some(me);
     // Asking, said by the button pressed; by every one that sends it when
@@ -797,7 +850,11 @@ fn Quiet(kind: RequestKind) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let asking = expect_context::<Asking>();
+    // A Meshtastic node's firmware answers these once in so long; a
+    // MeshCore one, whenever asked.
+    let meshcore = untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore);
     let window: u32 = match kind {
+        _ if meshcore => 0,
         RequestKind::NodeInfo => 60,
         RequestKind::Position | RequestKind::Neighbors => 180,
         _ => 0,
@@ -2368,7 +2425,8 @@ fn RequestRow(request: Request) -> impl IntoView {
         .and_then(|payload| serde_json::to_string_pretty(&payload).ok())
         .or_else(|| reply.and_then(|reply| serde_json::to_string_pretty(&reply).ok()));
     // MeshCore's go on no channel.
-    let on_channel = request.kind != RequestKind::Regions;
+    let on_channel = !meshcore_kind(request.kind)
+        && untrack(|| live.selected_kind()) != Some(RadioKind::Meshcore);
     let has_detail = detail.is_some();
     let kind = request.kind;
     let clock = awaiting_clock(request.status == RequestStatus::Pending);
@@ -2406,17 +2464,41 @@ fn reply_summary(
     i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
     reply: &meshctl_api::RequestReply,
 ) -> String {
-    let meshctl_api::RequestReply::Regions {
-        regions, unscoped, ..
-    } = reply;
-    let mut names: Vec<String> = regions.iter().map(|name| format!("#{name}")).collect();
-    if *unscoped {
-        names.insert(0, t_string!(i18n, regions_unscoped).to_owned());
-    }
-    if names.is_empty() {
-        t_string!(i18n, regions_nothing).to_owned()
-    } else {
-        names.join(", ")
+    use meshctl_api::RequestReply;
+    match reply {
+        RequestReply::Regions {
+            regions, unscoped, ..
+        } => {
+            let mut names: Vec<String> = regions.iter().map(|name| format!("#{name}")).collect();
+            if *unscoped {
+                names.insert(0, t_string!(i18n, regions_unscoped).to_owned());
+            }
+            if names.is_empty() {
+                t_string!(i18n, regions_nothing).to_owned()
+            } else {
+                names.join(", ")
+            }
+        }
+        RequestReply::Status(status) => format!(
+            "{:.2} V · {} · {} dBm",
+            status.voltage,
+            duration(u64::from(status.uptime)),
+            status.noise_floor
+        ),
+        RequestReply::Telemetry { readings } => readings
+            .iter()
+            .map(|r| reading_words(i18n, r))
+            .collect::<Vec<_>>()
+            .join(" · "),
+        RequestReply::Neighbors { total, nodes } => t_string!(i18n, neighbors_told)
+            .replace("{n}", &nodes.len().to_string())
+            .replace("{total}", &total.to_string()),
+        RequestReply::Owner { firmware, name, .. } => format!("{name} · {firmware}"),
+        RequestReply::Ping {
+            round_trip_ms,
+            snr_there,
+            snr_back,
+        } => format!("{round_trip_ms} ms · ↑ {snr_there:.1} dB · ↓ {snr_back:.1} dB"),
     }
 }
 
@@ -2496,6 +2578,436 @@ fn Regions() -> impl IntoView {
     }
 }
 
+/// The last answer a node gave to a kind of request, and when.
+fn last_reply(live: Live, num: u32, kind: RequestKind) -> Option<(meshctl_api::RequestReply, i64)> {
+    live.requests.with(|requests| {
+        requests
+            .iter()
+            .filter(|r| r.node == num && r.kind == kind && r.status == RequestStatus::Answered)
+            .max_by_key(|r| r.answered_at)
+            .and_then(|r| Some((r.reply.clone()?, r.answered_at?)))
+    })
+}
+
+/// A sensor's reading, in words: what, how much, and of which sensor when
+/// not the node's own.
+fn reading_words(i18n: I18nContext<Locale>, reading: &meshctl_api::SensorReading) -> String {
+    let value = |decimals: usize| {
+        reading
+            .values
+            .first()
+            .map_or_else(String::new, |v| format!("{v:.decimals$}"))
+    };
+    let words = match reading.kind.as_str() {
+        "voltage" => format!("{} {} V", t_string!(i18n, reading_voltage), value(2)),
+        "temperature" => format!("{} {} °C", t_string!(i18n, reading_temperature), value(1)),
+        "humidity" => format!("{} {} %", t_string!(i18n, reading_humidity), value(0)),
+        "pressure" => format!("{} {} hPa", t_string!(i18n, reading_pressure), value(1)),
+        "current" => format!("{} {} A", t_string!(i18n, reading_current), value(3)),
+        "power" => format!("{} {} W", t_string!(i18n, reading_power), value(0)),
+        "illuminance" => format!("{} {} lux", t_string!(i18n, reading_illuminance), value(0)),
+        "altitude" => format!("{} {} m", t_string!(i18n, reading_altitude), value(0)),
+        "percentage" => format!("{} {} %", t_string!(i18n, reading_percentage), value(0)),
+        "energy" => format!("{} {} kWh", t_string!(i18n, reading_energy), value(3)),
+        "distance" => format!("{} {} m", t_string!(i18n, reading_distance), value(3)),
+        "place" => {
+            let v = &reading.values;
+            format!(
+                "{} {:.5}, {:.5}",
+                t_string!(i18n, reading_place),
+                v.first().copied().unwrap_or_default(),
+                v.get(1).copied().unwrap_or_default()
+            )
+        }
+        other => format!(
+            "{} {}",
+            other,
+            reading
+                .values
+                .iter()
+                .map(|v| format!("{v}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    if reading.channel == 1 {
+        words
+    } else {
+        format!(
+            "{words} ({})",
+            t_string!(i18n, reading_sensor).replace("{n}", &reading.channel.to_string())
+        )
+    }
+}
+
+/// How a MeshCore repeater or room says it is doing, asked of it.
+#[component]
+fn RemoteStatus() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let last = move || last_reply(live, asking.num, RequestKind::Status);
+    let at = Signal::derive(move || last().map(|(_, at)| at));
+    let body = move || {
+        let Some((meshctl_api::RequestReply::Status(s), _)) = last() else {
+            return view! { <p class="nothing">{t!(i18n, remote_status_none)}</p> }.into_any();
+        };
+        let packets = |all: u32, flood: u32, direct: u32| {
+            t_string!(i18n, remote_packets)
+                .replace("{all}", &all.to_string())
+                .replace("{flood}", &flood.to_string())
+                .replace("{direct}", &direct.to_string())
+        };
+        view! {
+            <dl class="facts">
+                {fact(t!(i18n, remote_voltage), format!("{:.2} V", s.voltage))}
+                {fact(t!(i18n, remote_uptime), duration(u64::from(s.uptime)))}
+                {fact(t!(i18n, remote_noise), format!("{} dBm", s.noise_floor))}
+                {fact(
+                    t!(i18n, remote_last_heard),
+                    format!("{} dBm · {:.1} dB", s.last_rssi, s.last_snr),
+                )}
+                {fact(t!(i18n, remote_received), packets(s.received, s.received_flood, s.received_direct))}
+                {fact(t!(i18n, remote_sent), packets(s.sent, s.sent_flood, s.sent_direct))}
+                {fact(
+                    t!(i18n, remote_duplicates),
+                    format!("{} · {}", s.flood_duplicates, s.direct_duplicates),
+                )}
+                {fact(t!(i18n, remote_airtime), duration(u64::from(s.airtime)))}
+                {s.receive_airtime.map(|t| fact(t!(i18n, remote_receive_airtime), duration(u64::from(t))))}
+                {fact(t!(i18n, remote_queue), s.queue.to_string())}
+                {s.receive_errors.map(|e| fact(t!(i18n, remote_receive_errors), e.to_string()))}
+                {(s.errors != 0).then(|| fact(t!(i18n, remote_errors), format!("{:#06x}", s.errors)))}
+                {s.posted.map(|p| fact(t!(i18n, remote_posted), p.to_string()))}
+                {s.pushed.map(|p| fact(t!(i18n, remote_pushed), p.to_string()))}
+            </dl>
+        }
+        .into_any()
+    };
+    move || {
+        view! {
+            <Section
+                title=t!(i18n, remote_status).into_any()
+                at=at.get()
+                asked=Some(Asked::Request(RequestKind::Status))
+            >
+                {body}
+            </Section>
+        }
+    }
+}
+
+/// What a MeshCore node's sensors read, asked of it.
+#[component]
+fn RemoteTelemetry() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let last = move || last_reply(live, asking.num, RequestKind::Telemetry);
+    let at = Signal::derive(move || last().map(|(_, at)| at));
+    let body = move || {
+        let Some((meshctl_api::RequestReply::Telemetry { readings }, _)) = last() else {
+            return view! { <p class="nothing">{t!(i18n, remote_telemetry_none)}</p> }.into_any();
+        };
+        view! {
+            <ul class="readings">
+                {readings
+                    .iter()
+                    .map(|r| view! { <li>{reading_words(i18n, r)}</li> })
+                    .collect_view()}
+            </ul>
+            <p class="hint dim">{t!(i18n, remote_telemetry_hint)}</p>
+        }
+        .into_any()
+    };
+    move || {
+        view! {
+            <Section
+                title=t!(i18n, remote_telemetry).into_any()
+                at=at.get()
+                asked=Some(Asked::Request(RequestKind::Telemetry))
+            >
+                {body}
+            </Section>
+        }
+    }
+}
+
+/// The nodes a MeshCore repeater or room hears straight, asked of it: each
+/// a click away from its page, when known.
+#[component]
+fn RemoteNeighbors() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let last = move || last_reply(live, asking.num, RequestKind::Neighbors);
+    let at = Signal::derive(move || last().map(|(_, at)| at));
+    let body = move || {
+        let Some((meshctl_api::RequestReply::Neighbors { total, nodes }, _)) = last() else {
+            return view! { <p class="nothing">{t!(i18n, remote_neighbors_none)}</p> }.into_any();
+        };
+        let more = (u32::try_from(nodes.len()).unwrap_or(0) < total).then(|| {
+            t_string!(i18n, neighbors_told)
+                .replace("{n}", &nodes.len().to_string())
+                .replace("{total}", &total.to_string())
+        });
+        view! {
+            <ul class="neighbours">
+                {nodes
+                    .into_iter()
+                    .map(|n| {
+                        let node = n.node;
+                        let known = live.nodes.with_untracked(|nodes| nodes.contains_key(&node));
+                        let name = crate::chat::node_name(live, node);
+                        view! {
+                            <li>
+                                <button
+                                    type="button"
+                                    class="link"
+                                    disabled=!known
+                                    on:click=move |_| live.open_node(node)
+                                >
+                                    {name}
+                                </button>
+                                <span class="snr">
+                                    {format!("{:.1} dB · ", n.snr)}
+                                    {t_string!(i18n, node_ago).replace("{ago}", &duration(u64::from(n.seconds_ago)))}
+                                </span>
+                            </li>
+                        }
+                    })
+                    .collect_view()}
+            </ul>
+            {more.map(|more| view! { <p class="hint dim">{more}</p> })}
+        }
+        .into_any()
+    };
+    move || {
+        view! {
+            <Section
+                title=t!(i18n, remote_neighbors).into_any()
+                at=at.get()
+                asked=Some(Asked::Request(RequestKind::Neighbors))
+            >
+                {body}
+            </Section>
+        }
+    }
+}
+
+/// Who runs a MeshCore node, as it says, asked of it.
+#[component]
+fn RemoteOwner() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let last = move || last_reply(live, asking.num, RequestKind::Owner);
+    let at = Signal::derive(move || last().map(|(_, at)| at));
+    let body = move || {
+        let Some((
+            meshctl_api::RequestReply::Owner {
+                firmware,
+                name,
+                owner,
+            },
+            _,
+        )) = last()
+        else {
+            return view! { <p class="nothing">{t!(i18n, remote_owner_none)}</p> }.into_any();
+        };
+        view! {
+            <dl class="facts">
+                {fact(t!(i18n, remote_owner_name), name)}
+                {fact(t!(i18n, remote_owner_firmware), firmware)}
+                {(!owner.is_empty()).then(|| fact(t!(i18n, remote_owner_owner), owner))}
+            </dl>
+        }
+        .into_any()
+    };
+    move || {
+        view! {
+            <Section
+                title=t!(i18n, remote_owner).into_any()
+                at=at.get()
+                asked=Some(Asked::Request(RequestKind::Owner))
+            >
+                {body}
+            </Section>
+        }
+    }
+}
+
+/// A MeshCore node heard straight, pinged: how long there and back, and how
+/// each end heard the other. Only for one heard straight.
+#[component]
+fn RemotePing() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let last = move || last_reply(live, asking.num, RequestKind::Ping);
+    let at = Signal::derive(move || last().map(|(_, at)| at));
+    let direct = move || {
+        live.nodes
+            .with(|nodes| nodes.get(&asking.num).and_then(|n| n.hops_away))
+            == Some(0)
+    };
+    let body = move || {
+        let result = last().and_then(|(reply, _)| match reply {
+            meshctl_api::RequestReply::Ping {
+                round_trip_ms,
+                snr_there,
+                snr_back,
+            } => Some((round_trip_ms, snr_there, snr_back)),
+            _ => None,
+        });
+        view! {
+            {result.map(|(ms, there, back)| view! {
+                <dl class="facts compact">
+                    {fact(t!(i18n, ping_round_trip), format!("{ms} ms"))}
+                    {fact(t!(i18n, ping_there), format!("{there:.1} dB"))}
+                    {fact(t!(i18n, ping_back), format!("{back:.1} dB"))}
+                </dl>
+            })}
+            {(!direct()).then(|| view! { <p class="hint dim">{t!(i18n, ping_only_direct)}</p> })}
+        }
+    };
+    move || {
+        view! {
+            <Section
+                title=t!(i18n, remote_ping).into_any()
+                at=at.get()
+                asked=direct().then_some(Asked::Request(RequestKind::Ping))
+            >
+                {body}
+            </Section>
+        }
+    }
+}
+
+/// The radio's login to a MeshCore repeater, room or sensor: as what, a
+/// password to log in with, kept once right, and forgetting it. What is
+/// asked of it logs in as a guest first, if the radio has not since it
+/// connected.
+#[component]
+fn NodeAccessSection() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let login = RwSignal::new(None::<meshctl_api::NodeLogin>);
+    let busy = RwSignal::new(false);
+    let problem = RwSignal::new(None::<Failure>);
+    let password = RwSignal::new(String::new());
+    let read = move || {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        spawn_local(async move {
+            if let Ok(read) = daemon::node_login(radio, asking.num).await {
+                login.try_set(Some(read));
+            }
+        });
+    };
+    // Read as the page opens, and again as requests come back, as one asked
+    // logs in first.
+    Effect::new(move |_| {
+        live.requests.track();
+        live.synced.track();
+        read();
+    });
+    let submit = move |ev: leptos::ev::SubmitEvent| {
+        ev.prevent_default();
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        let given = password.get_untracked();
+        busy.set(true);
+        problem.set(None);
+        spawn_local(async move {
+            let done =
+                daemon::log_in_node(radio, asking.num, (!given.is_empty()).then_some(given)).await;
+            busy.try_set(false);
+            match done {
+                Ok(read) => {
+                    login.try_set(Some(read));
+                    password.try_set(String::new());
+                }
+                Err(failure) => {
+                    problem.try_set(Some(failure));
+                }
+            }
+        });
+    };
+    let forget = move |_| {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        spawn_local(async move {
+            if let Ok(read) = daemon::forget_node_password(radio, asking.num).await {
+                login.try_set(Some(read));
+            }
+        });
+    };
+    let access = move || {
+        let access = login.with(|l| l.as_ref().and_then(|l| l.access));
+        match access {
+            Some(meshctl_api::NodeAccess::Admin) => t_string!(i18n, access_admin),
+            Some(meshctl_api::NodeAccess::ReadWrite) => t_string!(i18n, access_read_write),
+            Some(meshctl_api::NodeAccess::ReadOnly) => t_string!(i18n, access_guest),
+            None => t_string!(i18n, access_out),
+        }
+    };
+    let remembered = move || login.with(|l| l.as_ref().is_some_and(|l| l.remembered));
+    let problem_words = move || {
+        problem.get().map(|failure| match failure {
+            Failure::Rejected(ErrorCode::WrongPassword) => t_string!(i18n, room_wrong_password),
+            Failure::Rejected(ErrorCode::RadioDidNotAnswer) => t_string!(i18n, access_no_answer),
+            Failure::Rejected(ErrorCode::RadioNotConnected) => t_string!(i18n, node_not_connected),
+            _ => t_string!(i18n, error_failed),
+        })
+    };
+    view! {
+        <Section title=t!(i18n, access_title).into_any()>
+            <dl class="facts compact">
+                {fact(t!(i18n, access_as), access)}
+            </dl>
+            <form class="access-form" on:submit=submit>
+                <input
+                    type="text"
+                    class="secret"
+                    maxlength="15"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    placeholder=move || t_string!(i18n, access_password)
+                    aria-label=move || t_string!(i18n, access_password)
+                    prop:value=move || password.get()
+                    on:input=move |ev| password.set(event_target_value(&ev))
+                />
+                <button type="submit" disabled=move || busy.get()>
+                    {move || {
+                        if busy.get() {
+                            t!(i18n, room_logging_in).into_any()
+                        } else {
+                            t!(i18n, room_log_in).into_any()
+                        }
+                    }}
+                </button>
+            </form>
+            {move || problem_words().map(|w| view! { <p class="problem">{w}</p> })}
+            <p class="hint dim">{t!(i18n, access_hint)}</p>
+            <Show when=remembered>
+                <button type="button" class="link" on:click=forget>
+                    {t!(i18n, room_forget_password)}
+                </button>
+            </Show>
+        </Section>
+    }
+}
+
 /// What a kind of request is called.
 #[component]
 fn KindLabel(kind: RequestKind) -> impl IntoView {
@@ -2509,6 +3021,10 @@ fn KindLabel(kind: RequestKind) -> impl IntoView {
         RequestKind::LocalStats => t!(i18n, ask_local_stats).into_any(),
         RequestKind::Neighbors => t!(i18n, ask_neighbors).into_any(),
         RequestKind::Regions => t!(i18n, ask_regions).into_any(),
+        RequestKind::Status => t!(i18n, ask_status).into_any(),
+        RequestKind::Telemetry => t!(i18n, ask_telemetry).into_any(),
+        RequestKind::Owner => t!(i18n, ask_owner).into_any(),
+        RequestKind::Ping => t!(i18n, ask_ping).into_any(),
     }
 }
 

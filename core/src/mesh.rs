@@ -219,7 +219,7 @@ pub enum Scope {
 }
 
 /// What a node answered a request with, by the id the request went by.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Reply {
     pub request_id: u32,
     /// The node asked, which is who answered.
@@ -228,7 +228,7 @@ pub struct Reply {
 }
 
 /// What a node answered.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Answer {
     /// The regions a repeater repeats floods scoped to, by their names, and
     /// whether it repeats those scoped to none; with its clock.
@@ -237,6 +237,32 @@ pub enum Answer {
         unscoped: bool,
         clock: Option<u32>,
     },
+    /// How a MeshCore repeater or room is doing.
+    Status(crate::meshcore::answers::NodeStatus),
+    /// What a MeshCore node's sensors read, its own among them.
+    Telemetry(Vec<crate::meshcore::answers::Reading>),
+    /// The nodes a MeshCore node hears straight, by their numbers, as far
+    /// as the start of their keys tells: how many in all, and those told.
+    Neighbours { total: u16, heard: Vec<Neighbour> },
+    /// Who runs a MeshCore node, as it says.
+    Owner(crate::meshcore::answers::Owner),
+    /// A MeshCore node heard straight, pinged: how long there and back, in
+    /// milliseconds, the SNR it heard the radio at, and the SNR the radio
+    /// heard it back at.
+    Ping {
+        round_trip_ms: u32,
+        snr_there: f32,
+        snr_back: f32,
+    },
+}
+
+/// A node another hears straight: by its number, how long ago, and at what
+/// SNR.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Neighbour {
+    pub node: u32,
+    pub seconds_ago: u32,
+    pub snr: f32,
 }
 
 /// What the firmware puts in a route for a hop it could not tell.

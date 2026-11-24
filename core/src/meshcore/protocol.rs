@@ -101,6 +101,8 @@ pub mod command {
     const GET_STATS: u8 = 0x38;
     const SEND_ANON_REQ: u8 = 0x39;
     const SEND_LOGIN: u8 = 0x1a;
+    const SEND_BINARY_REQ: u8 = 0x32;
+    const SEND_TRACE_PATH: u8 = 0x24;
     const SET_FLOOD_SCOPE_KEY: u8 = 0x36;
     const SET_TUNING_PARAMS: u8 = 0x15;
     const GET_TUNING_PARAMS: u8 = 0x2b;
@@ -314,6 +316,32 @@ pub mod command {
         let mut payload = vec![SEND_ANON_REQ];
         payload.extend_from_slice(key);
         payload.extend_from_slice(data);
+        payload
+    }
+
+    /// A request to a node the radio logged in to, by its whole key: what it
+    /// asks, and what goes with it; the radio puts its clock before, which
+    /// the node answers with as the tag. Answered with `MessageSent`, whose
+    /// tag the node's `BinaryResponse` carries. The radio waits for one
+    /// such answer at a time: another request forgets the one before.
+    pub fn send_binary_request(key: &[u8; 32], data: &[u8]) -> Vec<u8> {
+        let mut payload = vec![SEND_BINARY_REQ];
+        payload.extend_from_slice(key);
+        payload.extend_from_slice(data);
+        payload
+    }
+
+    /// A trace along a path of nodes, by their hashes, each `size` bytes
+    /// (the low two bits of `flags`, 0 for one): each one on it passes it on
+    /// with the SNR it heard it at, and the radio hears the last one pass
+    /// it. Answered with `MessageSent`; then pushed `TraceData`, with the
+    /// tag given.
+    pub fn send_trace_path(tag: u32, flags: u8, path: &[u8]) -> Vec<u8> {
+        let mut payload = vec![SEND_TRACE_PATH];
+        payload.extend_from_slice(&tag.to_le_bytes());
+        payload.extend_from_slice(&0u32.to_le_bytes());
+        payload.push(flags);
+        payload.extend_from_slice(path);
         payload
     }
 
@@ -621,6 +649,15 @@ pub enum Response {
     MessagesWaiting,
     /// Pushed: a contact the radio had not heard of before.
     NewContact(Contact),
+    /// Pushed: a trace sent came back, by its tag: the hashes of the path
+    /// it went, the SNR each hop heard it at, and the SNR the radio heard
+    /// it back at.
+    TraceData {
+        tag: [u8; 4],
+        hashes: Vec<u8>,
+        snrs: Vec<f32>,
+        last_snr: f32,
+    },
     /// Pushed: a login was taken.
     LoggedIn(LoggedIn),
     /// Pushed: a login was refused, by the first six bytes of the node's key.
@@ -642,6 +679,7 @@ impl Response {
                 | Self::BinaryResponse { .. }
                 | Self::RxLog { .. }
                 | Self::LoggedIn(_)
+                | Self::TraceData { .. }
                 | Self::NotLoggedIn(_)
         ) || matches!(self, Self::Other(code) if *code >= 0x80)
     }
@@ -705,6 +743,7 @@ impl Response {
             0x83 => Self::MessagesWaiting,
             0x8a => Self::NewContact(contact(data)?),
             0x85 => Self::LoggedIn(logged_in(data)?),
+            0x89 => trace_data(data)?,
             0x86 => Self::NotLoggedIn(bytes_at(data, 1)?),
             0x88 => Self::RxLog {
                 snr: snr(*data.first()?),
@@ -884,6 +923,30 @@ fn contact_message(data: &[u8], newer: bool) -> Option<ContactMessage> {
         } else {
             None
         },
+    })
+}
+
+/// A trace come back: a reserved byte, the length of its path in bytes, its
+/// flags (the low two bits the size of each hash, 0 for one byte), its tag
+/// and auth code, the path's hashes, the SNR each hop heard it at, and the
+/// SNR the radio heard it at, in quarters of a dB.
+fn trace_data(data: &[u8]) -> Option<Response> {
+    let path_len = usize::from(*data.get(1)?);
+    let size = 1usize << (data.get(2)? & 0x03);
+    let tag = bytes_at(data, 3)?;
+    let hashes = data.get(11..11 + path_len)?.to_vec();
+    let hops = path_len / size;
+    let snrs = data
+        .get(11 + path_len..11 + path_len + hops)?
+        .iter()
+        .map(|&b| snr(b))
+        .collect();
+    let last_snr = snr(*data.get(11 + path_len + hops)?);
+    Some(Response::TraceData {
+        tag,
+        hashes,
+        snrs,
+        last_snr,
     })
 }
 

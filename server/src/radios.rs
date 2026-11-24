@@ -200,6 +200,8 @@ pub enum AskFailure {
     TooSoon {
         wait: i64,
     },
+    /// It needs a login, which the radio could not make.
+    Login(LoginFailure),
     Failed(anyhow::Error),
 }
 
@@ -358,16 +360,7 @@ async fn keep_reply(
     radio: RadioId,
     reply: &mesh::Reply,
 ) -> Result<()> {
-    let mesh::Answer::Regions {
-        names,
-        unscoped,
-        clock,
-    } = &reply.answer;
-    let kept = meshctl_api::RequestReply::Regions {
-        regions: names.clone(),
-        unscoped: *unscoped,
-        clock: clock.map(i64::from),
-    };
+    let kept = reply_of(&reply.answer);
     if let Some(request) = store
         .reply_request(radio, reply.request_id, reply.from, &kept, now())
         .await?
@@ -375,6 +368,113 @@ async fn keep_reply(
         let _ = changes.send(Change::Request(radio, request));
     }
     Ok(())
+}
+
+/// A node's answer, as the API tells it.
+fn reply_of(answer: &mesh::Answer) -> meshctl_api::RequestReply {
+    use meshctl_api::RequestReply;
+    match answer {
+        mesh::Answer::Regions {
+            names,
+            unscoped,
+            clock,
+        } => RequestReply::Regions {
+            regions: names.clone(),
+            unscoped: *unscoped,
+            clock: clock.map(i64::from),
+        },
+        mesh::Answer::Status(status) => RequestReply::Status(meshctl_api::NodeStatus {
+            voltage: f32::from(status.battery_mv) / 1000.0,
+            queue: u32::from(status.queue),
+            noise_floor: i32::from(status.noise_floor),
+            last_rssi: i32::from(status.last_rssi),
+            last_snr: status.last_snr,
+            received: status.received,
+            sent: status.sent,
+            received_flood: status.received_flood,
+            received_direct: status.received_direct,
+            sent_flood: status.sent_flood,
+            sent_direct: status.sent_direct,
+            flood_duplicates: u32::from(status.flood_duplicates),
+            direct_duplicates: u32::from(status.direct_duplicates),
+            airtime: status.airtime,
+            uptime: status.uptime,
+            errors: u32::from(status.errors),
+            receive_airtime: status.receive_airtime,
+            receive_errors: status.receive_errors,
+            posted: status.posted.map(u32::from),
+            pushed: status.pushed.map(u32::from),
+        }),
+        mesh::Answer::Telemetry(readings) => RequestReply::Telemetry {
+            readings: readings
+                .iter()
+                .map(|r| meshctl_api::SensorReading {
+                    channel: u32::from(r.channel),
+                    kind: lpp_name(r.kind),
+                    values: r.values.clone(),
+                })
+                .collect(),
+        },
+        mesh::Answer::Neighbours { total, heard } => RequestReply::Neighbors {
+            total: u32::from(*total),
+            nodes: heard
+                .iter()
+                .map(|n| meshctl_api::HeardNeighbor {
+                    node: n.node,
+                    seconds_ago: n.seconds_ago,
+                    snr: n.snr,
+                })
+                .collect(),
+        },
+        mesh::Answer::Owner(owner) => RequestReply::Owner {
+            firmware: owner.firmware.clone(),
+            name: owner.name.clone(),
+            owner: owner.owner.clone(),
+        },
+        mesh::Answer::Ping {
+            round_trip_ms,
+            snr_there,
+            snr_back,
+        } => RequestReply::Ping {
+            round_trip_ms: *round_trip_ms,
+            snr_there: *snr_there,
+            snr_back: *snr_back,
+        },
+    }
+}
+
+/// What a Cayenne LPP type reads, by name; others by their number.
+fn lpp_name(kind: u8) -> String {
+    match kind {
+        0 => "digital_input",
+        1 => "digital_output",
+        2 => "analog_input",
+        3 => "analog_output",
+        100 => "generic",
+        101 => "illuminance",
+        102 => "presence",
+        103 => "temperature",
+        104 => "humidity",
+        113 => "acceleration",
+        115 => "pressure",
+        116 => "voltage",
+        117 => "current",
+        118 => "frequency",
+        120 => "percentage",
+        121 => "altitude",
+        125 => "concentration",
+        128 => "power",
+        130 => "distance",
+        131 => "energy",
+        132 => "direction",
+        133 => "time",
+        134 => "rotation",
+        135 => "colour",
+        136 => "place",
+        142 => "switch",
+        other => return other.to_string(),
+    }
+    .to_owned()
 }
 
 /// Keeps a copy of a message heard and the way it came, its region told by
@@ -394,9 +494,9 @@ async fn keep_route(
                 .latest_regions(radio)
                 .await?
                 .into_iter()
-                .flat_map(|(_, reply, _)| {
-                    let meshctl_api::RequestReply::Regions { regions, .. } = reply;
-                    regions
+                .flat_map(|(_, reply, _)| match reply {
+                    meshctl_api::RequestReply::Regions { regions, .. } => regions,
+                    _ => Vec::new(),
                 })
                 .collect();
             names.extend(store.channel_scopes(radio).await?.into_values());
@@ -1379,9 +1479,20 @@ impl Radios {
             return Err(AskFailure::InvalidNode);
         }
         // MeshCore radios ask only what MeshCore nodes answer, and the other
-        // way round.
+        // way round; neighbours, both.
+        use meshctl_core::meshcore::{anonymous, request};
         let meshcore = self.protocol(id) == Some(Protocol::Meshcore);
-        if meshcore != (new.kind == RequestKind::Regions) {
+        let meshcore_kind = matches!(
+            new.kind,
+            RequestKind::Regions
+                | RequestKind::Status
+                | RequestKind::Telemetry
+                | RequestKind::Owner
+                | RequestKind::Ping
+        );
+        if meshcore_kind && !meshcore
+            || meshcore && !meshcore_kind && new.kind != RequestKind::Neighbors
+        {
             return Err(AskFailure::Unsupported);
         }
         if self.link(id) != LinkState::Ready {
@@ -1394,17 +1505,40 @@ impl Radios {
             return Err(AskFailure::Pending);
         }
         if meshcore {
-            let tag = mesh
-                .meshcore_ask(new.node, meshctl_core::meshcore::anonymous::REGIONS)
-                .await
-                .map_err(|error| match error {
-                    AdminError::NoPath => AskFailure::NoPath,
-                    AdminError::UnknownNode | AdminError::OwnNode => AskFailure::InvalidNode,
-                    AdminError::Unsupported => AskFailure::Unsupported,
-                    AdminError::NotConnected | AdminError::NoAnswer | AdminError::Refused(_) => {
-                        AskFailure::NotConnected
-                    }
-                })?;
+            // What needs a login: as a guest at least, first, unless the
+            // radio logged in since it connected.
+            let logged = match new.kind {
+                RequestKind::Status => Some(request::STATUS),
+                RequestKind::Telemetry => Some(request::TELEMETRY),
+                RequestKind::Neighbors => Some(request::NEIGHBOURS),
+                RequestKind::Owner => Some(request::OWNER),
+                _ => None,
+            };
+            if logged.is_some() {
+                let held = self
+                    .logins
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains_key(&(id, new.node));
+                if !held {
+                    self.log_in_node(id, new.node, None)
+                        .await
+                        .map_err(AskFailure::Login)?;
+                }
+            }
+            let asked = match (new.kind, logged) {
+                (RequestKind::Ping, _) => mesh.meshcore_ping(new.node).await,
+                (_, Some(what)) => mesh.meshcore_request(new.node, what).await,
+                _ => mesh.meshcore_ask(new.node, anonymous::REGIONS).await,
+            };
+            let tag = asked.map_err(|error| match error {
+                AdminError::NoPath => AskFailure::NoPath,
+                AdminError::UnknownNode | AdminError::OwnNode => AskFailure::InvalidNode,
+                AdminError::Unsupported => AskFailure::Unsupported,
+                AdminError::NotConnected | AdminError::NoAnswer | AdminError::Refused(_) => {
+                    AskFailure::NotConnected
+                }
+            })?;
             let request = self
                 .store
                 .add_request(id, new.node, new.kind, 0, tag, now())
@@ -1426,7 +1560,11 @@ impl Radios {
             RequestKind::PowerTelemetry => Ask::PowerTelemetry,
             RequestKind::LocalStats => Ask::LocalStats,
             RequestKind::Neighbors => Ask::Neighbors,
-            RequestKind::Regions => return Err(AskFailure::Unsupported),
+            RequestKind::Regions
+            | RequestKind::Status
+            | RequestKind::Telemetry
+            | RequestKind::Owner
+            | RequestKind::Ping => return Err(AskFailure::Unsupported),
         };
         let packet_id =
             mesh.send_request(new.node, new.channel, ask)
@@ -2149,12 +2287,15 @@ impl Radios {
             .copied();
         let repeaters: Vec<meshctl_api::MeshcoreRepeaterRegions> = mesh.read(|state| {
             said.into_iter()
-                .map(|(node, reply, answered_at)| {
+                .filter_map(|(node, reply, answered_at)| {
                     let meshctl_api::RequestReply::Regions {
                         regions, unscoped, ..
-                    } = reply;
+                    } = reply
+                    else {
+                        return None;
+                    };
                     let known = state.nodes.get(&node);
-                    meshctl_api::MeshcoreRepeaterRegions {
+                    Some(meshctl_api::MeshcoreRepeaterRegions {
                         node,
                         name: known
                             .and_then(|n| n.user.as_ref())
@@ -2163,7 +2304,7 @@ impl Radios {
                         regions,
                         unscoped,
                         answered_at,
-                    }
+                    })
                 })
                 .collect()
         });

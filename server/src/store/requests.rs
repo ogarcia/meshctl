@@ -34,6 +34,10 @@ fn kind_name(kind: RequestKind) -> &'static str {
         RequestKind::LocalStats => "local_stats",
         RequestKind::Neighbors => "neighbors",
         RequestKind::Regions => "regions",
+        RequestKind::Status => "status",
+        RequestKind::Telemetry => "telemetry",
+        RequestKind::Owner => "owner",
+        RequestKind::Ping => "ping",
     }
 }
 
@@ -46,6 +50,10 @@ fn kind_from(name: &str) -> RequestKind {
         "local_stats" => RequestKind::LocalStats,
         "neighbors" => RequestKind::Neighbors,
         "regions" => RequestKind::Regions,
+        "status" => RequestKind::Status,
+        "telemetry" => RequestKind::Telemetry,
+        "owner" => RequestKind::Owner,
+        "ping" => RequestKind::Ping,
         _ => RequestKind::NodeInfo,
     }
 }
@@ -61,7 +69,11 @@ fn port_of(kind: RequestKind) -> Option<PortNum> {
         | RequestKind::PowerTelemetry
         | RequestKind::LocalStats => PortNum::TelemetryApp,
         RequestKind::Neighbors => PortNum::NeighborinfoApp,
-        RequestKind::Regions => return None,
+        RequestKind::Regions
+        | RequestKind::Status
+        | RequestKind::Telemetry
+        | RequestKind::Owner
+        | RequestKind::Ping => return None,
     })
 }
 

@@ -35,7 +35,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(node_login, log_in_node, forget_node_password))
 }
 
-fn login_failed(failure: LoginFailure) -> Response {
+pub(super) fn login_failed(failure: LoginFailure) -> Response {
     let (status, error) = match failure {
         LoginFailure::NoSuchRadio => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
         LoginFailure::NoLogin => (StatusCode::NOT_FOUND, ErrorCode::NoLogin),

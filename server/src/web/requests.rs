@@ -138,6 +138,7 @@ async fn ask(
             }),
         )
             .into_response(),
+        Err(AskFailure::Login(failure)) => super::meshcore::login_failed(failure),
         Err(AskFailure::Failed(err)) => failed(&err),
     }
 }

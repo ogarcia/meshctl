@@ -434,6 +434,80 @@ fn room_sync(radio: &mut Radio) -> usize {
     new.len()
 }
 
+/// How a repeater or a room is doing, as the firmware's `RepeaterStats` or
+/// `ServerStats` lay it out: figures that change a little each time.
+fn node_status(node: &Contact, room: bool) -> Vec<u8> {
+    let up = u32::try_from(random(400_000)).unwrap_or(0) + 86_400;
+    let received = 20_000 + u32::try_from(random(5_000)).unwrap_or(0);
+    let mut data = Vec::new();
+    data.extend((3_900 + u16::try_from(random(300)).unwrap_or(0)).to_le_bytes());
+    data.extend(u16::try_from(random(3)).unwrap_or(0).to_le_bytes());
+    data.extend((-118i16 + i16::try_from(random(6)).unwrap_or(0)).to_le_bytes());
+    data.extend((-80i16 - i16::try_from(random(30)).unwrap_or(0)).to_le_bytes());
+    data.extend(received.to_le_bytes());
+    data.extend((received / 2).to_le_bytes());
+    data.extend((up / 90).to_le_bytes());
+    data.extend(up.to_le_bytes());
+    data.extend((received / 3).to_le_bytes());
+    data.extend((received / 6).to_le_bytes());
+    data.extend((received / 2).to_le_bytes());
+    data.extend((received / 4).to_le_bytes());
+    data.extend(0u16.to_le_bytes());
+    data.extend((24i16 + i16::try_from(random(16)).unwrap_or(0)).to_le_bytes());
+    data.extend(12u16.to_le_bytes());
+    data.extend(u16::try_from(received / 10).unwrap_or(0).to_le_bytes());
+    if room {
+        data.extend(42u16.to_le_bytes());
+        data.extend(97u16.to_le_bytes());
+    } else {
+        data.extend((up / 40).to_le_bytes());
+        data.extend(u32::try_from(node.name.len()).unwrap_or(0).to_le_bytes());
+    }
+    data
+}
+
+/// What a node's sensors read, in Cayenne LPP: its voltage and temperature,
+/// and to its admin a sensor's humidity and pressure as well.
+fn node_telemetry(admin: bool) -> Vec<u8> {
+    let volts = 395 + u16::try_from(random(20)).unwrap_or(0);
+    let tenths = 180 + i16::try_from(random(60)).unwrap_or(0);
+    let mut data = vec![1, 116];
+    data.extend(volts.to_be_bytes());
+    data.extend([1, 103]);
+    data.extend(tenths.to_be_bytes());
+    if admin {
+        data.extend([2, 104, 130]);
+        data.extend([2, 115]);
+        data.extend(10_132u16.to_be_bytes());
+    }
+    data
+}
+
+/// The nodes a repeater or a room hears straight: the radio's other
+/// contacts but itself, each by the first four bytes of its key, the
+/// strongest first.
+fn node_neighbours(radio: &Radio, to: &Contact) -> Vec<u8> {
+    let heard: Vec<&Contact> = radio
+        .contacts
+        .iter()
+        .filter(|c| c.key != to.key && c.kind == 2)
+        .collect();
+    let count = u16::try_from(heard.len() + 1).unwrap_or(0);
+    let mut data = Vec::new();
+    data.extend(count.to_le_bytes());
+    data.extend(count.to_le_bytes());
+    for (i, contact) in heard.iter().enumerate() {
+        data.extend(&contact.key[..4]);
+        data.extend((u32::try_from(i).unwrap_or(0) * 900 + 30).to_le_bytes());
+        data.push(i8::try_from(28 - 8 * i).unwrap_or(0).cast_unsigned());
+    }
+    // And the radio itself, as one it hears.
+    data.extend(&ME[..4]);
+    data.extend(120u32.to_le_bytes());
+    data.push(18);
+    data
+}
+
 /// The first four bytes of a key, as a room's post names its author by.
 fn key_prefix(key: &[u8; 32]) -> [u8; 4] {
     [key[0], key[1], key[2], key[3]]
@@ -715,6 +789,99 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                     answer.extend(said);
                     answer.extend([0; 4]);
                     let _ = events.send(Event::Push(answer));
+                });
+            }
+            vec![sent]
+        }
+        // SEND_BINARY_REQ: a key, then a request to a node logged in to.
+        // Its repeaters and its room answer as the firmware does, as far as
+        // the login lets: nothing to one not logged in, the access list
+        // only to its admin, a guest only its own telemetry.
+        0x32 => {
+            let Some(key) = key_in(data) else {
+                return error(6);
+            };
+            let Some(to) = radio.contacts.iter().find(|c| c.key == key).cloned() else {
+                return error(2);
+            };
+            let tag: [u8; 4] = u32::try_from(random(u64::from(u32::MAX)))
+                .unwrap_or(1)
+                .to_le_bytes();
+            let mut sent = vec![0x06, u8::from(to.path_len < 0)];
+            sent.extend(tag);
+            sent.extend(3_000u32.to_le_bytes());
+            let acl = if to.name == "Sala Coruña" {
+                radio.room_access
+            } else {
+                radio.logins.get(&to.name).copied()
+            };
+            let what = data.get(32).copied().unwrap_or(0);
+            println!("request {what:#04x} to {:?}, logged in as {acl:?}", to.name);
+            let answer = match (acl, what) {
+                (None, _) => None,
+                (Some(_), 0x01) => Some(node_status(&to, to.kind == 3)),
+                (Some(acl), 0x03) => Some(node_telemetry(acl == 3)),
+                (Some(_), 0x06) => Some(node_neighbours(&radio, &to)),
+                (Some(_), 0x07) => {
+                    Some(format!("v1.18.0-fake\n{}\nmeshctl, A Coruña", to.name).into_bytes())
+                }
+                (Some(3), 0x05) => {
+                    let mut list = Vec::new();
+                    list.extend(&ME[..6]);
+                    list.push(3);
+                    list.extend(&self::key(0x41)[..6]);
+                    list.push(0);
+                    Some(list)
+                }
+                _ => None,
+            };
+            if let Some(answer) = answer {
+                let events = events.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(700 + random(1_000))).await;
+                    let mut push = vec![0x8c, 0];
+                    push.extend(tag);
+                    push.extend(answer);
+                    let _ = events.send(Event::Push(push));
+                });
+            }
+            vec![sent]
+        }
+        // SEND_TRACE_PATH: a tag, an auth code, flags and a path of hashes.
+        // A contact heard straight whose hash is the path passes it back
+        // with the SNR it heard the radio at; anything else, nothing.
+        0x24 => {
+            let (Some(tag), Some(&flags)) = (data.get(..4), data.get(8)) else {
+                return error(6);
+            };
+            let tag: [u8; 4] = tag.try_into().unwrap_or_default();
+            let path = data.get(9..).unwrap_or_default().to_vec();
+            let size = 1usize << (flags & 0x03);
+            let mut sent = vec![0x06, 0];
+            sent.extend(tag);
+            sent.extend(1_500u32.to_le_bytes());
+            let back = path.len() == size
+                && radio
+                    .contacts
+                    .iter()
+                    .any(|c| c.path_len == 0 && c.key[..size] == path[..]);
+            println!(
+                "trace along {path:02x?}, {}",
+                if back { "back" } else { "lost" }
+            );
+            if back {
+                let events = events.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(300 + random(600))).await;
+                    let there = i8::try_from(20 + random(16)).unwrap_or(0);
+                    let back = i8::try_from(12 + random(16)).unwrap_or(0);
+                    let mut push = vec![0x89, 0, u8::try_from(path.len()).unwrap_or(0), flags];
+                    push.extend(tag);
+                    push.extend([0; 4]);
+                    push.extend(&path);
+                    push.push(there.cast_unsigned());
+                    push.push(back.cast_unsigned());
+                    let _ = events.send(Event::Push(push));
                 });
             }
             vec![sent]

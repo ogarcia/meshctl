@@ -1368,12 +1368,27 @@ pub enum RequestKind {
     PowerTelemetry,
     /// How it sees the mesh: nodes online, packets, noise.
     LocalStats,
-    /// The nodes it hears directly. Once in three minutes at most.
+    /// The nodes it hears directly. Once in three minutes at most, from a
+    /// Meshtastic radio; from a MeshCore one, logged in to, as for `status`.
     Neighbors,
     /// The regions a MeshCore repeater or room repeats floods scoped to, and
     /// whether it repeats those scoped to none: with no login, only direct,
     /// so to a node the radio knows a path to.
     Regions,
+    /// How a MeshCore repeater or room is doing: its battery, the noise it
+    /// hears, its packets, how long it has been up. Logged in to, as a guest
+    /// at least, which meshctl does first if it has not since the radio
+    /// connected.
+    Status,
+    /// What a MeshCore node's sensors read: its own to a guest, all to its
+    /// admin. Logged in to, as for `status`.
+    Telemetry,
+    /// Who runs a MeshCore node: its firmware, its name and what its owner
+    /// says. Logged in to, as for `status`.
+    Owner,
+    /// A MeshCore node heard straight, pinged, with no login: how long there
+    /// and back, and how each end heard the other.
+    Ping,
 }
 
 impl RequestKind {
@@ -1381,7 +1396,13 @@ impl RequestKind {
     /// radio sends it whenever asked.
     pub const fn pace(self) -> Option<Pace> {
         match self {
-            Self::NodeInfo | Self::Neighbors | Self::Regions => None,
+            Self::NodeInfo
+            | Self::Neighbors
+            | Self::Regions
+            | Self::Status
+            | Self::Telemetry
+            | Self::Owner
+            | Self::Ping => None,
             Self::Position => Some(Pace::Position),
             Self::DeviceTelemetry
             | Self::EnvironmentTelemetry
@@ -1488,7 +1509,7 @@ pub struct Request {
 }
 
 /// What a node answered a request with, by what it was asked.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RequestReply {
@@ -1502,6 +1523,99 @@ pub enum RequestReply {
         /// Its clock as it answered, in seconds since the epoch.
         clock: Option<i64>,
     },
+    /// How a MeshCore repeater or room is doing.
+    Status(NodeStatus),
+    /// What a MeshCore node's sensors read: its own, on channel 1, and to
+    /// its admin those of the rest.
+    Telemetry { readings: Vec<SensorReading> },
+    /// The nodes a MeshCore node hears straight: how many in all, and those
+    /// it told, the strongest first.
+    Neighbors {
+        total: u32,
+        nodes: Vec<HeardNeighbor>,
+    },
+    /// Who runs a MeshCore node, as it says.
+    Owner {
+        #[cfg_attr(feature = "openapi", schema(example = "v1.18.0"))]
+        firmware: String,
+        name: String,
+        /// What its owner wrote of themselves; empty for nothing.
+        owner: String,
+    },
+    /// A MeshCore node heard straight, pinged: how long there and back, and
+    /// how each end heard the other.
+    Ping {
+        round_trip_ms: u32,
+        /// The SNR it heard the radio at, in dB.
+        snr_there: f32,
+        /// The SNR the radio heard it back at, in dB.
+        snr_back: f32,
+    },
+}
+
+/// How a MeshCore repeater or room says it is doing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeStatus {
+    /// Its battery, in volts.
+    pub voltage: f32,
+    /// Packets waiting to go out.
+    pub queue: u32,
+    /// The noise it hears, in dBm.
+    pub noise_floor: i32,
+    /// The signal of the last packet it heard, in dBm and dB.
+    pub last_rssi: i32,
+    pub last_snr: f32,
+    pub received: u32,
+    pub sent: u32,
+    pub received_flood: u32,
+    pub received_direct: u32,
+    pub sent_flood: u32,
+    pub sent_direct: u32,
+    pub flood_duplicates: u32,
+    pub direct_duplicates: u32,
+    /// Seconds it spent sending, and since it started.
+    pub airtime: u32,
+    pub uptime: u32,
+    /// Its error flags; 0 for none.
+    pub errors: u32,
+    /// A repeater's: seconds it spent receiving, and packets it could not
+    /// read.
+    pub receive_airtime: Option<u32>,
+    pub receive_errors: Option<u32>,
+    /// A room's: posts it took, and pushed to those logged in.
+    pub posted: Option<u32>,
+    pub pushed: Option<u32>,
+}
+
+/// What a sensor of a node reads, as Cayenne LPP gives it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SensorReading {
+    /// 1 the node's own; the rest, its sensors.
+    pub channel: u32,
+    /// What it reads, by Cayenne LPP's type: `voltage` (V), `temperature`
+    /// (°C), `humidity` (%), `pressure` (hPa), `current` (A), `power` (W),
+    /// `illuminance` (lux), `altitude` (m), `percentage`, `energy` (kWh),
+    /// `distance` (m), `place` (latitude, longitude, altitude), and others
+    /// by their LPP number.
+    #[cfg_attr(feature = "openapi", schema(example = "voltage"))]
+    pub kind: String,
+    /// One value, or three for a place, an acceleration, a rotation or a
+    /// colour.
+    pub values: Vec<f64>,
+}
+
+/// A node another hears straight.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HeardNeighbor {
+    /// The node its key starts with, known or not.
+    pub node: u32,
+    /// How long ago it last heard it, in seconds.
+    pub seconds_ago: u32,
+    /// In dB.
+    pub snr: f32,
 }
 
 /// Who the radio says it is.
