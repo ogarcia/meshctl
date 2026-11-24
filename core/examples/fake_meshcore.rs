@@ -13,8 +13,8 @@
 //! With a control port, it listens there, on this machine only, for lines
 //! that play what the mesh would do to it:
 //!
-//! - `hear <slot> <text>`: someone writes that on a channel, as MeshCore
-//!   clients do, `NAME: text`.
+//! - `hear <slot> [<name>|]<text>`: someone writes that on a channel, as
+//!   MeshCore clients do, `NAME: text`; the one named, or anyone.
 //! - `dm <text>`: Ana, a contact, writes to the radio directly.
 //! - `react <slot> <emoji>`: someone reacts to the latest said on a channel,
 //!   as MeshCore One does; `dmreact <emoji>`, Ana to the latest between her
@@ -42,14 +42,9 @@
 //! Its own settings change as the firmware's do, each checked as it checks
 //! them; its clock starts an hour behind, as a radio's does after a power
 //! cut, and goes only forward. Contacts are added, removed and their paths
-//! reset; channels set and emptied, each with its secret, `Public` with the
-//! one every radio has; its adverts only printed. Its tuning, auto-add, path
+//! reset; channels set and emptied, each with its secret, Galicia's #names
+//! at first; its adverts only printed. Its tuning, auto-add, path
 //! hash size and default flood scope are kept as the firmware keeps them.
-
-/// The secret of `Public`, every radio's channel.
-const PUBLIC_SECRET: [u8; 16] = [
-    0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a, 0xc9, 0xe5, 0xed, 0xba, 0xa1, 0x15, 0xcd, 0x72,
-];
 
 /// The frequencies, in kHz, on which the firmware lets a client repeat.
 const REPEAT_FREQUENCIES: [u32; 3] = [433_000, 869_495, 918_000];
@@ -222,19 +217,27 @@ impl Radio {
             last_modified: at - 600,
         };
         let mut channels = vec![(String::new(), [0u8; 16]); usize::from(MAX_CHANNELS)];
-        channels[0] = ("Public".into(), PUBLIC_SECRET);
-        // A #name, kept as the apps keep it: without its `#`, its secret
-        // the start of the SHA-256 of `#galicia`.
-        channels[1] = (
-            "galicia".into(),
-            [
-                0x84, 0x0c, 0x97, 0x22, 0x39, 0xa5, 0xc7, 0x81, 0xde, 0x27, 0x4e, 0x01, 0x1f, 0xf1,
-                0x81, 0x59,
-            ],
-        );
-        channels[2] = ("Casa".into(), [0x17; 16]);
+        // Galicia's, as a radio there has them: the first after the preset
+        // the mesh there uses, and then the provinces'. Each a #name, kept
+        // as the apps keep it, without its `#`, its secret the start of the
+        // SHA-256 of `#name`.
+        for (slot, name) in [
+            "NarrowFast",
+            "Iberia",
+            "Galicia",
+            "ACoruña",
+            "Lugo",
+            "Ourense",
+            "Pontevedra",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            channels[slot] = (name.into(), region_key(&name.to_lowercase()));
+        }
         Self {
-            name: "Fake core".into(),
+            // A ship of the Culture's, as Iain M. Banks named them: Just Testing.
+            name: "Solo probando".into(),
             lat: 43_362_300,
             lon: -8_411_500,
             frequency: 869_618,
@@ -1536,8 +1539,8 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
     match words.next() {
         Some("hear") => {
             let slot = words.next().and_then(|w| w.parse::<u8>().ok());
-            let (Some(slot), Some(text)) = (slot, words.next()) else {
-                return "usage: hear <slot> <text>".into();
+            let (Some(slot), Some(said)) = (slot, words.next()) else {
+                return "usage: hear <slot> [<name>|]<text>".into();
             };
             if radio
                 .channels
@@ -1547,7 +1550,10 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                 return format!("no channel in slot {slot}");
             }
             const SENDERS: [&str; 4] = ["Pepe", "Uxía", "Brais 🚲", "EA1XYZ"];
-            let sender = SENDERS[usize::try_from(random(4)).unwrap_or(0)];
+            let (sender, text) = match said.split_once('|') {
+                Some((name, text)) => (name.trim(), text.trim()),
+                None => (SENDERS[usize::try_from(random(4)).unwrap_or(0)], said),
+            };
             let at = now();
             radio
                 .said
@@ -1555,10 +1561,11 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             let message = channel_message(slot, at, sender, text);
             radio.queued.push_back(message);
             // Heard twice: through Monte and Torre, then through the room
-            // and Torre; on galicia, in its region.
+            // and Torre; on Galicia, in its region.
             let secret = radio.channels[usize::from(slot)].1;
             let payload = raw::seal_channel_text(&secret, at, &format!("{sender}: {text}"));
-            let region = (slot == 1).then(|| region_key("galicia"));
+            let region =
+                (radio.channels[usize::from(slot)].0 == "Galicia").then(|| region_key("galicia"));
             let first = flooded(
                 raw::PAYLOAD_GRP_TXT,
                 &[key(0x52), key(0x55)],
@@ -1735,7 +1742,7 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             let _ = events.send(Event::Drop);
             "dropped".into()
         }
-        _ => "commands: hear <slot> <text>, dm <text>, advert, drop".into(),
+        _ => "commands: hear <slot> [<name>|]<text>, dm <text>, advert, drop".into(),
     }
 }
 
