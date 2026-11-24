@@ -72,6 +72,11 @@ fn with_token(request: RequestBuilder) -> RequestBuilder {
     }
 }
 
+/// What is answering, and its version.
+pub async fn version() -> Result<meshctl_api::Version, Failure> {
+    get("/version").await
+}
+
 /// Whether the daemon takes this token: asked of it before it is kept,
 /// with a call that needs one. Unreachable when it cannot be told.
 pub async fn check_token(token: &str) -> Result<bool, Failure> {

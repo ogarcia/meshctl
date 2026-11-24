@@ -30,6 +30,9 @@ async fn version() -> Json<Version> {
     Json(Version {
         name: "meshctl".into(),
         version: env!("CARGO_PKG_VERSION").into(),
+        revision: Some(env!("MESHCTL_GIT_REVISION"))
+            .filter(|revision| !revision.is_empty())
+            .map(Into::into),
     })
 }
 

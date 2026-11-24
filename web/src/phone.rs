@@ -308,6 +308,7 @@ pub fn MoreView() -> impl IntoView {
             {item(Page::Radios)}
             {item(Page::Data)}
             {item(Page::Preferences)}
+            <crate::about::AboutFoot />
         </div>
     }
 }

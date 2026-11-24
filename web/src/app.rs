@@ -207,6 +207,10 @@ pub struct Live {
     pub removing: RwSignal<bool>,
     /// Whether the window to add from a link is open.
     pub adding_link: RwSignal<Option<crate::links::LinkWant>>,
+    /// Whether the about window is open.
+    pub about: RwSignal<bool>,
+    /// meshctl's version, and the commit it was built from, once asked.
+    pub version: RwSignal<Option<String>>,
     /// A link's LoRa settings, taken for the LoRa tab to put in its form.
     pub lora_from_link: RwSignal<Option<meshctl_api::LoraSettings>>,
     /// Turned whenever what meshctl keeps was cleaned, or how long it keeps
@@ -300,6 +304,8 @@ impl Live {
             history: RwSignal::new(false),
             removing: RwSignal::new(false),
             adding_link: RwSignal::new(None),
+            about: RwSignal::new(false),
+            version: RwSignal::new(None),
             lora_from_link: RwSignal::new(None),
             storage_turn: RwSignal::new(0),
             interface: StoredValue::new(None),
@@ -1534,6 +1540,7 @@ fn Frame() -> impl IntoView {
             <crate::phone::TabBar />
             <crate::phone::RadioSheet />
             <crate::links::LinkAdder />
+            <crate::about::AboutDialog />
             <Newer />
         </div>
     }
@@ -1652,22 +1659,7 @@ fn Rail() -> impl IntoView {
     };
     view! {
         <nav class="rail" aria-label=move || t_string!(i18n, nav_radios)>
-            // The mesh, its main node a gear: assets/icons/meshctl.svg.
-            <svg class="logo" viewBox="0 0 32 32" role="img" aria-label="meshctl">
-                <path
-                    stroke-width="2.2"
-                    d="M9.31 18.25L6 26M17.9 15.37L26 20M6 26L26 20M18.17 9.15L25 6"
-                ></path>
-                <g fill="currentColor" stroke="none">
-                    <circle cx="6" cy="26" r="4.1"></circle>
-                    <circle cx="26" cy="20" r="4.1"></circle>
-                    <circle cx="25" cy="6" r="4.1"></circle>
-                    <path
-                        fill-rule="evenodd"
-                        d="M11.07 8.01L11.11 6.67L12.89 6.67L12.93 8.01L14.17 8.52L15.14 7.61L16.39 8.86L15.48 9.83L15.99 11.07L17.33 11.11L17.33 12.89L15.99 12.93L15.48 14.17L16.39 15.14L15.14 16.39L14.17 15.48L12.93 15.99L12.89 17.33L11.11 17.33L11.07 15.99L9.83 15.48L8.86 16.39L7.61 15.14L8.52 14.17L8.01 12.93L6.67 12.89L6.67 11.11L8.01 11.07L8.52 9.83L7.61 8.86L8.86 7.61L9.83 8.52ZM13.6 12A1.6 1.6 0 1 0 10.4 12A1.6 1.6 0 1 0 13.6 12Z"
-                    ></path>
-                </g>
-            </svg>
+            <crate::about::Logo class="logo" />
             <span class="rail-rule"></span>
             <For
                 each=radios
@@ -1799,6 +1791,7 @@ fn MeshctlSidebar() -> impl IntoView {
         <div class="sidebar-body">
             {item(Page::Radios)} {item(Page::Data)} {item(Page::Preferences)}
         </div>
+        <crate::about::AboutFoot />
     }
 }
 

@@ -998,5 +998,14 @@
   "link_lora_will_change": "It is not what your radio uses: once saved, the radio restarts and only hears those on these settings.",
   "link_lora_same": "Its region and modem are what your radio already uses.",
   "link_no_lora": "This link brings only channels, no LoRa.",
-  "link_for_lora": "It is a contact link: it is added from the list of nodes."
+  "link_for_lora": "It is a contact link: it is added from the list of nodes.",
+  "about_title": "About meshctl",
+  "about_text": "meshctl is a control panel for your mesh radios, Meshtastic and MeshCore: it connects to them over the network or a cable and, from the browser, lets you talk on their channels and in private, see their nodes on the map, follow the packets they hear and set them up.",
+  "about_website": "Website",
+  "about_issues": "Any issues?",
+  "about_license": "Free software under the GPL, version 3 or later",
+  "about_made_with": "Made with",
+  "about_love": "love",
+  "about_made_in": "in Galicia, Spain, Europe",
+  "about_by": "by"
 }

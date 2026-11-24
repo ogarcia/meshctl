@@ -32,6 +32,10 @@ pub struct Version {
     /// Its version, as Cargo writes it.
     #[cfg_attr(feature = "openapi", schema(example = "0.1.0"))]
     pub version: String,
+    /// The commit it was built from, short; none if that was not known.
+    #[cfg_attr(feature = "openapi", schema(example = "a46d60f"))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
 }
 
 /// Why a request was refused.

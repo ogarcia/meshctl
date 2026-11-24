@@ -3,6 +3,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/i18n/mod.rs"));
 
+mod about;
 mod app;
 mod badge;
 mod channel_settings;
