@@ -907,6 +907,8 @@
   "mc_channel_scope_menu": "Región en la que se inunda lo que envías a este canal",
   "regions_subtitle_radio": "#{r} (radio)",
   "regions_subtitle_none": "sin región",
+  "regions_subtitle_unserved_short": "ningún repetidor directo",
+  "regions_subtitle_unserved": "Ningún repetidor que la radio oye directamente repite esta región: lo que envíes no pasará de tu alcance.",
   "route_heard": "Oído {n} veces",
   "route_echoes": "Repetido {n} veces",
   "route_hint": "Cada copia que llegó y por dónde: los repetidores desde el lado de quien lo envió hasta esta radio.",

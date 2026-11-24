@@ -1419,8 +1419,21 @@
       .region-chips { flex: 1 1 100%; }
       .region-chips:empty { display: none; }
       .region-chips .choice { display: inline-flex; align-items: center; gap: 8px; }
-      .region-chips .choice.far:not(.on) { opacity: 0.6; }
-      .region-chips .served { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--mc-muted); }
+      .region-chips .choice.far:not(.on),
+      .channel-regions .choice.far:not(.on) { opacity: 0.6; }
+      .region-chips .served,
+      .channel-regions .served,
+      .heading-menu .served { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--mc-muted); }
+      .channel-regions .served { margin-left: 4px; }
+      .channel-regions .choice.on .served { color: inherit; }
+      .heading-menu .served { margin-left: auto; }
+      .heading-menu button.far:not(.on) .label { opacity: 0.6; }
+      /* A search of the regions nearby, from where one is picked. */
+      .heading-menu .region-search { color: var(--mc-muted); }
+      .heading-menu .separator { height: 1px; margin: 4px 12px; background: var(--mc-border); }
+      .channel-regions .region-search { border-style: dashed; }
+      /* The region a channel floods in reaches no repeater heard straight. */
+      .region-unserved { color: var(--mc-warn); }
       .region-chips .choice.on .served { color: inherit; }
       .region-warning { flex: 1 1 100%; margin: 0; font-size: 13px; color: var(--mc-warn); }
       /* A repeater's regions: each a chip, not a button. */
@@ -2974,7 +2987,9 @@
       .channel-region { position: relative; }
       .channel-region .heading-menu { min-width: 240px; max-height: 60vh; overflow-y: auto; }
       .channel-region .heading-menu > p { margin: 4px 10px 6px; font-size: 12px; text-align: left; }
-      .channel-region .heading-menu .check { display: flex; margin-left: auto; }
+      .channel-region .heading-menu .label { flex: 1; }
+      .channel-region .heading-menu .check { display: flex; width: 16px; }
+      .channel-region .heading-menu .served { margin-left: 0; min-width: 28px; text-align: right; }
       .channel-region .heading-menu .check svg { width: 16px; height: 16px; }
       /* The emojis over the bar, on the right, beside their button. */
       .emoji-popover {

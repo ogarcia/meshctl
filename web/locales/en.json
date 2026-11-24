@@ -907,6 +907,8 @@
   "mc_channel_scope_menu": "Region what you send to this channel floods in",
   "regions_subtitle_radio": "#{r} (radio)",
   "regions_subtitle_none": "no region",
+  "regions_subtitle_unserved_short": "no repeater heard straight",
+  "regions_subtitle_unserved": "No repeater the radio hears straight repeats this region: what you send will not go past its reach.",
   "route_heard": "Heard {n} times",
   "route_echoes": "Repeated {n} times",
   "route_hint": "Each copy that came and which way: the repeaters from its sender's side to this radio.",

@@ -296,15 +296,65 @@ fn ChannelEditor(
             .and_then(|c| c.scope.clone())
             .map_or_else(String::new, |s| if s == "*" { s } else { format!("#{s}") }),
     );
-    // The regions found nearby, to pick one.
-    let found = RwSignal::new(Vec::<String>::new());
-    if let Some(radio) = live.selected.get_untracked() {
-        spawn_local(async move {
-            if let Ok(read) = daemon::meshcore_regions(radio).await {
-                found.set(read.regions.into_iter().map(|r| r.name).collect());
+    // The regions found nearby, to pick one, each with how many repeaters
+    // serve it.
+    let found = crate::meshcore_regions::FoundRegions::read();
+    // A region to pick, as written in the field: none for the radio's,
+    // `*` for none at all; with how many repeaters serve it, heard straight
+    // and in all, dimmed when none heard straight does.
+    let region_chip = move |value: Option<String>, text: Signal<String>| {
+        let written = match value.as_deref() {
+            None => String::new(),
+            Some("*") => "*".to_owned(),
+            Some(name) => format!("#{name}"),
+        };
+        // As the regions are found, which may be after it is drawn.
+        let served = {
+            let value = value.clone();
+            Signal::derive(move || value.as_deref().and_then(|name| found.served(name)))
+        };
+        let far = {
+            let value = value.clone();
+            Signal::derive(move || value.as_deref().is_some_and(|name| found.unserved(name)))
+        };
+        let title = move || {
+            served.get().map(|(direct, all)| {
+                t_string!(i18n, regions_served)
+                    .replace("{n}", &all.to_string())
+                    .replace("{d}", &direct.to_string())
+            })
+        };
+        let on = written.clone();
+        view! {
+            <button
+                type="button"
+                class="choice"
+                class:on=move || region.with(|r| r.trim() == on)
+                class:far=far
+                title=title
+                on:click=move |_| region.set(written.clone())
+            >
+                {text}
+                {move || served.get().map(|(direct, all)| view! { <span class="served">{format!("{direct}/{all}")}</span> })}
+            </button>
+        }
+    };
+    // The region written, known to reach no repeater heard straight.
+    let region_unserved = move || {
+        let written = region.with(|r| r.trim().to_owned());
+        match written.as_str() {
+            "" => None,
+            "*" => found
+                .unserved("*")
+                .then(|| t_string!(i18n, regions_unscoped_unserved).to_owned()),
+            name => {
+                let name = name.trim_start_matches('#');
+                found
+                    .unserved(name)
+                    .then(|| t_string!(i18n, regions_unserved).replace("{name}", name))
             }
-        });
-    }
+        }
+    };
     let secret = RwSignal::new(if adding { Secret::New } else { Secret::Keep });
     let own = RwSignal::new(String::new());
     // Its link, to share it, and the secret it has.
@@ -528,44 +578,36 @@ fn ChannelEditor(
                                 on:input=move |ev| region.set(event_target_value(&ev))
                             />
                             <div class="flag-chips channel-regions">
-                                <button
-                                    type="button"
-                                    class="choice"
-                                    class:on=move || region.with(|r| r.trim().is_empty())
-                                    on:click=move |_| region.set(String::new())
-                                >
-                                    {t!(i18n, mc_channel_scope_default)}
-                                </button>
-                                <button
-                                    type="button"
-                                    class="choice"
-                                    class:on=move || region.with(|r| r.trim() == "*")
-                                    on:click=move |_| region.set("*".to_owned())
-                                >
-                                    {t!(i18n, chat_scope_none)}
-                                </button>
+                                {region_chip(None, Signal::derive(move || t_string!(i18n, mc_channel_scope_default).to_owned()))}
+                                {region_chip(Some("*".to_owned()), Signal::derive(move || t_string!(i18n, chat_scope_none).to_owned()))}
                                 {move || {
                                     found
-                                        .get()
+                                        .names()
                                         .into_iter()
                                         .map(|name| {
-                                            let written = format!("#{name}");
-                                            let shown = written.clone();
-                                            let on = written.clone();
-                                            view! {
-                                                <button
-                                                    type="button"
-                                                    class="choice"
-                                                    class:on=move || region.with(|r| r.trim() == on)
-                                                    on:click=move |_| region.set(written.clone())
-                                                >
-                                                    {shown}
-                                                </button>
-                                            }
+                                            let shown = format!("#{name}");
+                                            region_chip(Some(name), Signal::derive(move || shown.clone()))
                                         })
                                         .collect_view()
                                 }}
+                                <button
+                                    type="button"
+                                    class="choice region-search"
+                                    disabled=move || found.searching()
+                                    on:click=move |_| found.search()
+                                >
+                                    {move || found.button_words(i18n)}
+                                </button>
                             </div>
+                            {move || {
+                                region_unserved().map(|text| {
+                                    view! {
+                                        <p class="region-warning">
+                                            {text}
+                                        </p>
+                                    }
+                                })
+                            }}
                             <span class="hint dim">{t!(i18n, mc_channel_scope_hint)}</span>
                         </div>
                         {share}
