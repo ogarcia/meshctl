@@ -108,6 +108,9 @@ const ROLES: &[(&str, &str, &str)] = &[
     ("TAK", "TAK", "TAK"),
     ("TAK_TRACKER", "Rastreador TAK", "TAK tracker"),
     ("LOST_AND_FOUND", "Objetos perdidos", "Lost and found"),
+    // MeshCore's kinds of node, beside the repeaters and sensors both have.
+    ("CHAT", "Compañero", "Companion"),
+    ("ROOM", "Sala", "Room"),
 ];
 
 /// The configuration's sections and the modules, by their names in the

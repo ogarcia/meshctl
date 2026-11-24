@@ -2293,18 +2293,22 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 let known = known()?;
                 let mut parts: Vec<AnyView> = vec![known.id.clone().into_any()];
                 if live.page.get() == Page::Node {
-                    // Its role by name; its code beside, where there is room.
+                    // Its role by name; its code beside, where there is room,
+                    // but MeshCore's, whose kinds are named alone.
+                    let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
                     if let Some(role) = known.role.clone() {
                         let name = crate::names::role_name(i18n.get_locale(), &role);
-                        parts.push(
+                        parts.push(if meshcore {
+                            name.into_any()
+                        } else {
                             view! {
                                 {name}
                                 <span class="code">" (" {role} ")"</span>
                             }
-                            .into_any(),
-                        );
+                            .into_any()
+                        });
                     }
-                    if let Some(hardware) = &known.hw_model {
+                    if let Some(hardware) = known.hw_model.as_deref().filter(|h| !h.is_empty()) {
                         parts.push(model(hardware).into_any());
                     }
                 } else {
