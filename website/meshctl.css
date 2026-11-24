@@ -1,0 +1,444 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
+ *
+ * meshctl's page, made of meshctl's own pieces, as Meshview's is of its: its
+ * bars, its buttons, its cards and the colours of both its themes, light and
+ * dark as the browser is, in its amber. The values are copied from the
+ * interface's stylesheet rather than linked, as that is built into the daemon
+ * and this page is not served by it. */
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(fonts/inter-latin-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url(fonts/inter-latin-ext-wght-normal.woff2) format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* --- the theme: amber, light, then dark ---------------------------------- */
+
+:root {
+  color-scheme: light;
+  --mc-font: "Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mc-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --mc-radius: 12px;
+  --mc-radius-sm: 8px;
+
+  --mc-page: #f4f5f7;
+  --mc-surface: #ffffff;
+  --mc-surface-2: #f8f9fa;
+  --mc-raised: #eef0f3;
+  --mc-border: #d8dde3;
+  --mc-text: #161b22;
+  --mc-muted: #57606a;
+  --mc-primary: #9a5b00;
+  --mc-primary-strong: #7a4800;
+  --mc-on-primary: #ffffff;
+  --mc-soft: color-mix(in srgb, var(--mc-primary) 14%, var(--mc-surface));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --mc-page: #0e1116;
+    --mc-surface: #12161c;
+    --mc-surface-2: #0f1318;
+    --mc-raised: #1b222b;
+    --mc-border: #2a3340;
+    --mc-text: #e6edf3;
+    --mc-muted: #9aa7b4;
+    --mc-primary: #f0a63a;
+    --mc-primary-strong: #f6c06e;
+    --mc-on-primary: #1a1205;
+  }
+}
+
+/* --- a reset, as the interface's ----------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* A section reached by its link starts below the sticky bar (53px). */
+html { scroll-padding-top: 69px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--mc-page);
+  color: var(--mc-text);
+  font: 15px/1.6 var(--mc-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--mc-primary); text-decoration: none; }
+a:hover { color: var(--mc-primary-strong); text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--mc-primary); outline-offset: 2px; }
+
+code { font-family: var(--mc-mono); font-size: 0.875em; }
+
+p, figure, h1, h2, h3 { margin: 0; }
+
+/* Icons: Tabler's outlines, drawn in the colour of the text around them. */
+.ti {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 1em;
+  height: 1em;
+  background: currentColor;
+  mask: var(--icon) center / contain no-repeat;
+  vertical-align: -0.125em;
+}
+.ti-broadcast { --icon: url(icons/broadcast.svg); }
+.ti-map-2 { --icon: url(icons/map-2.svg); }
+.ti-id { --icon: url(icons/id.svg); }
+.ti-message { --icon: url(icons/message.svg); }
+.ti-route { --icon: url(icons/route.svg); }
+.ti-activity { --icon: url(icons/activity.svg); }
+.ti-adjustments { --icon: url(icons/adjustments.svg); }
+.ti-qrcode { --icon: url(icons/qrcode.svg); }
+.ti-device-desktop { --icon: url(icons/device-desktop.svg); }
+.ti-device-mobile { --icon: url(icons/device-mobile.svg); }
+.ti-brand-github { --icon: url(icons/brand-github.svg); }
+.ti-download { --icon: url(icons/download.svg); }
+.ti-box { --icon: url(icons/box.svg); }
+
+/* --- the bar on top, as the interface's headings ------------------------- */
+
+.mc-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--mc-surface);
+  border-bottom: 1px solid var(--mc-border);
+}
+
+.mc-header-inner {
+  max-width: 1280px;
+  margin: auto;
+  padding: 0 28px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.mc-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  color: var(--mc-text);
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.mc-brand:hover { color: var(--mc-text); text-decoration: none; }
+.mc-logo { width: 32px; height: 32px; flex-shrink: 0; color: var(--mc-primary); }
+
+.mc-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mc-nav a {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--mc-radius-sm);
+  color: var(--mc-muted);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.mc-nav a:hover { background: var(--mc-raised); color: var(--mc-text); text-decoration: none; }
+.mc-nav-external { margin-left: 4px; font-size: 12px; color: var(--mc-muted); }
+
+/* The other language. */
+.mc-lang {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-sm);
+  color: var(--mc-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mc-lang:hover { background: var(--mc-raised); color: var(--mc-text); text-decoration: none; }
+
+/* --- the content --------------------------------------------------------- */
+
+.mc-content {
+  flex: 1 0 auto;
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 28px 48px;
+}
+
+.mc-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 32px;
+  align-items: center;
+  padding: 40px 0 32px;
+}
+
+.mc-hero h1 {
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.mc-hero h1 span { color: var(--mc-primary); }
+
+.mc-hero .lead {
+  max-width: 52rem;
+  margin-top: 16px;
+  font-size: 18px;
+  line-height: 1.55;
+}
+
+.mc-hero .note {
+  max-width: 52rem;
+  margin-top: 12px;
+  font-size: 14px;
+  color: var(--mc-muted);
+}
+
+/* The mark, large, on the app's own tile. */
+.mc-hero-mark {
+  width: 180px;
+  height: 180px;
+  border-radius: 40px;
+  background: #0f1318;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1px var(--mc-border);
+}
+
+.mc-hero-mark svg { width: 128px; height: 128px; color: #f0a63a; }
+
+.mc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+/* Buttons, as the interface's: bordered, and the main one filled. */
+.mc-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-surface);
+  color: var(--mc-text);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mc-button:hover { border-color: var(--mc-primary); color: var(--mc-text); text-decoration: none; }
+.mc-button .ti { font-size: 16px; color: var(--mc-primary); }
+
+.mc-button.is-primary {
+  border-color: var(--mc-primary);
+  background: var(--mc-primary);
+  color: var(--mc-on-primary);
+  font-weight: 600;
+}
+
+.mc-button.is-primary .ti { color: inherit; }
+
+.mc-button.is-primary:hover {
+  border-color: var(--mc-primary-strong);
+  background: var(--mc-primary-strong);
+  color: var(--mc-on-primary);
+}
+
+/* A section's heading, as the interface's pages have. */
+.mc-heading { margin: 44px 0 14px; }
+.mc-heading h2 { font-size: 22px; font-weight: 650; line-height: 1.25; }
+.mc-heading p { margin-top: 2px; color: var(--mc-muted); font-size: 14px; }
+
+/* What meshctl does. */
+.mc-features {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mc-feature {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 14px;
+  align-content: start;
+  padding: 16px 20px;
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius);
+}
+
+.mc-feature-icon {
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--mc-soft);
+  color: var(--mc-primary);
+  font-size: 21px;
+}
+
+.mc-feature h3 { font-size: 15px; font-weight: 650; line-height: 1.35; }
+.mc-feature p { margin-top: 4px; font-size: 14px; color: var(--mc-muted); }
+
+/* A card with a title, as the node page's sections. */
+.mc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius);
+}
+
+.mc-card + .mc-card { margin-top: 12px; }
+
+.mc-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--mc-border);
+}
+
+.mc-card-head .ti { color: var(--mc-primary); font-size: 18px; }
+.mc-card-head h3 { font-size: 15px; font-weight: 650; line-height: 1.35; }
+
+.mc-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-sm);
+}
+
+.mc-card > p { font-size: 14px; color: var(--mc-muted); }
+
+/* Two phones, side by side. */
+.mc-phones {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.mc-card .mc-phones img { width: min(100%, 300px); border-radius: 22px; }
+
+.mc-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: 12px;
+}
+
+.mc-columns .mc-card + .mc-card { margin-top: 0; }
+.mc-columns + .mc-card, .mc-columns + .mc-columns { margin-top: 12px; }
+
+.mc-card ul { margin: 0; padding-left: 20px; font-size: 14px; }
+.mc-card li + li { margin-top: 4px; }
+
+pre {
+  margin: 0;
+  overflow-x: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-surface-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+pre code { font-size: inherit; }
+
+/* --- the foot: who makes it, as the about window says ------------------- */
+
+.mc-footer {
+  border-top: 1px solid var(--mc-border);
+  background: var(--mc-surface);
+  color: var(--mc-muted);
+  font-size: 13px;
+}
+
+.mc-footer-inner {
+  max-width: 1280px;
+  margin: auto;
+  padding: 16px 28px;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.mc-footer .heart { color: #d93848; }
+
+/* Flags as pictures: emoji flags do not show on Windows. */
+.mc-footer .flag {
+  height: 0.95em;
+  width: auto;
+  vertical-align: -0.12em;
+  border-radius: 1.5px;
+}
+
+@media (max-width: 1000px) {
+  .mc-features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 860px) {
+  .mc-nav .wide { display: none; }
+  .mc-hero { grid-template-columns: minmax(0, 1fr); }
+  .mc-hero-mark { display: none; }
+}
+
+@media (max-width: 700px) {
+  .mc-header-inner { padding: 0 14px; gap: 12px; }
+  .mc-content { padding: 12px 14px 32px; }
+  .mc-hero { padding-top: 24px; }
+  .mc-hero h1 { font-size: 28px; }
+  .mc-hero .lead { font-size: 16px; }
+  .mc-actions .mc-button { flex: 1 1 auto; }
+  .mc-features { grid-template-columns: minmax(0, 1fr); }
+  .mc-card { padding: 12px 14px 14px; }
+  .mc-footer-inner { padding: 16px 14px; }
+}

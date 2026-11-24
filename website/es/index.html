@@ -1,0 +1,284 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
+
+  La página de meshctl en español: la misma que index.html, en inglés, y las
+  dos dicen lo mismo.
+-->
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>meshctl — un panel de control ligero para tus radios de malla</title>
+
+    <meta name="description" content="meshctl se mantiene conectado a tus radios Meshtastic y MeshCore, guarda lo que oyen y te deja chatear con ellas, ver la malla en el mapa, seguir cada paquete y ajustarlas: desde el navegador, el escritorio o el móvil." />
+    <link rel="canonical" href="https://meshctl.ogarcia.me/es/" />
+    <link rel="alternate" hreflang="en" href="https://meshctl.ogarcia.me/" />
+    <link rel="alternate" hreflang="es" href="https://meshctl.ogarcia.me/es/" />
+    <link rel="alternate" hreflang="x-default" href="https://meshctl.ogarcia.me/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="meshctl" />
+    <meta property="og:title" content="meshctl — un panel de control ligero para tus radios de malla" />
+    <meta property="og:description" content="Tus radios Meshtastic y MeshCore, desde el navegador, el escritorio o el móvil: chat, la malla en el mapa, cada paquete y sus ajustes." />
+    <meta property="og:url" content="https://meshctl.ogarcia.me/es/" />
+    <meta property="og:image" content="https://meshctl.ogarcia.me/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="La marca de meshctl, una malla cuyo nodo principal es una rueda dentada, junto a su nombre y una línea: un panel de control ligero para tus radios de malla" />
+    <meta property="og:locale" content="es_ES" />
+    <meta property="og:locale:alternate" content="en_GB" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="../apple-touch-icon.png" />
+
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#12161c" media="(prefers-color-scheme: dark)" />
+
+    <link rel="preload" href="../fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="../meshctl.css" />
+  </head>
+
+  <body>
+    <header class="mc-header">
+      <div class="mc-header-inner">
+        <a class="mc-brand" href="./">
+          <svg class="mc-logo" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><path stroke-width="2.2" d="M9.31 18.25L6 26M17.9 15.37L26 20M6 26L26 20M18.17 9.15L25 6"/><g fill="currentColor" stroke="none"><circle cx="6" cy="26" r="4.1"/><circle cx="26" cy="20" r="4.1"/><circle cx="25" cy="6" r="4.1"/><path fill-rule="evenodd" d="M11.07 8.01L11.11 6.67L12.89 6.67L12.93 8.01L14.17 8.52L15.14 7.61L16.39 8.86L15.48 9.83L15.99 11.07L17.33 11.11L17.33 12.89L15.99 12.93L15.48 14.17L16.39 15.14L15.14 16.39L14.17 15.48L12.93 15.99L12.89 17.33L11.11 17.33L11.07 15.99L9.83 15.48L8.86 16.39L7.61 15.14L8.52 14.17L8.01 12.93L6.67 12.89L6.67 11.11L8.01 11.07L8.52 9.83L7.61 8.86L8.86 7.61L9.83 8.52ZM13.6 12A1.6 1.6 0 1 0 10.4 12A1.6 1.6 0 1 0 13.6 12Z"/></g></svg>
+          meshctl
+        </a>
+        <nav class="mc-nav" aria-label="Secciones">
+          <a class="wide" href="#features">Qué hace</a>
+          <a class="wide" href="#screens">Pantallas</a>
+          <a class="wide" href="#install">Instalarlo</a>
+          <a href="https://github.com/ogarcia/meshctl">GitHub<span class="mc-nav-external" aria-hidden="true">↗</span></a>
+        </nav>
+        <a class="mc-lang" href="../" hreflang="en" lang="en" title="English">EN</a>
+      </div>
+    </header>
+
+    <main class="mc-content">
+      <section class="mc-hero">
+        <div>
+          <h1>Tus radios de malla, <span>bajo control</span>.</h1>
+          <p class="lead">
+            meshctl se mantiene conectado a tus radios Meshtastic y MeshCore a todas
+            horas, guarda lo que oyen y te deja hablar en sus canales y en privado,
+            ver la malla en el mapa, seguir cada paquete que oyen y ajustarlas.
+          </p>
+          <p class="note">
+            Un binario pequeño con el panel dentro, para un servidor, una Raspberry Pi
+            o un contenedor; una app de escritorio para Windows y Linux; y una app
+            para el móvil. Una radio o una docena, todas desde el mismo panel, en
+            español e inglés. meshctl es joven y cambia deprisa: pruébalo y cuéntanos
+            qué encuentras.
+          </p>
+          <div class="mc-actions">
+            <a class="mc-button is-primary" href="#install"><span class="ti ti-download" aria-hidden="true"></span> Instalarlo</a>
+            <a class="mc-button" href="https://github.com/ogarcia/meshctl"><span class="ti ti-brand-github" aria-hidden="true"></span> Código en GitHub</a>
+          </div>
+        </div>
+        <div class="mc-hero-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-linecap="round"><path stroke-width="2.2" d="M9.31 18.25L6 26M17.9 15.37L26 20M6 26L26 20M18.17 9.15L25 6"/><g fill="currentColor" stroke="none"><circle cx="6" cy="26" r="4.1"/><circle cx="26" cy="20" r="4.1"/><circle cx="25" cy="6" r="4.1"/><path fill-rule="evenodd" d="M11.07 8.01L11.11 6.67L12.89 6.67L12.93 8.01L14.17 8.52L15.14 7.61L16.39 8.86L15.48 9.83L15.99 11.07L17.33 11.11L17.33 12.89L15.99 12.93L15.48 14.17L16.39 15.14L15.14 16.39L14.17 15.48L12.93 15.99L12.89 17.33L11.11 17.33L11.07 15.99L9.83 15.48L8.86 16.39L7.61 15.14L8.52 14.17L8.01 12.93L6.67 12.89L6.67 11.11L8.01 11.07L8.52 9.83L7.61 8.86L8.86 7.61L9.83 8.52ZM13.6 12A1.6 1.6 0 1 0 10.4 12A1.6 1.6 0 1 0 13.6 12Z"/></g></svg>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="mc-features">
+          <div class="mc-feature">
+            <span class="mc-feature-icon" aria-hidden="true"><span class="ti ti-broadcast"></span></span>
+            <h3>Tus radios</h3>
+            <p>Meshtastic y MeshCore, tantas como tengas, por red o por cable, conectadas a todas horas y otra vez solas cuando se cae el enlace.</p>
+          </div>
+          <div class="mc-feature">
+            <span class="mc-feature-icon" aria-hidden="true"><span class="ti ti-map-2"></span></span>
+            <h3>La malla en el mapa</h3>
+            <p>Cada nodo oído, cuándo, cómo de bien y a qué distancia, en una lista y en un mapa, con su color según los saltos a los que está.</p>
+          </div>
+          <div class="mc-feature">
+            <span class="mc-feature-icon" aria-hidden="true"><span class="ti ti-id"></span></span>
+            <h3>Una página por nodo</h3>
+            <p>Lo que cuenta de sí mismo, y lo que se le puede pedir: estado, telemetría, vecinos, su posición, las lecturas de un sensor, el acceso a un repetidor.</p>
+          </div>
+          <div class="mc-feature">
+            <span class="mc-feature-icon" aria-hidden="true"><span class="ti ti-message"></span></span>
+            <h3>Chat</h3>
+            <p>Canales y mensajes privados, guardados mientras no estabas, con respuestas, reacciones y marcas que dicen si alguien los oyó; también las salas de MeshCore.</p>
+          </div>
+          <div class="mc-feature">
+            <span class="mc-feature-icon" aria-hidden="true"><span class="ti ti-route"></span></span>
+            <h3>Rutas</h3>
+            <p>Traceroutes en las dos mallas y el descubrimiento de rutas de MeshCore, cada salto en el mapa, y los que solo se deducen, marcados como tales.</p>
+          </div>
+          <div class="mc-feature">
+            <span class="mc-feature-icon" aria-hidden="true"><span class="ti ti-activity"></span></span>
+            <h3>En directo</h3>
+            <p>Cada paquete que oye la radio, según lo oye, con lo que lleva y el camino por el que llegó.</p>
+          </div>
+          <div class="mc-feature">
+            <span class="mc-feature-icon" aria-hidden="true"><span class="ti ti-adjustments"></span></span>
+            <h3>Ajustes</h3>
+            <p>El usuario de una radio, su LoRa, sus canales, el dispositivo y los módulos, cada campo explicado, y lo que solo importa con algo encendido, solo entonces.</p>
+          </div>
+          <div class="mc-feature">
+            <span class="mc-feature-icon" aria-hidden="true"><span class="ti ti-qrcode"></span></span>
+            <h3>Enlaces y códigos QR</h3>
+            <p>Nodos, canales y la LoRa de una radio, desde los enlaces que comparten las apps: pegados, leídos de un QR con la cámara o compartidos en el móvil.</p>
+          </div>
+          <div class="mc-feature">
+            <span class="mc-feature-icon" aria-hidden="true"><span class="ti ti-device-desktop"></span></span>
+            <h3>Estés donde estés</h3>
+            <p>Desde cualquier navegador, como app de escritorio que sigue escuchando con la ventana cerrada, o como app en el móvil. Software libre, bajo la GPL.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="screens">
+        <div class="mc-heading">
+          <h2>Pantallas</h2>
+          <p>La malla de alrededor de A Coruña, como la muestra meshctl; el chat, en una radio hecha para enseñarlo.</p>
+        </div>
+
+        <figure class="mc-card">
+          <div class="mc-card-head"><span class="ti ti-map-2" aria-hidden="true"></span><h3>La malla en el mapa</h3></div>
+          <img
+            src="../shots/es-map.webp" width="1600" height="900"
+            alt="Un mapa de A Coruña y Ferrol salpicado de nodos, con su color según
+                 los saltos a los que están, el de la propia radio en ámbar, junto a
+                 sus páginas y canales."
+          />
+          <p>Cada nodo con posición, con su color según lo lejos que está, y los routers y estaciones base señalados.</p>
+        </figure>
+
+        <figure class="mc-card">
+          <div class="mc-card-head"><span class="ti ti-message" aria-hidden="true"></span><h3>Chat</h3></div>
+          <img
+            src="../shots/es-chat.webp" width="1600" height="900" loading="lazy"
+            alt="Una conversación en el canal Galicia: mensajes de varias personas, uno
+                 con un pulgar arriba, y los de la propia radio, uno de ellos una
+                 respuesta, marcados como oídos por dos repetidores."
+          />
+          <p>Respuestas, reacciones y marcas que dicen si un mensaje salió y quién lo oyó.</p>
+        </figure>
+
+        <figure class="mc-card">
+          <div class="mc-card-head"><span class="ti ti-id" aria-hidden="true"></span><h3>Un nodo</h3></div>
+          <img
+            src="../shots/es-node.webp" width="1600" height="900" loading="lazy"
+            alt="La página de un repetidor: su posición en un mapa pequeño, su estado, el
+                 camino hasta él y un traceroute de ida y vuelta con la señal en cada
+                 salto."
+          />
+          <p>Su posición, lo que contestó al pedírselo y la ruta hasta él, salto a salto, de ida y de vuelta.</p>
+        </figure>
+
+        <figure class="mc-card">
+          <div class="mc-card-head"><span class="ti ti-broadcast" aria-hidden="true"></span><h3>Nodos</h3></div>
+          <img
+            src="../shots/es-nodes.webp" width="1600" height="900" loading="lazy"
+            alt="La lista de nodos: sus nombres, cuándo se oyeron, a qué distancia están,
+                 su batería y su hardware y rol."
+          />
+          <p>Cada nodo oído, para buscar y filtrar: directos, por la malla o por MQTT.</p>
+        </figure>
+
+        <figure class="mc-card">
+          <div class="mc-card-head"><span class="ti ti-activity" aria-hidden="true"></span><h3>En directo</h3></div>
+          <img
+            src="../shots/es-live.webp" width="1600" height="900" loading="lazy"
+            alt="La vista en directo: los paquetes según se oyen, su tipo, quién los envió
+                 y por qué canal, lo que llevan y los saltos y la señal con que
+                 llegaron."
+          />
+          <p>Cada paquete según se oye, para filtrar por tipo, canal o nodo.</p>
+        </figure>
+
+        <figure class="mc-card">
+          <div class="mc-card-head"><span class="ti ti-adjustments" aria-hidden="true"></span><h3>Ajustes</h3></div>
+          <img
+            src="../shots/es-settings.webp" width="1600" height="900" loading="lazy"
+            alt="Los ajustes de LoRa de una radio: su región, su preset, su límite de
+                 saltos y si transmite, cada uno con una frase sobre lo que hace."
+          />
+          <p>Cada ajuste dicho con palabras, y guardado en la radio cuando tú lo digas.</p>
+        </figure>
+
+        <figure class="mc-card">
+          <div class="mc-card-head"><span class="ti ti-qrcode" aria-hidden="true"></span><h3>Desde un enlace</h3></div>
+          <img
+            src="../shots/es-link.webp" width="1600" height="900" loading="lazy"
+            alt="La ventana que añade un nodo desde un enlace: el enlace pegado y el
+                 contacto que trae, mostrado antes de añadirlo."
+          />
+          <p>Pegado, escaneado o compartido: se lee al momento, y se añade solo cuando lo confirmas.</p>
+        </figure>
+
+        <figure class="mc-card">
+          <div class="mc-card-head"><span class="ti ti-device-mobile" aria-hidden="true"></span><h3>En el móvil</h3></div>
+          <div class="mc-phones">
+            <img
+              src="../shots/es-phone-chat.webp" width="786" height="1702" loading="lazy"
+              alt="El chat en un móvil: la conversación del canal Galicia, a todo lo ancho."
+            />
+            <img
+              src="../shots/es-phone-map.webp" width="786" height="1702" loading="lazy"
+              alt="El mapa en un móvil, con las pestañas al pie: mapa, nodos, chats, en
+                 directo y más."
+            />
+          </div>
+          <p>Todo el panel, colocado para el móvil, e instalado como app desde el navegador.</p>
+        </figure>
+      </section>
+
+      <section id="install">
+        <div class="mc-heading">
+          <h2>Instalarlo</h2>
+          <p>Cada <a href="https://github.com/ogarcia/meshctl/releases">versión</a> trae todo esto.</p>
+        </div>
+
+        <div class="mc-columns">
+          <div class="mc-card">
+            <div class="mc-card-head"><span class="ti ti-download" aria-hidden="true"></span><h3>El daemon</h3></div>
+            <pre><code>meshctld</code></pre>
+            <p>Un binario, con el panel dentro, para Linux (x86_64 y aarch64, cualquier distribución) y macOS. Arráncalo y abre <code>http://127.0.0.1:7434</code>; la primera vez, el panel te pide una radio.</p>
+            <p>En tu propia máquina no necesita token: solo llegas tú. Para entrar desde otro sitio, dale uno o pon un proxy delante; el <a href="https://github.com/ogarcia/meshctl#access">README</a> cuenta cómo.</p>
+          </div>
+
+          <div class="mc-card">
+            <div class="mc-card-head"><span class="ti ti-box" aria-hidden="true"></span><h3>Contenedor</h3></div>
+            <pre><code>podman run -d --name meshctl \
+  -p 127.0.0.1:7434:7434 \
+  -v meshctl:/var/lib/meshctl \
+  ghcr.io/ogarcia/meshctl:latest</code></pre>
+            <p>Para <code>amd64</code> y <code>arm64</code>. <code>latest</code> es la última versión; <code>master</code>, el último cambio, con fallos incluidos sin coste adicional.</p>
+          </div>
+        </div>
+
+        <div class="mc-columns">
+          <div class="mc-card">
+            <div class="mc-card-head"><span class="ti ti-device-desktop" aria-hidden="true"></span><h3>App de escritorio</h3></div>
+            <ul>
+              <li><strong>Windows</strong>: una carpeta portable. Descomprímela y ejecuta <code>meshctl.exe</code>; lo que guarda va a su lado.</li>
+              <li><strong>Linux</strong>: un Flatpak, <code>flatpak install --user meshctl-*.flatpak</code>.</li>
+            </ul>
+            <p>Con el daemon dentro, solo en tu máquina. Al cerrar su ventana sigue escuchando tus radios, y los enlaces <code>meshcore://</code> se abren en ella.</p>
+          </div>
+
+          <div class="mc-card">
+            <div class="mc-card-head"><span class="ti ti-device-mobile" aria-hidden="true"></span><h3>En el móvil</h3></div>
+            <p>Abre meshctl en el navegador del móvil e instálalo como app desde su menú. En Android, los enlaces que le compartas, desde las apps de Meshtastic o MeshCore, lo abren para añadir lo que traen.</p>
+            <p>Los navegadores lo permiten, y también la cámara que lee los QR, por HTTPS: pon meshctl detrás de un proxy que lo sirva así.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="mc-footer">
+      <div class="mc-footer-inner">
+        <p>Hecho con <span class="heart" aria-label="amor">♥</span> en Galicia, España, Europa <img class="flag" src="../flags/eu.svg" width="21" height="14" alt=""> por Óscar García Amor</p>
+      </div>
+    </footer>
+  </body>
+</html>
