@@ -14,6 +14,8 @@
     <link data-trunk rel="copy-dir" href="vendor/leaflet-1.9.4" />
     <link data-trunk rel="copy-dir" href="vendor/tabler-icons-3.51.0" />
     <link data-trunk rel="copy-dir" href="vendor/emojibase-data-18.0.0" />
+    <link data-trunk rel="copy-file" href="favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- Leaflet's directory carries its version, and map.js gets a hash from
          trunk: both can be kept by browsers for good, as the server says. -->
     <link rel="stylesheet" href="/leaflet-1.9.4/dist/leaflet.css" />
@@ -268,7 +270,9 @@
         border-right: 1px solid var(--mc-border);
         overflow-y: auto;
       }
-      .rail .logo { width: 26px; height: 26px; flex: none; stroke: var(--mc-primary); }
+      /* Centred on the sidebar's heading, 52 px tall, and the rule under it
+         on that heading's border: the rail's padding and gaps, made up for. */
+      .rail .logo { width: 36px; height: 36px; margin: -6px 0 -4px; flex: none; color: var(--mc-primary); }
       .rail-rule { width: 32px; border-top: 1px solid var(--mc-border); margin: 2px 0; }
       .rail-space { flex: 1; }
       .rail-button {
