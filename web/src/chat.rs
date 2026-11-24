@@ -310,9 +310,8 @@ fn answerable(live: Live) -> bool {
     live.selected_kind().is_some()
 }
 
-/// Whether a conversation has reactions: not a room yet, as what its posts
-/// are hashed by there, the room's clock or their author's, is still to be
-/// read in MeshCore's apps.
+/// Whether a conversation has reactions: not a room, as MeshCore's rooms
+/// have none.
 fn reactable(live: Live, peer: Peer) -> bool {
     !matches!(peer, Peer::Node { node } if live.is_room(node))
 }

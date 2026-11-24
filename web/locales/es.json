@@ -210,6 +210,8 @@
   "room_wrong_password": "La sala no aceptó la contraseña.",
   "room_no_answer": "La sala no contestó: puede estar lejos, o no aceptar la contraseña ni dejar entrar a invitados.",
   "room_failed": "No se pudo entrar en la sala.",
+  "room_forget_password": "Olvidar la contraseña guardada",
+  "room_forget_sure": "¿Olvidar la contraseña guardada de esta sala? La próxima vez habrá que escribirla.",
   "nav_no_directs": "Aún no hay conversaciones directas.",
   "nav_my_node": "Mi nodo",
   "nav_own_node": "La página de esta radio",

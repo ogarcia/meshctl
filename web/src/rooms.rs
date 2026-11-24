@@ -13,6 +13,7 @@ use meshctl_api::{ErrorCode, RoomAccess};
 
 const LOCK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/lock.svg");
 const LOGIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/login-2.svg");
+const KEY_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/key-off.svg");
 
 /// What the selected radio was let in to the open room as, if it logged in
 /// since it connected.
@@ -78,6 +79,36 @@ pub fn LogInAgain(node: u32) -> impl IntoView {
             inner_html=LOGIN
             on:click=move |_| live.log_in_room(node, None)
         ></button>
+    }
+}
+
+/// Forgetting the password kept for a room: there only while one is.
+#[component]
+pub fn ForgetPassword(node: u32) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let remembered = move || {
+        live.room.with(|r| {
+            r.as_ref()
+                .filter(|r| r.node == node)
+                .and_then(|r| r.login.as_ref())
+                .is_some_and(|l| l.remembered)
+        })
+    };
+    move || {
+        remembered().then(|| {
+            view! {
+                <button
+                    class="icon-button"
+                    title=move || t_string!(i18n, room_forget_password)
+                    aria-label=move || t_string!(i18n, room_forget_password)
+                    inner_html=KEY_OFF
+                    on:click=move |_| {
+                        live.forget_room_password(node, t_string!(i18n, room_forget_sure));
+                    }
+                ></button>
+            }
+        })
     }
 }
 

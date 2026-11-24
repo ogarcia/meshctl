@@ -913,6 +913,29 @@ impl Live {
         });
     }
 
+    /// Forgets the password kept for a room, once sure; the login made with
+    /// it stays until the radio connects again.
+    pub fn forget_room_password(self, node: u32, sure: &str) {
+        let Some(radio) = self.selected.get_untracked() else {
+            return;
+        };
+        let sure = web_sys::window()
+            .and_then(|w| w.confirm_with_message(sure).ok())
+            .unwrap_or(false);
+        if !sure {
+            return;
+        }
+        spawn_local(async move {
+            if let Ok(login) = daemon::forget_room_password(radio, node).await {
+                self.room.update(|r| {
+                    if let Some(r) = r.as_mut().filter(|r| r.node == node) {
+                        r.login = Some(login);
+                    }
+                });
+            }
+        });
+    }
+
     pub fn selected_kind(self) -> Option<RadioKind> {
         let id = self.selected.get()?;
         self.radios
@@ -2371,7 +2394,10 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 </div>
                 <div class="actions">
                     {move || (live.page.get() == Page::Chat && live.is_room(node))
-                        .then(|| view! { <crate::rooms::LogInAgain node /> })}
+                        .then(|| view! {
+                            <crate::rooms::ForgetPassword node />
+                            <crate::rooms::LogInAgain node />
+                        })}
                     {action}
                 </div>
             }

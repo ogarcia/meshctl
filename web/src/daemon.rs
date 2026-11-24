@@ -241,6 +241,18 @@ pub async fn log_in_room(
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// Forgets the password kept for a room.
+pub async fn forget_room_password(
+    radio: RadioId,
+    node: u32,
+) -> Result<meshctl_api::RoomLogin, Failure> {
+    let request = with_token(Request::delete(&url(&format!(
+        "/radios/{radio}/rooms/{node}/login"
+    ))));
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
 /// Sends again one of ours on a MeshCore channel no repeater was heard
 /// passing on: the same packet, kept as it was.
 pub async fn resend_message(radio: RadioId, id: meshctl_api::MessageId) -> Result<(), Failure> {

@@ -855,9 +855,8 @@ impl Radios {
         // apps send them: what goes on the air, kept as it went; and a reply
         // in the region its message came in, unless another is asked for.
         let meshcore = self.protocol(id) == Some(Protocol::Meshcore);
-        // No reactions in a room yet: what its posts are hashed by there, the
-        // room's clock or their author's, is still to be read in its apps, and
-        // one that names nothing would go as a post.
+        // No reactions in a room: MeshCore's rooms have none, and one would
+        // go as a post.
         let to_room = meshcore
             && mesh.read(|state| {
                 state
