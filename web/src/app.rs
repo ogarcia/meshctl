@@ -1674,7 +1674,33 @@ fn RadioSidebar() -> impl IntoView {
             </button>
         }
     };
-    let channels = move || {
+
+    view! {
+        <Show when=move || live.selected.get().is_some()>
+            <RadioHead />
+            // The radio's pages, always there; its conversations under
+            // them, scrolled on their own however many there are.
+            <nav class="sidebar-pages">
+                {page_item(Page::Map)}
+                {page_item(Page::Nodes)}
+                {page_item(Page::Packets)}
+            </nav>
+            <div class="sidebar-body">
+                <Conversations />
+            </div>
+            <LocalFoot />
+        </Show>
+    }
+}
+
+/// The selected radio's conversations, in their sections: its channels, its
+/// rooms, if it knows any, and its direct conversations. The same in the
+/// sidebar and on a phone.
+#[component]
+pub(crate) fn Conversations() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let channels = Signal::derive(move || {
         live.channels.with(|channels| {
             channels
                 .iter()
@@ -1682,8 +1708,8 @@ fn RadioSidebar() -> impl IntoView {
                 .map(|c| Peer::Channel { channel: c.index })
                 .collect::<Vec<_>>()
         })
-    };
-    let directs = move || {
+    });
+    let directs = Signal::derive(move || {
         live.conversations.with(|conversations| {
             conversations
                 .iter()
@@ -1691,10 +1717,10 @@ fn RadioSidebar() -> impl IntoView {
                 .filter(|peer| matches!(peer, Peer::Node { node } if !live.is_room(*node)))
                 .collect::<Vec<_>>()
         })
-    };
+    });
     // Every room the radio knows: those with something said in them first,
     // the latest first, then the rest by name.
-    let rooms = move || {
+    let rooms = Signal::derive(move || {
         let mut rooms: Vec<Peer> = live.conversations.with(|conversations| {
             conversations
                 .iter()
@@ -1718,70 +1744,83 @@ fn RadioSidebar() -> impl IntoView {
         quiet.sort();
         rooms.extend(quiet.into_iter().map(|(_, node)| Peer::Node { node }));
         rooms
-    };
-    // Folded away, for those who do not use them: what is unread in them
-    // still said beside their heading.
-    let rooms_folded = move || live.preferences.with(|p| p.rooms_folded);
-    let fold_rooms = move |_| {
+    });
+    view! {
+        <Section
+            bit=SECTION_CHANNELS
+            title=Signal::derive(move || t_string!(i18n, nav_channels).to_owned())
+            peers=channels
+        />
+        <Show when=move || !rooms.with(Vec::is_empty)>
+            <Section
+                bit=SECTION_ROOMS
+                title=Signal::derive(move || t_string!(i18n, nav_rooms).to_owned())
+                peers=rooms
+            />
+        </Show>
+        <Section
+            bit=SECTION_DIRECTS
+            title=Signal::derive(move || t_string!(i18n, nav_directs).to_owned())
+            peers=directs
+        />
+        <Show when=move || {
+            directs.with(Vec::is_empty) && !live.preferences.with(|p| p.sections_folded & SECTION_DIRECTS != 0)
+        }>
+            <p class="empty dim">{t!(i18n, nav_no_directs)}</p>
+        </Show>
+    }
+}
+
+/// The bit each section of the conversations takes in the preferences when
+/// it is folded away.
+const SECTION_CHANNELS: u8 = 1;
+const SECTION_ROOMS: u8 = 2;
+const SECTION_DIRECTS: u8 = 4;
+
+/// A section of the conversations, folded away at its heading, as it is
+/// kept: what is unread in it then said beside its title, and the one open
+/// still there, so as not to lose where one is.
+#[component]
+fn Section(bit: u8, title: Signal<String>, peers: Signal<Vec<Peer>>) -> impl IntoView {
+    let live = expect_context::<Live>();
+    let folded = move || live.preferences.with(|p| p.sections_folded & bit != 0);
+    let fold = move |_| {
         let mut preferences = live.preferences.get_untracked();
-        preferences.rooms_folded = !preferences.rooms_folded;
+        preferences.sections_folded ^= bit;
         live.prefer(preferences);
     };
-    let rooms_unread = move || {
-        let rooms = rooms();
+    let unread = move || {
+        let peers = peers.get();
         let unread: u32 = live.conversations.with(|c| {
             c.iter()
-                .filter(|c| rooms.contains(&c.peer))
+                .filter(|c| peers.contains(&c.peer))
                 .map(|c| c.unread)
                 .sum()
         });
-        (rooms_folded() && unread > 0)
+        (folded() && unread > 0)
             .then(|| view! { <span class="unread">{unread_count(unread)}</span> })
     };
-
+    let shown = move || {
+        let open = (live.page.get() == Page::Chat)
+            .then(|| live.open.get())
+            .flatten();
+        let mut peers = peers.get();
+        if folded() {
+            peers.retain(|peer| Some(*peer) == open);
+        }
+        peers
+    };
     view! {
-        <Show when=move || live.selected.get().is_some()>
-            <RadioHead />
-            // The radio's pages, always there; its conversations under
-            // them, scrolled on their own however many there are.
-            <nav class="sidebar-pages">
-                {page_item(Page::Map)}
-                {page_item(Page::Nodes)}
-                {page_item(Page::Packets)}
-            </nav>
-            <div class="sidebar-body">
-                <h2>{t!(i18n, nav_channels)}</h2>
-                <For each=channels key=|peer| *peer let:peer>
-                    <PeerItem peer />
-                </For>
-                <Show when=move || !rooms().is_empty()>
-                    <h2 class="folding">
-                        <button
-                            type="button"
-                            aria-expanded=move || (!rooms_folded()).to_string()
-                            on:click=fold_rooms
-                        >
-                            <span>{t!(i18n, nav_rooms)}</span>
-                            {rooms_unread}
-                            <span class="chevron" class:folded=rooms_folded inner_html=CHEVRON></span>
-                        </button>
-                    </h2>
-                    <Show when=move || !rooms_folded()>
-                        <For each=rooms key=|peer| *peer let:peer>
-                            <PeerItem peer />
-                        </For>
-                    </Show>
-                </Show>
-                <h2>{t!(i18n, nav_directs)}</h2>
-                <For each=directs key=|peer| *peer let:peer>
-                    <PeerItem peer />
-                </For>
-                <Show when=move || directs().is_empty()>
-                    <p class="empty dim">{t!(i18n, nav_no_directs)}</p>
-                </Show>
-            </div>
-            <LocalFoot />
-        </Show>
+        <h2 class="folding">
+            <button type="button" aria-expanded=move || (!folded()).to_string() on:click=fold>
+                <span>{move || title.get()}</span>
+                {unread}
+                <span class="chevron" class:folded=folded inner_html=CHEVRON></span>
+            </button>
+        </h2>
+        <For each=shown key=|peer| *peer let:peer>
+            <PeerItem peer />
+        </For>
     }
 }
 

@@ -2085,9 +2085,9 @@ pub struct Preferences {
     /// Whether the live view shows what the radio itself sends too: by
     /// default it leaves it out.
     pub packets_with_own: bool,
-    /// Whether the rooms are folded away in the sidebar, for those who do not
-    /// use them.
-    pub rooms_folded: bool,
+    /// Which of the conversations' sections are folded away, in the sidebar
+    /// and on a phone, a bit each: channels 1, rooms 2, direct 4.
+    pub sections_folded: u8,
 }
 
 /// A column of the nodes list to sort by, and which way.
@@ -2194,7 +2194,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0,"packets_with_own":false,"rooms_folded":false}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0,"packets_with_own":false,"sections_folded":0}"#
         );
     }
 

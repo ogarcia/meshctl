@@ -6,12 +6,11 @@
 //! the pages those bars stand for on a wider screen. All of it shows only on
 //! a narrow screen, as the style sheet decides.
 
-use crate::app::{LinkLabel, Live, LocalFoot, Page, PeerItem};
+use crate::app::{Conversations, LinkLabel, Live, LocalFoot, Page};
 use crate::badge::{self, Face};
 use crate::i18n::{t, t_string, use_i18n};
 use crate::radios::Editing;
 use leptos::prelude::*;
-use meshctl_api::Peer;
 
 const MAP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map.svg");
 const ANTENNA: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/antenna.svg");
@@ -256,42 +255,12 @@ pub fn RadioSheet() -> impl IntoView {
     }
 }
 
-/// The selected radio's channels and direct conversations, as a page.
+/// The selected radio's conversations, in their sections, as a page.
 #[component]
 pub fn ChatsView() -> impl IntoView {
-    let i18n = use_i18n();
-    let live = expect_context::<Live>();
-    let channels = move || {
-        live.channels.with(|channels| {
-            channels
-                .iter()
-                .filter(|c| c.role != "DISABLED")
-                .map(|c| Peer::Channel { channel: c.index })
-                .collect::<Vec<_>>()
-        })
-    };
-    let directs = move || {
-        live.conversations.with(|conversations| {
-            conversations
-                .iter()
-                .map(|c| c.peer)
-                .filter(|peer| matches!(peer, Peer::Node { .. }))
-                .collect::<Vec<_>>()
-        })
-    };
     view! {
         <div class="phone-list">
-            <h2>{t!(i18n, nav_channels)}</h2>
-            <For each=channels key=|peer| *peer let:peer>
-                <PeerItem peer />
-            </For>
-            <h2>{t!(i18n, nav_directs)}</h2>
-            <For each=directs key=|peer| *peer let:peer>
-                <PeerItem peer />
-            </For>
-            <Show when=move || directs().is_empty()>
-                <p class="empty dim">{t!(i18n, nav_no_directs)}</p>
-            </Show>
+            <Conversations />
         </div>
     }
 }

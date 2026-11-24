@@ -395,15 +395,19 @@
         letter-spacing: 0.06em;
       }
       .sidebar-body .empty { margin: 0; padding: 2px 10px; font-size: 12px; }
-      /* A heading that folds what is under it away, as the rooms': its chevron
-         turned while folded. */
-      .sidebar-body h2.folding { padding: 0; }
-      .sidebar-body h2.folding button { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 0; padding: 2px 10px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
-      .sidebar-body h2.folding button:hover { color: var(--mc-text); }
-      .sidebar-body h2.folding .unread { text-transform: none; letter-spacing: 0; }
-      .sidebar-body h2.folding .chevron { display: flex; margin-left: auto; transition: transform 0.15s; }
-      .sidebar-body h2.folding .chevron svg { width: 14px; height: 14px; }
-      .sidebar-body h2.folding .chevron.folded { transform: rotate(-90deg); }
+      /* A heading that folds the section under it away: its chevron turned
+         while folded. */
+      h2.folding { padding: 0; }
+      .phone-list h2.folding { margin-bottom: 2px; }
+      h2.folding button { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 0; padding: 2px 10px; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+      h2.folding button:hover { color: var(--mc-text); }
+      h2.folding .unread { text-transform: none; letter-spacing: 0; }
+      h2.folding .chevron { display: flex; margin-left: auto; transition: transform 0.15s; }
+      h2.folding .chevron svg { width: 14px; height: 14px; }
+      h2.folding .chevron.folded { transform: rotate(-90deg); }
+      /* By touch, a heading tall enough for a finger. */
+      .phone-list h2.folding button { padding: 10px 4px; }
+      .phone-list h2.folding .chevron svg { width: 18px; height: 18px; }
       /* Adding from a link: the link, what it holds, and the buttons. */
       .link-adder { display: flex; flex-direction: column; gap: 12px; width: 480px; max-width: 100%; padding: 16px 20px 20px; }
       .link-adder header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
