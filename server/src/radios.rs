@@ -96,6 +96,12 @@ pub enum Change {
     Lagged,
 }
 
+/// The turn to log in to a node before a request.
+type LoginGate = Arc<tokio::sync::Mutex<()>>;
+
+/// How a login made before a request failed, and when.
+type LoginFailed = (std::time::Instant, LoginFailure);
+
 /// What a radio was let in to a room as, and when.
 type LoginHeld = (NodeAccess, i64);
 
@@ -117,6 +123,22 @@ pub enum LoginFailure {
     /// The radio would not send it, and said why.
     Refused(String),
     Failed(anyhow::Error),
+}
+
+impl LoginFailure {
+    /// The same failure again, for another that waited for it.
+    fn again(&self) -> Self {
+        match self {
+            Self::NoSuchRadio => Self::NoSuchRadio,
+            Self::NoLogin => Self::NoLogin,
+            Self::NotOnRadio => Self::NotOnRadio,
+            Self::NotConnected => Self::NotConnected,
+            Self::WrongPassword => Self::WrongPassword,
+            Self::NoAnswer => Self::NoAnswer,
+            Self::Refused(why) => Self::Refused(why.clone()),
+            Self::Failed(err) => Self::Failed(anyhow::anyhow!("{err:#}")),
+        }
+    }
 }
 
 impl From<anyhow::Error> for LoginFailure {
@@ -699,6 +721,12 @@ pub struct Radios {
     /// repeaters and sensors: what each
     /// let it in as, and when.
     logins: Arc<Mutex<HashMap<(RadioId, u32), LoginHeld>>>,
+    /// The logins made before a request, one at a time to each node: what
+    /// comes while one is under way waits for it, rather than make another.
+    logging_in: Arc<Mutex<HashMap<(RadioId, u32), LoginGate>>>,
+    /// How the last of those failed, and when: what waited for it fails
+    /// alike, with nothing sent again.
+    login_failed: Arc<Mutex<HashMap<(RadioId, u32), LoginFailed>>>,
     changes: broadcast::Sender<Change>,
     stopped: watch::Sender<bool>,
 }
@@ -711,6 +739,8 @@ impl Radios {
             running: Arc::default(),
             searching: Arc::default(),
             logins: Arc::default(),
+            logging_in: Arc::default(),
+            login_failed: Arc::default(),
             changes: broadcast::channel(EVENT_BACKLOG).0,
             stopped: watch::channel(false).0,
         };
@@ -1220,6 +1250,54 @@ impl Radios {
         self.node_login(id, node).await
     }
 
+    /// Logs in to a node before a request, with the password kept or as a
+    /// guest: one at a time to each node. One that came while another was
+    /// under way takes how that ended, logged in or failed, rather than send
+    /// another login; one that comes later tries again.
+    async fn log_in_once(
+        &self,
+        id: RadioId,
+        node: u32,
+        arrived: std::time::Instant,
+    ) -> Result<(), LoginFailure> {
+        let gate = Arc::clone(
+            self.logging_in
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry((id, node))
+                .or_default(),
+        );
+        let _turn = gate.lock().await;
+        let held = self
+            .logins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(&(id, node));
+        if held {
+            return Ok(());
+        }
+        let failed = self
+            .login_failed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&(id, node))
+            .filter(|(at, _)| *at > arrived)
+            .map(|(_, failure)| failure.again());
+        if let Some(failure) = failed {
+            return Err(failure);
+        }
+        match self.log_in_node(id, node, None).await {
+            Ok(_) => Ok(()),
+            Err(failure) => {
+                self.login_failed
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert((id, node), (std::time::Instant::now(), failure.again()));
+                Err(failure)
+            }
+        }
+    }
+
     /// Forgets the password kept for a node; the login, if any, stays.
     pub async fn forget_node_password(
         &self,
@@ -1473,6 +1551,8 @@ impl Radios {
     /// Asks a node for something it tells on request; the answer, or the lack
     /// of one, comes on the event stream as the request changes.
     pub async fn request(&self, id: RadioId, new: NewRequest) -> Result<Request, AskFailure> {
+        // When it came, for a login under way as it did, which it waits for.
+        let arrived = std::time::Instant::now();
         let mesh = self.mesh(id).ok_or(AskFailure::NoSuchRadio)?;
         let origin = mesh.read(|state| state.local.as_ref().map(|l| l.num));
         if new.node == mesh::BROADCAST || origin == Some(new.node) {
@@ -1514,22 +1594,30 @@ impl Radios {
                 RequestKind::Owner => Some(request::OWNER),
                 _ => None,
             };
-            if logged.is_some() {
-                let held = self
-                    .logins
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .contains_key(&(id, new.node));
-                if !held {
-                    self.log_in_node(id, new.node, None)
-                        .await
-                        .map_err(AskFailure::Login)?;
+            let held = self
+                .logins
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&(id, new.node));
+            // Its owner with no login, where its path is known; logged in
+            // already, as a login tells its firmware too.
+            let mut anonymous_owner = None;
+            if new.kind == RequestKind::Owner && !held {
+                match mesh.meshcore_ask(new.node, anonymous::OWNER).await {
+                    Err(AdminError::NoPath) => {}
+                    asked => anonymous_owner = Some(asked),
                 }
             }
-            let asked = match (new.kind, logged) {
-                (RequestKind::Ping, _) => mesh.meshcore_ping(new.node).await,
-                (_, Some(what)) => mesh.meshcore_request(new.node, what).await,
-                _ => mesh.meshcore_ask(new.node, anonymous::REGIONS).await,
+            if logged.is_some() && !held && anonymous_owner.is_none() {
+                self.log_in_once(id, new.node, arrived)
+                    .await
+                    .map_err(AskFailure::Login)?;
+            }
+            let asked = match (anonymous_owner, new.kind, logged) {
+                (Some(asked), _, _) => asked,
+                (None, RequestKind::Ping, _) => mesh.meshcore_ping(new.node).await,
+                (None, _, Some(what)) => mesh.meshcore_request(new.node, what).await,
+                (None, _, None) => mesh.meshcore_ask(new.node, anonymous::REGIONS).await,
             };
             let tag = asked.map_err(|error| match error {
                 AdminError::NoPath => AskFailure::NoPath,

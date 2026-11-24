@@ -2493,6 +2493,7 @@ fn reply_summary(
         RequestReply::Neighbors { total, nodes } => t_string!(i18n, neighbors_told)
             .replace("{n}", &nodes.len().to_string())
             .replace("{total}", &total.to_string()),
+        RequestReply::Owner { firmware, name, .. } if firmware.is_empty() => name.clone(),
         RequestReply::Owner { firmware, name, .. } => format!("{name} · {firmware}"),
         RequestReply::Ping {
             round_trip_ms,
@@ -2818,7 +2819,7 @@ fn RemoteOwner() -> impl IntoView {
         view! {
             <dl class="facts">
                 {fact(t!(i18n, remote_owner_name), name)}
-                {fact(t!(i18n, remote_owner_firmware), firmware)}
+                {(!firmware.is_empty()).then(|| fact(t!(i18n, remote_owner_firmware), firmware))}
                 {(!owner.is_empty()).then(|| fact(t!(i18n, remote_owner_owner), owner))}
             </dl>
         }

@@ -766,12 +766,25 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             sent.extend(tag);
             sent.extend(2_500u32.to_le_bytes());
             let regions = data.get(32) == Some(&0x01);
+            let owner = data.get(32) == Some(&0x02);
             println!(
                 "anonymous request {:?} to {:?}, {}",
                 data.get(32),
                 to.name,
                 if flood { "flooded" } else { "direct" }
             );
+            if owner && !flood && matches!(to.kind, 2 | 3) {
+                let events = events.clone();
+                let said = format!("{}\nmeshctl, A Coruña", to.name);
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(600 + random(900))).await;
+                    let mut answer = vec![0x8c, 0];
+                    answer.extend(tag);
+                    answer.extend(now().to_le_bytes());
+                    answer.extend(said.as_bytes());
+                    let _ = events.send(Event::Push(answer));
+                });
+            }
             if regions && !flood && matches!(to.kind, 2 | 3) {
                 let events = events.clone();
                 // Each its own: the room only scoped, the tower on time.

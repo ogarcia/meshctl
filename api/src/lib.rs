@@ -1383,8 +1383,10 @@ pub enum RequestKind {
     /// What a MeshCore node's sensors read: its own to a guest, all to its
     /// admin. Logged in to, as for `status`.
     Telemetry,
-    /// Who runs a MeshCore node: its firmware, its name and what its owner
-    /// says. Logged in to, as for `status`.
+    /// Who runs a MeshCore node: its name and what its owner says, and its
+    /// firmware when logged in to. Not logged in to since the radio
+    /// connected, it goes with no login where its path is known, and comes
+    /// with no firmware; with no path known, it logs in as for `status`.
     Owner,
     /// A MeshCore node heard straight, pinged, with no login: how long there
     /// and back, and how each end heard the other.

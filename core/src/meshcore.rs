@@ -881,6 +881,9 @@ fn ping_tag(num: u32) -> u32 {
 pub mod anonymous {
     /// The regions it repeats on.
     pub const REGIONS: u8 = 0x01;
+    /// Its name and what its owner says, with no firmware: of one heard
+    /// straight, or on a path known, with no login.
+    pub const OWNER: u8 = 0x02;
 }
 
 /// What a node answered a request with, read by what was asked: an
@@ -916,6 +919,11 @@ fn answer_of(asked: Asking, data: &[u8], room: bool) -> Option<crate::mesh::Answ
         .and_then(|b| b.try_into().ok())
         .map(u32::from_le_bytes);
     match asked {
+        // Its name and its owner's words, after its clock: no firmware.
+        anonymous::OWNER => {
+            let said = answers::owner(&[b"\n", data.get(4..)?].concat())?;
+            Some(crate::mesh::Answer::Owner(said))
+        }
         anonymous::REGIONS => {
             let text = String::from_utf8_lossy(data.get(4..).unwrap_or_default()).into_owned();
             let mut unscoped = false;
@@ -2102,6 +2110,13 @@ mod tests {
             })
         );
         assert_eq!(answer_of(Asking::Anonymous(0x7f), &none, false), None);
+        // Its owner, anonymously: after its clock, with no firmware.
+        let mut anon = 1_700_000_000u32.to_le_bytes().to_vec();
+        anon.extend(b"Torre\nAlguien");
+        assert!(matches!(
+            answer_of(Asking::Anonymous(anonymous::OWNER), &anon, false),
+            Some(crate::mesh::Answer::Owner(o)) if o.name == "Torre" && o.owner == "Alguien" && o.firmware.is_empty()
+        ));
         // Logged in: as asked, with nothing before.
         let owner = b"v1.18.0\nTorre\nAlguien";
         assert!(matches!(
