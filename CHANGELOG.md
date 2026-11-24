@@ -3,7 +3,7 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-24)
 
 The first release: meshctl as it is, to be tried.
 

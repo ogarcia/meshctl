@@ -4000,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "meshctl-api"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4009,7 +4009,7 @@ dependencies = [
 
 [[package]]
 name = "meshctl-core"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "aes",
  "bytes",
@@ -4025,7 +4025,7 @@ dependencies = [
 
 [[package]]
 name = "meshctl-desktop"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "ashpd",
  "dirs 6.0.0",
@@ -4044,7 +4044,7 @@ dependencies = [
 
 [[package]]
 name = "meshctl-proto"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "prost",
@@ -4056,7 +4056,7 @@ dependencies = [
 
 [[package]]
 name = "meshctl-web"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "futures-util",
@@ -4078,7 +4078,7 @@ dependencies = [
 
 [[package]]
 name = "meshctld"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
