@@ -1502,6 +1502,7 @@ impl Mesh {
                 },
             );
         let wait = Duration::from_millis(u64::from(timeout_ms) * 2).max(ASK_WAIT);
+        tracing::debug!(num, ?what, timeout_ms, "a request sent");
         let (asked, mesh) = (Arc::clone(&session.asked), self.clone());
         tokio::spawn(async move {
             let timed_out = tokio::time::timeout(wait, told).await.is_err();
@@ -2179,6 +2180,7 @@ fn discovered(mesh: &Mesh, session: &Session, prefix: [u8; 6], there: &Path, bac
         })
         .map(|(tag, _)| *tag);
     let Some(Asked { from, answered, .. }) = tag.and_then(|tag| asked.remove(&tag)) else {
+        tracing::debug!(?prefix, "a route found that none asked for");
         return;
     };
     drop(asked);

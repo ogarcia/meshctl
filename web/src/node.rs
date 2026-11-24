@@ -270,6 +270,13 @@ fn Problem() -> impl IntoView {
                     t!(i18n, node_not_connected).into_any()
                 }
                 Failure::Rejected(ErrorCode::NoPath) => t!(i18n, ask_no_path).into_any(),
+                // The login it goes first with.
+                Failure::Rejected(ErrorCode::RadioDidNotAnswer) => {
+                    t!(i18n, ask_login_no_answer).into_any()
+                }
+                Failure::Rejected(ErrorCode::WrongPassword | ErrorCode::RadioRefused) => {
+                    t!(i18n, ask_login_refused).into_any()
+                }
                 _ => t!(i18n, error_failed).into_any(),
             };
             view! { <div class="toast" role="status">{text}</div> }
@@ -722,7 +729,10 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
     };
     // Not to be sent without its key: the radio refuses to.
     let keyless = move || asked.private() && needs_key(live, asking.num);
-    let off = move || !connected(live) || pending() || wait() > 0 || keyless();
+    // Logging in to the node first, as asked for something: nothing else
+    // goes meanwhile, as it would wait for that login too.
+    let logging_in = move || live.logging_in_to(asking.num);
+    let off = move || !connected(live) || pending() || wait() > 0 || keyless() || logging_in();
     let send = move |channel: u32| {
         pressed.set(Some((asking.num, me)));
         match asked {
@@ -753,7 +763,9 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
         pending() && pressed_here().is_none_or(|pressed| pressed == me || pressed.asked != asked)
     };
     let label = move || {
-        if asking_here() {
+        if logging_in() && is_pressed() {
+            t_string!(i18n, room_logging_in).to_owned()
+        } else if asking_here() {
             // A trace is traced; anything else, asked for.
             if asked == Asked::Trace {
                 t_string!(i18n, node_tracing).to_owned()
@@ -3084,6 +3096,9 @@ fn NodeAccessSection() -> impl IntoView {
                 Ok(read) => {
                     login.try_set(Some(read));
                     password.try_set(String::new());
+                    live.login_failed.update(|l| {
+                        l.remove(&asking.num);
+                    });
                 }
                 Err(failure) => {
                     problem.try_set(Some(failure));
@@ -3101,7 +3116,23 @@ fn NodeAccessSection() -> impl IntoView {
             }
         });
     };
+    // Logging in now, as asked for something: how long it is waited for
+    // yet, counted down.
+    let entering = move || {
+        asking.clock.track();
+        live.logging_in
+            .with(|l| l.get(&asking.num).copied())
+            .map(|(until, _)| {
+                let left = ((until - js_sys::Date::now()) / 1000.0).ceil().max(0.0);
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let left = left as u32;
+                t_string!(i18n, access_entering).replace("{s}", &left.to_string())
+            })
+    };
     let access = move || {
+        if let Some(entering) = entering() {
+            return entering;
+        }
         let access = login.with(|l| l.as_ref().and_then(|l| l.access));
         match access {
             Some(meshctl_api::NodeAccess::Admin) => t_string!(i18n, access_admin),
@@ -3109,15 +3140,27 @@ fn NodeAccessSection() -> impl IntoView {
             Some(meshctl_api::NodeAccess::ReadOnly) => t_string!(i18n, access_guest),
             None => t_string!(i18n, access_out),
         }
+        .to_owned()
     };
     let remembered = move || login.with(|l| l.as_ref().is_some_and(|l| l.remembered));
+    // Why it did not go in: here, or as asked for something, until it goes
+    // in; not while it tries again.
     let problem_words = move || {
-        problem.get().map(|failure| match failure {
-            Failure::Rejected(ErrorCode::WrongPassword) => t_string!(i18n, room_wrong_password),
-            Failure::Rejected(ErrorCode::RadioDidNotAnswer) => t_string!(i18n, access_no_answer),
-            Failure::Rejected(ErrorCode::RadioNotConnected) => t_string!(i18n, node_not_connected),
-            _ => t_string!(i18n, error_failed),
-        })
+        let asked = live.login_failed.with(|l| l.get(&asking.num).copied());
+        let logged = login.with(|l| l.as_ref().is_some_and(|l| l.access.is_some()));
+        let failure = problem.get().or(asked.filter(|_| !logged));
+        failure
+            .filter(|_| entering().is_none())
+            .map(|failure| match failure {
+                Failure::Rejected(ErrorCode::WrongPassword) => t_string!(i18n, room_wrong_password),
+                Failure::Rejected(ErrorCode::RadioDidNotAnswer) => {
+                    t_string!(i18n, access_no_answer)
+                }
+                Failure::Rejected(ErrorCode::RadioNotConnected) => {
+                    t_string!(i18n, node_not_connected)
+                }
+                _ => t_string!(i18n, error_failed),
+            })
     };
     view! {
         <Section title=t!(i18n, access_title).into_any()>

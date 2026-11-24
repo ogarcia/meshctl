@@ -237,6 +237,13 @@ pub struct Live {
     pub pressed: RwSignal<Option<(u32, crate::node::ButtonId)>>,
     /// Why the last request or traceroute was not sent.
     pub ask_error: RwSignal<Option<Failure>>,
+    /// The MeshCore nodes of the selected radio it logs in to now, as asked
+    /// for something first: until when, by this browser's clock, in
+    /// milliseconds, and how long in all.
+    pub logging_in: RwSignal<HashMap<u32, (f64, f64)>>,
+    /// The nodes the last login to, as asked for something, failed: why,
+    /// kept until one goes in.
+    pub login_failed: RwSignal<HashMap<u32, Failure>>,
     /// When, by this browser's clock, the selected radio sends each paced
     /// kind of thing again: until then it would drop it.
     pub ready: RwSignal<HashMap<Pace, u32>>,
@@ -301,6 +308,8 @@ impl Live {
             checks: RwSignal::new(Vec::new()),
             pressed: RwSignal::new(None),
             ask_error: RwSignal::new(None),
+            logging_in: RwSignal::new(HashMap::new()),
+            login_failed: RwSignal::new(HashMap::new()),
             ready: RwSignal::new(HashMap::new()),
             synced: RwSignal::new(0),
             now: RwSignal::new(now()),
@@ -490,6 +499,8 @@ impl Live {
         // new one's while that is read.
         self.loaded.set(None);
         self.status.set(None);
+        self.logging_in.set(HashMap::new());
+        self.login_failed.set(HashMap::new());
         self.nodes.set(BTreeMap::new());
         self.selected.set(Some(radio));
         self.open.set(None);
@@ -757,16 +768,36 @@ impl Live {
                 kind,
                 channel,
             };
-            match daemon::ask(radio, &new).await {
+            let done = daemon::ask(radio, &new).await;
+            // A login it went first with is over, either way.
+            self.logging_in.update(|l| {
+                l.remove(&node);
+            });
+            match done {
                 Ok(request) => {
+                    self.login_failed.update(|l| {
+                        l.remove(&node);
+                    });
                     if let Some(pace) = kind.pace() {
                         self.paced(pace);
                     }
                     self.keep_request(request);
                 }
-                Err(failure) => self.refused(radio, failure),
+                Err(failure) => {
+                    if login_failure(&failure) {
+                        self.login_failed.update(|l| {
+                            l.insert(node, failure);
+                        });
+                    }
+                    self.refused(radio, failure);
+                }
             }
         });
+    }
+
+    /// Whether the radio logs in to a node now, as asked for something.
+    pub fn logging_in_to(self, node: u32) -> bool {
+        self.logging_in.with(|l| l.contains_key(&node))
     }
 
     /// Puts a request of the open node in its list, or where it was.
@@ -1183,6 +1214,10 @@ impl Live {
                     wait_ms,
                 } if self.is_selected(radio) => {
                     let until = js_sys::Date::now() + f64::from(wait_ms);
+                    // Any login, as one asked for something goes first.
+                    self.logging_in.update(|l| {
+                        l.insert(node, (until, f64::from(wait_ms)));
+                    });
                     self.room.update(|r| {
                         if let Some(r) = r.as_mut().filter(|r| r.node == node && r.busy) {
                             r.until = Some((until, f64::from(wait_ms)));
@@ -2586,4 +2621,18 @@ fn TokenForm() -> impl IntoView {
             <button type="submit">{t!(i18n, token_use)}</button>
         </form>
     }
+}
+
+/// Whether a request was not sent as the login it went first with failed:
+/// the node did not answer it, or said no.
+fn login_failure(failure: &Failure) -> bool {
+    matches!(
+        failure,
+        Failure::Rejected(
+            meshctl_api::ErrorCode::RadioDidNotAnswer
+                | meshctl_api::ErrorCode::WrongPassword
+                | meshctl_api::ErrorCode::RadioRefused
+                | meshctl_api::ErrorCode::NotOnRadio
+        )
+    )
 }
