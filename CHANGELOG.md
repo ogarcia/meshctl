@@ -3,6 +3,38 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.4.0 (2026-11-25)
+
+Notifications of the messages heard, wherever meshctl runs.
+
+### Notifications
+
+- Of the messages heard where you say: each radio's direct conversations,
+  one node's, or a channel, followed wherever it goes on the radio,
+  everything said there or only when it mentions the radio, as `@Name` or
+  `@[Name]`.
+- Never of the radio's own, a reaction, what comes as it catches up or long
+  ago, nor of the conversation you have in front of you.
+- A page of their own among meshctl's settings: on or off, with the text or
+  only who wrote and where, as two samples show; each radio folded, none,
+  some or all of it at once.
+- In the browser, while the panel is open in a tab, if it lets; on Android
+  and on Linux's desktop, by the app, with its window closed too: one for
+  each conversation, which opens on it, and goes once it is read. On
+  Windows, as best it can.
+- Off on their own, on within the apps, for the direct messages.
+
+### The apps
+
+- On Linux and Windows, going on with the window closed is a setting too,
+  as on Android: off, closing it quits meshctl.
+- The Android app built with Gradle 9.9 and Java 25.
+
+### Under the hood
+
+- Every dependency brought up to date, the cryptography's new generation
+  among them, checked against what the firmware seals.
+
 ## 0.3.1 (2026-11-25)
 
 - On Windows, a radio plugged in by its cable, as `COM3`, written or picked

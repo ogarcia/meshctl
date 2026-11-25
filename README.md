@@ -50,6 +50,9 @@ server, in a container, as a desktop app, or as an app on your phone.
 - **Traceroutes:** on demand, with their history.
 - **Automatic replies:** if someone writes this, answer with that, where you
   say, from the daemon: a ping with the hops it took and its signal, say.
+- **Notifications:** of the messages heard where you say, a channel's maybe
+  only when it mentions you; in the browser, and from the apps with their
+  window closed.
 - **One binary**, small enough for a Raspberry Pi or a router, with the web
   interface built in; and a desktop app, for Windows and Linux, and an Android
   app, with the same inside.
@@ -93,8 +96,9 @@ Each [release](https://github.com/ogarcia/meshctl/releases) brings:
 
 The desktop app runs the daemon within itself, on this machine alone, and
 shows the panel in its own window. Closing it keeps it listening to your
-radios: in the tray on Windows, as a background app on Linux. `meshcore://`
-links open in it, to add the node or channel they hold.
+radios, and notifying you, unless you say otherwise in its settings: in the
+tray on Windows, as a background app on Linux. `meshcore://` links open in
+it, to add the node or channel they hold.
 
 The Android app does the same on the phone: radios over the network, by USB
 (with a cable or an OTG adapter) and by Bluetooth, picked from those plugged
@@ -102,6 +106,17 @@ in or heard nearby. It keeps listening with the app closed if you say so in
 its settings, with a notification that tells it is. `meshcore://` links, and
 links shared to it from the Meshtastic or MeshCore apps, open in it. Android
 asks, the first time, to let the browser or the files app install it.
+
+To have it kept up to date, [Obtainium](https://github.com/ImranR98/Obtainium)
+follows the releases. From the phone, add it set up already, for [nearly
+every phone][obtainium-arm64] or for [an older 32-bit one][obtainium-arm]; or
+by hand: add `https://github.com/ogarcia/meshctl` as an app and, as each
+release brings both APKs, set its *Filter APKs by regular expression* to
+`android-arm64\.apk$` (`android-arm\.apk$` on a 32-bit phone). It tells when
+a new one is out, and installs it over the one you have.
+
+[obtainium-arm64]: https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22me.ogarcia.meshctl%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fogarcia%2Fmeshctl%22%2C%22author%22%3A%22ogarcia%22%2C%22name%22%3A%22meshctl%22%2C%22additionalSettings%22%3A%22%7B%5C%22apkFilterRegEx%5C%22%3A%5C%22android-arm64%5C%5C%5C%5C.apk%24%5C%22%7D%22%7D
+[obtainium-arm]: https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22me.ogarcia.meshctl%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fogarcia%2Fmeshctl%22%2C%22author%22%3A%22ogarcia%22%2C%22name%22%3A%22meshctl%22%2C%22additionalSettings%22%3A%22%7B%5C%22apkFilterRegEx%5C%22%3A%5C%22android-arm%5C%5C%5C%5C.apk%24%5C%22%7D%22%7D
 
 ## Running
 
