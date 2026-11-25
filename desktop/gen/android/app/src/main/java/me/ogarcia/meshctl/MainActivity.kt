@@ -3,13 +3,20 @@ package me.ogarcia.meshctl
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.Keep
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
@@ -33,6 +40,7 @@ class MainActivity : TauriActivity() {
       WindowInsetsCompat.CONSUMED
     }
     ask(intent)
+    open(intent)
     // The notification that says it goes on listening, where Android asks
     // for leave to show it.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -45,9 +53,87 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  /** The panel's webview, once made. */
+  private var webView: WebView? = null
+
+  /** A link meshctl was opened with, for the panel to take once it loads. */
+  @Volatile
+  private var link: String? = null
+
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    this.webView = webView
+    webView.addJavascriptInterface(Panel(), "meshctlApp")
+  }
+
+  /**
+   * A link to add what it holds, from a meshcore:// opened or text shared:
+   * to the panel's /share, as a browser's share target has it, straight
+   * away where it shows already, or taken by the panel as it loads.
+   */
+  private fun open(intent: Intent?) {
+    val opened = when (intent?.action) {
+      Intent.ACTION_VIEW -> intent.dataString
+      Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+      else -> null
+    } ?: return
+    val shown = webView?.url?.let(Uri::parse)
+    if (shown != null && (shown.scheme == "http" || shown.scheme == "https")) {
+      webView?.loadUrl(
+        shown.buildUpon()
+          .path("/share")
+          .clearQuery()
+          .appendQueryParameter("text", opened)
+          .fragment(null)
+          .build()
+          .toString()
+      )
+    } else {
+      link = opened
+    }
+  }
+
+  /** What the panel and the app tell each other. */
+  @Keep
+  inner class Panel {
+    /** The link meshctl was opened with, once; none, if not. */
+    @Keep
+    @JavascriptInterface
+    fun takeLink(): String? {
+      val taken = link
+      link = null
+      return taken
+    }
+
+    /**
+     * The system's bars, in the colour of the panel's own at their edges,
+     * as the panel says it, its theme picked or the system's changed: the
+     * room left for them painted with it, their icons dark on light and
+     * light on dark.
+     */
+    @Keep
+    @JavascriptInterface
+    fun paint(color: String) {
+      val parsed = try {
+        Color.parseColor(color.trim())
+      } catch (_: IllegalArgumentException) {
+        return
+      }
+      runOnUiThread {
+        findViewById<View>(android.R.id.content).setBackgroundColor(parsed)
+        val light = ColorUtils.calculateLuminance(parsed) > 0.5
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+          isAppearanceLightStatusBars = light
+          isAppearanceLightNavigationBars = light
+        }
+      }
+    }
+  }
+
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     ask(intent)
+    open(intent)
   }
 
   /** The service, looking for radios by Bluetooth, asks for leave to. */

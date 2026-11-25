@@ -46,6 +46,34 @@
         window.addEventListener('resize', () => setTimeout(reveal, 50));
         window.addEventListener('focusin', () => setTimeout(reveal, 300));
       })();
+      // Within the Android app: the link it was opened with, if any, to the
+      // share target, as a browser's would have it; and its bars in the
+      // colour of the panel's own, the top bar's and the tab bar's, told as
+      // the page loads, and again as its theme changes or the system's does.
+      (() => {
+        const app = window.meshctlApp;
+        if (!app) return;
+        const link = app.takeLink();
+        if (link && location.pathname !== '/share') {
+          location.replace('/share?text=' + encodeURIComponent(link));
+          return;
+        }
+        const paint = () => {
+          const color = getComputedStyle(document.body)
+            .getPropertyValue('--mc-surface').trim();
+          if (color) app.paint(color);
+        };
+        const start = () => {
+          paint();
+          new MutationObserver(paint).observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['data-theme'],
+          });
+          matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paint);
+        };
+        if (document.body) start();
+        else document.addEventListener('DOMContentLoaded', start);
+      })();
     </script>
     <!-- Leaflet's directory carries its version, and map.js gets a hash from
          trunk: both can be kept by browsers for good, as the server says. -->
