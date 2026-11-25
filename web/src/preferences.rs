@@ -10,8 +10,16 @@ use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
 use meshctl_api::{Accent, Language, MapTheme, Preferences, Theme};
 
-/// The accents to come, as they will look: for now, not to be picked.
-const ACCENTS_TO_COME: [&str; 5] = ["#4dabf7", "#38d9a9", "#9775fa", "#f06595", "#ff8a6b"];
+/// The accents, each as its swatch shows it: as it looks on the dark theme,
+/// the brightest; gray, between its light and its dark, to be seen on both.
+const ACCENTS: [(Accent, &str); 6] = [
+    (Accent::Amber, "#f0a63a"),
+    (Accent::Blue, "#4dabf7"),
+    (Accent::Teal, "#38d9a9"),
+    (Accent::Violet, "#9775fa"),
+    (Accent::Coral, "#ff8a6b"),
+    (Accent::Gray, "#868e96"),
+];
 
 #[component]
 pub fn PreferencesView() -> impl IntoView {
@@ -53,20 +61,27 @@ pub fn PreferencesView() -> impl IntoView {
             Signal::derive(label),
         )
     });
-    // The accent: amber, the only one there is yet; the others, to come,
-    // show where they will be.
-    let amber = move || current().accent == Accent::Amber;
-    let coming = ACCENTS_TO_COME.map(|color| {
+    let accents = ACCENTS.map(|(accent, color)| {
+        let on = move || current().accent == accent;
+        let name = move || match accent {
+            Accent::Amber => t_string!(i18n, accent_amber).to_owned(),
+            Accent::Blue => t_string!(i18n, accent_blue).to_owned(),
+            Accent::Teal => t_string!(i18n, accent_teal).to_owned(),
+            Accent::Violet => t_string!(i18n, accent_violet).to_owned(),
+            Accent::Coral => t_string!(i18n, accent_coral).to_owned(),
+            Accent::Gray => t_string!(i18n, accent_gray).to_owned(),
+        };
         view! {
             <button
                 type="button"
                 role="radio"
                 class="swatch"
-                aria-checked="false"
-                disabled
-                title=move || t_string!(i18n, accent_soon)
-                aria-label=move || t_string!(i18n, accent_soon)
+                class:on=on
+                aria-checked=move || on().to_string()
+                title=name
+                aria-label=name
                 style=format!("--swatch: {color}")
+                on:click=move |_| choose(Box::new(move |p| p.accent = accent))()
             ></button>
         }
     });
@@ -87,18 +102,7 @@ pub fn PreferencesView() -> impl IntoView {
             </Row>
             <Row title=t!(i18n, prefs_accent).into_any() hint=t!(i18n, prefs_accent_hint).into_any()>
                 <div class="pref-control accents" role="radiogroup">
-                    <button
-                        type="button"
-                        role="radio"
-                        class="swatch"
-                        class:on=amber
-                        aria-checked=move || amber().to_string()
-                        title=move || t_string!(i18n, accent_amber)
-                        aria-label=move || t_string!(i18n, accent_amber)
-                        style="--swatch: #f0a63a"
-                        on:click=move |_| choose(Box::new(|p| p.accent = Accent::Amber))()
-                    ></button>
-                    {coming.into_iter().collect_view()}
+                    {accents.into_iter().collect_view()}
                 </div>
             </Row>
             <Row

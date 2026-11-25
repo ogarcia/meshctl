@@ -1411,6 +1411,11 @@ fn show(preferences: Preferences) {
         "data-accent",
         Some(match preferences.accent {
             Accent::Amber => "amber",
+            Accent::Blue => "blue",
+            Accent::Teal => "teal",
+            Accent::Violet => "violet",
+            Accent::Coral => "coral",
+            Accent::Gray => "gray",
         }),
     );
     set(

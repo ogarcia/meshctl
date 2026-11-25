@@ -232,6 +232,125 @@
           --mc-chart-2: #4a96ea;
         }
       }
+      /* The other accents, each with the colour that stands apart from it:
+         amber's blue, or amber itself for blue. */
+      :root[data-accent="blue"] {
+        --mc-primary: #1864ab;
+        --mc-on-primary: #ffffff;
+        --mc-second: #9a5b00;
+        --mc-chart-1: #1864ab;
+        --mc-chart-2: #9a5b00;
+      }
+      :root[data-theme="dark"][data-accent="blue"] {
+        --mc-primary: #4dabf7;
+        --mc-on-primary: #06121f;
+        --mc-second: #f0a63a;
+        --mc-chart-1: #3b8fd6;
+        --mc-chart-2: #c98018;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"])[data-accent="blue"] {
+          --mc-primary: #4dabf7;
+          --mc-on-primary: #06121f;
+          --mc-second: #f0a63a;
+          --mc-chart-1: #3b8fd6;
+          --mc-chart-2: #c98018;
+        }
+      }
+      :root[data-accent="teal"] {
+        --mc-primary: #087f5b;
+        --mc-on-primary: #ffffff;
+        --mc-second: #1f6fd1;
+        --mc-chart-1: #087f5b;
+        --mc-chart-2: #1f6fd1;
+      }
+      :root[data-theme="dark"][data-accent="teal"] {
+        --mc-primary: #38d9a9;
+        --mc-on-primary: #04140f;
+        --mc-second: #5aa9ff;
+        --mc-chart-1: #2bb38b;
+        --mc-chart-2: #4a96ea;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"])[data-accent="teal"] {
+          --mc-primary: #38d9a9;
+          --mc-on-primary: #04140f;
+          --mc-second: #5aa9ff;
+          --mc-chart-1: #2bb38b;
+          --mc-chart-2: #4a96ea;
+        }
+      }
+      :root[data-accent="violet"] {
+        --mc-primary: #6741d9;
+        --mc-on-primary: #ffffff;
+        --mc-second: #087f5b;
+        --mc-chart-1: #6741d9;
+        --mc-chart-2: #087f5b;
+      }
+      :root[data-theme="dark"][data-accent="violet"] {
+        --mc-primary: #9775fa;
+        --mc-on-primary: #0f0820;
+        --mc-second: #38d9a9;
+        --mc-chart-1: #7f62e0;
+        --mc-chart-2: #2bb38b;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"])[data-accent="violet"] {
+          --mc-primary: #9775fa;
+          --mc-on-primary: #0f0820;
+          --mc-second: #38d9a9;
+          --mc-chart-1: #7f62e0;
+          --mc-chart-2: #2bb38b;
+        }
+      }
+      :root[data-accent="coral"] {
+        --mc-primary: #c0401e;
+        --mc-on-primary: #ffffff;
+        --mc-second: #1f6fd1;
+        --mc-chart-1: #c0401e;
+        --mc-chart-2: #1f6fd1;
+      }
+      :root[data-theme="dark"][data-accent="coral"] {
+        --mc-primary: #ff8a6b;
+        --mc-on-primary: #200b05;
+        --mc-second: #5aa9ff;
+        --mc-chart-1: #e0704f;
+        --mc-chart-2: #4a96ea;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"])[data-accent="coral"] {
+          --mc-primary: #ff8a6b;
+          --mc-on-primary: #200b05;
+          --mc-second: #5aa9ff;
+          --mc-chart-1: #e0704f;
+          --mc-chart-2: #4a96ea;
+        }
+      }
+      /* Gray, for the interface in one colour: as near the text as to be
+         told from what is dimmed. */
+      :root[data-accent="gray"] {
+        --mc-primary: #343a40;
+        --mc-on-primary: #ffffff;
+        --mc-second: #1f6fd1;
+        --mc-chart-1: #495057;
+        --mc-chart-2: #1f6fd1;
+      }
+      :root[data-theme="dark"][data-accent="gray"] {
+        --mc-primary: #dee2e6;
+        --mc-on-primary: #12161c;
+        --mc-second: #5aa9ff;
+        --mc-chart-1: #adb5bd;
+        --mc-chart-2: #4a96ea;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"])[data-accent="gray"] {
+          --mc-primary: #dee2e6;
+          --mc-on-primary: #12161c;
+          --mc-second: #5aa9ff;
+          --mc-chart-1: #adb5bd;
+          --mc-chart-2: #4a96ea;
+        }
+      }
       /* Worked out from the rest, so that each accent says only its own. */
       body {
         --mc-soft: color-mix(in srgb, var(--mc-primary) 16%, var(--mc-surface));

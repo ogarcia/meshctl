@@ -110,6 +110,11 @@ fn themed(html: &str, preferences: &Preferences) -> String {
     }
     attributes.push_str(match preferences.accent {
         Accent::Amber => r#" data-accent="amber""#,
+        Accent::Blue => r#" data-accent="blue""#,
+        Accent::Teal => r#" data-accent="teal""#,
+        Accent::Violet => r#" data-accent="violet""#,
+        Accent::Coral => r#" data-accent="coral""#,
+        Accent::Gray => r#" data-accent="gray""#,
     });
     match preferences.map_theme {
         MapTheme::Page => {}

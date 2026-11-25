@@ -2552,6 +2552,12 @@ pub enum Theme {
 pub enum Accent {
     #[default]
     Amber,
+    Blue,
+    Teal,
+    Violet,
+    Coral,
+    /// The interface in one colour.
+    Gray,
 }
 
 /// The maps' theme.
