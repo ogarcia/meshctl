@@ -5,11 +5,13 @@
 //! for following along, and the token when it asks for one.
 
 use crate::traces::{Traceroute, TracerouteId};
+use futures_util::lock::Mutex;
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use gloo_net::http::{Request, RequestBuilder, Response};
 use gloo_net::websocket::Message as Frame;
 use gloo_net::websocket::futures::WebSocket;
-use meshctl_api::events::{EVENTS_PATH, Hello, ServerMessage};
+use meshctl_api::events::{ClientMessage, EVENTS_PATH, Hello, ServerMessage};
 use meshctl_api::{
     API_V1, Channel, ChannelHistory, ChannelOrder, ChannelSecret, Conversation, Error, ErrorCode,
     MapView, Message, NewMessage, Node, NodeSettings, NodeSettingsChange, Packet, PacketFilter,
@@ -17,6 +19,7 @@ use meshctl_api::{
     SettingsApplied, SettingsSection, SightingId, Status, TOKEN_HEADER,
 };
 use serde::de::DeserializeOwned;
+use std::rc::Rc;
 
 /// Where the token is kept in the browser, once given.
 const TOKEN_KEY: &str = "meshctl.token";
@@ -795,11 +798,24 @@ pub async fn remove_channel(
 
 /// The event stream, already past hello and ready.
 pub struct Events {
-    socket: WebSocket,
+    stream: SplitStream<WebSocket>,
+}
+
+/// The event stream's other way: what this page tells the daemon.
+#[derive(Clone)]
+pub struct Teller(Rc<Mutex<SplitSink<WebSocket, Frame>>>);
+
+impl Teller {
+    /// Tells the daemon something; lost if the stream is gone, as a new one
+    /// is told again.
+    pub async fn tell(&self, message: &ClientMessage) {
+        let text = serde_json::to_string(message).expect("client messages serialize");
+        let _ = self.0.lock().await.send(Frame::Text(text)).await;
+    }
 }
 
 impl Events {
-    pub async fn open() -> Result<Self, Failure> {
+    pub async fn open() -> Result<(Self, Teller), Failure> {
         let location = web_sys::window().ok_or(Failure::Unreachable)?.location();
         let scheme = match location.protocol().as_deref() {
             Ok("https:") => "wss",
@@ -815,9 +831,10 @@ impl Events {
             .await
             .map_err(|_| Failure::Unreachable)?;
 
-        let mut events = Self { socket };
+        let (sink, stream) = socket.split();
+        let mut events = Self { stream };
         match events.next().await {
-            Some(ServerMessage::Ready) => Ok(events),
+            Some(ServerMessage::Ready) => Ok((events, Teller(Rc::new(Mutex::new(sink))))),
             Some(ServerMessage::Error {
                 error: ErrorCode::Unauthorized,
             }) => Err(Failure::Unauthorized),
@@ -828,7 +845,7 @@ impl Events {
     /// The next message, or `None` once the stream is closed.
     pub async fn next(&mut self) -> Option<ServerMessage> {
         loop {
-            match self.socket.next().await? {
+            match self.stream.next().await? {
                 Ok(Frame::Text(text)) => {
                     if let Ok(message) = serde_json::from_str(&text) {
                         return Some(message);
@@ -907,6 +924,21 @@ pub async fn save_app_settings(
 ) -> Result<meshctl_api::AppSettings, Failure> {
     let request = with_token(Request::put(&url("/preferences/app")))
         .json(settings)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// What meshctl notifies of.
+pub async fn notifications() -> Result<meshctl_api::Notifications, Failure> {
+    get("/preferences/notifications").await
+}
+
+pub async fn save_notifications(
+    notifications: &meshctl_api::Notifications,
+) -> Result<meshctl_api::Notifications, Failure> {
+    let request = with_token(Request::put(&url("/preferences/notifications")))
+        .json(notifications)
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)

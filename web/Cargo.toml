@@ -13,7 +13,7 @@ publish = false
 # to the daemon only through /api/v1, with the types in meshctl-api.
 [dependencies]
 console_error_panic_hook = "0.1"
-futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 gloo-net = { version = "0.8", default-features = false, features = ["http", "json", "websocket"] }
 gloo-timers = { version = "0.4", features = ["futures"] }
 js-sys = "0.3"
@@ -30,7 +30,7 @@ serde.workspace = true
 serde_json = "1"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["CanvasRenderingContext2d", "Clipboard", "ContextAttributes2d", "CssStyleDeclaration", "DataTransfer", "Document", "DomRect", "DragEvent", "Element", "Event", "EventInit", "HtmlCanvasElement", "HtmlDocument", "HtmlElement", "HtmlFormElement", "HtmlInputElement", "ImageData", "IntersectionObserver", "IntersectionObserverInit", "HtmlTextAreaElement", "KeyboardEvent", "HtmlImageElement", "HtmlVideoElement", "Location", "MediaDevices", "MediaStream", "MediaStreamConstraints", "MediaStreamTrack", "Navigator", "NodeList", "ResizeObserver", "ScrollBehavior", "ScrollToOptions", "Selection", "Storage", "Url", "UrlSearchParams", "History", "Window", "Blob", "File", "FileList"] }
+web-sys = { version = "0.3", features = ["CanvasRenderingContext2d", "Clipboard", "ContextAttributes2d", "CssStyleDeclaration", "DataTransfer", "Document", "DomRect", "DragEvent", "Element", "Event", "EventInit", "HtmlCanvasElement", "HtmlDocument", "HtmlElement", "HtmlFormElement", "HtmlInputElement", "ImageData", "IntersectionObserver", "IntersectionObserverInit", "HtmlTextAreaElement", "KeyboardEvent", "HtmlImageElement", "HtmlVideoElement", "Location", "MediaDevices", "MediaStream", "MediaStreamConstraints", "MediaStreamTrack", "Navigator", "NodeList", "Notification", "NotificationOptions", "NotificationPermission", "ResizeObserver", "ScrollBehavior", "ScrollToOptions", "Selection", "Storage", "Url", "UrlSearchParams", "History", "Window", "Blob", "File", "FileList"] }
 
 [build-dependencies]
 leptos_i18n_build = { version = "0.6", features = ["csr"] }

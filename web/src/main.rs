@@ -23,6 +23,8 @@ mod meshcore_regions;
 mod meshcore_settings;
 mod names;
 mod node;
+mod notifications;
+mod notify;
 mod offline;
 mod packets;
 mod phone;

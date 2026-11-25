@@ -30,6 +30,7 @@ fn tab_of(page: Page) -> Page {
         | Page::Preferences
         | Page::Radios
         | Page::AutoReplies
+        | Page::Notifications
         | Page::Data => Page::More,
     }
 }
@@ -59,9 +60,12 @@ pub fn is_tab(page: Page) -> bool {
 pub fn back_of(page: Page) -> Option<Page> {
     match page {
         Page::Chat => Some(Page::Chats),
-        Page::RadioSettings | Page::Preferences | Page::Radios | Page::AutoReplies | Page::Data => {
-            Some(Page::More)
-        }
+        Page::RadioSettings
+        | Page::Preferences
+        | Page::Radios
+        | Page::AutoReplies
+        | Page::Notifications
+        | Page::Data => Some(Page::More),
         _ => None,
     }
 }
@@ -284,6 +288,7 @@ pub fn MoreView() -> impl IntoView {
             Page::RadioSettings => t!(i18n, nav_radio_settings).into_any(),
             Page::Radios => t!(i18n, radios_title).into_any(),
             Page::AutoReplies => t!(i18n, replies_title).into_any(),
+            Page::Notifications => t!(i18n, notifications_title).into_any(),
             Page::Data => t!(i18n, data_title).into_any(),
             _ => t!(i18n, prefs_title).into_any(),
         };
@@ -316,6 +321,7 @@ pub fn MoreView() -> impl IntoView {
             <h2>"meshctl"</h2>
             {item(Page::Radios)}
             {item(Page::AutoReplies)}
+            {item(Page::Notifications)}
             {item(Page::Data)}
             {item(Page::Preferences)}
             <crate::about::AboutFoot />

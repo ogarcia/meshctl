@@ -91,6 +91,8 @@ pub enum Page {
     Radios,
     /// meshctl's: what it answers on its own, and where.
     AutoReplies,
+    /// meshctl's: what it notifies of.
+    Notifications,
     /// meshctl's: what it keeps, and for how long.
     Data,
     /// On a phone: the selected radio's channels and direct conversations,
@@ -106,7 +108,7 @@ impl Page {
     fn is_meshctl(self) -> bool {
         matches!(
             self,
-            Self::Preferences | Self::Radios | Self::AutoReplies | Self::Data
+            Self::Preferences | Self::Radios | Self::AutoReplies | Self::Notifications | Self::Data
         )
     }
 }
@@ -1083,7 +1085,10 @@ impl Live {
     /// One connection to the event stream, until it drops.
     async fn session(self) -> Failure {
         let mut events = match Events::open().await {
-            Ok(events) => events,
+            Ok((events, teller)) => {
+                crate::notify::connected(self, teller);
+                events
+            }
             Err(failure) => return failure,
         };
         // After ready, not before: nothing is lost in between.
@@ -1332,6 +1337,10 @@ impl Live {
                     self.preferences.set(preferences);
                     Ok(())
                 }
+                ServerMessage::Notification { notification } => {
+                    crate::notify::show(self, notification);
+                    Ok(())
+                }
                 ServerMessage::Radios | ServerMessage::Lagged => self.refresh().await,
                 // Another radio's messages, come or read: how many it has
                 // unread, on its button.
@@ -1469,6 +1478,7 @@ fn Shell() -> impl IntoView {
     let i18n = use_i18n();
     let live = Live::new();
     provide_context(live);
+    crate::notify::watch(live);
     follow(live);
 
     Effect::new(move |_| {
@@ -1610,6 +1620,7 @@ fn Content() -> impl IntoView {
             (_, _, Page::Preferences) => Shown::Page(Page::Preferences),
             (_, _, Page::Radios) => Shown::Page(Page::Radios),
             (_, _, Page::AutoReplies) => Shown::Page(Page::AutoReplies),
+            (_, _, Page::Notifications) => Shown::Page(Page::Notifications),
             (_, _, Page::Data) => Shown::Page(Page::Data),
             // The welcome, over the whole screen, instead.
             (_, Some(0), _) => Shown::Nothing,
@@ -1630,6 +1641,9 @@ fn Content() -> impl IntoView {
         Shown::Page(Page::Radios) => view! { <RadiosView /> }.into_any(),
         Shown::Page(Page::AutoReplies) => {
             view! { <crate::auto_replies::AutoRepliesView /> }.into_any()
+        }
+        Shown::Page(Page::Notifications) => {
+            view! { <crate::notifications::NotificationsView /> }.into_any()
         }
         Shown::Page(Page::Data) => view! { <crate::storage::DataView /> }.into_any(),
         Shown::Page(Page::Map) => view! { <MapView /> }.into_any(),
@@ -1793,6 +1807,7 @@ fn MeshctlSidebar() -> impl IntoView {
             Page::Preferences => t!(i18n, prefs_title).into_any(),
             Page::Data => t!(i18n, data_title).into_any(),
             Page::AutoReplies => t!(i18n, replies_title).into_any(),
+            Page::Notifications => t!(i18n, notifications_title).into_any(),
             _ => t!(i18n, radios_title).into_any(),
         };
         // The radios' page opens on their list, the editor closed; the
@@ -1815,8 +1830,8 @@ fn MeshctlSidebar() -> impl IntoView {
             <span class="dim">{t!(i18n, nav_meshctl_settings)}</span>
         </header>
         <div class="sidebar-body">
-            {item(Page::Radios)} {item(Page::AutoReplies)} {item(Page::Data)}
-            {item(Page::Preferences)}
+            {item(Page::Radios)} {item(Page::AutoReplies)} {item(Page::Notifications)}
+            {item(Page::Data)} {item(Page::Preferences)}
         </div>
         <crate::about::AboutFoot />
     }
@@ -2235,6 +2250,13 @@ fn Topbar() -> impl IntoView {
             <div class="heading">
                 <h1>{t!(i18n, prefs_title)}</h1>
                 <span class="dim">{t!(i18n, prefs_text)}</span>
+            </div>
+        }
+        .into_any(),
+        Page::Notifications => view! {
+            <div class="heading">
+                <h1>{t!(i18n, notifications_title)}</h1>
+                <span class="dim">{t!(i18n, notifications_text)}</span>
             </div>
         }
         .into_any(),

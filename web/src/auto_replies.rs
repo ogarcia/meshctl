@@ -72,7 +72,7 @@ fn reorder(live: Live, from: usize, to: usize) {
 }
 
 /// A radio's name, by its id.
-fn radio_name(live: Live, radio: RadioId) -> String {
+pub(crate) fn radio_name(live: Live, radio: RadioId) -> String {
     live.radios.with_untracked(|radios| {
         radios
             .iter()
@@ -84,7 +84,7 @@ fn radio_name(live: Live, radio: RadioId) -> String {
 }
 
 /// A node, by its name if the selected radio knows it.
-fn node_label(live: Live, radio: RadioId, node: u32) -> String {
+pub(crate) fn node_label(live: Live, radio: RadioId, node: u32) -> String {
     if live.selected.get_untracked() == Some(radio) {
         crate::chat::node_name(live, node)
     } else {
@@ -496,9 +496,56 @@ impl Draft {
     }
 }
 
+/// Each radio's channels, as read: none for one that cannot say, nothing
+/// yet for one still being asked.
+pub(crate) type RadioChannels = RwSignal<HashMap<RadioId, Option<Vec<Channel>>>>;
+
+/// The radios, by their id, name and kind, and each one's channels as it
+/// has them now, as they are read: none for one that cannot say.
+pub(crate) fn radio_channels(live: Live) -> (Vec<(RadioId, String, RadioKind)>, RadioChannels) {
+    let channels = RwSignal::new(HashMap::<RadioId, Option<Vec<Channel>>>::new());
+    let radios: Vec<(RadioId, String, RadioKind)> = live.radios.with_untracked(|radios| {
+        radios
+            .iter()
+            .flatten()
+            .map(|r| (r.id, r.name.clone(), r.kind))
+            .collect()
+    });
+    for (radio, _, kind) in &radios {
+        let (radio, kind) = (*radio, *kind);
+        spawn_local(async move {
+            let mut read = daemon::channels(radio).await.ok().map(|all| {
+                all.into_iter()
+                    .filter(|c| c.role != "DISABLED")
+                    .collect::<Vec<_>>()
+            });
+            // A Meshtastic channel with no name goes by its radio's modem
+            // preset, as the radio names it; Custom with none.
+            if kind == RadioKind::Meshtastic
+                && let Some(list) = read.as_mut()
+                && list.iter().any(|c| c.name.is_empty())
+                && let Ok(status) = daemon::status(radio).await
+                && let Some(local) = status.local
+            {
+                let preset = local
+                    .modem_preset
+                    .as_deref()
+                    .map_or_else(|| "Custom".to_owned(), crate::chat::preset_name);
+                for channel in list.iter_mut().filter(|c| c.name.is_empty()) {
+                    channel.name.clone_from(&preset);
+                }
+            }
+            channels.try_update(|channels| {
+                channels.insert(radio, read);
+            });
+        });
+    }
+    (radios, channels)
+}
+
 /// A channel place as the editor tells it apart: by its radio and slot, or,
 /// in none, by its name.
-fn channel_place(radio: RadioId, channel: &Channel) -> AutoReplyPlace {
+pub(crate) fn channel_place(radio: RadioId, channel: &Channel) -> AutoReplyPlace {
     AutoReplyPlace::Channel {
         radio,
         channel: Some(channel.index),
@@ -508,7 +555,7 @@ fn channel_place(radio: RadioId, channel: &Channel) -> AutoReplyPlace {
 
 /// A channel's name, as read with its preset's for one with none; by its
 /// slot while none is known.
-fn channel_name(channel: &Channel) -> String {
+pub(crate) fn channel_name(channel: &Channel) -> String {
     if channel.name.is_empty() {
         let i18n = use_i18n();
         untrack(|| format!("{} {}", t_string!(i18n, channel_numbered), channel.index))
@@ -519,7 +566,7 @@ fn channel_name(channel: &Channel) -> String {
 
 /// Places alike but for the name told with a channel in a slot, which the
 /// editor does not keep up to date.
-fn same_place(a: &AutoReplyPlace, b: &AutoReplyPlace) -> bool {
+pub(crate) fn same_place(a: &AutoReplyPlace, b: &AutoReplyPlace) -> bool {
     match (a, b) {
         (
             AutoReplyPlace::Channel {
@@ -628,45 +675,7 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
         });
     }
 
-    // Each radio's channels, as it has them now; none for one that cannot
-    // say.
-    let channels = RwSignal::new(HashMap::<RadioId, Option<Vec<Channel>>>::new());
-    let radios: Vec<(RadioId, String, RadioKind)> = live.radios.with_untracked(|radios| {
-        radios
-            .iter()
-            .flatten()
-            .map(|r| (r.id, r.name.clone(), r.kind))
-            .collect()
-    });
-    for (radio, _, kind) in &radios {
-        let (radio, kind) = (*radio, *kind);
-        spawn_local(async move {
-            let mut read = daemon::channels(radio).await.ok().map(|all| {
-                all.into_iter()
-                    .filter(|c| c.role != "DISABLED")
-                    .collect::<Vec<_>>()
-            });
-            // A Meshtastic channel with no name goes by its radio's modem
-            // preset, as the radio names it; Custom with none.
-            if kind == RadioKind::Meshtastic
-                && let Some(list) = read.as_mut()
-                && list.iter().any(|c| c.name.is_empty())
-                && let Ok(status) = daemon::status(radio).await
-                && let Some(local) = status.local
-            {
-                let preset = local
-                    .modem_preset
-                    .as_deref()
-                    .map_or_else(|| "Custom".to_owned(), crate::chat::preset_name);
-                for channel in list.iter_mut().filter(|c| c.name.is_empty()) {
-                    channel.name.clone_from(&preset);
-                }
-            }
-            channels.try_update(|channels| {
-                channels.insert(radio, read);
-            });
-        });
-    }
+    let (radios, channels) = radio_channels(live);
 
     // The texts' fields, and the last one written in, for the variables to
     // go into.
