@@ -311,7 +311,7 @@ fn triggered(triggers: &[String], matching: AutoReplyMatch, text: &str) -> bool 
 /// What a message heard by a radio tells, with what the radio knows of its
 /// sender and its channel.
 fn told(radios: &Radios, radio: RadioId, message: &Message) -> Told {
-    let local = jiff::Zoned::now();
+    let local = jiff::ZonedDateTime::now();
     let mut told = Told {
         hops: message.hops_away,
         snr: message.snr,
