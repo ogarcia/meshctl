@@ -26,8 +26,11 @@ const MESSAGES: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline
 const HASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/hash.svg");
 const USER: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/user.svg");
 const CHECK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/check.svg");
-const BELL_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/bell-off.svg");
-const BELL_PLAIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/bell.svg");
+// A radio's none, some and all, on a phone: a circle crossed out, dashed,
+// and full.
+const NONE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/circle-off.svg");
+const SOME: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/circle-dashed.svg");
+const ALL: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/filled/circle.svg");
 const CHEVRON: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 const WARNING: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/alert-triangle.svg");
@@ -505,7 +508,7 @@ fn RadioPlaces(
 
 /// How much of a radio is notified of, as a pill of three: none and all
 /// are picked; some is so when it is, and is not picked but by picking
-/// within the radio. Words where there is room; on a phone, bells.
+/// within the radio. Words where there is room; on a phone, circles.
 #[component]
 fn Level(level: Memo<usize>, set_all: impl Fn(bool) + Copy + 'static) -> impl IntoView {
     let i18n = use_i18n();
@@ -519,7 +522,7 @@ fn Level(level: Memo<usize>, set_all: impl Fn(bool) + Copy + 'static) -> impl In
         }
         .to_owned()
     };
-    let buttons = [BELL_OFF, BELL_PLAIN, BELL]
+    let buttons = [NONE, SOME, ALL]
         .into_iter()
         .enumerate()
         .map(|(at, icon)| {

@@ -4394,12 +4394,14 @@
       .notify-radio-head .chevron svg { width: 18px; height: 18px; }
       .notify-radio.open .notify-radio-head .chevron { transform: rotate(180deg); }
       .notify-radio-head:hover .chevron { color: var(--mc-text); }
-      /* How much of a radio: words, or on a phone bells; some, chosen
+      /* How much of a radio: words, or on a phone circles; some, chosen
          only as it is, in grey as never is. */
       .notify-level { flex: none; }
       .notify-level button { min-height: 32px; font-size: 13px; }
       .notify-level .level-icon { display: none; }
       .notify-level .level-icon svg { width: 18px; height: 18px; }
+      /* All: the circle full, as drawn, not outlined as every icon is. */
+      .notify-level button:last-child .level-icon svg { fill: currentColor; stroke: none; }
       .notify-level button.some { font-style: italic; cursor: default; }
       .notify-level button.some:hover { color: var(--mc-muted); }
       .notify-level button.some.on:hover { color: var(--mc-text); }
