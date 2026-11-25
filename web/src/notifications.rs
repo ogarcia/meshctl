@@ -2,22 +2,32 @@
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
 //! meshctl's notifications, as a page of its settings: whether it notifies
-//! at all, with what messages say or not, and where, each radio's places
-//! picked as an automatic reply's are; a channel, maybe only when it
-//! mentions the radio.
+//! at all, and who shows them; with what messages say or not, as a sample
+//! shows; and where, each radio's conversations as never, everything, or,
+//! on a channel, only when it mentions the radio.
 //!
 //! Each change is kept as it is made.
 
 use crate::app::Live;
 use crate::auto_replies::{channel_name, channel_place, node_label, radio_channels, same_place};
+use crate::badge::{self, Face};
 use crate::daemon;
 use crate::i18n::{t, t_string, use_i18n};
 use crate::notify::{self, Permission};
+use crate::preferences::{Choice, pills};
 use crate::radios::Switch;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{AutoReplyPlace, Channel, NotificationPlace, Notifications, RadioId};
+use meshctl_api::{AutoReplyPlace, Badge, Channel, NotificationPlace, Notifications, RadioId};
 use std::collections::HashMap;
+
+const BELL: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/bell-ringing.svg");
+const MESSAGES: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/messages.svg");
+const HASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/hash.svg");
+const USER: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/user.svg");
+const CHECK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/check.svg");
+const WARNING: &str =
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/alert-triangle.svg");
 
 /// Keeps the notifications as they are now, and reads them back as kept:
 /// as they were, if they could not be.
@@ -69,33 +79,50 @@ pub fn NotificationsView() -> impl IntoView {
             ask();
         }
     };
-    // A line of its own under what the switch does.
-    let browser = move || {
-        if notify::in_app() || !enabled() {
+    // Who shows them, and whether they can: a line under the switch.
+    let status = move || {
+        if !enabled() {
             return ().into_any();
+        }
+        if notify::in_app() {
+            return view! {
+                <p class="notify-status">
+                    <span class="icon" inner_html=CHECK></span>
+                    <span>{t!(i18n, notifications_status_app)}</span>
+                </p>
+            }
+            .into_any();
         }
         match permission.get() {
             Permission::Granted => view! {
-                <span class="notify-browser dim">{t!(i18n, notifications_browser_granted)}</span>
+                <p class="notify-status ok">
+                    <span class="icon" inner_html=CHECK></span>
+                    <span>{t!(i18n, notifications_browser_granted)}</span>
+                </p>
             }
             .into_any(),
             Permission::Ask => view! {
-                <span class="notify-browser notify-ask">
-                    <span class="dim">{t!(i18n, notifications_browser_ask)}</span>
-                    <button type="button" on:click=move |_| ask()>
+                <p class="notify-status ask">
+                    <span class="icon" inner_html=WARNING></span>
+                    <span>{t!(i18n, notifications_browser_ask)}</span>
+                    <button type="button" class="primary" on:click=move |_| ask()>
                         {t!(i18n, notifications_browser_allow)}
                     </button>
-                </span>
+                </p>
             }
             .into_any(),
             Permission::Denied => view! {
-                <span class="notify-browser error">{t!(i18n, notifications_browser_denied)}</span>
+                <p class="notify-status bad">
+                    <span class="icon" inner_html=WARNING></span>
+                    <span>{t!(i18n, notifications_browser_denied)}</span>
+                </p>
             }
             .into_any(),
             Permission::Unsupported => view! {
-                <span class="notify-browser error">
-                    {t!(i18n, notifications_browser_unsupported)}
-                </span>
+                <p class="notify-status bad">
+                    <span class="icon" inner_html=WARNING></span>
+                    <span>{t!(i18n, notifications_browser_unsupported)}</span>
+                </p>
             }
             .into_any(),
         }
@@ -110,29 +137,32 @@ pub fn NotificationsView() -> impl IntoView {
 
     view! {
         <section
-            class="preferences data notifications"
+            class="notifications"
+            class:off=move || !enabled()
             class:gone=move || settings.with(Option::is_none)
         >
-            <div class="pref-row">
-                <div class="pref-what">
-                    <span class="pref-title">{t!(i18n, notifications_on)}</span>
-                    <span class="dim">{t!(i18n, notifications_on_hint)}</span>
-                    {browser}
-                </div>
-                <div class="pref-control switch-control">
+            <div class="card notify-hero">
+                <div class="notify-head">
+                    <span class="reply-face" inner_html=BELL></span>
+                    <div class="notify-what">
+                        <h2>{t!(i18n, notifications_on)}</h2>
+                        <span class="dim">{t!(i18n, notifications_on_hint)}</span>
+                    </div>
                     <Switch
                         on=Signal::derive(enabled)
                         label=Signal::derive(move || t_string!(i18n, notifications_on).to_string())
                         flip=flip_enabled
                     />
                 </div>
+                {status}
             </div>
-            <div class="pref-row" class:muted=move || !enabled()>
-                <div class="pref-what">
-                    <span class="pref-title">{t!(i18n, notifications_show_text)}</span>
-                    <span class="dim">{t!(i18n, notifications_show_text_hint)}</span>
-                </div>
-                <div class="pref-control switch-control">
+
+            <div class="card notify-look">
+                <div class="notify-head">
+                    <div class="notify-what">
+                        <h3>{t!(i18n, notifications_show_text)}</h3>
+                        <span class="dim">{t!(i18n, notifications_show_text_hint)}</span>
+                    </div>
                     <Switch
                         on=Signal::derive(show_text)
                         label=Signal::derive(move || {
@@ -144,9 +174,36 @@ pub fn NotificationsView() -> impl IntoView {
                         }
                     />
                 </div>
+                <div class="notify-sample" aria-hidden="true">
+                    <img class="sample-app" src="/favicon.svg" alt="" />
+                    <div class="sample-body">
+                        <span class="sample-top">
+                            <span>"meshctl"</span>
+                            <span class="dim">{t!(i18n, notifications_sample_when)}</span>
+                        </span>
+                        <b>{t!(i18n, notifications_sample_title)}</b>
+                        {move || {
+                            if show_text() {
+                                view! { <span>{t!(i18n, notifications_sample_text)}</span> }
+                                    .into_any()
+                            } else {
+                                view! {
+                                    <span class="dim hidden-text">
+                                        {t!(i18n, notifications_sample_hidden)}
+                                    </span>
+                                }
+                                    .into_any()
+                            }
+                        }}
+                    </div>
+                </div>
             </div>
-            <h2>{t!(i18n, notifications_where)}</h2>
-            <div class="notify-places" class:muted=move || !enabled()>
+
+            <header class="notify-where">
+                <h2>{t!(i18n, notifications_where)}</h2>
+                <span class="dim">{t!(i18n, notifications_where_hint)}</span>
+            </header>
+            <div class="notify-places">
                 {wheres}
                 {empty.then(|| view! { <p class="hint dim">{t!(i18n, notifications_no_radios)}</p> })}
             </div>
@@ -154,9 +211,17 @@ pub fn NotificationsView() -> impl IntoView {
     }
 }
 
+/// How a conversation is notified of: never, only mentions, everything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Level {
+    Never,
+    Mentions,
+    All,
+}
+
 /// Where messages are notified of on one radio: its direct conversations,
-/// each of its channels, everything said there or only mentions, and what
-/// else it was given there.
+/// each of its channels, and what else it was given there, each a row with
+/// how much of it is.
 #[component]
 fn RadioPlaces(
     radio: RadioId,
@@ -166,15 +231,27 @@ fn RadioPlaces(
 ) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let given = move |place: &AutoReplyPlace| {
+    let (badge, short) = live.radios.with_untracked(|radios| {
+        radios
+            .iter()
+            .flatten()
+            .find(|r| r.id == radio)
+            .map(|r| (r.badge.clone(), r.short_name.clone()))
+            .unwrap_or_else(|| (Badge::default(), None))
+    });
+    let level_of = move |place: &AutoReplyPlace| {
         settings.with(|s| {
-            s.as_ref()
+            match s
+                .as_ref()
                 .and_then(|s| s.places.iter().find(|p| same_place(&p.place, place)))
-                .cloned()
+            {
+                None => Level::Never,
+                Some(p) if p.mentions => Level::Mentions,
+                Some(_) => Level::All,
+            }
         })
     };
-    // Each change is a place in or out, or a channel's mentions flipped.
-    let set = move |place: AutoReplyPlace, now: Option<bool>| {
+    let set = move |place: AutoReplyPlace, level: Level| {
         let Some(mut changed) = settings.get_untracked() else {
             return;
         };
@@ -182,67 +259,71 @@ fn RadioPlaces(
             .places
             .iter()
             .position(|p| same_place(&p.place, &place));
-        match (at, now) {
-            (Some(at), None) => {
+        match (at, level) {
+            (Some(at), Level::Never) => {
                 changed.places.remove(at);
             }
-            (Some(at), Some(mentions)) => changed.places[at].mentions = mentions,
-            (None, Some(mentions)) => changed.places.push(NotificationPlace { place, mentions }),
-            (None, None) => return,
+            (Some(at), level) => changed.places[at].mentions = level == Level::Mentions,
+            (None, Level::Never) => return,
+            (None, level) => changed.places.push(NotificationPlace {
+                place,
+                mentions: level == Level::Mentions,
+            }),
         }
         keep(settings, changed);
     };
-    let check = move |place: AutoReplyPlace, label: String, note: Option<String>, channel: bool| {
-        let on = {
-            let place = place.clone();
-            move || given(&place).is_some()
+    let row = move |place: AutoReplyPlace,
+                    icon: &'static str,
+                    label: String,
+                    note: Option<String>,
+                    channel: bool| {
+        let levels: &[Level] = if channel {
+            &[Level::Never, Level::Mentions, Level::All]
+        } else {
+            &[Level::Never, Level::All]
         };
-        let mentions = {
-            let place = place.clone();
-            move || given(&place).is_some_and(|p| p.mentions)
-        };
-        let flip = {
-            let place = place.clone();
-            move |_| {
-                let now = if given(&place).is_some() {
-                    None
-                } else {
-                    Some(false)
+        let choices: Vec<Choice> = levels
+            .iter()
+            .map(|&level| {
+                let on = {
+                    let place = place.clone();
+                    Signal::derive(move || level_of(&place) == level)
                 };
-                set(place.clone(), now);
-            }
-        };
-        let pick = move |ev: leptos::ev::Event| {
-            set(place.clone(), Some(event_target_value(&ev) == "mentions"));
+                let pick = {
+                    let place = place.clone();
+                    Box::new(move || set(place.clone(), level)) as Box<dyn Fn() + Send + Sync>
+                };
+                let word = Signal::derive(move || {
+                    match level {
+                        Level::Never => t_string!(i18n, notifications_never),
+                        Level::Mentions => t_string!(i18n, notifications_mentions),
+                        Level::All => t_string!(i18n, notifications_all),
+                    }
+                    .to_owned()
+                });
+                (on, pick, word)
+            })
+            .collect();
+        let quiet = {
+            let place = place.clone();
+            move || level_of(&place) == Level::Never
         };
         view! {
-            <div class="notify-place">
-                <label class="check">
-                    <input type="checkbox" prop:checked=on.clone() on:change=flip />
+            <div class="notify-row" class:quiet=quiet>
+                <span class="row-icon" inner_html=icon></span>
+                <span class="row-name">
                     <span>{label}</span>
                     {note.map(|note| view! { <span class="dim">{note}</span> })}
-                </label>
-                {channel
-                    .then(|| {
-                        view! {
-                            <select
-                                class="notify-mode"
-                                class:gone=move || !on()
-                                prop:value=move || if mentions() { "mentions" } else { "all" }
-                                on:change=pick
-                            >
-                                <option value="all">{t!(i18n, notifications_all)}</option>
-                                <option value="mentions">{t!(i18n, notifications_mentions)}</option>
-                            </select>
-                        }
-                    })}
+                </span>
+                {pills(choices)}
             </div>
         }
     };
     let directs = move || {
-        check(
+        row(
             AutoReplyPlace::Directs { radio },
-            t_string!(i18n, reply_directs).to_owned(),
+            MESSAGES,
+            t_string!(i18n, notifications_directs).to_owned(),
             None,
             false,
         )
@@ -256,14 +337,12 @@ fn RadioPlaces(
             Some(Some(list)) if !list.is_empty() => {
                 for channel in list {
                     let place = channel_place(radio, channel);
-                    let label = format!("#{}", channel_name(channel));
-                    views.push(check(place, label, None, true).into_any());
+                    views.push(row(place, HASH, channel_name(channel), None, true).into_any());
                 }
             }
             Some(_) => {
                 views.push(
-                    view! { <span class="hint dim">{t!(i18n, reply_no_channels)}</span> }
-                        .into_any(),
+                    view! { <p class="hint dim">{t!(i18n, reply_no_channels)}</p> }.into_any(),
                 );
             }
             None => {}
@@ -283,28 +362,61 @@ fn RadioPlaces(
                     let listed = matches!(&known, Some(Some(list))
                         if channel.is_some_and(|c| list.iter().any(|l| l.index == c)));
                     if !listed {
-                        let label = format!("#{}", name.clone().unwrap_or_default());
+                        let label = name.clone().unwrap_or_default();
                         let note = channel
                             .is_none()
                             .then(|| t_string!(i18n, reply_away).to_owned());
-                        views.push(check(given.place.clone(), label, note, true).into_any());
+                        views.push(row(given.place.clone(), HASH, label, note, true).into_any());
                     }
                 }
                 AutoReplyPlace::Node { radio: r, node } if *r == radio => {
-                    let label = t_string!(i18n, reply_with_node)
-                        .replace("{node}", &node_label(live, radio, *node));
-                    views.push(check(given.place.clone(), label, None, false).into_any());
+                    let label = node_label(live, radio, *node);
+                    views.push(row(given.place.clone(), USER, label, None, false).into_any());
                 }
                 _ => {}
             }
         }
         views.into_iter().collect_view()
     };
+    // How many of its conversations are notified of, under its name.
+    let summary = move || {
+        let count = settings.with(|s| {
+            s.as_ref().map_or(0, |s| {
+                s.places
+                    .iter()
+                    .filter(|p| place_radio(&p.place) == radio)
+                    .count()
+            })
+        });
+        match count {
+            0 => t_string!(i18n, notifications_radio_none).to_owned(),
+            1 => t_string!(i18n, notifications_radio_single).to_owned(),
+            n => t_string!(i18n, notifications_radio_count).replace("{count}", &n.to_string()),
+        }
+    };
+    let style = badge::style(&badge);
+    let class = format!("rail-button radio notify-badge {}", badge::class(&badge));
     view! {
-        <div class="card radio-places notify-radio">
-            <b>{name}</b>
+        <div class="card notify-radio">
+            <header>
+                <span class=class style=style>
+                    <Face name=name.clone() badge=badge short=short />
+                </span>
+                <span class="notify-radio-name">
+                    <b>{name}</b>
+                    <span class="dim">{summary}</span>
+                </span>
+            </header>
             {directs}
             {rest}
         </div>
+    }
+}
+
+fn place_radio(place: &AutoReplyPlace) -> RadioId {
+    match place {
+        AutoReplyPlace::Directs { radio }
+        | AutoReplyPlace::Node { radio, .. }
+        | AutoReplyPlace::Channel { radio, .. } => *radio,
     }
 }

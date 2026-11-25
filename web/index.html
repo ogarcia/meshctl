@@ -4271,20 +4271,94 @@
       .reply-editor label.check .dim { font-size: 12px; }
       .reply-editor label.check input { min-height: 0; margin: 0; accent-color: var(--mc-primary); }
 
-      /* Notifications: each radio's places, as a reply's, a channel's with
-         whether everything or only mentions; all of it faded while off. */
-      .notifications .muted { opacity: 0.55; }
-      .notifications .pref-control.switch-control { width: auto; }
-      .notify-places { display: flex; flex-direction: column; gap: 10px; }
-      .notify-radio { flex-direction: column; flex-wrap: nowrap; gap: 8px; }
-      .notify-place { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; }
-      .notify-place label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; min-width: 0; }
-      .notify-place label.check .dim { font-size: 12px; }
-      .notify-place label.check input { min-height: 0; margin: 0; accent-color: var(--mc-primary); }
-      .notify-place .notify-mode { width: auto; min-height: 30px; font-size: 13px; padding: 2px 8px; }
-      .notify-browser { display: block; margin-top: 6px; font-size: 13px; }
-      .notify-ask { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-      .notify-ask button { min-height: 30px; padding: 2px 12px; font-size: 13px; }
+      /* Notifications: a card with the bell and the switch, and who shows
+         them; a sample of one, as it will look; then each radio's card,
+         a row for each conversation and how much of it is notified of.
+         All but the first faded while they are off. */
+      .notifications { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 760px; margin: 0 auto; }
+      .notifications .card { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+      .notifications.off .notify-look,
+      .notifications.off .notify-where,
+      .notifications.off .notify-places { opacity: 0.5; }
+      .notify-head { display: flex; align-items: center; gap: 14px; }
+      .notify-what { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+      .notify-what h2, .notify-what h3 { margin: 0; font-size: 16px; }
+      .notify-what h3 { font-size: 15px; }
+      .notify-what .dim { font-size: 13px; }
+      .notify-head > .switch { flex: none; }
+      .notifications.off .notify-hero .reply-face { background: var(--mc-raised); color: var(--mc-muted); }
+      .notify-status {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0;
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 13px;
+        background: var(--mc-raised);
+      }
+      .notify-status > .icon { flex: none; display: flex; width: 18px; height: 18px; }
+      .notify-status > .icon svg { width: 18px; height: 18px; }
+      .notify-status > span:nth-child(2) { flex: 1 1 auto; min-width: 0; }
+      .notify-status.ok { background: color-mix(in srgb, var(--mc-ok) 14%, transparent); }
+      .notify-status.ok > .icon { color: var(--mc-ok); }
+      .notify-status.ask { background: var(--mc-soft); }
+      .notify-status.ask > .icon { color: var(--mc-primary); }
+      .notify-status.bad { background: color-mix(in srgb, var(--mc-danger) 12%, transparent); }
+      .notify-status.bad > .icon { color: var(--mc-danger); }
+      .notify-status button { flex: none; min-height: 32px; padding: 4px 14px; }
+
+      /* The sample: as a desktop shows one, on the page's own ground. */
+      .notify-sample {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        max-width: 400px;
+        padding: 12px 14px;
+        border: 1px solid var(--mc-border);
+        border-radius: 14px;
+        background: var(--mc-page);
+        box-shadow: 0 6px 18px rgb(0 0 0 / 0.10);
+      }
+      .notify-sample .sample-app { flex: none; width: 36px; height: 36px; padding: 6px; border-radius: 10px; background: var(--mc-soft); }
+      .notify-sample .sample-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+      .notify-sample .sample-top { display: flex; gap: 6px; font-size: 12px; color: var(--mc-muted); }
+      .notify-sample .sample-top .dim::before { content: "·"; margin-right: 6px; }
+      .notify-sample b { font-size: 14px; }
+      .notify-sample .hidden-text { font-style: italic; }
+
+      .notify-where { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; padding: 0 4px; }
+      .notify-where h2 { margin: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--mc-muted); }
+      .notify-where .dim { font-size: 13px; }
+      .notify-places { display: flex; flex-direction: column; gap: 12px; }
+      .notifications .notify-radio { gap: 4px; padding: 12px 14px 8px; }
+      .notify-radio > header { display: flex; align-items: center; gap: 12px; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--mc-border); }
+      .notify-radio .notify-badge { width: 40px; height: 40px; border-radius: 20px; cursor: default; }
+      .notify-radio-name { display: flex; flex-direction: column; min-width: 0; }
+      .notify-radio-name .dim { font-size: 12px; }
+      .notify-row { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+      .notify-row + .notify-row { border-top: 1px solid color-mix(in srgb, var(--mc-border) 60%, transparent); }
+      .notify-row .row-icon { flex: none; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; background: var(--mc-soft); color: var(--mc-primary); }
+      .notify-row .row-icon svg { width: 18px; height: 18px; }
+      .notify-row .row-name { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; font-size: 14px; }
+      .notify-row .row-name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .notify-row .row-name .dim { font-size: 12px; }
+      .notify-row.quiet .row-icon { background: var(--mc-raised); color: var(--mc-muted); }
+      .notify-row.quiet .row-name { color: var(--mc-muted); }
+      .notify-row .segmented.pref-control { flex: none; width: auto; min-width: 0; }
+      .notify-row .segmented button { min-height: 32px; font-size: 13px; }
+      /* Never, chosen, in grey: the accent is for what is notified of. */
+      .notify-row.quiet .segmented::before { background: var(--mc-raised); box-shadow: inset 0 0 0 1px var(--mc-border); }
+      .notify-row.quiet .segmented button.on { color: var(--mc-text); }
+      .notify-radio > .hint { margin: 6px 0; }
+      @media (max-width: 835px) {
+        .notifications .card { padding: 14px; }
+        .notify-hero .reply-face { width: 44px; height: 44px; border-radius: 12px; }
+        .notify-hero .reply-face svg { width: 22px; height: 22px; }
+        .notify-row { flex-wrap: wrap; row-gap: 6px; padding: 6px 0; }
+        .notify-row .segmented.pref-control { flex: 1 1 100%; }
+        .notify-sample { max-width: none; }
+      }
 
       /* The emoji picker: a search, the groups, and the emojis. */
       .emoji-picker {
