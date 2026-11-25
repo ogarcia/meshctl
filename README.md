@@ -48,6 +48,8 @@ server, in a container, as a desktop app, or as an app on your phone.
   map.
 - **Chat:** channels and direct messages, with history kept while you were away.
 - **Traceroutes:** on demand, with their history.
+- **Automatic replies:** if someone writes this, answer with that, where you
+  say, from the daemon: a ping with the hops it took and its signal, say.
 - **One binary**, small enough for a Raspberry Pi or a router, with the web
   interface built in; and a desktop app, for Windows and Linux, with the same
   inside.

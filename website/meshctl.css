@@ -108,6 +108,7 @@ p, figure, h1, h2, h3 { margin: 0; }
 .ti-id { --icon: url(icons/id.svg); }
 .ti-message { --icon: url(icons/message.svg); }
 .ti-route { --icon: url(icons/route.svg); }
+.ti-robot { --icon: url(icons/robot.svg); }
 .ti-activity { --icon: url(icons/activity.svg); }
 .ti-adjustments { --icon: url(icons/adjustments.svg); }
 .ti-qrcode { --icon: url(icons/qrcode.svg); }
@@ -296,6 +297,11 @@ p, figure, h1, h2, h3 { margin: 0; }
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+/* Ten in three columns: the last across them. */
+@media (min-width: 1001px) {
+  .mc-feature-wide { grid-column: 1 / -1; }
 }
 
 .mc-feature {
