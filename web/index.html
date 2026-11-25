@@ -3344,7 +3344,8 @@
       .welcome-back svg { width: 16px; height: 16px; }
       .welcome-radio fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
       .welcome-radio legend,
-      .welcome-radio .field > .label {
+      .welcome-radio .field > .label,
+      .welcome-radio .plugged-head > .label {
         padding: 0;
         margin-bottom: 8px;
         color: var(--mc-muted);
@@ -3388,7 +3389,8 @@
       }
       .welcome-card.on .icon { color: var(--mc-primary); }
       .welcome-radio .field { display: flex; flex-direction: column; }
-      .welcome-radio .field > .label { display: block; }
+      .welcome-radio .field > .label,
+      .welcome-radio .plugged-head > .label { display: block; }
       .welcome-radio .optional { font-weight: 400; }
       /* 16px: a phone does not zoom in to write in it. */
       .welcome-radio input { min-height: 44px; font-size: 16px; }
@@ -3920,8 +3922,10 @@
          radios plugged in to pick from. */
       .radio-editor fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
       .radio-editor legend,
-      .radio-editor .field > .label { margin-bottom: 6px; padding: 0; color: var(--mc-muted); font-size: 12px; }
-      .radio-editor .field > .label { display: block; margin-bottom: 0; }
+      .radio-editor .field > .label,
+      .radio-editor .plugged-head > .label { margin-bottom: 6px; padding: 0; color: var(--mc-muted); font-size: 12px; }
+      .radio-editor .field > .label,
+      .radio-editor .plugged-head > .label { display: block; margin-bottom: 0; }
       .radio-editor .optional { font-weight: 400; }
       .radio-editor .field > .hint { color: var(--mc-muted); }
       .radio-editor .welcome-card { padding: 10px 12px; }
@@ -3948,8 +3952,19 @@
       }
       .plugged-radio.on > .icon { color: var(--mc-primary); }
       .plugged-none { margin: 0; padding: 12px; border: 1px dashed var(--mc-border); border-radius: 12px; color: var(--mc-muted); font-size: 13px; text-align: center; }
+      /* What the field is, and beside it, on the right, what to do when the
+         radio is not among those shown: on a line of its own, still on the
+         right, where both do not fit. */
+      .plugged-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        column-gap: 12px;
+      }
+      .plugged-head > .label { min-width: 0; }
       .plugged-hand {
-        align-self: flex-start;
+        margin-left: auto;
         padding: 2px 0;
         border: 0;
         background: none;

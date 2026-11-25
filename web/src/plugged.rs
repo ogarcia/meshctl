@@ -375,7 +375,25 @@ fn PluggedPicker(place: Place) -> impl IntoView {
     let none = move || plugged.with(|p| p.as_ref().is_some_and(Vec::is_empty));
     view! {
         <div class="field plugged">
-            <span class="label">{t!(i18n, welcome_device)}</span>
+            <div class="plugged-head">
+                <span class="label">{t!(i18n, welcome_device)}</span>
+                <button
+                    type="button"
+                    class="plugged-hand"
+                    class:gone=move || app.get()
+                    on:click=move |_| {
+                        by_hand.update(|h| *h = !*h);
+                        address.set(String::new());
+                        place.picked_name.set(None);
+                    }
+                >
+                    {move || if by_hand.get() {
+                        t!(i18n, plugged_pick).into_any()
+                    } else {
+                        t!(i18n, plugged_by_hand).into_any()
+                    }}
+                </button>
+            </div>
             <div class="plugged-list" role="radiogroup" class:gone=by_hand>
                 {rows}
                 <p class="plugged-none" class:gone=move || !none()>
@@ -398,22 +416,6 @@ fn PluggedPicker(place: Place) -> impl IntoView {
                 />
                 <span class="hint">{t!(i18n, welcome_device_hint)}</span>
             </Show>
-            <button
-                type="button"
-                class="plugged-hand"
-                class:gone=move || app.get()
-                on:click=move |_| {
-                    by_hand.update(|h| *h = !*h);
-                    address.set(String::new());
-                    place.picked_name.set(None);
-                }
-            >
-                {move || if by_hand.get() {
-                    t!(i18n, plugged_pick).into_any()
-                } else {
-                    t!(i18n, plugged_by_hand).into_any()
-                }}
-            </button>
         </div>
     }
 }
@@ -543,7 +545,17 @@ fn NearbyPicker(place: Place) -> impl IntoView {
     };
     view! {
         <div class="field plugged">
-            <span class="label">{t!(i18n, nearby_title)}</span>
+            <div class="plugged-head">
+                <span class="label">{t!(i18n, nearby_title)}</span>
+                <button
+                    type="button"
+                    class="plugged-hand"
+                    disabled=move || looking.get()
+                    on:click=move |_| look()
+                >
+                    {t!(i18n, nearby_again)}
+                </button>
+            </div>
             <div class="plugged-list" role="radiogroup">
                 {rows}
                 <p class="plugged-none" class:gone=move || !looking.get()>
@@ -556,14 +568,6 @@ fn NearbyPicker(place: Place) -> impl IntoView {
                     {t!(i18n, nearby_none)}
                 </p>
             </div>
-            <button
-                type="button"
-                class="plugged-hand"
-                disabled=move || looking.get()
-                on:click=move |_| look()
-            >
-                {t!(i18n, nearby_again)}
-            </button>
         </div>
     }
 }
