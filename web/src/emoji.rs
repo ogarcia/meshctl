@@ -23,10 +23,11 @@ const FOUND_MAX: usize = 160;
 const FREQUENT: u8 = u8::MAX;
 
 /// What the most used start as, before any is: those most said in a chat,
-/// and the mesh's own.
-pub const COMMON: [&str; 18] = [
+/// and the mesh's own; the numbers and the kangaroo tell, on Meshtastic,
+/// how many hops a message took.
+pub const COMMON: [&str; 24] = [
     "👍", "❤️", "😂", "😮", "😢", "🙏", "👋", "🎉", "📡", "✅", "👌", "🔥", "😊", "🤔", "👀", "💪",
-    "🙌", "⚡",
+    "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "🦘",
 ];
 
 /// The groups shown as tabs, each with the emoji that stands for it.

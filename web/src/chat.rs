@@ -47,8 +47,9 @@ const REACTIONS_OFFERED: usize = 7;
 /// How many reactions a message shows, the most given, before the rest.
 const REACTIONS_SHOWN: usize = 4;
 
-/// How many of the emojis most used the chat offers first: four rows.
-const FREQUENT_SHOWN: usize = 36;
+/// How many of the emojis most used the chat offers first: four rows of
+/// eight.
+const FREQUENT_SHOWN: usize = 32;
 
 /// From how many bytes a message is near what it takes, and its field says
 /// so.
