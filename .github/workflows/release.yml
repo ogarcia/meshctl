@@ -224,7 +224,9 @@ jobs:
           path: ${{ env.ARCHIVE }}
           if-no-files-found: error
 
-  # ── The Android app, an APK for phones' ARM64 ──────────────────────────────
+  # ── The Android app, an APK for each of phones' ARMs ──────────────────────
+  # ARM64, nearly every phone; ARM, 32 bits, older or cheaper ones, which
+  # may well be the ones given to the mesh.
   # Signed with the key in the ANDROID_KEYSTORE secret (the .jks, in base64)
   # and its password in ANDROID_KEYSTORE_PASSWORD, written where Gradle looks
   # for them (see desktop/gen/android/app/build.gradle.kts). A tag needs
@@ -243,7 +245,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,wasm32-unknown-unknown
+          targets: aarch64-linux-android,armv7-linux-androideabi,wasm32-unknown-unknown
 
       # The crates downloaded, not what was built: Tauri's build scripts
       # write the Android project's Gradle and Kotlin files into the
@@ -292,19 +294,21 @@ jobs:
             > desktop/gen/android/keystore.properties
 
       - name: Build the app
-        run: cd desktop && cargo tauri android build --ci --apk --target aarch64
+        run: |
+          cd desktop
+          cargo tauri android build --ci --apk --split-per-abi --target aarch64 --target armv7
 
       - name: Package
         shell: bash
         run: |
-          APK=meshctl-${{ github.ref_name }}-android-arm64.apk
-          cp desktop/gen/android/app/build/outputs/apk/universal/release/app-universal-release*.apk "$APK"
-          echo "ARCHIVE=$APK" >> "$GITHUB_ENV"
+          OUT=desktop/gen/android/app/build/outputs/apk
+          cp "$OUT"/arm64/release/app-arm64-release*.apk meshctl-${{ github.ref_name }}-android-arm64.apk
+          cp "$OUT"/arm/release/app-arm-release*.apk meshctl-${{ github.ref_name }}-android-arm.apk
 
       - uses: actions/upload-artifact@v7
         with:
           name: meshctl-android
-          path: ${{ env.ARCHIVE }}
+          path: meshctl-*-android-*.apk
           if-no-files-found: error
 
   # ── The release, with every archive and their checksums ────────────────────
