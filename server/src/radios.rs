@@ -80,6 +80,8 @@ pub enum Change {
     NodeForgotten(RadioId, u32),
     /// Messages forgotten, as asked: one, and the reactions to it.
     MessagesForgotten(RadioId, Vec<MessageId>),
+    /// A message to notify of.
+    Notification(meshctl_api::Notification),
     /// A conversation read further, up to a message.
     ConversationRead {
         radio: RadioId,
@@ -1100,6 +1102,9 @@ pub struct Radios {
     busy: Arc<Mutex<HashMap<RadioId, (f32, std::time::Instant)>>>,
     /// The app it runs within, if any.
     host: Arc<std::sync::OnceLock<Arc<dyn crate::Host>>>,
+    /// The conversation each client of the event stream shows, and is seen,
+    /// by the number it was given.
+    viewing: Arc<Mutex<HashMap<u64, meshctl_api::events::Viewing>>>,
     changes: broadcast::Sender<Change>,
     stopped: watch::Sender<bool>,
 }
@@ -1116,6 +1121,7 @@ impl Radios {
             login_failed: Arc::default(),
             busy: Arc::default(),
             host: Arc::default(),
+            viewing: Arc::default(),
             changes: broadcast::channel(EVENT_BACKLOG).0,
             stopped: watch::channel(false).0,
         };
@@ -1125,6 +1131,7 @@ impl Radios {
         }
         radios.keep_clean();
         crate::auto_replies::spawn(radios.clone());
+        crate::notifications::spawn(radios.clone());
         Ok(radios)
     }
 
@@ -3402,6 +3409,84 @@ impl Radios {
         }
         self.store.set_app_settings(&kept).await?;
         Ok(true)
+    }
+
+    /// The app it runs within, if any.
+    pub fn host(&self) -> Option<Arc<dyn crate::Host>> {
+        self.host.get().cloned()
+    }
+
+    /// What is notified of, as set, or as it is until set: on only within
+    /// an app, and every radio's direct conversations.
+    pub async fn notifications(&self) -> Result<meshctl_api::Notifications> {
+        let kept = self.store.notifications().await?;
+        let places = match kept.places {
+            Some(places) => places,
+            None => self
+                .store
+                .radios()
+                .await?
+                .into_iter()
+                .map(|record| meshctl_api::NotificationPlace {
+                    place: meshctl_api::AutoReplyPlace::Directs { radio: record.id },
+                    mentions: false,
+                })
+                .collect(),
+        };
+        Ok(meshctl_api::Notifications {
+            enabled: kept.enabled.unwrap_or(self.host.get().is_some()),
+            show_text: kept.show_text.unwrap_or(true),
+            places,
+        })
+    }
+
+    /// Sets what is notified of; `false` if a place is on a radio, a
+    /// channel or a node there is not.
+    pub async fn set_notifications(
+        &self,
+        notifications: &meshctl_api::Notifications,
+    ) -> Result<bool> {
+        self.store
+            .set_notifications(
+                notifications.enabled,
+                notifications.show_text,
+                &notifications.places,
+            )
+            .await
+    }
+
+    /// Keeps the conversation a client of the event stream shows, and is
+    /// seen, or that it shows none.
+    pub fn set_viewing(&self, client: u64, viewing: Option<meshctl_api::events::Viewing>) {
+        let mut all = self.viewing.lock().unwrap_or_else(|e| e.into_inner());
+        match viewing {
+            Some(viewing) => all.insert(client, viewing),
+            None => all.remove(&client),
+        };
+    }
+
+    /// Whether a client shows a conversation, and is seen.
+    pub fn viewed(&self, radio: RadioId, peer: Peer) -> bool {
+        self.viewing
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .any(|viewing| viewing.radio == radio && viewing.peer == peer)
+    }
+
+    /// Tells every client of the event stream to notify of a message.
+    pub fn notify(&self, notification: meshctl_api::Notification) {
+        let _ = self.changes.send(Change::Notification(notification));
+    }
+
+    /// The name a radio is given in meshctl.
+    pub async fn radio_name(&self, radio: RadioId) -> Option<String> {
+        self.store
+            .radio(radio)
+            .await
+            .ok()
+            .flatten()
+            .map(|record| record.settings.name)
     }
 
     /// The interface's preferences.

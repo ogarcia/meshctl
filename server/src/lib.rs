@@ -11,6 +11,7 @@ mod keys;
 mod links;
 mod lora;
 mod meshcore;
+mod notifications;
 mod packets;
 mod radios;
 mod reactions;
@@ -33,6 +34,13 @@ pub trait Host: Send + Sync + 'static {
     /// Whether the app goes on running, and the daemon in it, with its
     /// window closed: told as it starts, as it was left, and as it changes.
     fn keep_running(&self, on: bool);
+
+    /// Shows a notification of a message, its conversation's, in place of
+    /// one shown before for it. Nothing, where the app shows none.
+    fn notify(&self, _notification: &meshctl_api::Notification) {}
+
+    /// A conversation read: its notification, if one is shown, goes.
+    fn read(&self, _radio: meshctl_api::RadioId, _peer: meshctl_api::Peer) {}
 }
 
 /// How the daemon runs.

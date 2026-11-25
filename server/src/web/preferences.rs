@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{AppSettings, EmojiUsed, Error, ErrorCode, Preferences};
+use meshctl_api::{AppSettings, EmojiUsed, Error, ErrorCode, Notifications, Preferences};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -18,6 +18,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(read, change))
         .routes(routes!(emojis, use_emoji))
         .routes(routes!(app, set_app))
+        .routes(routes!(notifications, set_notifications))
 }
 
 fn failed(err: &anyhow::Error) -> Response {
@@ -171,6 +172,59 @@ async fn set_app(State(state): State<AppState>, Json(settings): Json<AppSettings
     }
 }
 
+/// Notifications
+///
+/// What meshctl notifies of: whether at all, with what messages say, and
+/// where. As they are until set: on only within an app, and every radio's
+/// direct conversations.
+#[utoipa::path(
+    get,
+    path = "/preferences/notifications",
+    tag = "preferences",
+    responses(
+        (status = 200, description = "The notifications", body = Notifications),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+    )
+)]
+async fn notifications(State(state): State<AppState>) -> Response {
+    match state.radios.notifications().await {
+        Ok(notifications) => Json(notifications).into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Change the notifications
+///
+/// All of them, their places among them. A place on a channel in no slot
+/// now, as it was told, is kept.
+#[utoipa::path(
+    put,
+    path = "/preferences/notifications",
+    tag = "preferences",
+    request_body = Notifications,
+    responses(
+        (status = 200, description = "The notifications, as they are now", body = Notifications),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 422, description = "A place on a radio, channel or node there is not: `invalid_notifications`", body = Error),
+    )
+)]
+async fn set_notifications(
+    State(state): State<AppState>,
+    Json(notifications): Json<Notifications>,
+) -> Response {
+    match state.radios.set_notifications(&notifications).await {
+        Ok(true) => self::notifications(State(state)).await,
+        Ok(false) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(Error {
+                error: ErrorCode::InvalidNotifications,
+            }),
+        )
+            .into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::radios::Change;
@@ -206,6 +260,82 @@ mod tests {
         }
         let (_, body) = ask(app, get("/api/v1/preferences/emojis")).await;
         assert_eq!(json::<Vec<String>>(&body), ["📡"]);
+    }
+
+    #[tokio::test]
+    async fn notifications_are_off_on_their_own_and_on_within_an_app() {
+        use meshctl_api::{AutoReplyPlace, Notifications, RadioKind, RadioSettings};
+        use std::sync::Arc;
+
+        struct Quiet;
+        impl crate::Host for Quiet {
+            fn keep_running(&self, _: bool) {}
+        }
+
+        let radios = radios().await;
+        let app = router(AppState {
+            auth: Auth::new(None),
+            radios: radios.clone(),
+        });
+        let casa = radios
+            .add(RadioSettings {
+                name: "Casa".into(),
+                kind: RadioKind::Meshtastic,
+                address: "192.0.2.1".into(),
+                enabled: false,
+                shown: true,
+                badge: Default::default(),
+            })
+            .await
+            .unwrap()
+            .id;
+        let put = |body: String| {
+            Request::put("/api/v1/preferences/notifications")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap()
+        };
+        // On its own, until set: off, every radio's direct conversations.
+        let (_, body) = ask(app.clone(), get("/api/v1/preferences/notifications")).await;
+        let mut notifications = json::<Notifications>(&body);
+        assert!(!notifications.enabled);
+        assert!(notifications.show_text);
+        let radios_now = radios.list().await.unwrap();
+        assert_eq!(notifications.places.len(), radios_now.len());
+        assert!(notifications.places.iter().all(|p| {
+            !p.mentions
+                && radios_now
+                    .iter()
+                    .any(|r| p.place == AutoReplyPlace::Directs { radio: r.id })
+        }));
+        assert!(
+            notifications
+                .places
+                .iter()
+                .any(|p| p.place == AutoReplyPlace::Directs { radio: casa })
+        );
+
+        // Within an app, until set: on.
+        radios.set_host(Arc::new(Quiet)).await;
+        let (_, body) = ask(app.clone(), get("/api/v1/preferences/notifications")).await;
+        assert!(json::<Notifications>(&body).enabled);
+
+        // Set: as set; a place on a radio there is not, refused.
+        notifications.show_text = false;
+        notifications.places.clear();
+        let (status, body) = ask(
+            app.clone(),
+            put(serde_json::to_string(&notifications).unwrap()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json::<Notifications>(&body), notifications);
+        notifications.places.push(meshctl_api::NotificationPlace {
+            place: AutoReplyPlace::Directs { radio: casa + 9 },
+            mentions: false,
+        });
+        let (status, _) = ask(app, put(serde_json::to_string(&notifications).unwrap())).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]

@@ -87,6 +87,7 @@ const SCALAR_HTML: &str = r#"<!doctype html>
         meshctl_api::Error,
         meshctl_api::ErrorCode,
         meshctl_api::events::Hello,
+        meshctl_api::events::ClientMessage,
         meshctl_api::events::ServerMessage,
     )),
 )]

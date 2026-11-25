@@ -23,7 +23,7 @@ pub enum Keeping {
 }
 
 /// A place, as kept: its radio, and its channel's conversation or its node.
-type PlaceRow = (RadioId, Option<i64>, Option<i64>);
+pub(super) type PlaceRow = (RadioId, Option<i64>, Option<i64>);
 
 /// A place, as told: its reply, radio and node, and its channel's slot now,
 /// conversation and name.
@@ -270,7 +270,7 @@ impl Store {
 /// The places as kept, each once; `None` if one is on a radio there is not,
 /// a channel in no slot of it (but for one of `away`, kept by its name), or
 /// a node that is no node.
-async fn place_rows(
+pub(super) async fn place_rows(
     conn: &mut SqliteConnection,
     places: &[AutoReplyPlace],
     away: &[(RadioId, i64, String)],

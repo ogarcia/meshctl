@@ -25,6 +25,7 @@ mod auto_replies;
 pub use auto_replies::Keeping;
 mod meshcore_packets;
 pub use meshcore_packets::NewMeshcoreCopy;
+mod notifications;
 mod requests;
 mod retention;
 

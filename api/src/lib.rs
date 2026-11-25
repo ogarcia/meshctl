@@ -112,6 +112,9 @@ pub enum ErrorCode {
     /// a text of more than 200 bytes, or a place on a radio, channel or
     /// node there is not.
     InvalidAutoReply,
+    /// A place to notify of messages on a radio, channel or node there is
+    /// not.
+    InvalidNotifications,
 }
 
 /// The body of every error the API answers with.
@@ -462,6 +465,59 @@ pub struct AppSettings {
     /// own. On unless set otherwise.
     #[serde(default)]
     pub background: Option<bool>,
+}
+
+/// What meshctl notifies of: messages heard where they are set to be, in
+/// the app it runs within, or in a browser with the panel open that lets
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Notifications {
+    /// Whether it notifies at all: off unless set otherwise, but within an
+    /// app, as on a phone or a desktop, where it is on.
+    pub enabled: bool,
+    /// Whether a notification says what the message says, or only who
+    /// wrote it and where.
+    pub show_text: bool,
+    /// Where messages are notified of: every radio's direct conversations,
+    /// unless set otherwise.
+    pub places: Vec<NotificationPlace>,
+}
+
+/// Where messages are notified of, on one radio.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NotificationPlace {
+    /// As an automatic reply's: every direct conversation, one node's, or
+    /// a channel, wherever it is on the radio.
+    pub place: AutoReplyPlace,
+    /// On a channel, only the messages that mention the radio by its name,
+    /// as `@Name` or `@[Name]`.
+    #[serde(default)]
+    pub mentions: bool,
+}
+
+/// A message notified of, as it is shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Notification {
+    pub radio: RadioId,
+    /// Its conversation: what opens on the notification.
+    pub peer: Peer,
+    pub message: MessageId,
+    /// Who wrote it: their name, or their node's id.
+    #[cfg_attr(feature = "openapi", schema(example = "Ana"))]
+    pub sender: String,
+    /// The radio's name, as given in meshctl.
+    #[cfg_attr(feature = "openapi", schema(example = "Casa"))]
+    pub radio_name: String,
+    /// The channel's name, on a channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(example = "Galicia"))]
+    pub channel: Option<String>,
+    /// What it says; none unless notifications are to show it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 /// How busy a radio hears its channel, as it last said, if lately.

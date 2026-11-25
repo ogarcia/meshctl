@@ -9,8 +9,9 @@ use axum::extract::State;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::http::HeaderMap;
 use axum::response::Response;
-use meshctl_api::events::{CLOSE_UNAUTHORIZED, Hello, ServerMessage};
+use meshctl_api::events::{CLOSE_UNAUTHORIZED, ClientMessage, Hello, ServerMessage};
 use meshctl_api::{ErrorCode, TOKEN_HEADER};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
 use utoipa_axum::router::OpenApiRouter;
@@ -91,6 +92,12 @@ async fn stream(mut socket: WebSocket, state: AppState, let_in: bool) {
         return;
     }
 
+    // Its number, for the conversation it says it shows; forgotten as it
+    // goes, however it goes.
+    static CLIENTS: AtomicU64 = AtomicU64::new(0);
+    let client = CLIENTS.fetch_add(1, Ordering::Relaxed);
+    let _gone = Gone(state.radios.clone(), client);
+
     loop {
         tokio::select! {
             () = state.radios.stopped() => {
@@ -114,11 +121,25 @@ async fn stream(mut socket: WebSocket, state: AppState, let_in: bool) {
                 }
             }
             incoming = socket.recv() => match incoming {
-                // Nothing a client says after hello means anything yet.
                 Some(Ok(Message::Close(_)) | Err(_)) | None => return,
+                Some(Ok(Message::Text(text))) => {
+                    // What it does not understand, it is not told of.
+                    if let Ok(ClientMessage::Viewing { viewing }) = serde_json::from_str(&text) {
+                        state.radios.set_viewing(client, viewing);
+                    }
+                }
                 Some(Ok(_)) => {}
             },
         }
+    }
+}
+
+/// A client of the event stream gone: it shows nothing any longer.
+struct Gone(crate::radios::Radios, u64);
+
+impl Drop for Gone {
+    fn drop(&mut self) {
+        self.0.set_viewing(self.1, None);
     }
 }
 
@@ -197,6 +218,51 @@ mod tests {
             panic!("a close frame");
         };
         assert_eq!(u16::from(frame.code), 1001);
+    }
+
+    #[tokio::test]
+    async fn a_client_tells_what_it_shows_until_it_goes() {
+        use meshctl_api::Peer;
+        use meshctl_api::events::{ClientMessage, Viewing};
+
+        let radios = crate::web::tests::radios().await;
+        let router = crate::web::router(crate::web::AppState {
+            auth: crate::web::Auth::new(None),
+            radios: radios.clone(),
+        });
+        let mut client = connect_to(router).await;
+        client.send(Message::text("{}")).await.unwrap();
+        assert_eq!(message(receive(&mut client).await), ServerMessage::Ready);
+
+        let peer = Peer::Channel { channel: 1 };
+        let say = |viewing| {
+            Message::text(serde_json::to_string(&ClientMessage::Viewing { viewing }).unwrap())
+        };
+        client
+            .send(say(Some(Viewing { radio: 4, peer })))
+            .await
+            .unwrap();
+        let viewed = || async {
+            for _ in 0..50 {
+                if radios.viewed(4, peer) {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            false
+        };
+        assert!(viewed().await);
+        assert!(!radios.viewed(4, Peer::Channel { channel: 2 }));
+
+        // Gone: it shows nothing.
+        client.close(None).await.unwrap();
+        for _ in 0..50 {
+            if !radios.viewed(4, peer) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("still viewed after the client went");
     }
 
     async fn receive(client: &mut Client) -> Option<Message> {

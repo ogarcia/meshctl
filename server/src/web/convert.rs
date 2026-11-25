@@ -151,6 +151,7 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
         Change::Packet(radio, packet) => ServerMessage::Packet { radio, packet },
         Change::Request(radio, request) => ServerMessage::Request { radio, request },
         Change::Preferences(preferences) => ServerMessage::Preferences { preferences },
+        Change::Notification(notification) => ServerMessage::Notification { notification },
         Change::MessageStatus {
             radio,
             id,

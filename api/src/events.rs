@@ -16,8 +16,8 @@
 //! [`ServerMessage::Lagged`], that everything is. Either way, read it again.
 
 use crate::{
-    ErrorCode, LinkState, Message, MessageId, MessageStatus, Node, Packet, Peer, Preferences,
-    RadioId, Request,
+    ErrorCode, LinkState, Message, MessageId, MessageStatus, Node, Notification, Packet, Peer,
+    Preferences, RadioId, Request,
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +34,27 @@ pub struct Hello {
     /// The access token, when the daemon asks for one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+}
+
+/// What a client says after its hello, whenever it changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClientMessage {
+    /// The conversation it shows, and is seen: nothing in it is notified of
+    /// while it does. None, if it shows none, or is not seen.
+    Viewing {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        viewing: Option<Viewing>,
+    },
+}
+
+/// A conversation shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Viewing {
+    pub radio: RadioId,
+    pub peer: Peer,
 }
 
 /// Everything the daemon sends on the event stream.
@@ -73,6 +94,9 @@ pub enum ServerMessage {
         peer: Peer,
         up_to: MessageId,
     },
+    /// A message to notify of, where notifications are let be shown: the
+    /// app meshctl runs within shows it on its own.
+    Notification { notification: Notification },
     /// Messages forgotten, as asked of the daemon: one, and the reactions to
     /// it.
     MessagesForgotten { radio: RadioId, ids: Vec<MessageId> },
