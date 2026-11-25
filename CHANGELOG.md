@@ -3,6 +3,11 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.3.1 (2026-11-25)
+
+- On Windows, a radio plugged in by its cable, as `COM3`, written or picked
+  from those plugged in: it was taken for a host on the network.
+
 ## 0.3.0 (2026-11-25)
 
 meshctl on Android, and radios picked from a list rather than written.
