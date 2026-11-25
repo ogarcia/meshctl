@@ -7,14 +7,15 @@
 //! for nothing in it to be notified of.
 //!
 //! Within an app, the app shows them on its own, with its window closed
-//! too: the page shows none.
+//! too: the page shows none, and opens the conversation of one picked
+//! there, as the app tells it.
 
 use crate::app::{Live, Page};
 use crate::daemon::{self, Teller};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::{ClientMessage, Viewing};
-use meshctl_api::{Notification, Peer};
+use meshctl_api::{Notification, Peer, RadioId};
 use std::cell::{Cell, RefCell};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -51,6 +52,56 @@ pub fn watch(live: Live) {
         }));
     }
     Effect::new(move |_| tell(viewing(live, seen)));
+    // A notification picked in the app while the page shows.
+    std::mem::forget(window_event_listener_untyped(
+        "meshctl-chat",
+        move |event| {
+            if let Some(chat) = event
+                .dyn_ref::<web_sys::CustomEvent>()
+                .and_then(|e| e.detail().as_string())
+            {
+                open_chat(live, &chat);
+            }
+        },
+    ));
+}
+
+/// The daemon reached: a notification picked in the app as it started, its
+/// conversation opened.
+pub fn ready(live: Live) {
+    let window = window();
+    let Some(app) = js_sys::Reflect::get(&window, &JsValue::from_str("meshctlApp"))
+        .ok()
+        .filter(|app| !app.is_undefined() && !app.is_null())
+    else {
+        return;
+    };
+    let take = js_sys::Reflect::get(&app, &JsValue::from_str("takeChat"))
+        .ok()
+        .and_then(|take| take.dyn_into::<js_sys::Function>().ok());
+    if let Some(chat) = take
+        .and_then(|take| take.call0(&app).ok())
+        .and_then(|chat| chat.as_string())
+    {
+        open_chat(live, &chat);
+    }
+}
+
+/// A conversation to open, as the app gives it, in JSON.
+#[derive(serde::Deserialize)]
+struct Chat {
+    radio: RadioId,
+    peer: Peer,
+}
+
+fn open_chat(live: Live, chat: &str) {
+    let Ok(chat) = serde_json::from_str::<Chat>(chat) else {
+        return;
+    };
+    if live.selected.get_untracked() != Some(chat.radio) {
+        live.select(chat.radio);
+    }
+    live.open_chat(chat.peer);
 }
 
 /// A new event stream: the daemon told what the page shows, as it is now,
@@ -151,15 +202,13 @@ pub fn show(live: Live, notification: Notification) {
     let Ok(shown) = web_sys::Notification::new_with_options(&title, &options) else {
         return;
     };
-    let (radio, peer) = (notification.radio, notification.peer);
+    let chat =
+        serde_json::json!({ "radio": notification.radio, "peer": notification.peer }).to_string();
     let closing = shown.clone();
     let open = Closure::once_into_js(move || {
         let _ = window().focus();
         closing.close();
-        if live.selected.get_untracked() != Some(radio) {
-            live.select(radio);
-        }
-        live.open_chat(peer);
+        open_chat(live, &chat);
     });
     shown.set_onclick(Some(open.unchecked_ref()));
 }

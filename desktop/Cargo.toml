@@ -25,6 +25,8 @@ tauri-build = { version = "2", features = [] }
 # The whole daemon, panel embedded, run within: the window is a page served
 # by it on this machine alone, as any browser's would be.
 meshctld = { path = "../server" }
+# What the daemon tells the app, as the API has it: a notification.
+meshctl-api.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-deep-link = "2"
 # The plugins' settings in tauri.conf.json come out of its macro as JSON.

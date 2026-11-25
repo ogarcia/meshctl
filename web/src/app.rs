@@ -1096,6 +1096,7 @@ impl Live {
             return failure;
         }
         self.daemon.set(Daemon::Connected);
+        crate::notify::ready(self);
 
         while let Some(message) = events.next().await {
             let refreshed = match message {

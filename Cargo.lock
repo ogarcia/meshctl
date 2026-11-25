@@ -4042,6 +4042,7 @@ dependencies = [
  "ashpd",
  "dirs",
  "jni 0.22.4",
+ "meshctl-api",
  "meshctl-core",
  "meshctld",
  "serde_json",

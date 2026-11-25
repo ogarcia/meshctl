@@ -110,6 +110,38 @@ impl meshctld::Host for Service {
             .map(|_| ())
         });
     }
+
+    fn notify(&self, notification: &meshctl_api::Notification) {
+        let Ok(json) = serde_json::to_string(notification) else {
+            return;
+        };
+        self.call("notifyMessage", |env, service| {
+            let json = env.new_string(json)?;
+            env.call_method(
+                service,
+                jni_str!("notifyMessage"),
+                jni_sig!("(Ljava/lang/String;)V"),
+                &[JValue::Object(&json)],
+            )
+            .map(|_| ())
+        });
+    }
+
+    fn read(&self, radio: meshctl_api::RadioId, peer: meshctl_api::Peer) {
+        let (Ok(peer), Ok(radio)) = (serde_json::to_string(&peer), jint::try_from(radio)) else {
+            return;
+        };
+        self.call("readConversation", |env, service| {
+            let peer = env.new_string(peer)?;
+            env.call_method(
+                service,
+                jni_str!("readConversation"),
+                jni_sig!("(ILjava/lang/String;)V"),
+                &[JValue::Int(radio), JValue::Object(&peer)],
+            )
+            .map(|_| ())
+        });
+    }
 }
 
 /// Each radio open by USB, by the service's handle for it: where its bytes

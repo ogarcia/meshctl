@@ -3,4 +3,6 @@
     <string name="main_activity_title">"meshctl"</string>
     <string name="listening_channel">Listening to the radios</string>
     <string name="listening_text">Listening to your radios with the app closed</string>
+    <string name="messages_channel">Messages</string>
+    <string name="message_new">New message</string>
 </resources>

@@ -117,6 +117,21 @@ class ListeningService : Service() {
     }
   }
 
+  /** Messages notified of, one notification for each conversation. */
+  private val messages by lazy { Messages(this) }
+
+  /** Called by the daemon, as a message is to be notified of: in JSON. */
+  @Keep
+  fun notifyMessage(json: String) {
+    main.post { messages.show(json) }
+  }
+
+  /** Called by the daemon, as a conversation is read, its peer in JSON. */
+  @Keep
+  fun readConversation(radio: Int, peer: String) {
+    main.post { messages.read(radio, peer) }
+  }
+
   /** A radio open by USB, and what reads it. */
   private class Opened(val port: UsbSerialPort, val reader: SerialInputOutputManager)
 
