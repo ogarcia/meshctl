@@ -16,6 +16,7 @@ mod assets;
 mod auth;
 mod auto_replies;
 pub mod convert;
+mod devices;
 mod events;
 mod links;
 mod meshcore;
@@ -104,6 +105,7 @@ pub fn router(state: AppState) -> Router {
     // browser cannot put a header on a WebSocket.
     let guarded = api::router()
         .merge(radios::router())
+        .merge(devices::router())
         .merge(messages::router())
         .merge(links::router())
         .merge(meshcore::router())

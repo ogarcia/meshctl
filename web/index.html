@@ -3901,6 +3901,49 @@
          row is narrower; removing it is apart from the rest, on the left. */
       .radio-editor .buttons button { min-width: min(112px, calc((100% - 16px) / 3)); }
       .radio-editor .buttons .danger { margin-right: auto; }
+      /* Adding a radio: the welcome's cards and fields, in a dialog, and the
+         radios plugged in to pick from. */
+      .add-radio fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+      .add-radio legend,
+      .add-radio .field > .label { margin-bottom: 6px; padding: 0; color: var(--mc-muted); font-size: 12px; }
+      .add-radio .field > .label { display: block; margin-bottom: 0; }
+      .add-radio .optional { font-weight: 400; }
+      .add-radio .hint { color: var(--mc-muted); }
+      .add-radio .welcome-card { padding: 10px 12px; }
+      .plugged-list { display: flex; flex-direction: column; gap: 8px; }
+      .plugged-radio {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: var(--mc-surface);
+        text-align: left;
+      }
+      .plugged-radio > .icon { flex: none; display: flex; color: var(--mc-muted); }
+      .plugged-radio > .icon svg { width: 22px; height: 22px; }
+      .plugged-radio .what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .plugged-radio .title { font-weight: 600; }
+      .plugged-radio .detail { color: var(--mc-muted); font-size: 12px; overflow-wrap: anywhere; }
+      .plugged-radio .waiting { color: var(--mc-primary); font-size: 12px; }
+      .plugged-radio.on {
+        border-color: var(--mc-primary);
+        box-shadow: inset 0 0 0 1px var(--mc-primary);
+        background: color-mix(in srgb, var(--mc-primary) 8%, var(--mc-surface));
+      }
+      .plugged-radio.on > .icon { color: var(--mc-primary); }
+      .plugged-none { margin: 0; padding: 12px; border: 1px dashed var(--mc-border); border-radius: 12px; color: var(--mc-muted); font-size: 13px; text-align: center; }
+      .plugged-hand {
+        align-self: flex-start;
+        padding: 2px 0;
+        border: 0;
+        background: none;
+        color: var(--mc-primary);
+        font-size: 13px;
+      }
+      .plugged-hand:hover { text-decoration: underline; }
+      .add-radio .plugged,
+      .welcome-radio .plugged { display: flex; flex-direction: column; gap: 8px; }
 
       /*
        * The automatic replies: rows as the radios', and, when there are

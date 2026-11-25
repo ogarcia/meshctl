@@ -911,3 +911,21 @@ pub async fn save_app_settings(
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
 }
+
+/// The radios plugged in where the daemon runs.
+pub async fn plugged() -> Result<Vec<meshctl_api::PluggedRadio>, Failure> {
+    get("/devices").await
+}
+
+/// Asks the user, within an app that opens radios by USB, for leave to use
+/// one; whether meshctl has it now.
+pub async fn ask_plugged(address: &str) -> Result<bool, Failure> {
+    let asked = meshctl_api::PluggedAsk {
+        address: address.to_owned(),
+    };
+    let request = with_token(Request::post(&url("/devices/ask")))
+        .json(&asked)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}

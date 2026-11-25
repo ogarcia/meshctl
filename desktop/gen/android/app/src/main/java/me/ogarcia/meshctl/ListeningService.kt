@@ -153,15 +153,7 @@ class ListeningService : Service() {
         "%04x:%04x".format(it.device.vendorId, it.device.productId) == device
     } ?: return NO_DEVICE
     if (!manager.hasPermission(driver.device)) {
-      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        PendingIntent.FLAG_MUTABLE
-      } else {
-        0
-      }
-      manager.requestPermission(
-        driver.device,
-        PendingIntent.getBroadcast(this, 0, Intent(USB_PERMISSION).setPackage(packageName), flags)
-      )
+      ask(manager, driver)
       return ASKED
     }
     return try {
@@ -188,6 +180,57 @@ class ListeningService : Service() {
       android.util.Log.w("meshctl", "cannot open the radio by USB: $error")
       FAILED
     }
+  }
+
+  /** The radios plugged in by USB, for the daemon to list, as JSON. */
+  @Keep
+  fun listUsb(): String {
+    val manager = getSystemService(UsbManager::class.java) ?: return "[]"
+    val devices = org.json.JSONArray()
+    for (driver in plugged(manager)) {
+      val device = driver.device
+      // Its names, where Android gives them without leave.
+      val maker = try { device.manufacturerName } catch (_: Exception) { null }
+      val name = try { device.productName } catch (_: Exception) { null }
+      devices.put(
+        org.json.JSONObject()
+          .put("vendor", device.vendorId)
+          .put("product", device.productId)
+          .put("maker", maker ?: "")
+          .put("name", name ?: "")
+          .put("allowed", manager.hasPermission(device))
+      )
+    }
+    return devices.toString()
+  }
+
+  /**
+   * Asks the user for leave to use a radio by USB, by its ids as
+   * `vvvv:pppp`: whether meshctl has it already; if not, Android asks.
+   */
+  @Keep
+  fun askUsb(device: String): Boolean {
+    val manager = getSystemService(UsbManager::class.java) ?: return false
+    val driver = plugged(manager).firstOrNull {
+      "%04x:%04x".format(it.device.vendorId, it.device.productId) == device
+    } ?: return false
+    if (manager.hasPermission(driver.device)) {
+      return true
+    }
+    ask(manager, driver)
+    return false
+  }
+
+  private fun ask(manager: UsbManager, driver: UsbSerialDriver) {
+    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      PendingIntent.FLAG_MUTABLE
+    } else {
+      0
+    }
+    manager.requestPermission(
+      driver.device,
+      PendingIntent.getBroadcast(this, 0, Intent(USB_PERMISSION).setPackage(packageName), flags)
+    )
   }
 
   /** Writes to a radio open by USB; whether it could. */

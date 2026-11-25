@@ -6,9 +6,10 @@
 use crate::app::{Live, Page};
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
+use crate::plugged::{Place, PlaceFields};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{Badge, ErrorCode, LinkState, RadioId, RadioKind, RadioSettings};
+use meshctl_api::{Badge, ErrorCode, LinkState, RadioId, RadioSettings};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,13 +17,6 @@ enum Step {
     Hello,
     Radio,
     Linking,
-}
-
-/// How meshctl reaches the radio.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Via {
-    Network,
-    Usb,
 }
 
 /// How long the radio has to start answering before the welcome says it
@@ -41,15 +35,9 @@ pub fn Welcome(welcoming: RwSignal<Option<RadioId>>) -> impl IntoView {
     } else {
         Step::Hello
     });
-    let kind = RwSignal::new(RadioKind::Meshtastic);
-    let via = RwSignal::new(Via::Network);
-    let address = RwSignal::new(String::new());
-    let name = RwSignal::new(String::new());
     let form = Form {
-        kind,
-        via,
-        address,
-        name,
+        place: Place::new(),
+        name: RwSignal::new(String::new()),
     };
     view! {
         <div class="welcome-screen">
@@ -85,23 +73,14 @@ fn back(step: RwSignal<Step>, class: &'static str) -> impl IntoView {
 /// What the radio step asks, kept while going back and forth.
 #[derive(Clone, Copy)]
 struct Form {
-    kind: RwSignal<RadioKind>,
-    via: RwSignal<Via>,
-    address: RwSignal<String>,
+    place: Place,
     name: RwSignal<String>,
 }
 
 impl Form {
-    /// The address as the daemon takes it: a device's path from its name
-    /// alone, as `ttyACM0`.
+    /// The address as the daemon takes it.
     fn address(self) -> String {
-        let address = self.address.get_untracked().trim().to_owned();
-        match self.via.get_untracked() {
-            Via::Usb if !address.is_empty() && !address.starts_with('/') => {
-                format!("/dev/{address}")
-            }
-            _ => address,
-        }
+        self.place.address()
     }
 }
 
@@ -153,38 +132,6 @@ fn Hello(step: RwSignal<Step>) -> impl IntoView {
     }
 }
 
-/// One of [`cards`]: what it picks, its icon if any, its name and its line.
-type Card<T> = (T, Option<&'static str>, Signal<String>, Signal<String>);
-
-/// Two big choices side by side, as cards: a name, a line under it and,
-/// maybe, an icon.
-fn cards<T: Copy + PartialEq + Send + Sync + 'static>(
-    value: RwSignal<T>,
-    options: Vec<Card<T>>,
-) -> impl IntoView {
-    let buttons = options
-        .into_iter()
-        .map(|(this, icon, title, detail)| {
-            let on = move || value.get() == this;
-            view! {
-                <button
-                    type="button"
-                    role="radio"
-                    class="welcome-card"
-                    class:on=on
-                    aria-checked=move || on().to_string()
-                    on:click=move |_| value.set(this)
-                >
-                    {icon.map(|icon| view! { <span class="icon" inner_html=icon></span> })}
-                    <span class="title">{title}</span>
-                    <span class="detail">{detail}</span>
-                </button>
-            }
-        })
-        .collect_view();
-    view! { <div class="welcome-cards" role="radiogroup">{buttons}</div> }
-}
-
 #[component]
 fn RadioStep(
     step: RwSignal<Step>,
@@ -193,12 +140,8 @@ fn RadioStep(
 ) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let Form {
-        kind,
-        via,
-        address,
-        name,
-    } = form;
+    let Form { place, name } = form;
+    let Place { kind, address, .. } = place;
     let error = RwSignal::new(None::<Failure>);
     let busy = RwSignal::new(false);
     // Into the address at once, but not by touch: the keyboard would cover
@@ -215,51 +158,6 @@ fn RadioStep(
         }
     });
 
-    let kinds = cards(
-        kind,
-        vec![
-            (
-                RadioKind::Meshtastic,
-                None,
-                Signal::derive(|| "Meshtastic".to_owned()),
-                Signal::derive(move || t_string!(i18n, welcome_meshtastic_detail).to_owned()),
-            ),
-            (
-                RadioKind::Meshcore,
-                None,
-                Signal::derive(|| "MeshCore".to_owned()),
-                Signal::derive(move || t_string!(i18n, welcome_meshcore_detail).to_owned()),
-            ),
-        ],
-    );
-    let vias = cards(
-        via,
-        vec![
-            (
-                Via::Network,
-                Some(WIFI),
-                Signal::derive(move || t_string!(i18n, welcome_network).to_owned()),
-                Signal::derive(move || t_string!(i18n, welcome_network_detail).to_owned()),
-            ),
-            (
-                Via::Usb,
-                Some(USB),
-                Signal::derive(move || t_string!(i18n, welcome_usb).to_owned()),
-                Signal::derive(move || t_string!(i18n, welcome_usb_detail).to_owned()),
-            ),
-        ],
-    );
-    let hint = move || match via.get() {
-        Via::Network => {
-            let port = match kind.get() {
-                RadioKind::Meshtastic => 4403,
-                RadioKind::Meshcore => 5000,
-            };
-            t_string!(i18n, welcome_address_hint).replace("{port}", &port.to_string())
-        }
-        Via::Usb => t_string!(i18n, welcome_device_hint).to_owned(),
-    };
-
     let submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let target = form.address();
@@ -267,7 +165,10 @@ fn RadioStep(
         let given = name.get_untracked().trim().to_owned();
         let settings = RadioSettings {
             name: if given.is_empty() {
-                target.clone()
+                place
+                    .picked_name
+                    .get_untracked()
+                    .unwrap_or_else(|| target.clone())
             } else {
                 given
             },
@@ -315,37 +216,7 @@ fn RadioStep(
         <form class="welcome-radio" on:submit=submit>
             {back(step, "welcome-back")}
             <h1>{t!(i18n, welcome_radio_title)}</h1>
-            <fieldset>
-                <legend>{t!(i18n, welcome_kind)}</legend>
-                {kinds}
-            </fieldset>
-            <fieldset>
-                <legend>{t!(i18n, welcome_via)}</legend>
-                {vias}
-            </fieldset>
-            <label class="field">
-                <span class="label">
-                    {move || match via.get() {
-                        Via::Network => t!(i18n, welcome_address).into_any(),
-                        Via::Usb => t!(i18n, welcome_device).into_any(),
-                    }}
-                </span>
-                <input
-                    node_ref=input
-                    class="mono"
-                    required
-                    autocomplete="off"
-                    autocapitalize="off"
-                    spellcheck="false"
-                    placeholder=move || match via.get() {
-                        Via::Network => "192.168.1.10",
-                        Via::Usb => "/dev/ttyACM0",
-                    }
-                    prop:value=move || address.get()
-                    on:input=move |ev| address.set(event_target_value(&ev))
-                />
-                <span class="hint">{hint}</span>
-            </label>
+            <PlaceFields place input />
             <label class="field">
                 <span class="label">
                     {t!(i18n, welcome_name)}
@@ -540,8 +411,6 @@ fn Linking(
 const ARROW_RIGHT: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/arrow-right.svg");
 const ARROW_LEFT: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/arrow-left.svg");
-const WIFI: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/wifi.svg");
-const USB: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/usb.svg");
 const CIRCLE_CHECK: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/circle-check.svg");
 const ALERT: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/alert-triangle.svg");

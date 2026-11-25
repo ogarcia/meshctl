@@ -20,6 +20,7 @@ const UP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevr
 const DOWN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 const EYE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
+const ADD: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plus.svg");
 const EYE_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye-off.svg");
 
 /// What the radios' editor is open on, if anything, and in which of its
@@ -131,7 +132,7 @@ pub fn RadiosView() -> impl IntoView {
             // Over the list, on a radio picked or on one to add.
             match live.radio_editing.get() {
                 Editing::Closed => ().into_any(),
-                Editing::Adding => view! { <RadioEditor id=None modal=true /> }.into_any(),
+                Editing::Adding => view! { <AddRadio /> }.into_any(),
                 Editing::Radio(id, section) => {
                     view! { <RadioEditor id=Some(id) modal=true section /> }.into_any()
                 }
@@ -776,6 +777,156 @@ pub fn RadioEditor(
         view! { <div class="modal-back">{form}</div> }.into_any()
     } else {
         form.into_any()
+    }
+}
+
+/// Adds a radio: what it is, how meshctl reaches it and where, picked of
+/// those plugged in if it is; its name, if given. Its button, if asked,
+/// right after, in its editor.
+#[component]
+fn AddRadio() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let place = crate::plugged::Place::new();
+    let name = RwSignal::new(String::new());
+    let customize = RwSignal::new(false);
+    let error = RwSignal::new(None::<Failure>);
+    let busy = RwSignal::new(false);
+    let close = move || live.radio_editing.set(Editing::Closed);
+    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            close();
+        }
+    });
+    on_cleanup(move || escape.remove());
+    let save = move || {
+        let customize = customize.get_untracked();
+        let address = place.address();
+        let given = name.get_untracked().trim().to_owned();
+        let settings = RadioSettings {
+            name: if given.is_empty() {
+                place
+                    .picked_name
+                    .get_untracked()
+                    .unwrap_or_else(|| address.clone())
+            } else {
+                given
+            },
+            kind: place.kind.get_untracked(),
+            address,
+            enabled: true,
+            shown: true,
+            badge: Badge::default(),
+        };
+        busy.set(true);
+        spawn_local(async move {
+            match daemon::save_radio(None, &settings).await {
+                Ok(radio) => {
+                    let _ = live.refresh_radios().await;
+                    if customize {
+                        live.radio_editing
+                            .set(Editing::Radio(radio.id, Section::Button));
+                    } else {
+                        close();
+                    }
+                    return;
+                }
+                Err(failure) => {
+                    error.try_set(Some(failure));
+                }
+            }
+            busy.try_set(false);
+        });
+    };
+    let message = move || {
+        error.get().map(|failure| match failure {
+            Failure::Rejected(ErrorCode::InvalidName) => t!(i18n, error_invalid_name).into_any(),
+            Failure::Rejected(ErrorCode::InvalidAddress) => {
+                t!(i18n, error_invalid_address).into_any()
+            }
+            Failure::Rejected(ErrorCode::UnsupportedKind) => {
+                t!(i18n, error_unsupported_kind).into_any()
+            }
+            _ => t!(i18n, error_failed).into_any(),
+        })
+    };
+    let empty = move || place.address.with(|a| a.trim().is_empty());
+    view! {
+        <div class="modal-back">
+            <form
+                class="card radio-editor modal add-radio"
+                role="dialog"
+                aria-modal="true"
+                on:submit=move |ev| {
+                    ev.prevent_default();
+                    save();
+                }
+            >
+                <div class="dialog-top">
+                    <header class="editor-head">
+                        <span class="reply-face" inner_html=ADD></span>
+                        <span class="who">
+                            <h2>{t!(i18n, radio_add_title)}</h2>
+                        </span>
+                        <button
+                            type="button"
+                            class="close"
+                            title=move || t_string!(i18n, radio_cancel)
+                            aria-label=move || t_string!(i18n, radio_cancel)
+                            on:click=move |_| close()
+                            inner_html=CLOSE
+                        ></button>
+                    </header>
+                    <div class="modal-body fields">
+                        <crate::plugged::PlaceFields place />
+                        <label class="field">
+                            <span class="label">
+                                {t!(i18n, welcome_name)}
+                                <span class="optional">
+                                    " · " {t!(i18n, welcome_name_optional)}
+                                </span>
+                            </span>
+                            <input
+                                maxlength="64"
+                                placeholder=move || {
+                                    place
+                                        .picked_name
+                                        .get()
+                                        .unwrap_or_else(|| {
+                                            t_string!(i18n, welcome_name_placeholder).to_owned()
+                                        })
+                                }
+                                prop:value=move || name.get()
+                                on:input=move |ev| name.set(event_target_value(&ev))
+                            />
+                            <span class="hint">{t!(i18n, radio_add_name_hint)}</span>
+                        </label>
+                        <div class="toggle">
+                            <Switch
+                                on=Signal::derive(move || customize.get())
+                                label=Signal::derive(move || {
+                                    t_string!(i18n, radio_add_customize).to_string()
+                                })
+                                flip=move |_| customize.update(|c| *c = !*c)
+                            />
+                            <span>
+                                {t!(i18n, radio_add_customize)}
+                                <span class="dim">{t!(i18n, radio_add_customize_hint)}</span>
+                            </span>
+                        </div>
+                    </div>
+                    <p class="error">{message}</p>
+                </div>
+                <div class="buttons">
+                    <button type="button" on:click=move |_| close()>
+                        {t!(i18n, radio_cancel)}
+                    </button>
+                    <button type="submit" class="primary" disabled=move || busy.get() || empty()>
+                        {t!(i18n, radio_add)}
+                    </button>
+                </div>
+            </form>
+        </div>
     }
 }
 

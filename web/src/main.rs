@@ -26,6 +26,7 @@ mod node;
 mod offline;
 mod packets;
 mod phone;
+mod plugged;
 mod preferences;
 mod qr;
 mod radios;

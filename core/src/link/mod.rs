@@ -4,6 +4,7 @@
 //! A connection to a radio, carrying frame payloads: `FromRadio` protobufs in,
 //! `ToRadio` protobufs out. What they mean is somebody else's business.
 
+pub mod plugged;
 mod serial;
 mod tcp;
 pub mod usb;

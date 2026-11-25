@@ -19,7 +19,7 @@ use jni::JNIEnv;
 use jni::JavaVM;
 use jni::objects::{GlobalRef, JByteArray, JObject, JString, JValue};
 use jni::sys::jint;
-use meshctl_core::link::usb::{Opening, UsbOpener, UsbStream};
+use meshctl_core::link::usb::{Opening, UsbDevice, UsbOpener, UsbStream};
 use std::collections::HashMap;
 use std::ffi::{CString, c_char, c_int};
 use std::io::Write;
@@ -163,6 +163,76 @@ impl UsbOpener for UsbBridge {
             };
             Ok(Box::new(bridge(service, handle)) as Box<dyn UsbStream>)
         })
+    }
+
+    fn list(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<UsbDevice>> + Send>> {
+        let bridge = UsbBridge(Arc::clone(&self.0));
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || bridge.devices())
+                .await
+                .unwrap_or_default()
+        })
+    }
+
+    fn ask(
+        &self,
+        device: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send>> {
+        let service = Arc::clone(&self.0);
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                service.call("askUsb", |env, service| {
+                    let device = env.new_string(device)?;
+                    env.call_method(
+                        service,
+                        "askUsb",
+                        "(Ljava/lang/String;)Z",
+                        &[JValue::Object(&device)],
+                    )?
+                    .z()
+                })
+            })
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false)
+        })
+    }
+}
+
+impl UsbBridge {
+    /// The radios by USB, as the service lists them, in JSON.
+    fn devices(&self) -> Vec<UsbDevice> {
+        let listed = self.0.call("listUsb", |env, service| {
+            let listed = env
+                .call_method(service, "listUsb", "()Ljava/lang/String;", &[])?
+                .l()?;
+            Ok(String::from(env.get_string(&JString::from(listed))?))
+        });
+        let Some(listed) = listed else {
+            return Vec::new();
+        };
+        let Ok(serde_json::Value::Array(devices)) = serde_json::from_str(&listed) else {
+            return Vec::new();
+        };
+        devices
+            .iter()
+            .filter_map(|device| {
+                let text = |key: &str| {
+                    device[key]
+                        .as_str()
+                        .map(str::to_owned)
+                        .filter(|s| !s.is_empty())
+                };
+                Some(UsbDevice {
+                    vendor: u16::try_from(device["vendor"].as_u64()?).ok()?,
+                    product_id: u16::try_from(device["product"].as_u64()?).ok()?,
+                    maker: text("maker"),
+                    product: text("name"),
+                    allowed: device["allowed"].as_bool().unwrap_or(false),
+                })
+            })
+            .collect()
     }
 }
 

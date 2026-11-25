@@ -484,6 +484,38 @@ pub struct AutoReplyOrder {
     pub auto_replies: Vec<AutoReplyId>,
 }
 
+/// A radio plugged in where meshctl runs, to pick rather than know its
+/// address: a serial port that is a USB one, or, within an app that opens
+/// them, as on Android, a device by USB.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PluggedRadio {
+    /// What to give as the radio's address.
+    #[cfg_attr(feature = "openapi", schema(example = "/dev/ttyACM0"))]
+    pub address: String,
+    /// Its vendor's and product's ids, `vvvv:pppp`, if it says.
+    #[cfg_attr(feature = "openapi", schema(example = "239a:8029"))]
+    pub ids: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(example = "RAKwireless"))]
+    pub maker: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(example = "WisCore RAK4631 Board"))]
+    pub product: Option<String>,
+    /// Its USB chip, by its vendor, if known.
+    #[cfg_attr(feature = "openapi", schema(example = "nRF52 (Adafruit)"))]
+    pub chip: Option<String>,
+    /// Whether it can be opened now: by USB on Android, not until the user
+    /// lets meshctl use it.
+    pub ready: bool,
+}
+
+/// A radio plugged in to ask leave for, by its address.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PluggedAsk {
+    #[cfg_attr(feature = "openapi", schema(example = "usb://239a:8029"))]
+    pub address: String,
+}
+
 /// The order of the radios, as the interface lists them: every radio's id,
 /// each once.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
