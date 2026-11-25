@@ -14,8 +14,8 @@ publish = false
 [dependencies]
 console_error_panic_hook = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
-gloo-net = { version = "0.6", default-features = false, features = ["http", "json", "websocket"] }
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-net = { version = "0.8", default-features = false, features = ["http", "json", "websocket"] }
+gloo-timers = { version = "0.4", features = ["futures"] }
 js-sys = "0.3"
 leptos = { version = "0.8", features = ["csr"] }
 # leptos_i18n follows Leptos' minor versions: 0.6 is the one for Leptos 0.8.

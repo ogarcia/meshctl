@@ -27,7 +27,7 @@ prost-reflect = { version = "0.16", features = ["serde"] }
 # Fresh channel keys, when one is asked for.
 getrandom = "0.4"
 # Channel keys as the apps show them, given and asked for.
-base64 = "0.22"
+base64 = "0.23"
 # A MeshCore contact's name in its link, as the apps read it.
 form_urlencoded = "1"
 # The date and time an automatic reply tells, in the machine's time zone,
@@ -57,4 +57,4 @@ tempfile = "3"
 # Only to call the router the way axum does, with `ServiceExt::oneshot`.
 tower = { version = "0.5", default-features = false, features = ["util"] }
 # A WebSocket client, to talk to the event stream the way a client would.
-tokio-tungstenite = "0.29"
+tokio-tungstenite = "0.30"
