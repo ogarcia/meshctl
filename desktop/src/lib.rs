@@ -16,7 +16,10 @@
 //! On Android the daemon runs in a service of its own, in its own process,
 //! and the app's window shows its panel: see `android`.
 
-use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+use std::net::Ipv4Addr;
+#[cfg(desktop)]
+use std::net::{SocketAddr, TcpListener};
+#[cfg(desktop)]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

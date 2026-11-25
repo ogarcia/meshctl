@@ -11,6 +11,8 @@
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
+    <!-- Radios plugged in by USB, where the phone can host them. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <application
         android:icon="@mipmap/ic_launcher"
@@ -30,6 +32,14 @@
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+            <!-- A radio plugged in: Android offers to open meshctl, and
+                 lets it use the radio, for good if the user says so. -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_radios" />
             <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
             
             <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->

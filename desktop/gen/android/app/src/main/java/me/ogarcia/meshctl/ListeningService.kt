@@ -1,6 +1,15 @@
 package me.ogarcia.meshctl
 
 import android.app.NotificationChannel
+import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbManager
+import com.hoho.android.usbserial.driver.CdcAcmSerialDriver
+import com.hoho.android.usbserial.driver.UsbSerialDriver
+import com.hoho.android.usbserial.driver.UsbSerialPort
+import com.hoho.android.usbserial.driver.UsbSerialProber
+import com.hoho.android.usbserial.util.SerialInputOutputManager
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
@@ -47,6 +56,7 @@ class ListeningService : Service() {
   }
 
   override fun onDestroy() {
+    usb.keys.forEach { close(it) }
     stopDaemon()
     daemon?.join(STOPPING_MS)
     super.onDestroy()
@@ -106,8 +116,109 @@ class ListeningService : Service() {
     }
   }
 
+  /** A radio open by USB, and what reads it. */
+  private class Opened(val port: UsbSerialPort, val reader: SerialInputOutputManager)
+
+  private val usb = ConcurrentHashMap<Int, Opened>()
+  private val handles = AtomicInteger(0)
+
+  /**
+   * Every radio plugged in by USB with a driver for its serial chip: those
+   * known by their ids, and any other that says it is a modem (CDC), as
+   * boards with USB of their own are, nRF52's and ESP32-S3's.
+   */
+  private fun plugged(manager: UsbManager): List<UsbSerialDriver> {
+    val known = UsbSerialProber.getDefaultProber().findAllDrivers(manager)
+    val modems = manager.deviceList.values
+      .filter { device -> known.none { it.device == device } }
+      .filter { device ->
+        (0 until device.interfaceCount).any {
+          device.getInterface(it).interfaceClass == UsbConstants.USB_CLASS_COMM
+        }
+      }
+      .map { CdcAcmSerialDriver(it) }
+    return known + modems
+  }
+
+  /**
+   * Opens a radio by USB for the daemon: the one with these ids, as
+   * `vvvv:pppp`, or the first there is. Its handle; or NO_DEVICE, or ASKED
+   * when Android is asking the user for leave to use it, or FAILED.
+   */
+  @Keep
+  fun openUsb(device: String, baud: Int): Int {
+    val manager = getSystemService(UsbManager::class.java) ?: return NO_DEVICE
+    val driver = plugged(manager).firstOrNull {
+      device.isEmpty() ||
+        "%04x:%04x".format(it.device.vendorId, it.device.productId) == device
+    } ?: return NO_DEVICE
+    if (!manager.hasPermission(driver.device)) {
+      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        PendingIntent.FLAG_MUTABLE
+      } else {
+        0
+      }
+      manager.requestPermission(
+        driver.device,
+        PendingIntent.getBroadcast(this, 0, Intent(USB_PERMISSION).setPackage(packageName), flags)
+      )
+      return ASKED
+    }
+    return try {
+      val connection = manager.openDevice(driver.device) ?: return FAILED
+      val port = driver.ports.first()
+      port.open(connection)
+      port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+      // Both lines up, as a terminal leaves them: on boards whose chip
+      // resets them through these, as ESP32's, neither resets it.
+      port.dtr = true
+      port.rts = true
+      val handle = handles.incrementAndGet()
+      val reader = SerialInputOutputManager(port, object : SerialInputOutputManager.Listener {
+        override fun onNewData(data: ByteArray) = onUsbData(handle, data)
+        override fun onRunError(error: Exception) {
+          close(handle)
+          onUsbClosed(handle)
+        }
+      })
+      reader.start()
+      usb[handle] = Opened(port, reader)
+      handle
+    } catch (error: Exception) {
+      android.util.Log.w("meshctl", "cannot open the radio by USB: $error")
+      FAILED
+    }
+  }
+
+  /** Writes to a radio open by USB; whether it could. */
+  @Keep
+  fun writeUsb(handle: Int, data: ByteArray): Boolean {
+    val opened = usb[handle] ?: return false
+    return try {
+      opened.port.write(data, WRITE_MS)
+      true
+    } catch (error: Exception) {
+      false
+    }
+  }
+
+  @Keep
+  fun closeUsb(handle: Int) = close(handle)
+
+  private fun close(handle: Int) {
+    usb.remove(handle)?.let {
+      it.reader.stop()
+      try {
+        it.port.close()
+      } catch (_: Exception) {
+      }
+    }
+  }
+
   private external fun runDaemon(data: String)
   private external fun stopDaemon()
+  private external fun onUsbData(handle: Int, data: ByteArray)
+  private external fun onUsbClosed(handle: Int)
 
   companion object {
     /** Posts its notification again, if it is in the foreground. */
@@ -115,5 +226,10 @@ class ListeningService : Service() {
     private const val CHANNEL = "listening"
     private const val NOTIFICATION = 1
     private const val STOPPING_MS = 8000L
+    private const val WRITE_MS = 2000
+    private const val USB_PERMISSION = "me.ogarcia.meshctl.USB_PERMISSION"
+    private const val NO_DEVICE = -1
+    private const val ASKED = -2
+    private const val FAILED = -3
   }
 }

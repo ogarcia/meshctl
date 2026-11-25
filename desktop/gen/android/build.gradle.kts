@@ -13,6 +13,8 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // usb-serial-for-android, which is published there.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 

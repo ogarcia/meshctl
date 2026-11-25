@@ -6,6 +6,7 @@
 
 mod serial;
 mod tcp;
+pub mod usb;
 
 use meshctl_proto::frame;
 use std::io;
@@ -26,6 +27,10 @@ pub enum Transport {
     Tcp { host: String, port: u16 },
     /// A radio plugged in, by the path of its serial device.
     Serial { path: String, baud: u32 },
+    /// A radio plugged in where the system gives no serial device for it,
+    /// as on Android, opened by the app: by its vendor's and product's ids,
+    /// `vvvv:pppp`, or the first there is.
+    Usb { device: Option<String>, baud: u32 },
 }
 
 impl std::fmt::Display for Transport {
@@ -33,6 +38,9 @@ impl std::fmt::Display for Transport {
         match self {
             Self::Tcp { host, port } => write!(f, "tcp://{host}:{port}"),
             Self::Serial { path, baud } => write!(f, "serial://{path}@{baud}"),
+            Self::Usb { device, baud } => {
+                write!(f, "usb://{}@{baud}", device.as_deref().unwrap_or(""))
+            }
         }
     }
 }
@@ -41,7 +49,9 @@ impl std::fmt::Display for Transport {
 ///
 /// - `tcp://host`, `tcp://host:port`, or just `host` or `host:port`;
 /// - `serial:///dev/ttyACM0`, `serial:///dev/ttyACM0@115200`, or just the
-///   device's path.
+///   device's path;
+/// - `usb`, `usb://`, `usb://1a86:55d4`, any with `@115200`: by USB, where
+///   an app opens it.
 impl std::str::FromStr for Transport {
     type Err = String;
 
@@ -54,6 +64,9 @@ impl Transport {
     /// Reads where the radio is, as [`str::parse`] does, with the port to take
     /// for a host given without one: each kind of radio serves on its own.
     pub fn parse(s: &str, default_port: u16) -> Result<Self, String> {
+        if s == "usb" || s.starts_with("usb@") || s.starts_with("usb://") {
+            return usb_from(s.trim_start_matches("usb").trim_start_matches("://"));
+        }
         if let Some(rest) = s.strip_prefix("serial://") {
             return serial_from(rest);
         }
@@ -97,6 +110,34 @@ fn serial_from(s: &str) -> Result<Transport, String> {
     }
     Ok(Transport::Serial {
         path: path.to_owned(),
+        baud,
+    })
+}
+
+fn usb_from(s: &str) -> Result<Transport, String> {
+    let (device, baud) = match s.rsplit_once('@') {
+        Some((device, baud)) => (
+            device,
+            baud.parse()
+                .map_err(|_| format!("{baud:?} is not a speed"))?,
+        ),
+        None => (s, DEFAULT_BAUD),
+    };
+    let device = device.trim_matches('/');
+    if device.is_empty() {
+        return Ok(Transport::Usb { device: None, baud });
+    }
+    // A vendor's and a product's ids, each four hexadecimal digits.
+    let ids = device.split_once(':').filter(|(vendor, product)| {
+        [vendor, product]
+            .iter()
+            .all(|id| id.len() == 4 && id.chars().all(|c| c.is_ascii_hexdigit()))
+    });
+    if ids.is_none() {
+        return Err(format!("{device:?} is not a USB device's vvvv:pppp"));
+    }
+    Ok(Transport::Usb {
+        device: Some(device.to_ascii_lowercase()),
         baud,
     })
 }
@@ -161,6 +202,7 @@ pub async fn connect_framed(transport: &Transport, framing: Framing) -> io::Resu
     match transport {
         Transport::Tcp { host, port } => tcp::connect(host, *port, framing).await,
         Transport::Serial { path, baud } => serial::connect(path, *baud, framing).await,
+        Transport::Usb { device, baud } => usb::connect(device.as_deref(), *baud, framing).await,
     }
 }
 
@@ -264,6 +306,13 @@ mod tests {
         }
     }
 
+    fn usb(device: Option<&str>, baud: u32) -> Transport {
+        Transport::Usb {
+            device: device.map(str::to_owned),
+            baud,
+        }
+    }
+
     #[test]
     fn where_the_radio_is_reads_as_written() {
         let cases = [
@@ -278,18 +327,37 @@ mod tests {
                 "serial:///dev/ttyUSB1@921600",
                 serial("/dev/ttyUSB1", 921_600),
             ),
+            ("usb", usb(None, 115_200)),
+            ("usb://", usb(None, 115_200)),
+            ("usb@921600", usb(None, 921_600)),
+            ("usb://1A86:55D4", usb(Some("1a86:55d4"), 115_200)),
+            ("usb://239a:8029@115200", usb(Some("239a:8029"), 115_200)),
         ];
         for (written, expected) in cases {
             assert_eq!(written.parse::<Transport>().unwrap(), expected, "{written}");
         }
-        for wrong in ["", "tcp://", "host:port", "serial://", "/dev/tty@fast"] {
+        for wrong in [
+            "",
+            "tcp://",
+            "host:port",
+            "serial://",
+            "/dev/tty@fast",
+            "usb://radio",
+            "usb://1a86:55d",
+            "usb@fast",
+        ] {
             assert!(wrong.parse::<Transport>().is_err(), "{wrong}");
         }
     }
 
     #[test]
     fn it_reads_back_what_it_writes() {
-        for transport in [tcp("radio.lan", 4403), serial("/dev/ttyACM0", 115_200)] {
+        for transport in [
+            tcp("radio.lan", 4403),
+            serial("/dev/ttyACM0", 115_200),
+            usb(None, 115_200),
+            usb(Some("1a86:55d4"), 921_600),
+        ] {
             assert_eq!(
                 transport.to_string().parse::<Transport>().unwrap(),
                 transport

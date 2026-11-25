@@ -4031,6 +4031,7 @@ dependencies = [
  "ashpd",
  "dirs 6.0.0",
  "jni",
+ "meshctl-core",
  "meshctld",
  "serde_json",
  "sys-locale",
