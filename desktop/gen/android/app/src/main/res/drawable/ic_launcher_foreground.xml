@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- meshctl's mark, amber, on the 108 dp of an adaptive icon's layer: within
+     the circle of 66 dp every shape the launcher cuts keeps. Also the themed
+     icon's, which Android draws in its own colour. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="25.2"
+        android:translateY="25.2"
+        android:scaleX="1.8"
+        android:scaleY="1.8">
+        <path
+            android:strokeColor="#FFF0A63A"
+            android:strokeWidth="2.2"
+            android:strokeLineCap="round"
+            android:pathData="M9.31,18.25L6,26M17.9,15.37L26,20M6,26L26,20M18.17,9.15L25,6" />
+        <path
+            android:fillColor="#FFF0A63A"
+            android:pathData="M1.9,26a4.1,4.1 0,1 0,8.2 0a4.1,4.1 0,1 0,-8.2 0ZM21.9,20a4.1,4.1 0,1 0,8.2 0a4.1,4.1 0,1 0,-8.2 0ZM20.9,6a4.1,4.1 0,1 0,8.2 0a4.1,4.1 0,1 0,-8.2 0Z" />
+        <path
+            android:fillColor="#FFF0A63A"
+            android:fillType="evenOdd"
+            android:pathData="M11.07,8.01L11.11,6.67L12.89,6.67L12.93,8.01L14.17,8.52L15.14,7.61L16.39,8.86L15.48,9.83L15.99,11.07L17.33,11.11L17.33,12.89L15.99,12.93L15.48,14.17L16.39,15.14L15.14,16.39L14.17,15.48L12.93,15.99L12.89,17.33L11.11,17.33L11.07,15.99L9.83,15.48L8.86,16.39L7.61,15.14L8.52,14.17L8.01,12.93L6.67,12.89L6.67,11.11L8.01,11.07L8.52,9.83L7.61,8.86L8.86,7.61L9.83,8.52ZM13.6,12A1.6,1.6 0,1 0,10.4 12A1.6,1.6 0,1 0,13.6 12Z" />
+    </group>
+</vector>
