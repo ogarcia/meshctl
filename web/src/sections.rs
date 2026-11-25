@@ -610,18 +610,20 @@ fn FieldInput(
                         {options}
                         <option value="own">{t!(i18n, interval_own)}</option>
                     </select>
-                    <input
-                        type="number"
-                        step="1"
-                        min="0"
-                        class:gone=move || !(own.get() || !steps.contains(&seconds.get()))
-                        prop:value=move || seconds.get().to_string()
-                        on:input=move |ev| {
-                            if let Ok(secs) = event_target_value(&ev).parse::<i64>() {
-                                put(Json::from(secs));
+                    <span class="number-field" class:gone=move || !(own.get() || !steps.contains(&seconds.get()))>
+                        <input
+                            type="number"
+                            step="1"
+                            min="0"
+                            prop:value=move || seconds.get().to_string()
+                            on:input=move |ev| {
+                                if let Ok(secs) = event_target_value(&ev).parse::<i64>() {
+                                    put(Json::from(secs));
+                                }
                             }
-                        }
-                    />
+                        />
+                        <crate::stepper::Stepper />
+                    </span>
                 </div>
             }
             .into_any()
@@ -630,25 +632,27 @@ fn FieldInput(
             let current = current.clone();
             let whole = field.kind == FieldKind::Integer;
             view! {
-                <input
-                    class="pref-control"
-                    type="number"
-                    step=if whole { "1" } else { "any" }
-                    min=field.min.map(|m| m.to_string())
-                    max=field.max.map(|m| m.to_string())
-                    prop:value=move || current().to_string()
-                    on:input=move |ev| {
-                        let text = event_target_value(&ev);
-                        let number = if whole {
-                            text.parse::<i64>().ok().map(Json::from)
-                        } else {
-                            text.parse::<f64>().ok().map(Json::from)
-                        };
-                        if let Some(number) = number {
-                            put(number);
+                <span class="pref-control number-field">
+                    <input
+                        type="number"
+                        step=if whole { "1" } else { "any" }
+                        min=field.min.map(|m| m.to_string())
+                        max=field.max.map(|m| m.to_string())
+                        prop:value=move || current().to_string()
+                        on:input=move |ev| {
+                            let text = event_target_value(&ev);
+                            let number = if whole {
+                                text.parse::<i64>().ok().map(Json::from)
+                            } else {
+                                text.parse::<f64>().ok().map(Json::from)
+                            };
+                            if let Some(number) = number {
+                                put(number);
+                            }
                         }
-                    }
-                />
+                    />
+                    <crate::stepper::Stepper />
+                </span>
             }
             .into_any()
         }

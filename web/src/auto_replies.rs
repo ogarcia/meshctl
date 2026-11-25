@@ -272,34 +272,42 @@ fn BusyLimit() -> impl IntoView {
             })
             .collect_view()
     };
+    let off = move || !on();
     view! {
-        <div class="card busy-limit" class:gone=move || limits.with(Option::is_none)>
-            <div class="toggle">
-                <Switch
-                    on=Signal::derive(on)
-                    label=Signal::derive(move || t_string!(i18n, replies_busy).to_string())
-                    flip
-                />
-                <span>
-                    {t!(i18n, replies_busy)}
+        <div class="preferences data busy-limit" class:gone=move || limits.with(Option::is_none)>
+            <h2>{t!(i18n, replies_for_all)}</h2>
+            <div class="pref-row">
+                <div class="pref-what">
+                    <span class="pref-title">{t!(i18n, replies_busy)}</span>
                     <span class="dim">{t!(i18n, replies_busy_hint)}</span>
-                </span>
-                <label class="busy-most" class:gone=move || !on()>
-                    <input
-                        type="number"
-                        min="1"
-                        max="100"
-                        inputmode="numeric"
-                        prop:value=move || last.get().to_string()
-                        on:change=set
+                    <span class="busy-now dim">
+                        <span>{t!(i18n, replies_busy_now)}</span>
+                        {now}
+                    </span>
+                </div>
+                <div class="pref-control retention">
+                    <Switch
+                        on=Signal::derive(on)
+                        label=Signal::derive(move || t_string!(i18n, replies_busy).to_string())
+                        flip
                     />
-                    " %"
-                </label>
+                    <span class:dim=off>{t!(i18n, replies_busy_above)}</span>
+                    <span class="number-field">
+                        <input
+                            type="number"
+                            min="1"
+                            max="100"
+                            inputmode="numeric"
+                            disabled=off
+                            prop:value=move || last.get().to_string()
+                            on:change=set
+                        />
+                        <crate::stepper::Stepper />
+                    </span>
+                    <span class:dim=off>"%"</span>
+                </div>
             </div>
-            <p class="busy-now dim">
-                <span>{t!(i18n, replies_busy_now)}</span>
-                {now}
-            </p>
+            <h2>{t!(i18n, replies_each)}</h2>
         </div>
     }
 }

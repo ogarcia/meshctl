@@ -1066,8 +1066,13 @@
   "reply_var_time": "La hora en que se responde",
   "error_invalid_auto_reply": "Le hace falta un nombre, algo que esperar y algo con que responder, con textos de hasta 200 bytes.",
   "replies_busy": "Callar con el canal ocupado",
-  "replies_busy_hint": "Ninguna responde en una radio que oiga su canal ocupado más de este tiempo.",
+  "replies_busy_hint": "Ninguna responde en una radio que oiga su canal ocupado más tiempo que este. Mientras no diga cuánto, responde.",
   "replies_busy_now": "Ahora:",
   "replies_busy_unknown": "sin dato aún",
-  "replies_busy_paused": "en pausa"
+  "replies_busy_paused": "en pausa",
+  "replies_for_all": "Para todas",
+  "replies_each": "Cada una",
+  "replies_busy_above": "por encima del",
+  "number_less": "Menos",
+  "number_more": "Más"
 }

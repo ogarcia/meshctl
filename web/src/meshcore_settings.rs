@@ -510,17 +510,20 @@ fn RadioTab(draft: Draft) -> impl IntoView {
                 .into_any()
             >
                 <span class="pref-control mc-unit">
-                    <input
-                        type="number"
-                        min="-9"
-                        max=move || max_power.get().to_string()
-                        prop:value=move || power.get().to_string()
-                        on:change=move |ev| {
-                            if let Ok(dbm) = event_target_value(&ev).trim().parse::<i8>() {
-                                set_power(dbm);
+                    <span class="number-field">
+                        <input
+                            type="number"
+                            min="-9"
+                            max=move || max_power.get().to_string()
+                            prop:value=move || power.get().to_string()
+                            on:change=move |ev| {
+                                if let Ok(dbm) = event_target_value(&ev).trim().parse::<i8>() {
+                                    set_power(dbm);
+                                }
                             }
-                        }
-                    />
+                        />
+                        <crate::stepper::Stepper />
+                    </span>
                     <span class="dim">"dBm"</span>
                 </span>
             </Row>

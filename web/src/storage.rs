@@ -191,15 +191,18 @@ pub fn DataView() -> impl IntoView {
                         flip
                     />
                     <span class:dim=move || !on.get()>{t!(i18n, data_clean_after)}</span>
-                    <input
-                        type="number"
-                        min="1"
-                        max=Retention::LONGEST.to_string()
-                        inputmode="numeric"
-                        disabled=move || !on.get()
-                        prop:value=move || days().unwrap_or_else(|| kept.default_days()).to_string()
-                        on:change=typed
-                    />
+                    <span class="number-field">
+                        <input
+                            type="number"
+                            min="1"
+                            max=Retention::LONGEST.to_string()
+                            inputmode="numeric"
+                            disabled=move || !on.get()
+                            prop:value=move || days().unwrap_or_else(|| kept.default_days()).to_string()
+                            on:change=typed
+                        />
+                        <crate::stepper::Stepper />
+                    </span>
                     <span class:dim=move || !on.get()>{t!(i18n, data_days)}</span>
                 </div>
             </div>

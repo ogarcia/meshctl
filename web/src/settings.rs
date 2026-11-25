@@ -822,18 +822,20 @@ fn LoraTab(draft: Draft) -> impl IntoView {
                 title=t!(i18n, settings_hop_limit).into_any()
                 hint=t!(i18n, settings_hop_limit_hint).into_any()
             >
-                <input
-                    class="pref-control"
-                    type="number"
-                    min="1"
-                    max="7"
-                    prop:value=move || hop_limit.get().to_string()
-                    on:input=move |ev| {
-                        if let Ok(hops) = event_target_value(&ev).parse() {
-                            set_hop_limit(hops);
+                <span class="pref-control number-field">
+                    <input
+                        type="number"
+                        min="1"
+                        max="7"
+                        prop:value=move || hop_limit.get().to_string()
+                        on:input=move |ev| {
+                            if let Ok(hops) = event_target_value(&ev).parse() {
+                                set_hop_limit(hops);
+                            }
                         }
-                    }
-                />
+                    />
+                    <crate::stepper::Stepper />
+                </span>
             </Row>
             <Row title=t!(i18n, settings_tx).into_any() hint=t!(i18n, settings_tx_hint).into_any()>
                 <div class="pref-control switch-control">
@@ -1084,24 +1086,26 @@ fn LoraAdvancedRows(draft: Draft) -> impl IntoView {
                 title=t!(i18n, settings_tx_power).into_any()
                 hint=view! { {t!(i18n, settings_tx_power_hint)} " " {move || power_limit()} " dBm." }.into_any()
             >
-                <input
-                    class="pref-control"
-                    type="number"
-                    min="0"
-                    max=move || power_limit().to_string()
-                    prop:value=move || power.get().to_string()
-                    on:input=move |ev| {
-                        // Not past what the region allows, so as not to send
-                        // what the radio would cut down.
-                        if let Ok(dbm) = number(event_target_value(&ev)).parse::<i32>() {
-                            set_power(dbm.clamp(0, power_most() as i32));
+                <span class="pref-control number-field">
+                    <input
+                        type="number"
+                        min="0"
+                        max=move || power_limit().to_string()
+                        prop:value=move || power.get().to_string()
+                        on:input=move |ev| {
+                            // Not past what the region allows, so as not to send
+                            // what the radio would cut down.
+                            if let Ok(dbm) = number(event_target_value(&ev)).parse::<i32>() {
+                                set_power(dbm.clamp(0, power_most() as i32));
+                            }
                         }
-                    }
-                />
+                    />
+                    <crate::stepper::Stepper />
+                </span>
             </Row>
             <Row title=t!(i18n, settings_slot).into_any() hint=view! { {slot_hint} }.into_any()>
                 // Left empty, the radio's own, which it shows greyed, as "auto".
-                <div class="pref-control auto-field" class:auto=move || slot.get() == 0>
+                <div class="pref-control auto-field number-field" class:auto=move || slot.get() == 0>
                     <input
                         type="number"
                         min="1"
@@ -1121,11 +1125,12 @@ fn LoraAdvancedRows(draft: Draft) -> impl IntoView {
                             }
                         }
                     />
+                    <crate::stepper::Stepper />
                     <span class="auto-tag">"auto"</span>
                 </div>
             </Row>
             <Row title=t!(i18n, settings_frequency).into_any() hint=view! { {band_hint} }.into_any()>
-                <div class="pref-control auto-field" class:auto=move || frequency.get() == 0.0>
+                <div class="pref-control auto-field number-field" class:auto=move || frequency.get() == 0.0>
                     <input
                         type="number"
                         step="0.001"
@@ -1144,6 +1149,7 @@ fn LoraAdvancedRows(draft: Draft) -> impl IntoView {
                             }
                         }
                     />
+                    <crate::stepper::Stepper />
                     <span class="auto-tag">"auto"</span>
                 </div>
             </Row>
@@ -1151,19 +1157,21 @@ fn LoraAdvancedRows(draft: Draft) -> impl IntoView {
                 title=t!(i18n, settings_offset).into_any()
                 hint=t!(i18n, settings_offset_hint).into_any()
             >
-                <input
-                    class="pref-control"
-                    type="number"
-                    step="0.001"
-                    min="-1"
-                    max="1"
-                    prop:value=move || offset.get().to_string()
-                    on:change=move |ev| {
-                        if let Ok(mhz) = number(event_target_value(&ev)).parse() {
-                            set_offset(mhz);
+                <span class="pref-control number-field">
+                    <input
+                        type="number"
+                        step="0.001"
+                        min="-1"
+                        max="1"
+                        prop:value=move || offset.get().to_string()
+                        on:change=move |ev| {
+                            if let Ok(mhz) = number(event_target_value(&ev)).parse() {
+                                set_offset(mhz);
+                            }
                         }
-                    }
-                />
+                    />
+                    <crate::stepper::Stepper />
+                </span>
             </Row>
             <div class:gone=move || !limited()>
                 {switch_row(

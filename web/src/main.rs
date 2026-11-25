@@ -32,6 +32,7 @@ mod radios;
 mod rooms;
 mod sections;
 mod settings;
+mod stepper;
 mod storage;
 mod traces;
 mod welcome;
