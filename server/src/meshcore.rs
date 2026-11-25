@@ -469,9 +469,9 @@ pub fn hashtag_secret(name: &str) -> [u8; 16] {
     let bare = name.trim();
     let bare = bare.strip_prefix('#').unwrap_or(bare);
     let digest = Sha256::digest(format!("#{bare}").as_bytes());
-    let mut secret = [0u8; 16];
-    secret.copy_from_slice(&digest[..16]);
-    secret
+    digest[..16]
+        .try_into()
+        .expect("SHA-256 gives 32 bytes, 16 of them a secret")
 }
 
 /// A channel's name as the radio keeps it: a `#name`'s without its `#`, as
