@@ -839,8 +839,8 @@ pub fn ChatView() -> impl IntoView {
                             <span class="icon" inner_html=DOWN></span>
                             {move || match fresh.get() {
                                 0 => t_string!(i18n, chat_to_latest).to_owned(),
-                                1 => t_string!(i18n, chat_new_one).to_owned(),
-                                n => t_string!(i18n, chat_new_many).replace("{n}", &n.to_string()),
+                                1 => t_string!(i18n, chat_new_single).to_owned(),
+                                n => t_string!(i18n, chat_new_count).replace("{n}", &n.to_string()),
                             }}
                         </button>
                     </Show>
