@@ -32,6 +32,7 @@ class MainActivity : TauriActivity() {
       view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
       WindowInsetsCompat.CONSUMED
     }
+    ask(intent)
     // The notification that says it goes on listening, where Android asks
     // for leave to show it.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -42,6 +43,24 @@ class MainActivity : TauriActivity() {
         this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATIONS_ASKED
       )
     }
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    ask(intent)
+  }
+
+  /** The service, looking for radios by Bluetooth, asks for leave to. */
+  private fun ask(intent: Intent?) {
+    if (intent?.action != ASK_BLUETOOTH) {
+      return
+    }
+    val wanted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+    } else {
+      arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
+    ActivityCompat.requestPermissions(this, wanted, BLUETOOTH_ASKED)
   }
 
   // Notifications allowed: the service's, if it posted one unseen, again.
@@ -60,7 +79,10 @@ class MainActivity : TauriActivity() {
     }
   }
 
-  private companion object {
-    const val NOTIFICATIONS_ASKED = 7434
+  companion object {
+    /** The service's, for leave to use Bluetooth. */
+    const val ASK_BLUETOOTH = "me.ogarcia.meshctl.ASK_BLUETOOTH"
+    private const val NOTIFICATIONS_ASKED = 7434
+    private const val BLUETOOTH_ASKED = 7435
   }
 }

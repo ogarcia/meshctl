@@ -4,6 +4,7 @@
 //! A connection to a radio, carrying frame payloads: `FromRadio` protobufs in,
 //! `ToRadio` protobufs out. What they mean is somebody else's business.
 
+pub mod ble;
 pub mod plugged;
 mod serial;
 mod tcp;
@@ -32,6 +33,9 @@ pub enum Transport {
     /// as on Android, opened by the app: by its vendor's and product's ids,
     /// `vvvv:pppp`, or the first there is.
     Usb { device: Option<String>, baud: u32 },
+    /// A radio by Bluetooth, reached by the app, as on Android: by its
+    /// address, `AA:BB:CC:DD:EE:FF`.
+    Ble { address: String },
 }
 
 impl std::fmt::Display for Transport {
@@ -42,6 +46,7 @@ impl std::fmt::Display for Transport {
             Self::Usb { device, baud } => {
                 write!(f, "usb://{}@{baud}", device.as_deref().unwrap_or(""))
             }
+            Self::Ble { address } => write!(f, "ble://{address}"),
         }
     }
 }
@@ -67,6 +72,13 @@ impl Transport {
     pub fn parse(s: &str, default_port: u16) -> Result<Self, String> {
         if s == "usb" || s.starts_with("usb@") || s.starts_with("usb://") {
             return usb_from(s.trim_start_matches("usb").trim_start_matches("://"));
+        }
+        if let Some(address) = s.strip_prefix("ble://") {
+            let address = address.trim_end_matches('/').to_ascii_uppercase();
+            if !ble::is_address(&address) {
+                return Err(format!("{address:?} is not a Bluetooth address"));
+            }
+            return Ok(Self::Ble { address });
         }
         if let Some(rest) = s.strip_prefix("serial://") {
             return serial_from(rest);
@@ -151,6 +163,21 @@ pub struct Link {
     task: JoinHandle<()>,
 }
 
+impl Link {
+    /// A link from a radio's payloads as they come and go already, as by
+    /// Bluetooth: it ends as they do.
+    pub fn from_pipe(
+        tx: mpsc::UnboundedSender<Vec<u8>>,
+        rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    ) -> Self {
+        Self {
+            tx,
+            rx,
+            task: tokio::spawn(std::future::pending()),
+        }
+    }
+}
+
 impl Drop for Link {
     fn drop(&mut self) {
         self.task.abort();
@@ -204,6 +231,7 @@ pub async fn connect_framed(transport: &Transport, framing: Framing) -> io::Resu
         Transport::Tcp { host, port } => tcp::connect(host, *port, framing).await,
         Transport::Serial { path, baud } => serial::connect(path, *baud, framing).await,
         Transport::Usb { device, baud } => usb::connect(device.as_deref(), *baud, framing).await,
+        Transport::Ble { address } => ble::connect(address, framing).await,
     }
 }
 
@@ -333,6 +361,12 @@ mod tests {
             ("usb@921600", usb(None, 921_600)),
             ("usb://1A86:55D4", usb(Some("1a86:55d4"), 115_200)),
             ("usb://239a:8029@115200", usb(Some("239a:8029"), 115_200)),
+            (
+                "ble://aa:bb:cc:dd:ee:0f",
+                Transport::Ble {
+                    address: "AA:BB:CC:DD:EE:0F".into(),
+                },
+            ),
         ];
         for (written, expected) in cases {
             assert_eq!(written.parse::<Transport>().unwrap(), expected, "{written}");
@@ -346,6 +380,8 @@ mod tests {
             "usb://radio",
             "usb://1a86:55d",
             "usb@fast",
+            "ble://radio",
+            "ble://AA:BB:CC:DD:EE",
         ] {
             assert!(wrong.parse::<Transport>().is_err(), "{wrong}");
         }
@@ -358,6 +394,9 @@ mod tests {
             serial("/dev/ttyACM0", 115_200),
             usb(None, 115_200),
             usb(Some("1a86:55d4"), 921_600),
+            Transport::Ble {
+                address: "AA:BB:CC:DD:EE:0F".into(),
+            },
         ] {
             assert_eq!(
                 transport.to_string().parse::<Transport>().unwrap(),

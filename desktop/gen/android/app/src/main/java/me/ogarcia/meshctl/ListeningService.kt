@@ -57,6 +57,7 @@ class ListeningService : Service() {
 
   override fun onDestroy() {
     usb.keys.forEach { close(it) }
+    ble.closeAll()
     stopDaemon()
     daemon?.join(STOPPING_MS)
     super.onDestroy()
@@ -120,6 +121,25 @@ class ListeningService : Service() {
   private class Opened(val port: UsbSerialPort, val reader: SerialInputOutputManager)
 
   private val usb = ConcurrentHashMap<Int, Opened>()
+
+  /** Radios by Bluetooth, their payloads to and from the daemon. */
+  private val ble by lazy {
+    BleRadios(this, { handle, data -> onBleData(handle, data) }, { onBleClosed(it) })
+  }
+
+  /** The radios heard nearby, as JSON; empty while the user is asked. */
+  @Keep
+  fun lookBle(): String = ble.look() ?: ASKED_BLE
+
+  /** Reaches a radio by Bluetooth: its handle, or a negative number. */
+  @Keep
+  fun openBle(address: String, meshcore: Boolean): Int = ble.open(address, meshcore)
+
+  @Keep
+  fun writeBle(handle: Int, data: ByteArray): Boolean = ble.write(handle, data)
+
+  @Keep
+  fun closeBle(handle: Int) = ble.close(handle)
   private val handles = AtomicInteger(0)
 
   /**
@@ -262,6 +282,8 @@ class ListeningService : Service() {
   private external fun stopDaemon()
   private external fun onUsbData(handle: Int, data: ByteArray)
   private external fun onUsbClosed(handle: Int)
+  private external fun onBleData(handle: Int, data: ByteArray)
+  private external fun onBleClosed(handle: Int)
 
   companion object {
     /** Posts its notification again, if it is in the foreground. */
@@ -274,5 +296,7 @@ class ListeningService : Service() {
     private const val NO_DEVICE = -1
     private const val ASKED = -2
     private const val FAILED = -3
+    /** What lookBle says while the user is asked to let meshctl use Bluetooth. */
+    private const val ASKED_BLE = "asked"
   }
 }

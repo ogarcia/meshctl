@@ -13,12 +13,16 @@
 //! Radios plugged in by USB, which Android gives no serial device for,
 //! the service opens through Android's own USB: their bytes come in
 //! through `onUsbData` and go out through its `writeUsb`, as a stream the
-//! daemon takes as it would a serial port's.
+//! daemon takes as it would a serial port's. Radios by Bluetooth, the
+//! service reaches too, their payloads coming through `onBleData` and
+//! going through its `writeBle`, one by one.
 
 use jni::JNIEnv;
 use jni::JavaVM;
 use jni::objects::{GlobalRef, JByteArray, JObject, JString, JValue};
 use jni::sys::jint;
+use meshctl_core::link::Framing;
+use meshctl_core::link::ble::{BleOpener, Looked, Nearby, Pipe};
 use meshctl_core::link::usb::{Opening, UsbDevice, UsbOpener, UsbStream};
 use std::collections::HashMap;
 use std::ffi::{CString, c_char, c_int};
@@ -344,6 +348,174 @@ pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_onUsbClosed(
     }
 }
 
+/// Each radio reached by Bluetooth, by the service's handle for it: where
+/// its payloads go as they come.
+static BLE: Mutex<Option<HashMap<jint, mpsc::UnboundedSender<Vec<u8>>>>> = Mutex::new(None);
+
+/// Reaches radios by Bluetooth through the service.
+struct BleBridge(Arc<Service>);
+
+impl BleOpener for BleBridge {
+    fn open(
+        &self,
+        address: String,
+        framing: Framing,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<Pipe>> + Send>> {
+        let service = Arc::clone(&self.0);
+        Box::pin(async move {
+            let opened = {
+                let service = Arc::clone(&service);
+                tokio::task::spawn_blocking(move || {
+                    service.call("openBle", |env, service| {
+                        let address = env.new_string(address)?;
+                        env.call_method(
+                            service,
+                            "openBle",
+                            "(Ljava/lang/String;Z)I",
+                            &[
+                                JValue::Object(&address),
+                                JValue::Bool(u8::from(framing == Framing::Meshcore)),
+                            ],
+                        )?
+                        .i()
+                    })
+                })
+                .await
+                .ok()
+                .flatten()
+            };
+            let handle = match opened {
+                Some(handle) if handle >= 0 => handle,
+                Some(-2) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "waiting for leave to use Bluetooth",
+                    ));
+                }
+                Some(-4) => return Err(std::io::Error::other("Bluetooth is off")),
+                Some(-5) => return Err(std::io::Error::other("the radio was not paired")),
+                _ => {
+                    return Err(std::io::Error::other(
+                        "the radio by Bluetooth did not answer",
+                    ));
+                }
+            };
+            let (to_radio, mut outgoing) = mpsc::unbounded_channel::<Vec<u8>>();
+            let (incoming, from_radio) = mpsc::unbounded_channel::<Vec<u8>>();
+            if let Ok(mut ble) = BLE.lock() {
+                ble.get_or_insert_with(HashMap::new)
+                    .insert(handle, incoming);
+            }
+            // Each payload to the radio, by a thread of its own, as writing
+            // waits on it; the link gone, the radio let go.
+            std::thread::spawn(move || {
+                while let Some(payload) = outgoing.blocking_recv() {
+                    let written = service.call("writeBle", |env, service| {
+                        let array = env.byte_array_from_slice(&payload)?;
+                        env.call_method(
+                            service,
+                            "writeBle",
+                            "(I[B)Z",
+                            &[JValue::Int(handle), JValue::Object(&array)],
+                        )?
+                        .z()
+                    });
+                    if written != Some(true) {
+                        break;
+                    }
+                }
+                service.call("closeBle", |env, service| {
+                    env.call_method(service, "closeBle", "(I)V", &[JValue::Int(handle)])
+                        .map(|_| ())
+                });
+                if let Ok(mut ble) = BLE.lock()
+                    && let Some(ble) = ble.as_mut()
+                {
+                    ble.remove(&handle);
+                }
+            });
+            Ok((to_radio, from_radio))
+        })
+    }
+
+    fn look(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Looked> + Send>> {
+        let service = Arc::clone(&self.0);
+        Box::pin(async move {
+            let looked = tokio::task::spawn_blocking(move || {
+                service.call("lookBle", |env, service| {
+                    let looked = env
+                        .call_method(service, "lookBle", "()Ljava/lang/String;", &[])?
+                        .l()?;
+                    Ok(String::from(env.get_string(&JString::from(looked))?))
+                })
+            })
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+            if looked == "asked" {
+                return Looked::Asked;
+            }
+            let Ok(serde_json::Value::Array(heard)) = serde_json::from_str(&looked) else {
+                return Looked::Heard(Vec::new());
+            };
+            Looked::Heard(
+                heard
+                    .iter()
+                    .filter_map(|radio| {
+                        Some(Nearby {
+                            address: radio["address"].as_str()?.to_owned(),
+                            name: radio["name"]
+                                .as_str()
+                                .filter(|n| !n.is_empty())
+                                .map(str::to_owned),
+                            rssi: radio["rssi"].as_i64().and_then(|r| i16::try_from(r).ok()),
+                            framing: match radio["kind"].as_str() {
+                                Some("meshtastic") => Some(Framing::Meshtastic),
+                                Some("meshcore") => Some(Framing::Meshcore),
+                                _ => None,
+                            },
+                        })
+                    })
+                    .collect(),
+            )
+        })
+    }
+}
+
+/// A payload from a radio by Bluetooth, from the service's callbacks.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_onBleData(
+    env: JNIEnv,
+    _service: JObject,
+    handle: jint,
+    data: JByteArray,
+) {
+    let Ok(payload) = env.convert_byte_array(&data) else {
+        return;
+    };
+    if let Ok(ble) = BLE.lock()
+        && let Some(sender) = ble.as_ref().and_then(|ble| ble.get(&handle))
+    {
+        let _ = sender.send(payload);
+    }
+}
+
+/// A radio by Bluetooth gone: out of reach, or failing.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_onBleClosed(
+    _env: JNIEnv,
+    _service: JObject,
+    handle: jint,
+) {
+    if let Ok(mut ble) = BLE.lock()
+        && let Some(ble) = ble.as_mut()
+    {
+        // Its sender gone, the link sees it go.
+        ble.remove(&handle);
+    }
+}
+
 /// The running daemon's stop, once started.
 static STOP: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
 
@@ -377,6 +549,7 @@ pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_runDaemon(
     };
     if let Some(service) = &service {
         meshctl_core::link::usb::set_opener(Arc::new(UsbBridge(Arc::clone(service))));
+        meshctl_core::link::ble::set_opener(Arc::new(BleBridge(Arc::clone(service))));
     }
     let host = service.map(|service| service as Arc<dyn meshctld::Host>);
     let config = meshctld::Config {

@@ -508,6 +508,41 @@ pub struct PluggedRadio {
     pub ready: bool,
 }
 
+/// The ways meshctl reaches radios here, beyond the network and serial
+/// ports: those an app it runs within gives, as Android's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ConnectionWays {
+    /// Devices by USB, opened by the app, rather than by their paths.
+    pub usb: bool,
+    pub bluetooth: bool,
+}
+
+/// A radio heard nearby, by Bluetooth.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NearbyRadio {
+    /// What to give as the radio's address.
+    #[cfg_attr(feature = "openapi", schema(example = "ble://AA:BB:CC:DD:EE:FF"))]
+    pub address: String,
+    #[cfg_attr(feature = "openapi", schema(example = "Meshtastic_a1b2"))]
+    pub name: Option<String>,
+    /// How well it is heard, in dBm.
+    #[cfg_attr(feature = "openapi", schema(example = -60))]
+    pub rssi: Option<i16>,
+    /// Its firmware, by the service it says it has.
+    pub kind: Option<RadioKind>,
+}
+
+/// The radios heard nearby by Bluetooth, or none yet: until the user lets
+/// meshctl use Bluetooth, which the app is asking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NearbyRadios {
+    pub allowed: bool,
+    pub radios: Vec<NearbyRadio>,
+}
+
 /// A radio plugged in to ask leave for, by its address.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

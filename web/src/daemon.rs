@@ -929,3 +929,14 @@ pub async fn ask_plugged(address: &str) -> Result<bool, Failure> {
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
 }
+
+/// The ways meshctl reaches radios here, beyond the network and serial
+/// ports.
+pub async fn ways() -> Result<meshctl_api::ConnectionWays, Failure> {
+    get("/devices/ways").await
+}
+
+/// Looks for radios nearby by Bluetooth, a few seconds.
+pub async fn bluetooth() -> Result<meshctl_api::NearbyRadios, Failure> {
+    get("/devices/bluetooth").await
+}

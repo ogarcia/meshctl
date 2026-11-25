@@ -10,11 +10,16 @@ use crate::daemon;
 use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{PluggedRadio, RadioKind};
+use meshctl_api::{NearbyRadio, PluggedRadio, RadioKind};
 use std::time::Duration;
 
 const WIFI: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/wifi.svg");
 const USB: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/usb.svg");
+const BLUETOOTH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/bluetooth.svg");
+
+/// How soon radios nearby are looked for again while Android asks for
+/// leave to use Bluetooth.
+const ASKED_AGAIN: Duration = Duration::from_secs(3);
 
 /// How often the radios plugged in are read again, while they are shown.
 const PLUGGED_EVERY: Duration = Duration::from_secs(3);
@@ -24,6 +29,7 @@ const PLUGGED_EVERY: Duration = Duration::from_secs(3);
 pub enum Via {
     Network,
     Usb,
+    Bluetooth,
 }
 
 /// Where a radio to add is, as it is asked.
@@ -42,6 +48,9 @@ pub struct Place {
 pub fn via_of(address: &str) -> Via {
     let address = address.trim();
     let port = address.to_ascii_uppercase();
+    if address.starts_with("ble://") {
+        return Via::Bluetooth;
+    }
     if address.starts_with('/')
         || address.starts_with("serial://")
         || address.starts_with("usb")
@@ -151,9 +160,15 @@ pub fn PlaceFields(
             ),
         ],
     );
-    let vias = cards(
-        via,
-        vec![
+    // Bluetooth, where there is a way to reach radios by it: an app's.
+    let bluetooth = RwSignal::new(false);
+    spawn_local(async move {
+        if let Ok(ways) = daemon::ways().await {
+            bluetooth.try_set(ways.bluetooth);
+        }
+    });
+    let vias = move || {
+        let mut ways = vec![
             (
                 Via::Network,
                 Some(WIFI),
@@ -166,12 +181,25 @@ pub fn PlaceFields(
                 Signal::derive(move || t_string!(i18n, welcome_usb).to_owned()),
                 Signal::derive(move || t_string!(i18n, welcome_usb_detail).to_owned()),
             ),
-        ],
-    );
+        ];
+        if bluetooth.get() || via.get_untracked() == Via::Bluetooth {
+            ways.push((
+                Via::Bluetooth,
+                Some(BLUETOOTH),
+                Signal::derive(move || t_string!(i18n, welcome_bluetooth).to_owned()),
+                Signal::derive(move || t_string!(i18n, welcome_bluetooth_detail).to_owned()),
+            ));
+        }
+        cards(via, ways)
+    };
     // Another way to reach it takes the address it had, if any: going back
     // and forth loses none, while this is open.
-    let kept = StoredValue::new([String::new(), String::new()]);
-    let slot = |via: Via| usize::from(via == Via::Usb);
+    let kept = StoredValue::new([String::new(), String::new(), String::new()]);
+    let slot = |via: Via| match via {
+        Via::Network => 0,
+        Via::Usb => 1,
+        Via::Bluetooth => 2,
+    };
     Effect::new(move |before: Option<Via>| {
         let now = via.get();
         if let Some(before) = before.filter(|before| *before != now) {
@@ -199,10 +227,13 @@ pub fn PlaceFields(
             <legend>{t!(i18n, welcome_via)}</legend>
             {vias}
         </fieldset>
-        <Show
-            when=move || via.get() == Via::Network
-            fallback=move || view! { <PluggedPicker place /> }
-        >
+        <Show when=move || via.get() == Via::Usb>
+            <PluggedPicker place />
+        </Show>
+        <Show when=move || via.get() == Via::Bluetooth>
+            <NearbyPicker place />
+        </Show>
+        <Show when=move || via.get() == Via::Network>
             <label class="field">
                 <span class="label">{t!(i18n, welcome_address)}</span>
                 <input
@@ -382,6 +413,156 @@ fn PluggedPicker(place: Place) -> impl IntoView {
                 } else {
                     t!(i18n, plugged_by_hand).into_any()
                 }}
+            </button>
+        </div>
+    }
+}
+
+/// What a radio heard nearby is called: its name, or its address.
+fn nearby_name(radio: &NearbyRadio) -> String {
+    radio
+        .name
+        .clone()
+        .unwrap_or_else(|| radio.address.trim_start_matches("ble://").to_owned())
+}
+
+/// The radios heard nearby by Bluetooth, looked for as it is shown and
+/// again as asked, to pick one from: its firmware picked with it, if it
+/// says.
+#[component]
+fn NearbyPicker(place: Place) -> impl IntoView {
+    let i18n = use_i18n();
+    let address = place.address;
+    let nearby = RwSignal::new(None::<Vec<NearbyRadio>>);
+    let allowed = RwSignal::new(true);
+    let looking = RwSignal::new(false);
+    // Looked for again and again while Android asks for leave, so that the
+    // radios show as soon as it is given.
+    fn look(
+        looking: RwSignal<bool>,
+        allowed: RwSignal<bool>,
+        nearby: RwSignal<Option<Vec<NearbyRadio>>>,
+    ) {
+        if looking.get_untracked() {
+            return;
+        }
+        looking.set(true);
+        spawn_local(async move {
+            if let Ok(heard) = daemon::bluetooth().await {
+                allowed.try_set(heard.allowed);
+                nearby.try_set(Some(heard.radios));
+                if !heard.allowed {
+                    set_timeout(
+                        move || {
+                            if !looking.is_disposed() {
+                                look(looking, allowed, nearby);
+                            }
+                        },
+                        ASKED_AGAIN,
+                    );
+                }
+            }
+            looking.try_set(false);
+        });
+    }
+    let look = move || look(looking, allowed, nearby);
+    look();
+    let pick = move |radio: NearbyRadio| {
+        address.set(radio.address.clone());
+        place.picked_name.set(Some(nearby_name(&radio)));
+        if let Some(kind) = radio.kind {
+            place.kind.set(kind);
+        }
+    };
+    let rows = move || {
+        let mut heard = nearby.get().unwrap_or_default();
+        // The one it has already, out of reach or connected and so silent:
+        // first, by its address.
+        let now = address.get();
+        if now.starts_with("ble://") && !heard.iter().any(|r| r.address == now) {
+            heard.insert(
+                0,
+                NearbyRadio {
+                    address: now,
+                    name: None,
+                    rssi: None,
+                    kind: None,
+                },
+            );
+        }
+        heard
+            .into_iter()
+            .map(|radio| {
+                let this = radio.address.clone();
+                let on = {
+                    let this = this.clone();
+                    move || address.with(|a| *a == this)
+                };
+                let name = nearby_name(&radio);
+                let detail = [
+                    radio.kind.map(|kind| {
+                        match kind {
+                            RadioKind::Meshtastic => "Meshtastic",
+                            RadioKind::Meshcore => "MeshCore",
+                        }
+                        .to_owned()
+                    }),
+                    radio.rssi.map(|rssi| format!("{rssi} dBm")),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
+                view! {
+                    <button
+                        type="button"
+                        role="radio"
+                        class="plugged-radio"
+                        class:on=on.clone()
+                        aria-checked=move || on().to_string()
+                        on:click=move |_| pick(radio.clone())
+                    >
+                        <span class="icon" inner_html=BLUETOOTH></span>
+                        <span class="what">
+                            <span class="title">{name}</span>
+                            <span class="detail">{detail}</span>
+                            <span class="detail mono">
+                                {this.trim_start_matches("ble://").to_owned()}
+                            </span>
+                        </span>
+                    </button>
+                }
+            })
+            .collect_view()
+    };
+    let none = move || {
+        !looking.get()
+            && allowed.get()
+            && nearby.with(|n| n.as_ref().is_some_and(Vec::is_empty))
+            && !address.with(|a| a.starts_with("ble://"))
+    };
+    view! {
+        <div class="field plugged">
+            <span class="label">{t!(i18n, nearby_title)}</span>
+            <div class="plugged-list" role="radiogroup">
+                {rows}
+                <p class="plugged-none" class:gone=move || !looking.get()>
+                    {t!(i18n, nearby_looking)}
+                </p>
+                <p class="plugged-none" class:gone=move || allowed.get()>
+                    {t!(i18n, nearby_asked)}
+                </p>
+                <p class="plugged-none" class:gone=move || !none()>
+                    {t!(i18n, nearby_none)}
+                </p>
+            </div>
+            <button
+                type="button"
+                class="plugged-hand"
+                disabled=move || looking.get()
+                on:click=move |_| look()
+            >
+                {t!(i18n, nearby_again)}
             </button>
         </div>
     }

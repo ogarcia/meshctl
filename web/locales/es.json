@@ -1087,5 +1087,12 @@
   "plugged_pick": "Elegirla de las enchufadas",
   "radio_add_customize": "Después, personalizar su botón",
   "radio_add_name_hint": "Si no le das uno, el de la radio enchufada o su dirección.",
-  "radio_add_customize_hint": "Su icono o sus letras, y su color en la barra, justo al añadirla."
+  "radio_add_customize_hint": "Su icono o sus letras, y su color en la barra, justo al añadirla.",
+  "welcome_bluetooth": "Por Bluetooth",
+  "welcome_bluetooth_detail": "Emparejada con este móvil",
+  "nearby_title": "La radio cercana",
+  "nearby_looking": "Buscando radios cercanas…",
+  "nearby_asked": "Android te está pidiendo permiso para usar el Bluetooth: acéptalo y vuelve a buscar.",
+  "nearby_none": "No se oye ninguna radio cerca. ¿Tienen el Bluetooth encendido, ella y este móvil?",
+  "nearby_again": "Buscar otra vez"
 }
