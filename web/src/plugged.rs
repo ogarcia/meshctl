@@ -37,7 +37,35 @@ pub struct Place {
     pub picked_name: RwSignal<Option<String>>,
 }
 
+/// How an address reaches its radio: a device's path, or USB, is plugged
+/// in; anything else, over the network.
+pub fn via_of(address: &str) -> Via {
+    let address = address.trim();
+    let port = address.to_ascii_uppercase();
+    if address.starts_with('/')
+        || address.starts_with("serial://")
+        || address.starts_with("usb")
+        || (port.starts_with("COM")
+            && port[3..].chars().all(|c| c.is_ascii_digit())
+            && port.len() > 3)
+    {
+        Via::Usb
+    } else {
+        Via::Network
+    }
+}
+
 impl Place {
+    /// Where a radio already added is, to change it.
+    pub fn of(kind: RadioKind, address: &str) -> Self {
+        Self {
+            kind: RwSignal::new(kind),
+            via: RwSignal::new(via_of(address)),
+            address: RwSignal::new(address.to_owned()),
+            picked_name: RwSignal::new(None),
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             kind: RwSignal::new(RadioKind::Meshtastic),
@@ -71,6 +99,8 @@ pub fn cards<T: Copy + PartialEq + Send + Sync + 'static>(
     value: RwSignal<T>,
     options: Vec<Card<T>>,
 ) -> impl IntoView {
+    // Three or more: as rows by their icons, across or one under another.
+    let many = options.len() > 2;
     let buttons = options
         .into_iter()
         .map(|(this, icon, title, detail)| {
@@ -91,7 +121,7 @@ pub fn cards<T: Copy + PartialEq + Send + Sync + 'static>(
             }
         })
         .collect_view();
-    view! { <div class="welcome-cards" role="radiogroup">{buttons}</div> }
+    view! { <div class="welcome-cards" class:many=many role="radiogroup">{buttons}</div> }
 }
 
 /// What the radio is, how meshctl reaches it, and where.
@@ -138,11 +168,17 @@ pub fn PlaceFields(
             ),
         ],
     );
-    // Another way to reach it starts its address afresh.
+    // Another way to reach it takes the address it had, if any: going back
+    // and forth loses none, while this is open.
+    let kept = StoredValue::new([String::new(), String::new()]);
+    let slot = |via: Via| usize::from(via == Via::Usb);
     Effect::new(move |before: Option<Via>| {
         let now = via.get();
-        if before.is_some_and(|before| before != now) {
-            address.set(String::new());
+        if let Some(before) = before.filter(|before| *before != now) {
+            kept.update_value(|kept| {
+                kept[slot(before)] = address.get_untracked();
+                address.set(kept[slot(now)].clone());
+            });
             place.picked_name.set(None);
         }
         now
@@ -216,6 +252,16 @@ fn PluggedPicker(place: Place) -> impl IntoView {
     let read = move || {
         spawn_local(async move {
             if let Ok(read) = daemon::plugged().await {
+                // An address given before, a path none of them has: as
+                // written by hand, the first time, where there are paths.
+                if plugged.get_untracked().is_none()
+                    && !app.get_untracked()
+                    && address.with_untracked(|a| {
+                        !a.trim().is_empty() && !read.iter().any(|p| p.address == *a)
+                    })
+                {
+                    by_hand.try_set(true);
+                }
                 // One just let be used: no longer waiting.
                 if let Some(waiting) = asked.get_untracked()
                     && read.iter().any(|p| p.address == waiting && p.ready)
@@ -226,11 +272,11 @@ fn PluggedPicker(place: Place) -> impl IntoView {
             }
         });
     };
-    read();
     spawn_local(async move {
         if let Ok(settings) = daemon::app_settings().await {
             app.try_set(settings.background.is_some());
         }
+        read();
     });
     let every = set_interval_with_handle(read, PLUGGED_EVERY).ok();
     on_cleanup(move || {

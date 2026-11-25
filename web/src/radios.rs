@@ -575,19 +575,21 @@ pub fn RadioEditor(
         }
         None => t!(i18n, radio_add_title).into_any(),
     };
-    let kinds = [RadioKind::Meshtastic, RadioKind::Meshcore].map(|kind| {
-        let on = move || draft.with(|d| d.kind == kind);
-        view! {
-            <button
-                type="button"
-                role="radio"
-                class:on=on
-                aria-checked=move || on().to_string()
-                on:click=move |_| draft.update(|d| d.kind = kind)
-            >
-                {kind_name(kind)}
-            </button>
-        }
+    // What it is and where, as when it was added: from it, and into it.
+    let place = untrack(|| draft.with(|d| crate::plugged::Place::of(d.kind, &d.address)));
+    Effect::new(move |_| {
+        let kind = place.kind.get();
+        place.address.track();
+        place.via.track();
+        let address = place.address();
+        draft.update(|d| {
+            if d.kind != kind {
+                d.kind = kind;
+            }
+            if d.address != address {
+                d.address = address;
+            }
+        });
     });
     let name = Signal::derive(move || draft.with(|d| d.name.clone()));
     let look = Signal::derive(move || draft.with(Draft::badge));
@@ -685,33 +687,7 @@ pub fn RadioEditor(
                             }
                         />
                     </label>
-                    <div class="field">
-                        <span class="dim">{t!(i18n, radio_kind)}</span>
-                        <div
-                            class="segmented"
-                            role="radiogroup"
-                            style=move || {
-                                let at = draft.with(|d| usize::from(d.kind == RadioKind::Meshcore));
-                                format!("--n: 2; --at: {at}")
-                            }
-                        >
-                            {kinds.into_iter().collect_view()}
-                        </div>
-                    </div>
-                    <label>
-                        <span class="dim">{t!(i18n, radio_address)}</span>
-                        <input
-                            required
-                            class="mono"
-                            placeholder="192.168.1.10 · /dev/ttyACM0"
-                            prop:value=move || draft.with(|d| d.address.clone())
-                            on:input=move |ev| {
-                                let address = event_target_value(&ev);
-                                draft.update(|d| d.address = address);
-                            }
-                        />
-                        <span class="hint dim">{t!(i18n, radio_address_hint)}</span>
-                    </label>
+                    <crate::plugged::PlaceFields place />
                     <div class="toggle">
                         <Switch
                             on=Signal::derive(move || draft.with(|d| d.enabled))

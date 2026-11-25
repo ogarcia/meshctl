@@ -3352,6 +3352,21 @@
         font-weight: 600;
       }
       .welcome-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      /* Three or more: across, each its icon beside its name; one under
+         another where they would not fit. */
+      .welcome-cards.many { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .welcome-cards.many .welcome-card:has(> .icon) {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-content: start;
+        column-gap: 10px;
+        row-gap: 2px;
+      }
+      .welcome-cards.many .welcome-card > .icon { grid-row: span 2; margin: 2px 0 0; }
+      fieldset:has(> .welcome-cards.many) { container-type: inline-size; }
+      @container (max-width: 480px) {
+        .welcome-cards.many { grid-template-columns: minmax(0, 1fr); }
+      }
       .welcome-card {
         display: flex;
         flex-direction: column;
@@ -3903,13 +3918,13 @@
       .radio-editor .buttons .danger { margin-right: auto; }
       /* Adding a radio: the welcome's cards and fields, in a dialog, and the
          radios plugged in to pick from. */
-      .add-radio fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
-      .add-radio legend,
-      .add-radio .field > .label { margin-bottom: 6px; padding: 0; color: var(--mc-muted); font-size: 12px; }
-      .add-radio .field > .label { display: block; margin-bottom: 0; }
-      .add-radio .optional { font-weight: 400; }
-      .add-radio .hint { color: var(--mc-muted); }
-      .add-radio .welcome-card { padding: 10px 12px; }
+      .radio-editor fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+      .radio-editor legend,
+      .radio-editor .field > .label { margin-bottom: 6px; padding: 0; color: var(--mc-muted); font-size: 12px; }
+      .radio-editor .field > .label { display: block; margin-bottom: 0; }
+      .radio-editor .optional { font-weight: 400; }
+      .radio-editor .field > .hint { color: var(--mc-muted); }
+      .radio-editor .welcome-card { padding: 10px 12px; }
       .plugged-list { display: flex; flex-direction: column; gap: 8px; }
       .plugged-radio {
         display: flex;
@@ -3942,7 +3957,7 @@
         font-size: 13px;
       }
       .plugged-hand:hover { text-decoration: underline; }
-      .add-radio .plugged,
+      .radio-editor .plugged,
       .welcome-radio .plugged { display: flex; flex-direction: column; gap: 8px; }
 
       /*
