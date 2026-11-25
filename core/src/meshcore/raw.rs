@@ -7,7 +7,7 @@
 //! them out and `Utils` seals them.
 
 use aes::Aes128;
-use aes::cipher::{BlockDecrypt, KeyInit, generic_array::GenericArray};
+use aes::cipher::{Array, BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
@@ -114,7 +114,7 @@ impl RawPacket {
 /// The region code a packet goes with, by its region's key: the start of
 /// the HMAC of its type and payload; 0000 and FFFF kept apart.
 pub fn transport_code(key: &[u8; 16], payload_type: u8, payload: &[u8]) -> u16 {
-    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("any key length");
+    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(key).expect("any key length");
     mac.update(&[payload_type]);
     mac.update(payload);
     let out = mac.finalize().into_bytes();
@@ -146,16 +146,14 @@ pub fn open_channel_text(secret: &[u8; 16], payload: &[u8]) -> Option<(u32, Stri
     // The MAC's key is the secret as 32 bytes, its second half zeros.
     let mut key = [0u8; 32];
     key[..16].copy_from_slice(secret);
-    let mut check = <Hmac<Sha256> as Mac>::new_from_slice(&key).expect("any key length");
+    let mut check = <Hmac<Sha256> as KeyInit>::new_from_slice(&key).expect("any key length");
     check.update(encrypted);
     if check.finalize().into_bytes()[..MAC_SIZE] != *mac {
         return None;
     }
-    let cipher = Aes128::new(GenericArray::from_slice(secret));
+    let cipher = Aes128::new(&(*secret).into());
     let mut plain = encrypted.to_vec();
-    for block in plain.chunks_mut(16) {
-        cipher.decrypt_block(GenericArray::from_mut_slice(block));
-    }
+    cipher.decrypt_blocks(Array::slice_as_chunks_mut(&mut plain).0);
     let timestamp = u32::from_le_bytes(plain.get(..4)?.try_into().ok()?);
     // Plain text only: the top bits of its type byte say other kinds.
     if plain.get(4)? >> 2 != 0 {
@@ -172,20 +170,17 @@ pub fn open_channel_text(secret: &[u8; 16], payload: &[u8]) -> Option<(u32, Stri
 /// A channel's text sealed with its secret, as the firmware seals it: what
 /// a channel message carries.
 pub fn seal_channel_text(secret: &[u8; 16], timestamp: u32, text: &str) -> Vec<u8> {
-    use aes::cipher::BlockEncrypt;
     let mut plain = timestamp.to_le_bytes().to_vec();
     plain.push(0);
     plain.extend(text.as_bytes());
     while !plain.len().is_multiple_of(16) {
         plain.push(0);
     }
-    let cipher = Aes128::new(GenericArray::from_slice(secret));
-    for block in plain.chunks_mut(16) {
-        cipher.encrypt_block(GenericArray::from_mut_slice(block));
-    }
+    let cipher = Aes128::new(&(*secret).into());
+    cipher.encrypt_blocks(Array::slice_as_chunks_mut(&mut plain).0);
     let mut key = [0u8; 32];
     key[..16].copy_from_slice(secret);
-    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&key).expect("any key length");
+    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(&key).expect("any key length");
     mac.update(&plain);
     let mut payload = vec![channel_hash(secret)];
     payload.extend(&mac.finalize().into_bytes()[..MAC_SIZE]);
@@ -338,6 +333,21 @@ mod tests {
         let last = bad.len() - 1;
         bad[last] ^= 1;
         assert_eq!(open_channel_text(&secret, &bad), None);
+    }
+
+    #[test]
+    fn it_seals_and_codes_as_done_apart() {
+        // Worked out with Python's cryptography and hmac, as the firmware
+        // does it: AES-128 by blocks, a SHA-256 HMAC keyed by the secret
+        // and 16 zeros, its first two bytes.
+        let sealed = sealed(&[0x11; 16], 1_795_000_000, "Ana: hola a todos");
+        let expected = "b8ca2922d9b4bf16c7b4990e37b5ad1572495a16e8d05fd300f2fa40732b7213a82cf0";
+        let hex: String = sealed.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, expected);
+        assert_eq!(
+            transport_code(&[7; 16], PAYLOAD_GRP_TXT, &[9, 9, 9]),
+            0xd024
+        );
     }
 
     #[test]

@@ -34,7 +34,7 @@ form_urlencoded = "1"
 # or in TZ's: with the zones within, for a container that has none.
 jiff = { version = "1", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always", "tzdb-zoneinfo"] }
 # Fingerprints of channels, to tell where each went.
-sha2 = "0.10"
+sha2 = "0.11"
 # A reaction is one emoji: one grapheme, as the MeshCore apps tell it.
 unicode-segmentation = "1"
 # The interface trunk builds into web/dist. When it has not been built the
