@@ -3,6 +3,41 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.2.0 (2026-11-25)
+
+Automatic replies, and the panel easier at hand.
+
+### Automatic replies
+
+- If someone writes this, answer with that: a ping, say, with the hops it
+  took and the signal it came with. On both meshes, from the daemon, with
+  the panel closed too.
+- A reaction with the hops, 🎯 come direct, a text, or both, and another
+  text if it came direct; the texts with variables from the message (who
+  sent it, its hops, its SNR and RSSI, its channel, the date and time),
+  signed with 🤖 unless told not to.
+- Each where it is given, on any radio: every direct conversation, one
+  node's, or a channel, followed wherever it goes on the radio. A message
+  two would answer is answered by the first, in an order of their own.
+- Kept in check: never the radio's own, MQTT's, a reaction, a room's post
+  or another bot's; nothing heard while catching up or long ago; the same
+  node once in five minutes, and six a minute. Quiet, all of them, on a
+  radio that hears its channel busier than 25% of the time, or as set.
+- Their own page among meshctl's settings, each shown as it will go.
+
+### The panel
+
+- The map comes back to the area it was left at, all of it, on a screen
+  of any size: a phone shows what a desktop showed.
+- The numbers from one to seven and the kangaroo among the suggested
+  emojis, as the mesh tells hops with them.
+- Number fields with less and more buttons in meshctl's look, again and
+  again while held.
+- Rows dragged to another place show where they will fall, the others
+  making way.
+- Many radios on the rail, in a short window, scroll without a bar, with
+  meshctl's settings always at its foot.
+
 ## 0.1.0 (2026-11-24)
 
 The first release: meshctl as it is, to be tried.
