@@ -40,9 +40,46 @@ permissions:
   contents: read
 
 jobs:
+  # ── The interface, once: web/dist, the same for every platform ───────────
+  # WebAssembly and what goes with it, which each binary below embeds as it
+  # is compiled: built here alone, and handed to them.
+  web:
+    name: Build the interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Load build versions
+        shell: bash
+        run: grep -E '^[A-Za-z_]+=' versions.env >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web
+
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@${{ env.TRUNK_VERSION }}
+
+      - name: Build the interface
+        run: cd web && trunk build --release
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: interface
+          path: web/dist/
+          if-no-files-found: error
+          retention-days: 1
+
   # ── Compile the binary once per arch (native runners) ──────────────────────
   build:
     name: Compile binary (${{ matrix.arch }})
+    needs: web
     runs-on: ${{ matrix.os }}
     # aarch64 musl is a cross build from the arm runner's gnu host, so the cc
     # crate looks for aarch64-linux-musl-gcc (not shipped by musl-tools) to
@@ -70,7 +107,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }},wasm32-unknown-unknown
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -79,15 +116,12 @@ jobs:
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
 
-      - name: Install trunk
-        uses: taiki-e/install-action@v2
+      # The interface, built once above: web/dist, which the daemon embeds
+      # as it is compiled.
+      - uses: actions/download-artifact@v8
         with:
-          tool: trunk@${{ env.TRUNK_VERSION }}
-
-      # The interface first: web/dist, which the daemon embeds as it is
-      # compiled.
-      - name: Build the interface
-        run: cd web && trunk build --release
+          name: interface
+          path: web/dist
 
       - name: Build the daemon
         run: |

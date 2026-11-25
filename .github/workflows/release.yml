@@ -20,9 +20,46 @@ permissions:
   contents: read
 
 jobs:
+  # ── The interface, once: web/dist, the same for every platform ───────────
+  # WebAssembly and what goes with it, which each binary below embeds as it
+  # is compiled: built here alone, and handed to them.
+  web:
+    name: Build the interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Load build versions
+        shell: bash
+        run: grep -E '^[A-Za-z_]+=' versions.env >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web
+
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@${{ env.TRUNK_VERSION }}
+
+      - name: Build the interface
+        run: cd web && trunk build --release
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: interface
+          path: web/dist/
+          if-no-files-found: error
+          retention-days: 1
+
   # ── The daemon, with its interface embedded, once per target ───────────────
   build:
     name: Build ${{ matrix.target }}
+    needs: web
     runs-on: ${{ matrix.os }}
     # aarch64 musl is a cross build from the arm runner's gnu host, so the cc
     # crate looks for aarch64-linux-musl-gcc (not shipped by musl-tools) to
@@ -53,7 +90,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }},wasm32-unknown-unknown
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -63,15 +100,12 @@ jobs:
         if: contains(matrix.target, 'linux-musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
 
-      - name: Install trunk
-        uses: taiki-e/install-action@v2
+      # The interface, built once above: web/dist, which the daemon embeds
+      # as it is compiled.
+      - uses: actions/download-artifact@v8
         with:
-          tool: trunk@${{ env.TRUNK_VERSION }}
-
-      # The interface first: web/dist, which the daemon embeds as it is
-      # compiled.
-      - name: Build the interface
-        run: cd web && trunk build --release
+          name: interface
+          path: web/dist
 
       - name: Build the daemon
         run: cargo build --release --locked --target ${{ matrix.target }} -p meshctld
@@ -96,6 +130,7 @@ jobs:
   # takes WebView2, which Windows 10 and 11 have.
   windows:
     name: Build Windows desktop (portable)
+    needs: web
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -106,19 +141,18 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc,wasm32-unknown-unknown
+          targets: x86_64-pc-windows-msvc
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: windows-desktop
 
-      - name: Install trunk
-        uses: taiki-e/install-action@v2
+      # The interface, built once above: web/dist, which the daemon embeds
+      # as it is compiled.
+      - uses: actions/download-artifact@v8
         with:
-          tool: trunk@${{ env.TRUNK_VERSION }}
-
-      - name: Build the interface
-        run: cd web && trunk build --release
+          name: interface
+          path: web/dist
 
       # With the target named, so that the C runtime is linked statically in
       # the program alone (see .cargo/config.toml).
@@ -163,6 +197,7 @@ jobs:
   # manifest, so that the two do not drift.
   flatpak:
     name: Build Linux desktop (Flatpak)
+    needs: web
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -172,17 +207,10 @@ jobs:
         run: grep -E '^[A-Za-z_]+=' versions.env >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: linux-flatpak
-
-      - name: Install trunk
-        uses: taiki-e/install-action@v2
-        with:
-          tool: trunk@${{ env.TRUNK_VERSION }}
 
       # WebKitGTK's development files, to link the desktop app.
       - name: Install Tauri's system dependencies
@@ -191,8 +219,12 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev librsvg2-dev build-essential
 
-      - name: Build the interface
-        run: cd web && trunk build --release
+      # The interface, built once above: web/dist, which the daemon embeds
+      # as it is compiled.
+      - uses: actions/download-artifact@v8
+        with:
+          name: interface
+          path: web/dist
 
       - name: Build the desktop app
         run: cargo build --release --locked -p meshctl-desktop
@@ -235,6 +267,7 @@ jobs:
   # built on.
   android:
     name: Build Android app
+    needs: web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -245,7 +278,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,wasm32-unknown-unknown
+          targets: aarch64-linux-android,armv7-linux-androideabi
 
       # The crates downloaded, not what was built: Tauri's build scripts
       # write the Android project's Gradle and Kotlin files into the
@@ -261,10 +294,10 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Install trunk and the Tauri CLI
+      - name: Install the Tauri CLI
         uses: taiki-e/install-action@v2
         with:
-          tool: trunk@${{ env.TRUNK_VERSION }},tauri-cli@${{ env.TAURI_CLI_VERSION }}
+          tool: tauri-cli@${{ env.TAURI_CLI_VERSION }}
 
       # The runner has the SDK; the NDK, the one the app is built with.
       - name: Install the NDK
@@ -272,8 +305,12 @@ jobs:
           echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
-      - name: Build the interface
-        run: cd web && trunk build --release
+      # The interface, built once above: web/dist, which the daemon embeds
+      # as it is compiled.
+      - uses: actions/download-artifact@v8
+        with:
+          name: interface
+          path: web/dist
 
       - name: Write the signing key
         env:
@@ -324,6 +361,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
+          pattern: meshctl-*
           path: artifacts
           merge-multiple: true
 
