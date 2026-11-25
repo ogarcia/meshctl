@@ -823,7 +823,7 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                 return error(2);
             };
             let password = String::from_utf8_lossy(data.get(32..).unwrap_or_default()).into_owned();
-            println!("login to {} with {password:?}", to.name);
+            println!("login to {}", to.name);
             let tag: [u8; 4] = key_prefix(&key);
             let mut sent = vec![0x06, u8::from(to.path_len < 0)];
             sent.extend(tag);
