@@ -103,17 +103,23 @@ pub fn RadiosView() -> impl IntoView {
             .map(|(at, radio)| (at, count, radio))
             .collect::<Vec<_>>()
     };
-    // The row being dragged, by its place.
-    let dragging = RwSignal::new(None::<usize>);
+    // The rows as one is dragged to another place.
+    let sortable = crate::sortable::Sortable::new();
 
     view! {
-        <section class="radios" aria-label=move || t_string!(i18n, radios_title)>
+        <section
+            class="radios"
+            aria-label=move || t_string!(i18n, radios_title)
+            class:sorting=move || sortable.sorting()
+            on:dragover=move |ev| sortable.over(&ev)
+            on:drop=move |ev| sortable.drop(&ev, move |from, to| reorder(live, from, to))
+        >
             <For
                 each=radios
                 key=|(at, count, radio)| (*at, *count, radio.clone())
                 let:((at, count, radio))
             >
-                <RadioRow radio at count dragging />
+                <RadioRow radio at count sortable />
             </For>
             <p class="hint dim">
                 <span class="wide-only">{t!(i18n, radios_hint)}</span>
@@ -138,14 +144,13 @@ fn RadioRow(
     radio: Radio,
     at: usize,
     count: usize,
-    dragging: RwSignal<Option<usize>>,
+    sortable: crate::sortable::Sortable,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let id = radio.id;
     let link = radio.link;
     let selected = move || matches!(live.radio_editing.get(), Editing::Radio(at, _) if at == id);
-    let over = RwSignal::new(false);
 
     let flip = {
         let radio = radio.clone();
@@ -171,31 +176,11 @@ fn RadioRow(
             class="radio-row"
             class:selected=selected
             class:hidden=!radio.shown
-            class:dragging=move || dragging.get() == Some(at)
-            class:over=move || over.get()
+            class:dragging=move || sortable.dragged(at)
+            style=move || sortable.style(at)
             draggable="true"
-            on:dragstart=move |ev| {
-                if let Some(data) = ev.data_transfer() {
-                    data.set_effect_allowed("move");
-                    // Firefox starts no drag without data.
-                    let _ = data.set_data("text/plain", &at.to_string());
-                }
-                dragging.set(Some(at));
-            }
-            on:dragover=move |ev| {
-                ev.prevent_default();
-                over.set(dragging.get_untracked().is_some_and(|from| from != at));
-            }
-            on:dragleave=move |_| over.set(false)
-            on:drop=move |ev| {
-                ev.prevent_default();
-                over.set(false);
-                if let Some(from) = dragging.get_untracked() {
-                    reorder(live, from, at);
-                }
-                dragging.set(None);
-            }
-            on:dragend=move |_| dragging.set(None)
+            on:dragstart=move |ev| sortable.start(&ev, at)
+            on:dragend=move |_| sortable.end()
         >
             <span class="grip" title=move || t_string!(i18n, radio_drag) inner_html=GRIP></span>
             <span class="moves">

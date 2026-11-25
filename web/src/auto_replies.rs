@@ -134,10 +134,16 @@ pub fn AutoRepliesView() -> impl IntoView {
         live.auto_replies
             .with(|r| r.as_ref().is_some_and(Vec::is_empty))
     };
-    let dragging = RwSignal::new(None::<usize>);
+    let sortable = crate::sortable::Sortable::new();
 
     view! {
-        <section class="radios replies" aria-label=move || t_string!(i18n, replies_title)>
+        <section
+            class="radios replies"
+            aria-label=move || t_string!(i18n, replies_title)
+            class:sorting=move || sortable.sorting()
+            on:dragover=move |ev| sortable.over(&ev)
+            on:drop=move |ev| sortable.drop(&ev, move |from, to| reorder(live, from, to))
+        >
             <Show when=empty>
                 <div class="card replies-empty">
                     <span class="icon" inner_html=ROBOT></span>
@@ -168,7 +174,7 @@ pub fn AutoRepliesView() -> impl IntoView {
                 key=|(at, count, reply)| (*at, *count, format!("{reply:?}"))
                 let:((at, count, reply))
             >
-                <ReplyRow reply at count dragging />
+                <ReplyRow reply at count sortable />
             </For>
             <Show when=move || !empty() && live.auto_replies.with(Option::is_some)>
                 <p class="hint dim">
@@ -333,13 +339,12 @@ fn ReplyRow(
     reply: AutoReply,
     at: usize,
     count: usize,
-    dragging: RwSignal<Option<usize>>,
+    sortable: crate::sortable::Sortable,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let id = reply.id;
     let selected = move || live.reply_editing.get() == ReplyEditing::Reply(id);
-    let over = RwSignal::new(false);
     let settings = reply.settings.clone();
     let toggle = {
         let reply = reply.clone();
@@ -371,30 +376,11 @@ fn ReplyRow(
             class="radio-row reply-row"
             class:selected=selected
             class:hidden=!settings.enabled
-            class:dragging=move || dragging.get() == Some(at)
-            class:over=move || over.get()
+            class:dragging=move || sortable.dragged(at)
+            style=move || sortable.style(at)
             draggable="true"
-            on:dragstart=move |ev| {
-                if let Some(data) = ev.data_transfer() {
-                    data.set_effect_allowed("move");
-                    let _ = data.set_data("text/plain", &at.to_string());
-                }
-                dragging.set(Some(at));
-            }
-            on:dragover=move |ev| {
-                ev.prevent_default();
-                over.set(dragging.get_untracked().is_some_and(|from| from != at));
-            }
-            on:dragleave=move |_| over.set(false)
-            on:drop=move |ev| {
-                ev.prevent_default();
-                over.set(false);
-                if let Some(from) = dragging.get_untracked() {
-                    reorder(live, from, at);
-                }
-                dragging.set(None);
-            }
-            on:dragend=move |_| dragging.set(None)
+            on:dragstart=move |ev| sortable.start(&ev, at)
+            on:dragend=move |_| sortable.end()
         >
             <span class="grip" title=move || t_string!(i18n, radio_drag) inner_html=GRIP></span>
             <span class="moves">

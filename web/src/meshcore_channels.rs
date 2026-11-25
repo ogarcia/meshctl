@@ -103,8 +103,8 @@ pub fn MeshcoreChannelsTab() -> impl IntoView {
                 .collect::<Vec<_>>()
         })
     };
-    // The row being dragged, by its place.
-    let dragging = RwSignal::new(None::<usize>);
+    // The rows as one is dragged to another place.
+    let sortable = crate::sortable::Sortable::new();
     let problem = RwSignal::new(None::<Failure>);
     // Moves the channel at one place of the list to another: shown so at
     // once, sent to the radio, and read back from it.
@@ -147,13 +147,18 @@ pub fn MeshcoreChannelsTab() -> impl IntoView {
     };
 
     view! {
-        <section class="channel-list">
+        <section
+            class="channel-list"
+            class:sorting=move || sortable.sorting()
+            on:dragover=move |ev| sortable.over(&ev)
+            on:drop=move |ev| sortable.drop(&ev, reorder)
+        >
             <For
                 each=channels
                 key=|(at, count, c)| format!("{at} {count} {} {} {:?}", c.index, c.name, c.kind)
                 let:((at, count, channel))
             >
-                <ChannelRow channel at count dragging editing reorder />
+                <ChannelRow channel at count sortable editing reorder />
             </For>
             {move || problem.get().map(|_| view! { <p class="error">{t!(i18n, mc_reorder_failed)}</p> })}
             <div class="channel-foot">
@@ -193,42 +198,21 @@ fn ChannelRow(
     channel: MeshcoreChannel,
     at: usize,
     count: usize,
-    dragging: RwSignal<Option<usize>>,
+    sortable: crate::sortable::Sortable,
     editing: RwSignal<Editing>,
     reorder: impl Fn(usize, usize) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let slot = channel.index;
     let kind = channel.kind;
-    let over = RwSignal::new(false);
     view! {
         <div
             class="radio-row channel-row"
-            class:dragging=move || dragging.get() == Some(at)
-            class:over=move || over.get()
+            class:dragging=move || sortable.dragged(at)
+            style=move || sortable.style(at)
             draggable="true"
-            on:dragstart=move |ev| {
-                if let Some(data) = ev.data_transfer() {
-                    data.set_effect_allowed("move");
-                    // Firefox starts no drag without data.
-                    let _ = data.set_data("text/plain", &at.to_string());
-                }
-                dragging.set(Some(at));
-            }
-            on:dragover=move |ev| {
-                ev.prevent_default();
-                over.set(dragging.get_untracked().is_some_and(|from| from != at));
-            }
-            on:dragleave=move |_| over.set(false)
-            on:drop=move |ev| {
-                ev.prevent_default();
-                over.set(false);
-                if let Some(from) = dragging.get_untracked() {
-                    reorder(from, at);
-                }
-                dragging.set(None);
-            }
-            on:dragend=move |_| dragging.set(None)
+            on:dragstart=move |ev| sortable.start(&ev, at)
+            on:dragend=move |_| sortable.end()
         >
             <span class="grip" title=move || t_string!(i18n, channel_drag) inner_html=GRIP></span>
             <span class="moves">

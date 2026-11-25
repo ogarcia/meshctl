@@ -3479,8 +3479,10 @@
       .radio-row.selected { border-color: var(--mc-primary); background: var(--mc-soft); }
       .radio-row.hidden .pick,
       .radio-row.hidden .face-button { opacity: 0.6; }
-      .radio-row.dragging { opacity: 0.4; }
-      .radio-row.over { border-style: dashed; border-color: var(--mc-primary); }
+      /* While one is dragged the others slide to make way, and it waits,
+         faint, where it would fall. */
+      .sorting > .radio-row { transition: transform 0.18s ease; }
+      .radio-row.dragging { opacity: 0.45; border-style: dashed; border-color: var(--mc-primary); }
       .radio-row .grip { flex: none; display: flex; color: var(--mc-muted); cursor: grab; }
       .radio-row .grip svg { width: 16px; height: 16px; }
       .radio-row .moves { flex: none; display: flex; flex-direction: column; }
