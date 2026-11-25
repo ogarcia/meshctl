@@ -43,6 +43,7 @@ async fn main() -> Result<()> {
         data: cli.data,
         listen: cli.listen,
         token: cli.token,
+        host: None,
     };
     meshctld::run_until(config, shutdown()).await
 }

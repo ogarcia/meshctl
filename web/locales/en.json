@@ -1075,5 +1075,8 @@
   "number_less": "Less",
   "number_more": "More",
   "reply_sign": "Sign with 🤖",
-  "reply_sign_hint": "Before the text, unless it starts so: an automatic reply is told apart so, and other bots do not answer it."
+  "reply_sign_hint": "Before the text, unless it starts so: an automatic reply is told apart so, and other bots do not answer it.",
+  "app_title": "On this phone",
+  "app_background": "Keep listening with the app closed",
+  "app_background_hint": "The radios stay connected, and automatic replies answer, with a notification that says so. Off, meshctl listens only while you use it."
 }

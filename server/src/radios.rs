@@ -1098,6 +1098,8 @@ pub struct Radios {
     /// How busy each radio last said it hears its channel, in percent, and
     /// when.
     busy: Arc<Mutex<HashMap<RadioId, (f32, std::time::Instant)>>>,
+    /// The app it runs within, if any.
+    host: Arc<std::sync::OnceLock<Arc<dyn crate::Host>>>,
     changes: broadcast::Sender<Change>,
     stopped: watch::Sender<bool>,
 }
@@ -1113,6 +1115,7 @@ impl Radios {
             logging_in: Arc::default(),
             login_failed: Arc::default(),
             busy: Arc::default(),
+            host: Arc::default(),
             changes: broadcast::channel(EVENT_BACKLOG).0,
             stopped: watch::channel(false).0,
         };
@@ -3365,6 +3368,40 @@ impl Radios {
     /// names every one once.
     pub async fn set_auto_reply_order(&self, order: &[meshctl_api::AutoReplyId]) -> Result<bool> {
         self.store.set_auto_reply_order(order).await
+    }
+
+    /// Takes the app it runs within, and tells it what it was left set to.
+    pub async fn set_host(&self, host: Arc<dyn crate::Host>) {
+        let settings = self.store.app_settings().await.unwrap_or_default();
+        host.keep_running(settings.background.unwrap_or(true));
+        let _ = self.host.set(host);
+    }
+
+    /// What the app it runs within lets be set, as it is: nothing without
+    /// one.
+    pub async fn app_settings(&self) -> Result<meshctl_api::AppSettings> {
+        if self.host.get().is_none() {
+            return Ok(meshctl_api::AppSettings::default());
+        }
+        let kept = self.store.app_settings().await?;
+        Ok(meshctl_api::AppSettings {
+            background: Some(kept.background.unwrap_or(true)),
+        })
+    }
+
+    /// Changes what the app it runs within lets be set, and tells it;
+    /// `false` without one.
+    pub async fn set_app_settings(&self, settings: meshctl_api::AppSettings) -> Result<bool> {
+        let Some(host) = self.host.get() else {
+            return Ok(false);
+        };
+        let mut kept = self.store.app_settings().await?;
+        if let Some(on) = settings.background {
+            kept.background = Some(on);
+            host.keep_running(on);
+        }
+        self.store.set_app_settings(&kept).await?;
+        Ok(true)
     }
 
     /// The interface's preferences.

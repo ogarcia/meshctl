@@ -452,6 +452,18 @@ impl AutoReplyLimits {
     }
 }
 
+/// What the app meshctl runs within lets be set, where it runs within one:
+/// none of what it does not have.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AppSettings {
+    /// Whether it goes on listening to the radios with the app closed, as
+    /// a phone's app does only when it says so, with a notification of its
+    /// own. On unless set otherwise.
+    #[serde(default)]
+    pub background: Option<bool>,
+}
+
 /// How busy a radio hears its channel, as it last said, if lately.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

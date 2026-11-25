@@ -3861,7 +3861,14 @@
        */
       /* The limit on a busy channel, over the replies, as a row of the data's
          times; and how busy each radio is now, under what it is. */
-      .busy-limit h2:first-child { margin-top: 4px; }
+      .busy-limit h2:first-child,
+      .app-listening h2:first-child { margin-top: 4px; }
+      .app-listening h2:last-child { margin-bottom: 4px; }
+      /* Its switch beside what it is, as a phone's settings have it, on
+         any width: it takes so little room. */
+      .app-listening .pref-row { border-bottom: 0; flex-wrap: nowrap; }
+      .app-listening .pref-what { min-width: 0; }
+      .app-listening .pref-control { width: auto; }
       .busy-limit h2:last-child { margin-bottom: 4px; }
       .busy-limit .pref-row { border-bottom: 0; }
       .busy-now { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 4px; }

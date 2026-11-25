@@ -896,3 +896,18 @@ pub async fn save_auto_reply_limits(
 pub async fn channels_busy() -> Result<Vec<meshctl_api::ChannelBusy>, Failure> {
     get("/auto-replies/busy").await
 }
+
+/// What the app meshctl runs within lets be set: nothing outside one.
+pub async fn app_settings() -> Result<meshctl_api::AppSettings, Failure> {
+    get("/preferences/app").await
+}
+
+pub async fn save_app_settings(
+    settings: &meshctl_api::AppSettings,
+) -> Result<meshctl_api::AppSettings, Failure> {
+    let request = with_token(Request::put(&url("/preferences/app")))
+        .json(settings)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}

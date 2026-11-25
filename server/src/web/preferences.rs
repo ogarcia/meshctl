@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{EmojiUsed, Error, ErrorCode, Preferences};
+use meshctl_api::{AppSettings, EmojiUsed, Error, ErrorCode, Preferences};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -17,6 +17,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(read, change))
         .routes(routes!(emojis, use_emoji))
+        .routes(routes!(app, set_app))
 }
 
 fn failed(err: &anyhow::Error) -> Response {
@@ -122,6 +123,54 @@ async fn use_emoji(State(state): State<AppState>, Json(used): Json<EmojiUsed>) -
     }
 }
 
+/// The app's settings
+///
+/// What the app meshctl runs within lets be set, as it is now: none of
+/// what it does not have, and all none when it runs on its own.
+#[utoipa::path(
+    get,
+    path = "/preferences/app",
+    tag = "preferences",
+    responses(
+        (status = 200, description = "The app's settings", body = AppSettings),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+    )
+)]
+async fn app(State(state): State<AppState>) -> Response {
+    match state.radios.app_settings().await {
+        Ok(settings) => Json(settings).into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Change the app's settings
+///
+/// Those given; the rest as they are.
+#[utoipa::path(
+    put,
+    path = "/preferences/app",
+    tag = "preferences",
+    request_body = AppSettings,
+    responses(
+        (status = 200, description = "The app's settings, as they are now", body = AppSettings),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "meshctl runs within no app: `not_found`", body = Error),
+    )
+)]
+async fn set_app(State(state): State<AppState>, Json(settings): Json<AppSettings>) -> Response {
+    match state.radios.set_app_settings(settings).await {
+        Ok(true) => app(State(state)).await,
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(Error {
+                error: ErrorCode::NotFound,
+            }),
+        )
+            .into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::radios::Change;
@@ -157,6 +206,46 @@ mod tests {
         }
         let (_, body) = ask(app, get("/api/v1/preferences/emojis")).await;
         assert_eq!(json::<Vec<String>>(&body), ["📡"]);
+    }
+
+    #[tokio::test]
+    async fn the_app_s_are_only_within_one() {
+        use meshctl_api::AppSettings;
+        use std::sync::{Arc, Mutex};
+
+        struct Told(Mutex<Vec<bool>>);
+        impl crate::Host for Told {
+            fn keep_running(&self, on: bool) {
+                self.0.lock().unwrap().push(on);
+            }
+        }
+
+        let radios = radios().await;
+        let app = router(AppState {
+            auth: Auth::new(None),
+            radios: radios.clone(),
+        });
+        let put = |body: &'static str| {
+            Request::put("/api/v1/preferences/app")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap()
+        };
+        // On its own: nothing to set.
+        let (_, body) = ask(app.clone(), get("/api/v1/preferences/app")).await;
+        assert_eq!(json::<AppSettings>(&body), AppSettings::default());
+        let (status, _) = ask(app.clone(), put(r#"{"background":false}"#)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // Within an app: told on at first, then off as set, and kept.
+        let told = Arc::new(Told(Mutex::new(Vec::new())));
+        radios.set_host(told.clone()).await;
+        let (_, body) = ask(app.clone(), get("/api/v1/preferences/app")).await;
+        assert_eq!(json::<AppSettings>(&body).background, Some(true));
+        let (status, body) = ask(app.clone(), put(r#"{"background":false}"#)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json::<AppSettings>(&body).background, Some(false));
+        assert_eq!(*told.0.lock().unwrap(), [true, false]);
     }
 
     #[tokio::test]

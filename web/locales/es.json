@@ -1075,5 +1075,8 @@
   "number_less": "Menos",
   "number_more": "Más",
   "reply_sign": "Firmar con 🤖",
-  "reply_sign_hint": "Delante del texto, si no empieza ya por él: así se reconoce una respuesta automática, y otros bots no la contestan."
+  "reply_sign_hint": "Delante del texto, si no empieza ya por él: así se reconoce una respuesta automática, y otros bots no la contestan.",
+  "app_title": "En este móvil",
+  "app_background": "Seguir escuchando con la app cerrada",
+  "app_background_hint": "Las radios siguen conectadas, y las respuestas automáticas responden, con una notificación que lo dice. Apagado, meshctl solo escucha mientras lo usas."
 }

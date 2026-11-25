@@ -28,8 +28,15 @@ use std::path::PathBuf;
 use store::Store;
 use tracing::{info, warn};
 
+/// The app the daemon runs within, if any, and what it lets be set.
+pub trait Host: Send + Sync + 'static {
+    /// Whether the app goes on running, and the daemon in it, with its
+    /// window closed: told as it starts, as it was left, and as it changes.
+    fn keep_running(&self, on: bool);
+}
+
 /// How the daemon runs.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     /// Where to keep what meshctl knows: the radios it was given and what
     /// they heard. Created if it is not there.
@@ -39,6 +46,19 @@ pub struct Config {
     /// An access token the API asks for in the X-Meshctl-Token header; none,
     /// or an empty one, leaves the API open to whoever reaches it.
     pub token: Option<String>,
+    /// The app it runs within, if one asks to be told what it lets be set.
+    pub host: Option<std::sync::Arc<dyn Host>>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("data", &self.data)
+            .field("listen", &self.listen)
+            .field("token", &self.token.as_ref().map(|_| "…"))
+            .field("host", &self.host.is_some())
+            .finish()
+    }
 }
 
 /// Runs the daemon: opens what it keeps, connects to its radios and serves
@@ -66,6 +86,9 @@ pub async fn run_until(
 
     let store = Store::open(&config.data).await?;
     let radios = Radios::start(store.clone()).await?;
+    if let Some(host) = config.host {
+        radios.set_host(host).await;
+    }
     match radios.list().await?.len() {
         0 => info!("no radios yet: add one from the panel"),
         n => info!(radios = n, "radios loaded"),

@@ -114,6 +114,7 @@ pub fn RadiosView() -> impl IntoView {
             on:dragover=move |ev| sortable.over(&ev)
             on:drop=move |ev| sortable.drop(&ev, move |from, to| reorder(live, from, to))
         >
+            <AppListening />
             <For
                 each=radios
                 key=|(at, count, radio)| (*at, *count, radio.clone())
@@ -245,6 +246,53 @@ fn RadioRow(
                 label=Signal::derive(move || t_string!(i18n, radio_enabled).to_string())
                 flip=toggle
             />
+        </div>
+    }
+}
+
+/// Within an app that lets it be set, as Android's: whether it goes on
+/// listening to the radios with the app closed. Nothing elsewhere.
+#[component]
+fn AppListening() -> impl IntoView {
+    let i18n = use_i18n();
+    let settings = RwSignal::new(None::<meshctl_api::AppSettings>);
+    spawn_local(async move {
+        if let Ok(read) = daemon::app_settings().await {
+            settings.try_set(Some(read));
+        }
+    });
+    let on = move || settings.with(|s| s.and_then(|s| s.background));
+    let flip = move |_| {
+        let Some(now) = on() else {
+            return;
+        };
+        let changed = meshctl_api::AppSettings {
+            background: Some(!now),
+        };
+        settings.set(Some(changed));
+        spawn_local(async move {
+            if let Ok(saved) = daemon::save_app_settings(&changed).await {
+                settings.try_set(Some(saved));
+            }
+        });
+    };
+    view! {
+        <div class="preferences data app-listening" class:gone=move || on().is_none()>
+            <h2>{t!(i18n, app_title)}</h2>
+            <div class="pref-row">
+                <div class="pref-what">
+                    <span class="pref-title">{t!(i18n, app_background)}</span>
+                    <span class="dim">{t!(i18n, app_background_hint)}</span>
+                </div>
+                <div class="pref-control switch-control">
+                    <Switch
+                        on=Signal::derive(move || on().unwrap_or(false))
+                        label=Signal::derive(move || t_string!(i18n, app_background).to_string())
+                        flip
+                    />
+                </div>
+            </div>
+            <h2>{t!(i18n, radios_title)}</h2>
         </div>
     }
 }

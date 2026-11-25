@@ -334,6 +334,28 @@ impl Store {
             .unwrap_or_default())
     }
 
+    /// What the app meshctl runs within was set to, or the defaults.
+    pub async fn app_settings(&self) -> Result<meshctl_api::AppSettings> {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT value FROM preference WHERE key = 'app'")
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row
+            .and_then(|(value,)| serde_json::from_str(&value).ok())
+            .unwrap_or_default())
+    }
+
+    pub async fn set_app_settings(&self, settings: &meshctl_api::AppSettings) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO preference (key, value) VALUES ('app', ?) \
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(serde_json::to_string(settings)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn set_preferences(&self, preferences: &Preferences) -> Result<()> {
         sqlx::query(
             "INSERT INTO preference (key, value) VALUES ('interface', ?) \
