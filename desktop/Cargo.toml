@@ -39,6 +39,10 @@ dirs = "6"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-window-state = "2"
 
+# On Android, the daemon run by the service, in Java, through JNI.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
 # A tray with its menu where there is one: its words in the system's
 # language.
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]

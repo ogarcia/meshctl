@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- meshctl's mark, in one colour, as Android draws a notification's. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="32"
+    android:viewportHeight="32">
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:pathData="M9.31,18.25L6,26M17.9,15.37L26,20M6,26L26,20M18.17,9.15L25,6" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M1.9,26a4.1,4.1 0,1 0,8.2 0a4.1,4.1 0,1 0,-8.2 0ZM21.9,20a4.1,4.1 0,1 0,8.2 0a4.1,4.1 0,1 0,-8.2 0ZM20.9,6a4.1,4.1 0,1 0,8.2 0a4.1,4.1 0,1 0,-8.2 0Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M11.07,8.01L11.11,6.67L12.89,6.67L12.93,8.01L14.17,8.52L15.14,7.61L16.39,8.86L15.48,9.83L15.99,11.07L17.33,11.11L17.33,12.89L15.99,12.93L15.48,14.17L16.39,15.14L15.14,16.39L14.17,15.48L12.93,15.99L12.89,17.33L11.11,17.33L11.07,15.99L9.83,15.48L8.86,16.39L7.61,15.14L8.52,14.17L8.01,12.93L6.67,12.89L6.67,11.11L8.01,11.07L8.52,9.83L7.61,8.86L8.86,7.61L9.83,8.52ZM13.6,12A1.6,1.6 0,1 0,10.4 12A1.6,1.6 0,1 0,13.6 12Z" />
+</vector>

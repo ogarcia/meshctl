@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Listening to the radios with the app closed, when it is told to:
+         a service in the foreground, of a kind that talks to devices, which
+         asks that it may change the network's state; and its notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -27,6 +34,12 @@
             
             <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
         </activity>
+
+        <service
+            android:name=".ListeningService"
+            android:process=":daemon"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

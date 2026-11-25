@@ -13,8 +13,8 @@
 //! as a background app on Linux. A `meshcore://` link opened anywhere
 //! opens the panel's window to add what it holds.
 
-//! On a phone, Android's, it is the same, in the one window a phone app
-//! has, what it keeps in the app's own folder.
+//! On Android the daemon runs in a service of its own, in its own process,
+//! and the app's window shows its panel: see `android`.
 
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::path::PathBuf;
@@ -42,9 +42,13 @@ fn kept_state() -> tauri_plugin_window_state::StateFlags {
     StateFlags::SIZE | StateFlags::MAXIMIZED
 }
 
+#[cfg(target_os = "android")]
+mod android;
+
 /// A port nothing uses now on this machine, so that the daemon does not
 /// clash with a `meshctld` of its own, or anything else. Another program
 /// could take it before the daemon does, in the moment between: unlikely.
+#[cfg(desktop)]
 fn free_port() -> u16 {
     TcpListener::bind((HOST, 0))
         .ok()
@@ -52,15 +56,10 @@ fn free_port() -> u16 {
         .map_or(7434, |address| address.port())
 }
 
-/// Where what meshctl knows is kept.
-fn data_dir<R: Runtime>(app: &tauri::App<R>) -> PathBuf {
-    // A phone's app keeps it in its own folder, which nothing else reads.
-    #[cfg(mobile)]
-    if let Ok(dir) = app.path().app_data_dir() {
-        return dir;
-    }
-    #[cfg(desktop)]
-    let _ = app;
+/// Where what meshctl knows is kept, on a desktop. On Android, the
+/// service says: the app's own folder.
+#[cfg(desktop)]
+fn data_dir() -> PathBuf {
     // Beside the program, carried along with it.
     #[cfg(target_os = "windows")]
     if let Some(dir) = std::env::current_exe()
@@ -109,6 +108,20 @@ fn open_link<R: Runtime>(app: &AppHandle<R>, port: u16, link: &Url) {
     show(app);
 }
 
+/// The panel's window, on a link if given.
+fn open_window<R: Runtime>(app: &AppHandle<R>, port: u16, link: Option<&Url>) {
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page(port, link)));
+    // The first time; then as it was left.
+    #[cfg(desktop)]
+    let window = window
+        .title("meshctl")
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(400.0, 500.0);
+    if let Err(error) = window.build() {
+        tracing::error!("cannot open the window: {error}");
+    }
+}
+
 /// Waits until the daemon serves, so that the window does not open on a
 /// connection refused; a minute at most, and then it opens anyway.
 async fn serving(port: u16) {
@@ -141,10 +154,16 @@ pub fn run() {
         )
         .init();
 
+    // On a desktop, a port free now; on Android, the daemon's own, which
+    // its service, in a process of its own, serves on.
+    #[cfg(desktop)]
     let port = free_port();
-    // The daemon, started once where it keeps what it knows is known, and
-    // stopped when the app quits, so that it lets the radios go and closes
-    // what it keeps cleanly.
+    #[cfg(target_os = "android")]
+    let port = android::port();
+    // On a desktop, the daemon, started once where it keeps what it knows
+    // is known, and stopped when the app quits, so that it lets the radios
+    // go and closes what it keeps cleanly. On Android, the service runs it,
+    // started as the window opens.
     let stop = Arc::new(Mutex::new(None::<oneshot::Sender<()>>));
     let daemon = Arc::new(Mutex::new(None::<tauri::async_runtime::JoinHandle<()>>));
 
@@ -180,26 +199,32 @@ pub fn run() {
     let (started_stop, started_daemon) = (Arc::clone(&stop), Arc::clone(&daemon));
     let app = builder
         .setup(move |app| {
-            let config = meshctld::Config {
-                data: data_dir(app),
-                listen: SocketAddr::from((HOST, port)),
-                token: None,
-            };
-            let (stopping, stopped) = oneshot::channel::<()>();
-            let task = tauri::async_runtime::spawn(async move {
-                let until = async move {
-                    let _ = stopped.await;
+            #[cfg(desktop)]
+            {
+                let config = meshctld::Config {
+                    data: data_dir(),
+                    listen: SocketAddr::from((HOST, port)),
+                    token: None,
+                    host: None,
                 };
-                if let Err(error) = meshctld::run_until(config, until).await {
-                    tracing::error!("the daemon stopped: {error:#}");
+                let (stopping, stopped) = oneshot::channel::<()>();
+                let task = tauri::async_runtime::spawn(async move {
+                    let until = async move {
+                        let _ = stopped.await;
+                    };
+                    if let Err(error) = meshctld::run_until(config, until).await {
+                        tracing::error!("the daemon stopped: {error:#}");
+                    }
+                });
+                if let Ok(mut stop) = started_stop.lock() {
+                    *stop = Some(stopping);
                 }
-            });
-            if let Ok(mut stop) = started_stop.lock() {
-                *stop = Some(stopping);
+                if let Ok(mut daemon) = started_daemon.lock() {
+                    *daemon = Some(task);
+                }
             }
-            if let Ok(mut daemon) = started_daemon.lock() {
-                *daemon = Some(task);
-            }
+            #[cfg(mobile)]
+            let _ = (&started_stop, &started_daemon);
 
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             tray(app)?;
@@ -233,20 +258,7 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 serving(port).await;
-                let window = WebviewWindowBuilder::new(
-                    &handle,
-                    "main",
-                    WebviewUrl::External(page(port, first.as_ref())),
-                );
-                // The first time; then as it was left.
-                #[cfg(desktop)]
-                let window = window
-                    .title("meshctl")
-                    .inner_size(1200.0, 800.0)
-                    .min_inner_size(400.0, 500.0);
-                if let Err(error) = window.build() {
-                    tracing::error!("cannot open the window: {error}");
-                }
+                open_window(&handle, port, first.as_ref());
             });
             Ok(())
         })

@@ -1,0 +1,4 @@
+<resources>
+    <string name="listening_channel">Escucha de las radios</string>
+    <string name="listening_text">Escuchando tus radios con la app cerrada</string>
+</resources>
