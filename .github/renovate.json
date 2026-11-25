@@ -12,9 +12,16 @@
       "rangeStrategy": "update-lockfile"
     },
     {
-      "description": "Batch routine crate updates into one weekly PR; majors stay separate.",
+      "description": "Batch routine crate updates into one weekly PR: patches, and minors from 1.0 on. Majors stay separate, and so do a 0.x crate's minors, which Cargo takes as breaking (0.8 to 0.9).",
       "matchManagers": ["cargo"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "rust crates (non-major)"
+    },
+    {
+      "description": "Minors from 1.0 on, with the patches.",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor"],
+      "matchCurrentVersion": "!/^0\\./",
       "groupName": "rust crates (non-major)"
     },
     {
@@ -23,14 +30,24 @@
       "groupName": "tauri"
     },
     {
-      "description": "The Android project's Gradle, plugins and libraries, together.",
+      "description": "Group GitHub Actions bumps together.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "description": "The Android project's Gradle, plugins and libraries, together, with the Java it is built with, which they must take.",
       "matchManagers": ["gradle", "gradle-wrapper"],
       "groupName": "android (gradle)"
     },
     {
-      "description": "Group GitHub Actions bumps together.",
-      "matchManagers": ["github-actions"],
-      "groupName": "github actions"
+      "description": "The Java the Android app is built with, in release.yml, with the Gradle it must suit.",
+      "matchDepNames": ["java-jdk"],
+      "groupName": "android (gradle)"
+    },
+    {
+      "description": "The Flatpak's Ubuntu runner is pinned on purpose: the GNOME runtime's glibc must not be older than the one it builds with.",
+      "matchDepNames": ["ubuntu"],
+      "enabled": false
     }
   ],
   "customManagers": [
