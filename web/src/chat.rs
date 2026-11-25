@@ -1829,6 +1829,22 @@ pub fn RouteList(
     }
 }
 
+/// The emojis offered first: the most used, then the common ones, as many
+/// as make four rows.
+pub fn offered_emojis(live: Live) -> Vec<String> {
+    let mut offered = live.emojis.get_untracked().unwrap_or_default();
+    for common in crate::emoji::COMMON {
+        if offered.len() >= FREQUENT_SHOWN {
+            break;
+        }
+        if !offered.iter().any(|e| e == common) {
+            offered.push(common.to_owned());
+        }
+    }
+    offered.truncate(FREQUENT_SHOWN);
+    offered
+}
+
 /// By touch, what can be done with a message, from below: reacting to it,
 /// answering it, copying it, forgetting it.
 #[component]
@@ -2140,19 +2156,7 @@ fn Composer(peer: Peer) -> impl IntoView {
     // does not move under the finger, and comes forward the next time. The
     // common ones after, as many as make four rows.
     let frequent = RwSignal::new(Vec::<String>::new());
-    let offer = move || {
-        let mut offered = live.emojis.get_untracked().unwrap_or_default();
-        for common in crate::emoji::COMMON {
-            if offered.len() >= FREQUENT_SHOWN {
-                break;
-            }
-            if !offered.iter().any(|e| e == common) {
-                offered.push(common.to_owned());
-            }
-        }
-        offered.truncate(FREQUENT_SHOWN);
-        frequent.set(offered);
-    };
+    let offer = move || frequent.set(offered_emojis(live));
     Effect::new(move |opened: Option<bool>| {
         let open = picking.get();
         if open && opened != Some(true) {

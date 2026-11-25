@@ -11,7 +11,7 @@ use crate::i18n::{t, t_string, use_i18n};
 use crate::radios::Switch;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::auto_replies::{MAX_TEXT_BYTES, Told, VARIABLES, hops_emoji, render};
+use meshctl_api::auto_replies::{MAX_TEXT_BYTES, Told, VARIABLES, hops_emoji, render, signed};
 use meshctl_api::{
     AutoReply, AutoReplyId, AutoReplyLimits, AutoReplyMatch, AutoReplyPlace, AutoReplySettings,
     Channel, ChannelBusy, ErrorCode, RadioId, RadioKind,
@@ -22,6 +22,7 @@ const GRIP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/gri
 const UP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-up.svg");
 const DOWN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
+const SMILE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/mood-smile.svg");
 const ROBOT: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/robot.svg");
 
 /// What the replies' editor is open on, if anything.
@@ -351,7 +352,7 @@ fn ReplyRow(
             answers.push("1️⃣".to_owned());
         }
         if let Some(text) = &settings.reply {
-            answers.push(format!("«{text}»"));
+            answers.push(format!("«{}»", signed(text.clone(), settings.sign)));
         }
         format!("{} → {}", settings.triggers.join(", "), answers.join(" "))
     };
@@ -447,6 +448,7 @@ struct Draft {
     triggers: String,
     matching: AutoReplyMatch,
     react: bool,
+    sign: bool,
     /// Whether it answers with a text, and whether with another if direct:
     /// each text kept while off, to come back to.
     texts: bool,
@@ -464,6 +466,7 @@ impl Draft {
             triggers: settings.triggers.join(", "),
             matching: settings.matching,
             react: settings.react,
+            sign: settings.sign,
             texts: settings.reply.is_some(),
             reply: settings.reply.clone().unwrap_or_default(),
             direct: settings.direct_reply.is_some(),
@@ -491,6 +494,7 @@ impl Draft {
             },
             matching: self.matching,
             react: self.react,
+            sign: self.sign,
             reply: text(self.texts, &self.reply),
             direct_reply: text(self.texts && self.direct, &self.direct_reply),
             places: self.places.clone(),
@@ -592,6 +596,7 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
                     triggers: Vec::new(),
                     matching: AutoReplyMatch::Whole,
                     react: false,
+                    sign: true,
                     reply: Some(String::new()),
                     direct_reply: None,
                     places: Vec::new(),
@@ -617,9 +622,14 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
     let error = RwSignal::new(None::<Failure>);
     let busy = RwSignal::new(false);
     let close = move || live.reply_editing.set(ReplyEditing::Closed);
+    // Escape closes the emojis first, if open; the editor, if not.
+    let emojis_open = StoredValue::new(None::<RwSignal<Option<bool>>>);
     let escape = window_event_listener(leptos::ev::keydown, move |ev| {
         if ev.key() == "Escape" {
-            close();
+            match emojis_open.try_get_value().flatten() {
+                Some(open) if open.try_get_untracked().flatten().is_some() => open.set(None),
+                _ => close(),
+            }
         }
     });
     on_cleanup(move || escape.remove());
@@ -677,8 +687,9 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
     let reply_field = NodeRef::<leptos::html::Textarea>::new();
     let direct_field = NodeRef::<leptos::html::Textarea>::new();
     let last_direct = StoredValue::new(false);
-    let insert = move |variable: &str| {
-        let direct = last_direct.get_value() && draft.with_untracked(|d| d.direct);
+    // Puts text where the caret is in a text's field, the reply's or the
+    // direct one's.
+    let put = move |token: String, direct: bool| {
         let field = if direct { direct_field } else { reply_field };
         let Some(field) = field.get_untracked() else {
             return;
@@ -695,7 +706,6 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
             .ok()
             .flatten()
             .map_or(at, |end| (end as usize).clamp(at, units.len()));
-        let token = format!("{{{variable}}}");
         let new = format!(
             "{}{token}{}",
             String::from_utf16_lossy(&units[..at]),
@@ -712,6 +722,72 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
                 d.reply = new;
             }
         });
+    };
+    // A variable, into the last of them written in.
+    let insert = move |variable: &str| {
+        let direct = last_direct.get_value() && draft.with_untracked(|d| d.direct);
+        put(format!("{{{variable}}}"), direct);
+    };
+    // The emojis of one of them, open under it: the most used first, as in
+    // the chat, and each picked counted as there.
+    let emojis_for = RwSignal::new(None::<bool>);
+    emojis_open.set_value(Some(emojis_for));
+    let frequent = RwSignal::new(Vec::<String>::new());
+    let toggle_emojis = move |direct: bool| {
+        if emojis_for.get_untracked() == Some(direct) {
+            emojis_for.set(None);
+            return;
+        }
+        frequent.set(crate::chat::offered_emojis(live));
+        if live.emojis.get_untracked().is_none() {
+            spawn_local(async move {
+                if let Ok(emojis) = daemon::emojis().await {
+                    live.emojis.set(Some(emojis));
+                    frequent.try_set(crate::chat::offered_emojis(live));
+                }
+            });
+        }
+        emojis_for.set(Some(direct));
+    };
+    let pick = Callback::new(move |emoji: String| {
+        let Some(direct) = emojis_for.get_untracked() else {
+            return;
+        };
+        let counted = emoji.clone();
+        spawn_local(async move {
+            if let Ok(emojis) = daemon::use_emoji(&counted).await {
+                live.emojis.set(Some(emojis));
+            }
+        });
+        put(emoji, direct);
+    });
+    let emoji_button = move |direct: bool| {
+        view! {
+            <button
+                type="button"
+                class="emoji-toggle"
+                class:on=move || emojis_for.get() == Some(direct)
+                aria-expanded=move || (emojis_for.get() == Some(direct)).to_string()
+                title=move || t_string!(i18n, chat_emoji)
+                aria-label=move || t_string!(i18n, chat_emoji)
+                on:mousedown=|ev| ev.prevent_default()
+                on:click=move |_| toggle_emojis(direct)
+                inner_html=SMILE
+            ></button>
+        }
+    };
+    let emoji_panel = move |direct: bool| {
+        view! {
+            <Show when=move || emojis_for.get() == Some(direct)>
+                <div class="reply-emojis">
+                    <crate::emoji::EmojiPicker
+                        picked=Signal::stored(None::<String>)
+                        pick
+                        frequent=Signal::from(frequent)
+                    />
+                </div>
+            </Show>
+        }
     };
 
     let submit = move |ev: leptos::ev::SubmitEvent| {
@@ -794,7 +870,10 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
                 _ => None,
             })
         });
-        let shown = render(&text, &sample(direct, channel));
+        let shown = signed(
+            render(&text, &sample(direct, channel)),
+            draft.with(|d| d.sign),
+        );
         let bytes = shown.len();
         let blank = shown.is_empty();
         let over = bytes > MAX_TEXT_BYTES;
@@ -947,7 +1026,19 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
                         />
                         <span>{t!(i18n, reply_text)}</span>
                     </div>
+                    <div class="toggle" class:gone=move || !draft.with(|d| d.texts)>
+                        <Switch
+                            on=Signal::derive(move || draft.with(|d| d.sign))
+                            label=Signal::derive(move || t_string!(i18n, reply_sign).to_string())
+                            flip=move |_| draft.update(|d| d.sign = !d.sign)
+                        />
+                        <span>
+                            {t!(i18n, reply_sign)}
+                            <span class="dim">{t!(i18n, reply_sign_hint)}</span>
+                        </span>
+                    </div>
                     <div class="reply-texts" class:gone=move || !draft.with(|d| d.texts)>
+                        <div class="reply-field">
                         <textarea
                             rows="2"
                             node_ref=reply_field
@@ -959,6 +1050,9 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
                                 draft.update(|d| d.reply = text);
                             }
                         ></textarea>
+                        {emoji_button(false)}
+                        </div>
+                        {emoji_panel(false)}
                         {move || preview(false)}
                         <div class="toggle">
                             <Switch
@@ -974,6 +1068,7 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
                             </span>
                         </div>
                         <div class="reply-texts" class:gone=move || !draft.with(|d| d.direct)>
+                            <div class="reply-field">
                             <textarea
                                 rows="2"
                                 node_ref=direct_field
@@ -985,6 +1080,9 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
                                     draft.update(|d| d.direct_reply = text);
                                 }
                             ></textarea>
+                            {emoji_button(true)}
+                            </div>
+                            {emoji_panel(true)}
                             {move || preview(true)}
                         </div>
                         <div class="variables">
@@ -1175,6 +1273,7 @@ mod tests {
             triggers: vec!["ping".into(), "test".into()],
             matching: AutoReplyMatch::Whole,
             react: true,
+            sign: true,
             reply: Some("🤖 Pong, {HOPS} 🦘".into()),
             direct_reply: Some("🤖 Pong 🎯".into()),
             places: vec![AutoReplyPlace::Directs { radio: 1 }],

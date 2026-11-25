@@ -3901,6 +3901,31 @@
       .reply-texts { display: flex; flex-direction: column; gap: 8px; }
       .reply-texts > .reply-texts { padding-left: 12px; border-left: 2px solid var(--mc-border); }
       .reply-texts textarea { width: 100%; resize: vertical; line-height: 1.45; overflow-wrap: anywhere; }
+      /* Its emojis' button in the field, at its right, as the chat's. */
+      .reply-field { position: relative; display: flex; }
+      .reply-field textarea { padding-right: 40px; }
+      .reply-field .emoji-toggle {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: none;
+        color: var(--mc-muted);
+      }
+      .reply-field .emoji-toggle svg { width: 20px; height: 20px; }
+      .reply-field .emoji-toggle:hover { color: var(--mc-text); }
+      .reply-field .emoji-toggle.on { color: var(--mc-primary); }
+      .reply-emojis .emoji-picker { max-width: none; background: var(--mc-surface); }
+      .reply-emojis .emoji-groups { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+      .reply-emojis .emoji-groups button { width: auto; }
       .reply-preview { display: flex; align-items: center; gap: 8px; font-size: 12px; }
       .reply-preview .bubble {
         flex: 1;

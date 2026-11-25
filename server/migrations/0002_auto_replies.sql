@@ -10,6 +10,8 @@ CREATE TABLE auto_reply (
     -- 'whole' or 'word'.
     matching TEXT NOT NULL,
     react INTEGER NOT NULL,
+    -- Whether its texts go with 🤖 before them.
+    sign INTEGER NOT NULL,
     reply TEXT,
     direct_reply TEXT
 );

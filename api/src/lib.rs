@@ -375,6 +375,11 @@ pub struct AutoReplySettings {
     /// The text it answers with; none, only the reaction.
     #[cfg_attr(feature = "openapi", schema(example = "🤖 Pong, {HOPS} 🦘"))]
     pub reply: Option<String>,
+    /// Whether its texts go signed, 🤖 before them unless they start so
+    /// already: as automatic replies are told apart, and not answered by
+    /// others'. On unless said.
+    #[serde(default = "signed_by_default")]
+    pub sign: bool,
     /// The text it answers a message that came direct with, if another.
     #[cfg_attr(
         feature = "openapi",
@@ -383,6 +388,10 @@ pub struct AutoReplySettings {
     pub direct_reply: Option<String>,
     /// Where it answers.
     pub places: Vec<AutoReplyPlace>,
+}
+
+fn signed_by_default() -> bool {
+    true
 }
 
 /// How a message is matched against an automatic reply's triggers.

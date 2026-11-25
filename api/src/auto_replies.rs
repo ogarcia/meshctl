@@ -90,6 +90,18 @@ pub fn render(text: &str, told: &Told) -> String {
     out.trim_end().to_owned()
 }
 
+/// What an automatic reply signs its texts with, and what tells another's.
+pub const SIGNATURE: &str = "🤖";
+
+/// A reply's text, signed if it is to be, unless it starts signed already.
+pub fn signed(text: String, sign: bool) -> String {
+    if sign && !text.trim_start().starts_with(SIGNATURE) && !text.is_empty() {
+        format!("{SIGNATURE} {text}")
+    } else {
+        text
+    }
+}
+
 /// A text cut to what a message takes, on a character.
 pub fn fit(mut text: String) -> String {
     let mut end = text.len().min(MAX_TEXT_BYTES);
@@ -138,6 +150,15 @@ mod tests {
         // Cut to what a message takes, on a character.
         let long = fit("ñ".repeat(150));
         assert!(long.len() <= MAX_TEXT_BYTES && long.chars().all(|c| c == 'ñ'));
+    }
+
+    #[test]
+    fn texts_are_signed_once() {
+        assert_eq!(signed("Pong".into(), true), "🤖 Pong");
+        assert_eq!(signed("🤖 Pong".into(), true), "🤖 Pong");
+        assert_eq!(signed(" 🤖Pong".into(), true), " 🤖Pong");
+        assert_eq!(signed("Hola".into(), false), "Hola");
+        assert_eq!(signed(String::new(), true), "");
     }
 
     #[test]

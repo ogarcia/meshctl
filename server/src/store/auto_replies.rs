@@ -44,6 +44,7 @@ type ReplyRow = (
     String,
     String,
     bool,
+    bool,
     Option<String>,
     Option<String>,
 );
@@ -60,7 +61,7 @@ impl Store {
     pub async fn auto_replies(&self) -> Result<Vec<AutoReply>> {
         let mut conn = self.pool.acquire().await?;
         let rows: Vec<ReplyRow> = sqlx::query_as(
-            "SELECT id, name, enabled, triggers, matching, react, reply, direct_reply
+            "SELECT id, name, enabled, triggers, matching, react, sign, reply, direct_reply
             FROM auto_reply ORDER BY position, id",
         )
         .fetch_all(&mut *conn)
@@ -95,22 +96,25 @@ impl Store {
         Ok(rows
             .into_iter()
             .map(
-                |(id, name, enabled, triggers, matching, react, reply, direct_reply)| AutoReply {
-                    id,
-                    settings: AutoReplySettings {
-                        name,
-                        enabled,
-                        triggers: serde_json::from_str(&triggers).unwrap_or_default(),
-                        matching: if matching == "word" {
-                            AutoReplyMatch::Word
-                        } else {
-                            AutoReplyMatch::Whole
+                |(id, name, enabled, triggers, matching, react, sign, reply, direct_reply)| {
+                    AutoReply {
+                        id,
+                        settings: AutoReplySettings {
+                            name,
+                            enabled,
+                            triggers: serde_json::from_str(&triggers).unwrap_or_default(),
+                            matching: if matching == "word" {
+                                AutoReplyMatch::Word
+                            } else {
+                                AutoReplyMatch::Whole
+                            },
+                            react,
+                            sign,
+                            reply,
+                            direct_reply,
+                            places: by_reply.remove(&id).unwrap_or_default(),
                         },
-                        react,
-                        reply,
-                        direct_reply,
-                        places: by_reply.remove(&id).unwrap_or_default(),
-                    },
+                    }
                 },
             )
             .collect())
@@ -124,9 +128,9 @@ impl Store {
     pub async fn add_auto_reply(&self, settings: &AutoReplySettings) -> Result<Keeping> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let (id,): (AutoReplyId,) = sqlx::query_as(
-            "INSERT INTO auto_reply (position, name, enabled, triggers, matching, react, reply,
-                direct_reply)
-            VALUES ((SELECT ifnull(max(position), 0) + 1 FROM auto_reply), ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO auto_reply (position, name, enabled, triggers, matching, react, sign,
+                reply, direct_reply)
+            VALUES ((SELECT ifnull(max(position), 0) + 1 FROM auto_reply), ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id",
         )
         .bind(&settings.name)
@@ -134,6 +138,7 @@ impl Store {
         .bind(serde_json::to_string(&settings.triggers)?)
         .bind(matching_name(settings.matching))
         .bind(settings.react)
+        .bind(settings.sign)
         .bind(&settings.reply)
         .bind(&settings.direct_reply)
         .fetch_one(&mut *tx)
@@ -159,7 +164,7 @@ impl Store {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let changed = sqlx::query(
             "UPDATE auto_reply SET name = ?, enabled = ?, triggers = ?, matching = ?, react = ?,
-                reply = ?, direct_reply = ?
+                sign = ?, reply = ?, direct_reply = ?
             WHERE id = ?",
         )
         .bind(&settings.name)
@@ -167,6 +172,7 @@ impl Store {
         .bind(serde_json::to_string(&settings.triggers)?)
         .bind(matching_name(settings.matching))
         .bind(settings.react)
+        .bind(settings.sign)
         .bind(&settings.reply)
         .bind(&settings.direct_reply)
         .bind(id)
@@ -389,6 +395,7 @@ mod tests {
             triggers: vec!["ping".into()],
             matching: AutoReplyMatch::Whole,
             react: true,
+            sign: true,
             reply: None,
             direct_reply: None,
             places: vec![

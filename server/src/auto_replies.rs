@@ -15,7 +15,7 @@
 
 use crate::radios::{Change, Radios};
 use crate::store::now;
-use meshctl_api::auto_replies::{MAX_TEXT_BYTES, Told, fit, hops_emoji, render};
+use meshctl_api::auto_replies::{MAX_TEXT_BYTES, SIGNATURE, Told, fit, hops_emoji, render, signed};
 use meshctl_api::{
     AutoReply, AutoReplyMatch, AutoReplyPlace, AutoReplySettings, BROADCAST, Message, NewMessage,
     RadioId,
@@ -37,10 +37,6 @@ const AGAIN_AFTER: Duration = Duration::from_secs(5 * 60);
 
 /// The most replies a radio sends in a minute.
 const MOST_A_MINUTE: usize = 6;
-
-/// What starts another's automatic reply, by custom: never answered, so
-/// that two never answer each other.
-const BOT: &str = "🤖";
 
 /// How often a MeshCore radio is asked how long it has been on the air.
 const AIRTIME_EVERY: Duration = Duration::from_secs(60);
@@ -254,7 +250,7 @@ fn answerable(message: &Message, now: i64) -> bool {
         && message.packet_id != 0
         && message.author.is_none()
         && now - message.at <= FRESH_SECS
-        && !message.text.trim_start().starts_with(BOT)
+        && !message.text.trim_start().starts_with(SIGNATURE)
 }
 
 /// Whether a reply answers a message heard by a radio: on, where the
@@ -393,7 +389,10 @@ async fn answer(radios: &Radios, radio: RadioId, reply: &AutoReply, message: &Me
     let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
         return;
     };
-    let text = fit(render(text, &told(radios, radio, message)));
+    let text = fit(signed(
+        render(text, &told(radios, radio, message)),
+        settings.sign,
+    ));
     if text.is_empty() {
         return;
     }
@@ -449,7 +448,8 @@ mod tests {
                 triggers: vec!["ping".into(), "test".into()],
                 matching: AutoReplyMatch::Whole,
                 react: true,
-                reply: Some("🤖 Pong".into()),
+                sign: true,
+                reply: Some("Pong".into()),
                 direct_reply: None,
                 places,
             },

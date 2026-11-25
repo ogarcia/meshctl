@@ -1052,8 +1052,8 @@
   "reply_enabled_hint": "Apagada no responde en ningún sitio, y no olvida dónde lo haría.",
   "reply_remove_confirm": "¿Eliminar esta respuesta automática?",
   "reply_ping_triggers": "ping, test, prueba",
-  "reply_ping_text": "🤖 Pong, {HOPS} 🦘",
-  "reply_ping_direct": "🤖 Pong, ¡directo! 🎯 SNR: {SNR}dB RSSI: {RSSI}dBm",
+  "reply_ping_text": "Pong, {HOPS} 🦘",
+  "reply_ping_direct": "Pong, ¡directo! 🎯 SNR: {SNR}dB RSSI: {RSSI}dBm",
   "reply_var_long_name": "Quién escribe, por su nombre largo",
   "reply_var_short_name": "Quién escribe, por su nombre corto",
   "reply_var_node_id": "Quién escribe, por el id de su nodo",
@@ -1073,5 +1073,7 @@
   "replies_each": "Cada una",
   "replies_busy_above": "por encima del",
   "number_less": "Menos",
-  "number_more": "Más"
+  "number_more": "Más",
+  "reply_sign": "Firmar con 🤖",
+  "reply_sign_hint": "Delante del texto, si no empieza ya por él: así se reconoce una respuesta automática, y otros bots no la contestan."
 }
