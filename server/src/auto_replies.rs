@@ -1,0 +1,551 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
+
+//! Automatic replies: a message heard that says what one of them waits for,
+//! where it waits for it, is answered on its own, with a reaction, a text,
+//! or both, from what the message came with. On either mesh alike: each
+//! tells what it can of the message, and what it cannot is left empty.
+//!
+//! Kept in check, as a mesh is everyone's: never a message of the radio's
+//! own, one come through MQTT, a reaction, a room's post, or one that looks
+//! like another's automatic reply (it starts with 🤖); never one heard as the
+//! radio catches up on what it kept while away, nor one from long ago; the
+//! same node answered by the same reply once in a while; and a radio's
+//! replies few a minute.
+
+use crate::radios::{Change, Radios};
+use crate::store::now;
+use meshctl_api::{
+    AutoReply, AutoReplyMatch, AutoReplyPlace, AutoReplySettings, BROADCAST, Message, NewMessage,
+    RadioId,
+};
+use meshctl_core::mesh::{self, LinkState};
+use std::collections::{HashMap, VecDeque};
+use std::time::{Duration, Instant};
+use tokio::sync::broadcast::error::RecvError;
+
+/// How long a radio is taken to be catching up, after it is ready: what it
+/// kept while nobody was there comes then, and is not answered.
+const CATCHING_UP: Duration = Duration::from_secs(20);
+
+/// The oldest a message is answered: by when it was heard.
+const FRESH_SECS: i64 = 120;
+
+/// How long before the same reply answers the same node again.
+const AGAIN_AFTER: Duration = Duration::from_secs(5 * 60);
+
+/// The most replies a radio sends in a minute.
+const MOST_A_MINUTE: usize = 6;
+
+/// What starts another's automatic reply, by custom: never answered, so
+/// that two never answer each other.
+const BOT: &str = "🤖";
+
+/// The longest text that goes out, in bytes.
+const MAX_TEXT_BYTES: usize = meshctl_core::radio::MAX_TEXT_BYTES;
+
+/// Answers what the automatic replies wait for, from what the radios hear,
+/// until they stop.
+pub fn spawn(radios: Radios) {
+    tokio::spawn(async move {
+        let mut changes = radios.subscribe();
+        let mut answering = Answering::default();
+        loop {
+            let change = tokio::select! {
+                change = changes.recv() => change,
+                () = radios.stopped() => return,
+            };
+            match change {
+                Ok(Change::Mesh(radio, mesh::Event::Link(LinkState::Ready))) => {
+                    answering.ready.insert(radio, Instant::now());
+                }
+                Ok(Change::Message(radio, message)) => {
+                    answering.heard(&radios, radio, message).await;
+                }
+                Ok(_) | Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => return,
+            }
+        }
+    });
+}
+
+#[derive(Default)]
+struct Answering {
+    /// When each radio was last ready.
+    ready: HashMap<RadioId, Instant>,
+    /// When each reply last answered each sender on each radio.
+    answered: HashMap<(i64, RadioId, Sender), Instant>,
+    /// When each radio sent its latest replies.
+    sent: HashMap<RadioId, VecDeque<Instant>>,
+}
+
+/// Who sent a message: its node, or, on a MeshCore channel, where none is
+/// known, the name it came under.
+type Sender = (u32, Option<String>);
+
+impl Answering {
+    async fn heard(&mut self, radios: &Radios, radio: RadioId, message: Message) {
+        let at = Instant::now();
+        if !answerable(&message, now())
+            || self
+                .ready
+                .get(&radio)
+                .is_none_or(|ready| at.duration_since(*ready) < CATCHING_UP)
+        {
+            return;
+        }
+        let replies = match radios.auto_replies().await {
+            Ok(replies) => replies,
+            Err(err) => {
+                tracing::warn!(error = format_args!("{err:#}"), "automatic replies");
+                return;
+            }
+        };
+        let Some(reply) = replies
+            .into_iter()
+            .find(|reply| answers(reply, radio, &message))
+        else {
+            return;
+        };
+        let sender = (message.from, message.sender_name.clone());
+        let key = (reply.id, radio, sender);
+        if self
+            .answered
+            .get(&key)
+            .is_some_and(|last| at.duration_since(*last) < AGAIN_AFTER)
+        {
+            tracing::info!(
+                radio,
+                reply = reply.id,
+                "automatic reply: answered not long ago"
+            );
+            return;
+        }
+        let sent = self.sent.entry(radio).or_default();
+        while sent
+            .front()
+            .is_some_and(|first| at.duration_since(*first) >= Duration::from_secs(60))
+        {
+            sent.pop_front();
+        }
+        if sent.len() >= MOST_A_MINUTE {
+            tracing::warn!(
+                radio,
+                reply = reply.id,
+                "automatic reply: too many this minute"
+            );
+            return;
+        }
+        sent.push_back(at);
+        self.answered
+            .retain(|_, last| at.duration_since(*last) < AGAIN_AFTER);
+        self.answered.insert(key, at);
+        answer(radios, radio, &reply, &message).await;
+    }
+}
+
+/// Whether an automatic reply is one: named, waiting for something, and
+/// answering with something, its texts no longer than a message takes.
+pub fn valid(settings: &AutoReplySettings) -> bool {
+    let text = |text: &Option<String>| {
+        text.as_ref()
+            .is_none_or(|t| !t.trim().is_empty() && t.len() <= MAX_TEXT_BYTES)
+    };
+    !settings.name.trim().is_empty()
+        && settings.triggers.iter().any(|t| !fold(t).is_empty())
+        && (settings.react || settings.reply.is_some())
+        && text(&settings.reply)
+        && text(&settings.direct_reply)
+}
+
+/// Whether a message is one an automatic reply may answer at `now`.
+fn answerable(message: &Message, now: i64) -> bool {
+    !message.outgoing
+        && !message.emoji
+        && !message.via_mqtt
+        && message.packet_id != 0
+        && message.author.is_none()
+        && now - message.at <= FRESH_SECS
+        && !message.text.trim_start().starts_with(BOT)
+}
+
+/// Whether a reply answers a message heard by a radio: on, where the
+/// message came, and the message says what it waits for.
+fn answers(reply: &AutoReply, radio: RadioId, message: &Message) -> bool {
+    let settings = &reply.settings;
+    let channel = message.to == BROADCAST;
+    settings.enabled
+        && settings.places.iter().any(|place| match place {
+            AutoReplyPlace::Directs { radio: r } => *r == radio && !channel,
+            AutoReplyPlace::Node { radio: r, node } => {
+                *r == radio && !channel && *node == message.from
+            }
+            AutoReplyPlace::Channel {
+                radio: r,
+                channel: slot,
+                ..
+            } => *r == radio && channel && *slot == Some(message.channel),
+        })
+        && triggered(&settings.triggers, settings.matching, &message.text)
+}
+
+/// Text to match: in lower case, without accents, and only its letters and
+/// numbers, in words one space apart.
+fn fold(text: &str) -> String {
+    let mut folded = String::with_capacity(text.len());
+    for c in text.chars().flat_map(char::to_lowercase) {
+        let c = match c {
+            'á' | 'à' | 'â' | 'ä' | 'ã' => 'a',
+            'é' | 'è' | 'ê' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ò' | 'ô' | 'ö' | 'õ' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ñ' => 'n',
+            'ç' => 'c',
+            c if c.is_alphanumeric() => c,
+            _ => ' ',
+        };
+        folded.push(c);
+    }
+    folded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether a text says one of the triggers, as matched.
+fn triggered(triggers: &[String], matching: AutoReplyMatch, text: &str) -> bool {
+    let text = fold(text);
+    let words = format!(" {text} ");
+    triggers
+        .iter()
+        .map(|t| fold(t))
+        .filter(|t| !t.is_empty())
+        .any(|trigger| match matching {
+            AutoReplyMatch::Whole => text == trigger,
+            AutoReplyMatch::Word => words.contains(&format!(" {trigger} ")),
+        })
+}
+
+/// The reaction that tells the hops a message took.
+fn hops_emoji(hops: u32) -> &'static str {
+    const KEYCAPS: [&str; 10] = ["🎯", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"];
+    match hops {
+        0..=9 => KEYCAPS[hops as usize],
+        10 => "🔟",
+        _ => "🦘",
+    }
+}
+
+/// What a message tells the variables of a reply.
+#[derive(Debug, Default)]
+struct Told {
+    long_name: Option<String>,
+    short_name: Option<String>,
+    node_id: Option<String>,
+    hops: Option<u32>,
+    snr: Option<f32>,
+    rssi: Option<i32>,
+    channel: Option<String>,
+    date: String,
+    time: String,
+}
+
+/// A reply's text, its variables told, cut to what a message takes.
+fn render(text: &str, told: &Told) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let value = after.find('}').and_then(|close| {
+            let value = match &after[..close] {
+                "LONG_NAME" => told.long_name.clone().unwrap_or_default(),
+                "SHORT_NAME" => told.short_name.clone().unwrap_or_default(),
+                "NODE_ID" => told.node_id.clone().unwrap_or_default(),
+                "HOPS" | "NUMBER_HOPS" => told.hops.map(|h| h.to_string()).unwrap_or_default(),
+                "KANGAROO_HOPS" => told
+                    .hops
+                    .map(|h| "🦘".repeat(h as usize))
+                    .unwrap_or_default(),
+                "SNR" => told.snr.map(|s| format!("{s:.1}")).unwrap_or_default(),
+                "RSSI" => told.rssi.map(|r| r.to_string()).unwrap_or_default(),
+                "CHANNEL" => told.channel.clone().unwrap_or_default(),
+                "DATE" => told.date.clone(),
+                "TIME" => told.time.clone(),
+                _ => return None,
+            };
+            Some((value, close))
+        });
+        match value {
+            Some((value, close)) => {
+                out.push_str(&value);
+                rest = &after[close + 1..];
+            }
+            // Not a variable: as written.
+            None => {
+                out.push('{');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    let mut end = out.trim_end().len().min(MAX_TEXT_BYTES);
+    while !out.is_char_boundary(end) {
+        end -= 1;
+    }
+    out.truncate(end);
+    out
+}
+
+/// What a message heard by a radio tells, with what the radio knows of its
+/// sender and its channel.
+fn told(radios: &Radios, radio: RadioId, message: &Message) -> Told {
+    let local = jiff::Zoned::now();
+    let mut told = Told {
+        hops: message.hops_away,
+        snr: message.snr,
+        rssi: message.rssi,
+        date: local.strftime("%Y-%m-%d").to_string(),
+        time: local.strftime("%H:%M").to_string(),
+        long_name: message.sender_name.clone(),
+        ..Told::default()
+    };
+    let Some(mesh) = radios.mesh(radio) else {
+        return told;
+    };
+    mesh.read(|state| {
+        let meshcore = state.meshcore.is_some();
+        if let Some(user) = state.nodes.get(&message.from).and_then(|n| n.user.as_ref()) {
+            told.long_name = Some(user.long_name.clone()).filter(|n| !n.is_empty());
+            told.short_name = Some(user.short_name.clone()).filter(|n| !n.is_empty());
+            // MeshCore's nodes go by the start of their key.
+            if meshcore && user.public_key.len() >= 4 {
+                told.node_id = Some(
+                    user.public_key[..4]
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect(),
+                );
+            }
+        }
+        if !meshcore && message.from != 0 {
+            told.node_id = Some(format!("!{:08x}", message.from));
+        }
+        if message.to == BROADCAST {
+            told.channel = crate::channels::slots_of(state)
+                .into_iter()
+                .find(|slot| slot.index == message.channel)
+                .map(|slot| slot.name);
+        }
+    });
+    told
+}
+
+/// Answers a message as a reply says: its reaction first, then its text.
+async fn answer(radios: &Radios, radio: RadioId, reply: &AutoReply, message: &Message) {
+    let settings = &reply.settings;
+    let (channel, node) = if message.to == BROADCAST {
+        (Some(message.channel), None)
+    } else {
+        (None, Some(message.from))
+    };
+    let out = |text: String, emoji: bool| NewMessage {
+        text,
+        channel,
+        node,
+        reply_id: Some(message.packet_id),
+        emoji,
+        scope: None,
+    };
+    if settings.react
+        && let Some(hops) = message.hops_away
+        && let Err(err) = radios
+            .send(radio, out(hops_emoji(hops).to_owned(), true))
+            .await
+    {
+        tracing::warn!(
+            radio,
+            reply = reply.id,
+            ?err,
+            "automatic reply: cannot react"
+        );
+    }
+    let direct = message.hops_away == Some(0);
+    let text = match (&settings.direct_reply, &settings.reply) {
+        (Some(direct_reply), _) if direct => Some(direct_reply),
+        (_, reply) => reply.as_ref(),
+    };
+    let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
+        return;
+    };
+    let text = render(text, &told(radios, radio, message));
+    if text.is_empty() {
+        return;
+    }
+    match radios.send(radio, out(text, false)).await {
+        Ok(_) => tracing::info!(radio, reply = reply.id, "automatic reply sent"),
+        Err(err) => tracing::warn!(
+            radio,
+            reply = reply.id,
+            ?err,
+            "automatic reply: cannot send"
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use meshctl_api::MessageStatus;
+
+    fn heard(text: &str) -> Message {
+        Message {
+            id: 1,
+            packet_id: 7,
+            from: 0x1234_5678,
+            sender_name: None,
+            to: BROADCAST,
+            channel: 2,
+            text: text.to_owned(),
+            at: 1_000,
+            outgoing: false,
+            status: MessageStatus::Received,
+            error: None,
+            reply_id: None,
+            emoji: false,
+            snr: Some(7.5),
+            rssi: Some(-95),
+            hops_away: Some(3),
+            via_mqtt: false,
+            scope: None,
+            heard: 1,
+            sent_at: None,
+            repeaters: 0,
+            author: None,
+        }
+    }
+
+    fn reply(places: Vec<AutoReplyPlace>) -> AutoReply {
+        AutoReply {
+            id: 1,
+            settings: AutoReplySettings {
+                name: "Ping".into(),
+                enabled: true,
+                triggers: vec!["ping".into(), "test".into()],
+                matching: AutoReplyMatch::Whole,
+                react: true,
+                reply: Some("🤖 Pong".into()),
+                direct_reply: None,
+                places,
+            },
+        }
+    }
+
+    #[test]
+    fn triggers_match_however_written() {
+        let both = ["ping".to_owned(), "Prueba".to_owned()];
+        for yes in ["ping", "Ping!", " PING ", "ping 🙂", "¡Prueba!", "prúeba"] {
+            assert!(triggered(&both, AutoReplyMatch::Whole, yes), "{yes}");
+        }
+        for no in ["ping me", "pinging", "", "🤖"] {
+            assert!(!triggered(&both, AutoReplyMatch::Whole, no), "{no}");
+        }
+        assert!(triggered(&both, AutoReplyMatch::Word, "a ping, please"));
+        assert!(triggered(&both, AutoReplyMatch::Word, "Ping."));
+        assert!(!triggered(&both, AutoReplyMatch::Word, "pinging"));
+        // An empty trigger matches nothing.
+        assert!(!triggered(&[" ! ".to_owned()], AutoReplyMatch::Whole, "?"));
+    }
+
+    #[test]
+    fn only_some_messages_are_answered() {
+        assert!(answerable(&heard("ping"), 1_060));
+        assert!(!answerable(&heard("ping"), 1_000 + FRESH_SECS + 1));
+        assert!(!answerable(&heard("🤖 Pong"), 1_000));
+        let changed = |change: fn(&mut Message)| {
+            let mut message = heard("ping");
+            change(&mut message);
+            answerable(&message, 1_000)
+        };
+        assert!(!changed(|m| m.outgoing = true));
+        assert!(!changed(|m| m.emoji = true));
+        assert!(!changed(|m| m.via_mqtt = true));
+        assert!(!changed(|m| m.author = Some(9)));
+        assert!(!changed(|m| m.packet_id = 0));
+    }
+
+    #[test]
+    fn a_reply_answers_where_it_is_placed() {
+        let on_channel = reply(vec![AutoReplyPlace::Channel {
+            radio: 1,
+            channel: Some(2),
+            name: None,
+        }]);
+        assert!(answers(&on_channel, 1, &heard("ping")));
+        assert!(!answers(&on_channel, 2, &heard("ping")));
+        assert!(!answers(&on_channel, 1, &heard("hola")));
+        let mut elsewhere = heard("ping");
+        elsewhere.channel = 3;
+        assert!(!answers(&on_channel, 1, &elsewhere));
+        let mut direct = heard("ping");
+        direct.to = 0x9999;
+        assert!(!answers(&on_channel, 1, &direct));
+
+        let directs = reply(vec![AutoReplyPlace::Directs { radio: 1 }]);
+        assert!(answers(&directs, 1, &direct));
+        assert!(!answers(&directs, 1, &heard("ping")));
+        let one = reply(vec![AutoReplyPlace::Node {
+            radio: 1,
+            node: 0x1234_5678,
+        }]);
+        assert!(answers(&one, 1, &direct));
+        let mut other = direct.clone();
+        other.from = 0x42;
+        assert!(!answers(&one, 1, &other));
+
+        let mut off = directs;
+        off.settings.enabled = false;
+        assert!(!answers(&off, 1, &direct));
+    }
+
+    #[test]
+    fn variables_are_told() {
+        let told = Told {
+            long_name: Some("Pastoriza".into()),
+            short_name: Some("PSTZ".into()),
+            node_id: Some("!12345678".into()),
+            hops: Some(3),
+            snr: Some(7.5),
+            rssi: Some(-95),
+            channel: Some("Galicia".into()),
+            date: "2026-11-25".into(),
+            time: "09:30".into(),
+        };
+        assert_eq!(
+            render(
+                "🤖 Pong, {HOPS} 🦘 {KANGAROO_HOPS}, {LONG_NAME} ({SHORT_NAME}, {NODE_ID})",
+                &told
+            ),
+            "🤖 Pong, 3 🦘 🦘🦘🦘, Pastoriza (PSTZ, !12345678)"
+        );
+        assert_eq!(
+            render(
+                "SNR: {SNR}dB RSSI: {RSSI}dBm #{CHANNEL} {DATE} {TIME}",
+                &told
+            ),
+            "SNR: 7.5dB RSSI: -95dBm #Galicia 2026-11-25 09:30"
+        );
+        // Unknown or unclosed: as written; one not told: empty.
+        assert_eq!(render("{NOPE} {HOPS", &told), "{NOPE} {HOPS");
+        assert_eq!(render("hops: {HOPS}", &Told::default()), "hops:");
+        // Cut to what a message takes, on a character.
+        let long = render(&"ñ".repeat(150), &told);
+        assert!(long.len() <= MAX_TEXT_BYTES && long.chars().all(|c| c == 'ñ'));
+    }
+
+    #[test]
+    fn hops_are_told_as_an_emoji() {
+        assert_eq!(hops_emoji(0), "🎯");
+        assert_eq!(hops_emoji(3), "3️⃣");
+        assert_eq!(hops_emoji(10), "🔟");
+        assert_eq!(hops_emoji(12), "🦘");
+    }
+}

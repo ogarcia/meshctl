@@ -59,7 +59,7 @@ server, in a container, as a desktop app, or as an app on your phone.
 Written down so that they stay that way. A feature request for any of these is
 a reason to point at another tool, not to grow this one.
 
-- Bots, automations, auto-responders or scheduled messages.
+- Bots, automations or scheduled messages.
 - MQTT, Matrix or any other bridge. See
   [loratrix](https://github.com/ogarcia/loratrix) for that.
 - Telemetry dashboards, charts or statistics beyond what a node says about

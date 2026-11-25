@@ -79,8 +79,8 @@ pub enum ErrorCode {
     InvalidBadge,
     /// Not an order of the radios: every radio's id, each once, and no other.
     InvalidOrder,
-    /// Not a place on the map: a latitude past ±90, a longitude past ±180, or
-    /// a zoom past what maps have.
+    /// Not an area on the map: south over north, west past east, wider than
+    /// the world, or off it.
     InvalidMapView,
     /// A channel with the very name and key of another the radio has: on
     /// the air, and to the radio, it would be that same channel.
@@ -107,6 +107,10 @@ pub enum ErrorCode {
     /// What only a node's admin may do: the radio is logged in to it as
     /// less.
     NotAdmin,
+    /// Not an automatic reply: no name, no trigger, nothing to answer with,
+    /// a text of more than 200 bytes, or a place on a radio, channel or
+    /// node there is not.
+    InvalidAutoReply,
 }
 
 /// The body of every error the API answers with.
@@ -329,6 +333,94 @@ impl MapView {
             && self.east - self.west <= 360.0
             && (-180.0..=180.0).contains(&centre)
     }
+}
+
+/// How an automatic reply is told by its id.
+pub type AutoReplyId = i64;
+
+/// An automatic reply: what a message must say for meshctl to answer it on
+/// its own, how it answers, and where.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AutoReply {
+    pub id: AutoReplyId,
+    #[serde(flatten)]
+    pub settings: AutoReplySettings,
+}
+
+/// What an automatic reply is, as it is set.
+///
+/// The texts take variables, from the message answered: `{LONG_NAME}`,
+/// `{SHORT_NAME}` and `{NODE_ID}` of who sent it, `{HOPS}` it took (also
+/// `{NUMBER_HOPS}`), as many kangaroos, `{KANGAROO_HOPS}`, `{SNR}` and
+/// `{RSSI}` it came with, its `{CHANNEL}`; and the `{DATE}` and `{TIME}`
+/// it is answered at. One the message does not carry is left empty.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AutoReplySettings {
+    /// What it is called, in the interface.
+    #[cfg_attr(feature = "openapi", schema(example = "Ping"))]
+    pub name: String,
+    /// Off, it answers nowhere, its places kept.
+    pub enabled: bool,
+    /// What a message says to be answered, any of them: in any case, with or
+    /// without accents, punctuation or emojis.
+    #[cfg_attr(feature = "openapi", schema(example = json!(["ping", "test"])))]
+    pub triggers: Vec<String>,
+    pub matching: AutoReplyMatch,
+    /// Whether it reacts to the message with the hops it took: 🎯 come
+    /// direct, 1️⃣ to 🔟, or 🦘 for more.
+    pub react: bool,
+    /// The text it answers with; none, only the reaction.
+    #[cfg_attr(feature = "openapi", schema(example = "🤖 Pong, {HOPS} 🦘"))]
+    pub reply: Option<String>,
+    /// The text it answers a message that came direct with, if another.
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = "🤖 Pong, direct! 🎯 SNR: {SNR}dB RSSI: {RSSI}dBm")
+    )]
+    pub direct_reply: Option<String>,
+    /// Where it answers.
+    pub places: Vec<AutoReplyPlace>,
+}
+
+/// How a message is matched against an automatic reply's triggers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AutoReplyMatch {
+    /// The whole message is one of them: "Ping!" is "ping", "ping me" not.
+    #[default]
+    Whole,
+    /// The message has one of them among its words.
+    Word,
+}
+
+/// Where an automatic reply answers, on one radio.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AutoReplyPlace {
+    /// Every direct conversation of the radio.
+    Directs { radio: RadioId },
+    /// The direct conversation with one node.
+    Node { radio: RadioId, node: u32 },
+    /// One channel, wherever it is on the radio. Given by its slot; told
+    /// with its slot now, none if it is in none, and its name.
+    Channel {
+        radio: RadioId,
+        channel: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+}
+
+/// The order of the automatic replies: every one's id, each once. A message
+/// two of them would answer is answered by the first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AutoReplyOrder {
+    pub auto_replies: Vec<AutoReplyId>,
 }
 
 /// The order of the radios, as the interface lists them: every radio's id,

@@ -5,6 +5,7 @@
 //! a desktop shell can run within itself, serving the panel to its own
 //! window.
 
+mod auto_replies;
 mod channels;
 mod keys;
 mod links;

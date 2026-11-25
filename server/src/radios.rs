@@ -1114,6 +1114,7 @@ impl Radios {
             radios.run(&record, state);
         }
         radios.keep_clean();
+        crate::auto_replies::spawn(radios.clone());
         Ok(radios)
     }
 
@@ -3263,6 +3264,45 @@ impl Radios {
                 tracing::warn!(radio = id, error = format_args!("{err:#}"), "cannot store");
             }
         }
+    }
+
+    /// The automatic replies, in the order they are tried in.
+    pub async fn auto_replies(&self) -> Result<Vec<meshctl_api::AutoReply>> {
+        self.store.auto_replies().await
+    }
+
+    /// Adds an automatic reply, the last.
+    pub async fn add_auto_reply(
+        &self,
+        settings: &meshctl_api::AutoReplySettings,
+    ) -> Result<crate::store::Keeping> {
+        if !crate::auto_replies::valid(settings) {
+            return Ok(crate::store::Keeping::Invalid);
+        }
+        self.store.add_auto_reply(settings).await
+    }
+
+    /// Changes an automatic reply.
+    pub async fn set_auto_reply(
+        &self,
+        id: meshctl_api::AutoReplyId,
+        settings: &meshctl_api::AutoReplySettings,
+    ) -> Result<crate::store::Keeping> {
+        if !crate::auto_replies::valid(settings) {
+            return Ok(crate::store::Keeping::Invalid);
+        }
+        self.store.set_auto_reply(id, settings).await
+    }
+
+    /// Removes an automatic reply; `false` if there is no such one.
+    pub async fn remove_auto_reply(&self, id: meshctl_api::AutoReplyId) -> Result<bool> {
+        self.store.remove_auto_reply(id).await
+    }
+
+    /// Puts the automatic replies in the order given; `false` unless it
+    /// names every one once.
+    pub async fn set_auto_reply_order(&self, order: &[meshctl_api::AutoReplyId]) -> Result<bool> {
+        self.store.set_auto_reply_order(order).await
     }
 
     /// The interface's preferences.

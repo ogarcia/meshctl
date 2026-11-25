@@ -21,6 +21,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod auto_replies;
+pub use auto_replies::Keeping;
 mod meshcore_packets;
 pub use meshcore_packets::NewMeshcoreCopy;
 mod requests;
