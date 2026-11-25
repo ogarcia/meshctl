@@ -17,10 +17,11 @@
 //! service reaches too, their payloads coming through `onBleData` and
 //! going through its `writeBle`, one by one.
 
-use jni::JNIEnv;
-use jni::JavaVM;
-use jni::objects::{GlobalRef, JByteArray, JObject, JString, JValue};
+use jni::errors::LogErrorAndDefault;
+use jni::objects::{JByteArray, JObject, JString};
+use jni::refs::Global;
 use jni::sys::jint;
+use jni::{Env, EnvUnowned, JValue, JavaVM, jni_sig, jni_str};
 use meshctl_core::link::Framing;
 use meshctl_core::link::ble::{BleOpener, Looked, Nearby, Pipe};
 use meshctl_core::link::usb::{Opening, UsbDevice, UsbOpener, UsbStream};
@@ -73,27 +74,20 @@ impl Write for Logcat {
 
 /// The service, as the daemon's host: told whether to stay in the
 /// foreground, it is called on, in Java.
-struct Service {
-    vm: JavaVM,
-    service: GlobalRef,
-}
+struct Service(Global<JObject<'static>>);
 
 impl Service {
-    /// Calls on the service, from any thread, in a frame of its own, so
-    /// that a thread that calls again and again keeps no references; what
-    /// Java throws goes to Android's log.
+    /// Calls on the service, from any thread, the thread attached for good
+    /// and in a frame of its own each time, so that a thread that calls
+    /// again and again keeps no references; what Java throws comes back as
+    /// an error, to the log.
     fn call<T>(
         &self,
         method: &str,
-        call: impl FnOnce(&mut JNIEnv, &JObject) -> jni::errors::Result<T>,
+        call: impl FnOnce(&mut Env, &JObject) -> jni::errors::Result<T>,
     ) -> Option<T> {
-        let mut env = self.vm.attach_current_thread_permanently().ok()?;
-        let service = self.service.as_obj();
-        let called = env.with_local_frame(8, |env| call(env, service));
-        if env.exception_check().unwrap_or(false) {
-            let _ = env.exception_describe();
-            let _ = env.exception_clear();
-        }
+        let called =
+            JavaVM::singleton().and_then(|vm| vm.attach_current_thread(|env| call(env, &self.0)));
         match called {
             Ok(value) => Some(value),
             Err(error) => {
@@ -109,9 +103,9 @@ impl meshctld::Host for Service {
         self.call("keepListening", |env, service| {
             env.call_method(
                 service,
-                "keepListening",
-                "(Z)V",
-                &[JValue::Bool(u8::from(on))],
+                jni_str!("keepListening"),
+                jni_sig!("(Z)V"),
+                &[JValue::Bool(on)],
             )
             .map(|_| ())
         });
@@ -120,7 +114,8 @@ impl meshctld::Host for Service {
 
 /// Each radio open by USB, by the service's handle for it: where its bytes
 /// go as they come, and none as it closes.
-static USB: Mutex<Option<HashMap<jint, mpsc::UnboundedSender<Option<Vec<u8>>>>>> = Mutex::new(None);
+type UsbRadios = HashMap<jint, mpsc::UnboundedSender<Option<Vec<u8>>>>;
+static USB: Mutex<Option<UsbRadios>> = Mutex::new(None);
 
 /// Opens radios by USB through the service.
 struct UsbBridge(Arc<Service>);
@@ -136,8 +131,8 @@ impl UsbOpener for UsbBridge {
                         let device = env.new_string(device.unwrap_or_default())?;
                         env.call_method(
                             service,
-                            "openUsb",
-                            "(Ljava/lang/String;I)I",
+                            jni_str!("openUsb"),
+                            jni_sig!("(Ljava/lang/String;I)I"),
                             &[JValue::Object(&device), JValue::Int(baud as jint)],
                         )?
                         .i()
@@ -189,8 +184,8 @@ impl UsbOpener for UsbBridge {
                     let device = env.new_string(device)?;
                     env.call_method(
                         service,
-                        "askUsb",
-                        "(Ljava/lang/String;)Z",
+                        jni_str!("askUsb"),
+                        jni_sig!("(Ljava/lang/String;)Z"),
                         &[JValue::Object(&device)],
                     )?
                     .z()
@@ -209,9 +204,14 @@ impl UsbBridge {
     fn devices(&self) -> Vec<UsbDevice> {
         let listed = self.0.call("listUsb", |env, service| {
             let listed = env
-                .call_method(service, "listUsb", "()Ljava/lang/String;", &[])?
+                .call_method(
+                    service,
+                    jni_str!("listUsb"),
+                    jni_sig!("()Ljava/lang/String;"),
+                    &[],
+                )?
                 .l()?;
-            Ok(String::from(env.get_string(&JString::from(listed))?))
+            env.cast_local::<JString>(listed)?.try_to_string(env)
         });
         let Some(listed) = listed else {
             return Vec::new();
@@ -263,8 +263,8 @@ fn bridge(service: Arc<Service>, handle: jint) -> tokio::io::DuplexStream {
                 let array = env.byte_array_from_slice(&bytes)?;
                 env.call_method(
                     service,
-                    "writeUsb",
-                    "(I[B)Z",
+                    jni_str!("writeUsb"),
+                    jni_sig!("(I[B)Z"),
                     &[JValue::Int(handle), JValue::Object(&array)],
                 )?
                 .z()
@@ -274,8 +274,13 @@ fn bridge(service: Arc<Service>, handle: jint) -> tokio::io::DuplexStream {
             }
         }
         writer.call("closeUsb", |env, service| {
-            env.call_method(service, "closeUsb", "(I)V", &[JValue::Int(handle)])
-                .map(|_| ())
+            env.call_method(
+                service,
+                jni_str!("closeUsb"),
+                jni_sig!("(I)V"),
+                &[JValue::Int(handle)],
+            )
+            .map(|_| ())
         });
         if let Ok(mut usb) = USB.lock()
             && let Some(usb) = usb.as_mut()
@@ -318,26 +323,28 @@ fn bridge(service: Arc<Service>, handle: jint) -> tokio::io::DuplexStream {
 
 /// Bytes from a radio by USB, from the service's thread that reads it.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_onUsbData(
-    env: JNIEnv,
-    _service: JObject,
+pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_onUsbData<'local>(
+    mut env: EnvUnowned<'local>,
+    _service: JObject<'local>,
     handle: jint,
-    data: JByteArray,
+    data: JByteArray<'local>,
 ) {
-    let Ok(bytes) = env.convert_byte_array(&data) else {
-        return;
-    };
-    if let Ok(usb) = USB.lock()
-        && let Some(sender) = usb.as_ref().and_then(|usb| usb.get(&handle))
-    {
-        let _ = sender.send(Some(bytes));
-    }
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let bytes = env.convert_byte_array(&data)?;
+        if let Ok(usb) = USB.lock()
+            && let Some(sender) = usb.as_ref().and_then(|usb| usb.get(&handle))
+        {
+            let _ = sender.send(Some(bytes));
+        }
+        Ok(())
+    })
+    .resolve::<LogErrorAndDefault>();
 }
 
 /// A radio by USB gone: unplugged, or failing.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_onUsbClosed(
-    _env: JNIEnv,
+    _env: EnvUnowned,
     _service: JObject,
     handle: jint,
 ) {
@@ -370,11 +377,11 @@ impl BleOpener for BleBridge {
                         let address = env.new_string(address)?;
                         env.call_method(
                             service,
-                            "openBle",
-                            "(Ljava/lang/String;Z)I",
+                            jni_str!("openBle"),
+                            jni_sig!("(Ljava/lang/String;Z)I"),
                             &[
                                 JValue::Object(&address),
-                                JValue::Bool(u8::from(framing == Framing::Meshcore)),
+                                JValue::Bool(framing == Framing::Meshcore),
                             ],
                         )?
                         .i()
@@ -414,8 +421,8 @@ impl BleOpener for BleBridge {
                         let array = env.byte_array_from_slice(&payload)?;
                         env.call_method(
                             service,
-                            "writeBle",
-                            "(I[B)Z",
+                            jni_str!("writeBle"),
+                            jni_sig!("(I[B)Z"),
                             &[JValue::Int(handle), JValue::Object(&array)],
                         )?
                         .z()
@@ -425,8 +432,13 @@ impl BleOpener for BleBridge {
                     }
                 }
                 service.call("closeBle", |env, service| {
-                    env.call_method(service, "closeBle", "(I)V", &[JValue::Int(handle)])
-                        .map(|_| ())
+                    env.call_method(
+                        service,
+                        jni_str!("closeBle"),
+                        jni_sig!("(I)V"),
+                        &[JValue::Int(handle)],
+                    )
+                    .map(|_| ())
                 });
                 if let Ok(mut ble) = BLE.lock()
                     && let Some(ble) = ble.as_mut()
@@ -444,9 +456,14 @@ impl BleOpener for BleBridge {
             let looked = tokio::task::spawn_blocking(move || {
                 service.call("lookBle", |env, service| {
                     let looked = env
-                        .call_method(service, "lookBle", "()Ljava/lang/String;", &[])?
+                        .call_method(
+                            service,
+                            jni_str!("lookBle"),
+                            jni_sig!("()Ljava/lang/String;"),
+                            &[],
+                        )?
                         .l()?;
-                    Ok(String::from(env.get_string(&JString::from(looked))?))
+                    env.cast_local::<JString>(looked)?.try_to_string(env)
                 })
             })
             .await
@@ -485,26 +502,28 @@ impl BleOpener for BleBridge {
 
 /// A payload from a radio by Bluetooth, from the service's callbacks.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_onBleData(
-    env: JNIEnv,
-    _service: JObject,
+pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_onBleData<'local>(
+    mut env: EnvUnowned<'local>,
+    _service: JObject<'local>,
     handle: jint,
-    data: JByteArray,
+    data: JByteArray<'local>,
 ) {
-    let Ok(payload) = env.convert_byte_array(&data) else {
-        return;
-    };
-    if let Ok(ble) = BLE.lock()
-        && let Some(sender) = ble.as_ref().and_then(|ble| ble.get(&handle))
-    {
-        let _ = sender.send(payload);
-    }
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let payload = env.convert_byte_array(&data)?;
+        if let Ok(ble) = BLE.lock()
+            && let Some(sender) = ble.as_ref().and_then(|ble| ble.get(&handle))
+        {
+            let _ = sender.send(payload);
+        }
+        Ok(())
+    })
+    .resolve::<LogErrorAndDefault>();
 }
 
 /// A radio by Bluetooth gone: out of reach, or failing.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_onBleClosed(
-    _env: JNIEnv,
+    _env: EnvUnowned,
     _service: JObject,
     handle: jint,
 ) {
@@ -522,10 +541,10 @@ static STOP: Mutex<Option<oneshot::Sender<()>>> = Mutex::new(None);
 /// Runs the daemon until `stopDaemon`, keeping what it knows in `data`:
 /// the service's thread, which it holds all along.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_runDaemon(
-    mut env: JNIEnv,
-    service: JObject,
-    data: JString,
+pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_runDaemon<'local>(
+    mut env: EnvUnowned<'local>,
+    service: JObject<'local>,
+    data: JString<'local>,
 ) {
     static LOGS: OnceLock<()> = OnceLock::new();
     LOGS.get_or_init(|| {
@@ -536,17 +555,19 @@ pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_runDaemon(
             .with_writer(|| Logcat(Vec::new()))
             .init();
     });
-    let data: PathBuf = match env.get_string(&data) {
-        Ok(data) => PathBuf::from(String::from(data)),
-        Err(error) => {
-            tracing::error!("no folder for the daemon: {error}");
-            return;
-        }
+    // Its folder and the service, kept to call on from other threads.
+    let taken = env
+        .with_env(|env| -> jni::errors::Result<_> {
+            let data = PathBuf::from(data.try_to_string(env)?);
+            let service = env.new_global_ref(&service).ok().map(Service);
+            Ok(Some((data, service)))
+        })
+        .resolve::<LogErrorAndDefault>();
+    let Some((data, service)) = taken else {
+        tracing::error!("no folder for the daemon");
+        return;
     };
-    let service = match (env.get_java_vm(), env.new_global_ref(service)) {
-        (Ok(vm), Ok(service)) => Some(Arc::new(Service { vm, service })),
-        _ => None,
-    };
+    let service = service.map(Arc::new);
     if let Some(service) = &service {
         meshctl_core::link::usb::set_opener(Arc::new(UsbBridge(Arc::clone(service))));
         meshctl_core::link::ble::set_opener(Arc::new(BleBridge(Arc::clone(service))));
@@ -585,7 +606,7 @@ pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_runDaemon(
 /// Stops the daemon, which lets the radios go and closes what it keeps.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_stopDaemon(
-    _env: JNIEnv,
+    _env: EnvUnowned,
     _service: JObject,
 ) {
     if let Some(stop) = STOP.lock().ok().and_then(|mut stop| stop.take()) {

@@ -41,7 +41,7 @@ tauri-plugin-window-state = "2"
 
 # On Android, the daemon run by the service, in Java, through JNI.
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
+jni = "0.22"
 # Radios by USB, opened by the service, as the daemon's core takes them.
 meshctl-core.workspace = true
 
