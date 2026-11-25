@@ -4222,6 +4222,11 @@
            a little tighter, to fit the five. */
         .pref-control,
         .section-panel .pref-control { width: 100%; }
+        /* But a switch, beside what it is, on the right, as a phone's
+           settings have it: it takes so little room. */
+        .pref-row:has(> .switch-control) { flex-wrap: nowrap; }
+        .pref-row:has(> .switch-control) > .pref-what { min-width: 0; }
+        .pref-row > .pref-control.switch-control { width: auto; }
         .pref-row { padding: 14px 4px; }
         .settings-tabs button { padding: 0 4px; }
         /* The sections in a row of chips that slides sideways, over the
