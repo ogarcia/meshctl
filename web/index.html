@@ -286,6 +286,17 @@
         background: var(--mc-rail);
         border-right: 1px solid var(--mc-border);
         overflow-y: auto;
+        /* Scrolled, with many radios in a short window, without a bar that
+           would narrow it. */
+        scrollbar-width: none;
+      }
+      .rail::-webkit-scrollbar { display: none; }
+      /* meshctl's settings always in sight, at its foot: the radios go
+         under, the rail's colour around it. */
+      .rail > .rail-button:last-child {
+        position: sticky;
+        bottom: 0;
+        box-shadow: 0 0 0 8px var(--mc-rail), 0 14px 0 8px var(--mc-rail);
       }
       /* Centred on the sidebar's heading, 52 px tall, and the rule under it
          on that heading's border: the rail's padding and gaps, made up for. */
@@ -996,6 +1007,12 @@
       .pref-control.retention input { text-align: right; }
       /* A share of the time: up to 100, and no wider than that takes. */
       .busy-limit .pref-control.retention .number-field { width: 116px; }
+      /* Where it no longer fits beside what it is, on a line of its own:
+         across it, the field taking what is left. */
+      @media (max-width: 600px) {
+        .busy-limit .pref-control.retention { width: 100%; }
+        .busy-limit .pref-control.retention .number-field { flex: 1; width: auto; }
+      }
       .data-clean { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 4px 4px; }
       .data-clean .dim { font-size: 12px; }
       .data-result { margin: 8px 4px 0; font-size: 13px; color: var(--mc-ok); }
@@ -1151,7 +1168,8 @@
         .auto-field.number-field input { padding-right: 148px; }
         .auto-field.number-field .auto-tag { right: 86px; }
         .pref-control.retention .number-field { width: 156px; }
-        .busy-limit .pref-control.retention .number-field { width: 132px; }
+        /* Up to 100 still, beside its wider buttons. */
+        .busy-limit .pref-control.retention .number-field { width: 136px; }
       }
       .switch-control { display: flex; }
       /*

@@ -247,9 +247,25 @@ fn BusyLimit() -> impl IntoView {
         });
     };
     // Each radio's, by its name: paused if past the threshold.
+    // Of the radios connected, and those that said lately: one that has not
+    // and cannot now says nothing worth the room.
+    let shown = move || {
+        busy.get()
+            .into_iter()
+            .filter(|b| {
+                b.percent.is_some()
+                    || live.radios.with(|radios| {
+                        radios
+                            .iter()
+                            .flatten()
+                            .any(|r| r.id == b.radio && r.link == meshctl_api::LinkState::Ready)
+                    })
+            })
+            .collect::<Vec<_>>()
+    };
     let now = move || {
         let most = limits.with(|l| l.and_then(|l| l.busy_channel));
-        busy.get()
+        shown()
             .into_iter()
             .map(|b| {
                 let name = radio_name(live, b.radio);
@@ -280,8 +296,7 @@ fn BusyLimit() -> impl IntoView {
                 <div class="pref-what">
                     <span class="pref-title">{t!(i18n, replies_busy)}</span>
                     <span class="dim">{t!(i18n, replies_busy_hint)}</span>
-                    <span class="busy-now dim">
-                        <span>{t!(i18n, replies_busy_now)}</span>
+                    <span class="busy-now dim" class:gone=move || shown().is_empty()>
                         {now}
                     </span>
                 </div>
@@ -496,20 +511,14 @@ fn channel_place(radio: RadioId, channel: &Channel) -> AutoReplyPlace {
     }
 }
 
-/// A channel's name: an unnamed one's is its preset's, which only the
-/// selected radio's status tells; another's goes by its slot.
-fn channel_name(live: Live, radio: RadioId, channel: &Channel) -> String {
-    if !channel.name.is_empty() {
-        channel.name.clone()
-    } else if live.selected.get_untracked() == Some(radio) {
-        crate::chat::title(
-            live,
-            meshctl_api::Peer::Channel {
-                channel: channel.index,
-            },
-        )
+/// A channel's name, as read with its preset's for one with none; by its
+/// slot while none is known.
+fn channel_name(channel: &Channel) -> String {
+    if channel.name.is_empty() {
+        let i18n = use_i18n();
+        untrack(|| format!("{} {}", t_string!(i18n, channel_numbered), channel.index))
     } else {
-        format!("{}", channel.index)
+        channel.name.clone()
     }
 }
 
@@ -628,14 +637,30 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
             .map(|r| (r.id, r.name.clone(), r.kind))
             .collect()
     });
-    for (radio, _, _) in &radios {
-        let radio = *radio;
+    for (radio, _, kind) in &radios {
+        let (radio, kind) = (*radio, *kind);
         spawn_local(async move {
-            let read = daemon::channels(radio).await.ok().map(|all| {
+            let mut read = daemon::channels(radio).await.ok().map(|all| {
                 all.into_iter()
                     .filter(|c| c.role != "DISABLED")
                     .collect::<Vec<_>>()
             });
+            // A Meshtastic channel with no name goes by its radio's modem
+            // preset, as the radio names it; Custom with none.
+            if kind == RadioKind::Meshtastic
+                && let Some(list) = read.as_mut()
+                && list.iter().any(|c| c.name.is_empty())
+                && let Ok(status) = daemon::status(radio).await
+                && let Some(local) = status.local
+            {
+                let preset = local
+                    .modem_preset
+                    .as_deref()
+                    .map_or_else(|| "Custom".to_owned(), crate::chat::preset_name);
+                for channel in list.iter_mut().filter(|c| c.name.is_empty()) {
+                    channel.name.clone_from(&preset);
+                }
+            }
             channels.try_update(|channels| {
                 channels.insert(radio, read);
             });
@@ -759,7 +784,7 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
                         .as_ref()?
                         .iter()
                         .find(|c| c.index == *slot)
-                        .map(|c| channel_name(live, *radio, c))
+                        .map(channel_name)
                 }),
                 _ => None,
             })
@@ -1085,7 +1110,7 @@ fn RadioPlaces(
             Some(Some(list)) if !list.is_empty() => {
                 for channel in list {
                     let place = channel_place(radio, channel);
-                    let name = channel_name(live, radio, channel);
+                    let name = channel_name(channel);
                     views.push(check(place, Signal::stored(format!("#{name}")), None).into_any());
                 }
             }

@@ -1067,7 +1067,6 @@
   "error_invalid_auto_reply": "Le hace falta un nombre, algo que esperar y algo con que responder, con textos de hasta 200 bytes.",
   "replies_busy": "Callar con el canal ocupado",
   "replies_busy_hint": "Ninguna responde en una radio que oiga su canal ocupado más tiempo que este. Mientras no diga cuánto, responde.",
-  "replies_busy_now": "Ahora:",
   "replies_busy_unknown": "sin dato aún",
   "replies_busy_paused": "en pausa",
   "replies_for_all": "Para todas",

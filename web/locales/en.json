@@ -1067,7 +1067,6 @@
   "error_invalid_auto_reply": "It needs a name, something to wait for, and something to answer with, its texts up to 200 bytes.",
   "replies_busy": "Quiet on a busy channel",
   "replies_busy_hint": "None answers on a radio that hears its channel busy more of the time than this. Until it has said how busy, it answers.",
-  "replies_busy_now": "Now:",
   "replies_busy_unknown": "not known yet",
   "replies_busy_paused": "paused",
   "replies_for_all": "For all of them",
