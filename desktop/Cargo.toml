@@ -12,6 +12,12 @@ publish = false
 # workspace's Cargo.toml): it needs WebKitGTK on Linux and WebView2 on
 # Windows, and only the desktop packages build it.
 
+# The app is a library, which a phone's app loads, and the desktop's
+# program runs.
+[lib]
+name = "meshctl_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -21,8 +27,6 @@ tauri-build = { version = "2", features = [] }
 meshctld = { path = "../server" }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-deep-link = "2"
-tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
-tauri-plugin-window-state = "2"
 # The plugins' settings in tauri.conf.json come out of its macro as JSON.
 serde_json = "1"
 tokio = { workspace = true, features = ["macros", "net", "signal", "sync", "time"] }
@@ -30,9 +34,14 @@ tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "6"
 
+# On a desktop: one app running at once, and its window as it was left.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-window-state = "2"
+
 # A tray with its menu where there is one: its words in the system's
 # language.
-[target.'cfg(not(target_os = "linux"))'.dependencies]
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 sys-locale = "0.3"
 
 # No tray on Linux's desktops: kept running as a background app through the

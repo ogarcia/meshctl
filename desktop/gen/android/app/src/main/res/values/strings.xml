@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">"meshctl"</string>
+    <string name="main_activity_title">"meshctl"</string>
+</resources>
