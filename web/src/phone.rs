@@ -25,9 +25,12 @@ fn tab_of(page: Page) -> Page {
         Page::Nodes | Page::Node => Page::Nodes,
         Page::Chats | Page::Chat => Page::Chats,
         Page::Packets => Page::Packets,
-        Page::More | Page::RadioSettings | Page::Preferences | Page::Radios | Page::Data => {
-            Page::More
-        }
+        Page::More
+        | Page::RadioSettings
+        | Page::Preferences
+        | Page::Radios
+        | Page::AutoReplies
+        | Page::Data => Page::More,
     }
 }
 
@@ -56,7 +59,9 @@ pub fn is_tab(page: Page) -> bool {
 pub fn back_of(page: Page) -> Option<Page> {
     match page {
         Page::Chat => Some(Page::Chats),
-        Page::RadioSettings | Page::Preferences | Page::Radios | Page::Data => Some(Page::More),
+        Page::RadioSettings | Page::Preferences | Page::Radios | Page::AutoReplies | Page::Data => {
+            Some(Page::More)
+        }
         _ => None,
     }
 }
@@ -278,6 +283,7 @@ pub fn MoreView() -> impl IntoView {
         let label = move || match page {
             Page::RadioSettings => t!(i18n, nav_radio_settings).into_any(),
             Page::Radios => t!(i18n, radios_title).into_any(),
+            Page::AutoReplies => t!(i18n, replies_title).into_any(),
             Page::Data => t!(i18n, data_title).into_any(),
             _ => t!(i18n, prefs_title).into_any(),
         };
@@ -287,6 +293,9 @@ pub fn MoreView() -> impl IntoView {
                 on:click=move |_| {
                     if page == Page::Radios {
                         live.radio_editing.set(Editing::Closed);
+                    }
+                    if page == Page::AutoReplies {
+                        live.reply_editing.set(crate::auto_replies::ReplyEditing::Closed);
                     }
                     live.go(page);
                 }
@@ -306,6 +315,7 @@ pub fn MoreView() -> impl IntoView {
             </Show>
             <h2>"meshctl"</h2>
             {item(Page::Radios)}
+            {item(Page::AutoReplies)}
             {item(Page::Data)}
             {item(Page::Preferences)}
             <crate::about::AboutFoot />

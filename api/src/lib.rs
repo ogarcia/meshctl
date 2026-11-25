@@ -8,6 +8,7 @@
 //! Nothing here is text for people. Errors, states, roles and models travel as
 //! codes, and each client puts them in its own words and language.
 
+pub mod auto_replies;
 pub mod events;
 
 use serde::{Deserialize, Serialize};

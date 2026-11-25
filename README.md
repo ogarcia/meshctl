@@ -133,7 +133,9 @@ podman run -d --name meshctl -p 127.0.0.1:7434:7434 \
 ```
 
 In the container, meshctl listens on every interface, port 7434, and keeps its
-database in `/var/lib/meshctl`, the volume above. The port above is published
+database in `/var/lib/meshctl`, the volume above. Its clock is in UTC, which
+is the time automatic replies tell: give it yours with `-e TZ=Europe/Madrid`,
+say. The port above is published
 on this machine alone, so no token is needed. To reach it from elsewhere,
 publish it as `-p 7434:7434` and set a token (`-e MESHCTL_TOKEN=a-long-secret`)
 or put a proxy in front (see [Access](#access)).

@@ -840,3 +840,39 @@ impl Events {
         }
     }
 }
+
+/// The automatic replies, in the order they are tried in.
+pub async fn auto_replies() -> Result<Vec<meshctl_api::AutoReply>, Failure> {
+    get("/auto-replies").await
+}
+
+/// Changes an automatic reply, or adds one when given none.
+pub async fn save_auto_reply(
+    reply: Option<meshctl_api::AutoReplyId>,
+    settings: &meshctl_api::AutoReplySettings,
+) -> Result<meshctl_api::AutoReply, Failure> {
+    let request = match reply {
+        Some(id) => Request::put(&url(&format!("/auto-replies/{id}"))),
+        None => Request::post(&url("/auto-replies")),
+    };
+    let request = with_token(request)
+        .json(settings)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+pub async fn remove_auto_reply(reply: meshctl_api::AutoReplyId) -> Result<(), Failure> {
+    let request = with_token(Request::delete(&url(&format!("/auto-replies/{reply}"))));
+    answer(request.send().await).await.map(|_| ())
+}
+
+pub async fn order_auto_replies(order: &[meshctl_api::AutoReplyId]) -> Result<(), Failure> {
+    let order = meshctl_api::AutoReplyOrder {
+        auto_replies: order.to_vec(),
+    };
+    let request = with_token(Request::put(&url("/auto-replies/order")))
+        .json(&order)
+        .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}

@@ -15,6 +15,7 @@
 
 use crate::radios::{Change, Radios};
 use crate::store::now;
+use meshctl_api::auto_replies::{MAX_TEXT_BYTES, Told, fit, hops_emoji, render};
 use meshctl_api::{
     AutoReply, AutoReplyMatch, AutoReplyPlace, AutoReplySettings, BROADCAST, Message, NewMessage,
     RadioId,
@@ -40,9 +41,6 @@ const MOST_A_MINUTE: usize = 6;
 /// What starts another's automatic reply, by custom: never answered, so
 /// that two never answer each other.
 const BOT: &str = "🤖";
-
-/// The longest text that goes out, in bytes.
-const MAX_TEXT_BYTES: usize = meshctl_core::radio::MAX_TEXT_BYTES;
 
 /// Answers what the automatic replies wait for, from what the radios hear,
 /// until they stop.
@@ -224,77 +222,6 @@ fn triggered(triggers: &[String], matching: AutoReplyMatch, text: &str) -> bool 
         })
 }
 
-/// The reaction that tells the hops a message took.
-fn hops_emoji(hops: u32) -> &'static str {
-    const KEYCAPS: [&str; 10] = ["🎯", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"];
-    match hops {
-        0..=9 => KEYCAPS[hops as usize],
-        10 => "🔟",
-        _ => "🦘",
-    }
-}
-
-/// What a message tells the variables of a reply.
-#[derive(Debug, Default)]
-struct Told {
-    long_name: Option<String>,
-    short_name: Option<String>,
-    node_id: Option<String>,
-    hops: Option<u32>,
-    snr: Option<f32>,
-    rssi: Option<i32>,
-    channel: Option<String>,
-    date: String,
-    time: String,
-}
-
-/// A reply's text, its variables told, cut to what a message takes.
-fn render(text: &str, told: &Told) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(open) = rest.find('{') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        let value = after.find('}').and_then(|close| {
-            let value = match &after[..close] {
-                "LONG_NAME" => told.long_name.clone().unwrap_or_default(),
-                "SHORT_NAME" => told.short_name.clone().unwrap_or_default(),
-                "NODE_ID" => told.node_id.clone().unwrap_or_default(),
-                "HOPS" | "NUMBER_HOPS" => told.hops.map(|h| h.to_string()).unwrap_or_default(),
-                "KANGAROO_HOPS" => told
-                    .hops
-                    .map(|h| "🦘".repeat(h as usize))
-                    .unwrap_or_default(),
-                "SNR" => told.snr.map(|s| format!("{s:.1}")).unwrap_or_default(),
-                "RSSI" => told.rssi.map(|r| r.to_string()).unwrap_or_default(),
-                "CHANNEL" => told.channel.clone().unwrap_or_default(),
-                "DATE" => told.date.clone(),
-                "TIME" => told.time.clone(),
-                _ => return None,
-            };
-            Some((value, close))
-        });
-        match value {
-            Some((value, close)) => {
-                out.push_str(&value);
-                rest = &after[close + 1..];
-            }
-            // Not a variable: as written.
-            None => {
-                out.push('{');
-                rest = after;
-            }
-        }
-    }
-    out.push_str(rest);
-    let mut end = out.trim_end().len().min(MAX_TEXT_BYTES);
-    while !out.is_char_boundary(end) {
-        end -= 1;
-    }
-    out.truncate(end);
-    out
-}
-
 /// What a message heard by a radio tells, with what the radio knows of its
 /// sender and its channel.
 fn told(radios: &Radios, radio: RadioId, message: &Message) -> Told {
@@ -376,7 +303,7 @@ async fn answer(radios: &Radios, radio: RadioId, reply: &AutoReply, message: &Me
     let Some(text) = text.filter(|t| !t.trim().is_empty()) else {
         return;
     };
-    let text = render(text, &told(radios, radio, message));
+    let text = fit(render(text, &told(radios, radio, message)));
     if text.is_empty() {
         return;
     }
@@ -504,48 +431,5 @@ mod tests {
         let mut off = directs;
         off.settings.enabled = false;
         assert!(!answers(&off, 1, &direct));
-    }
-
-    #[test]
-    fn variables_are_told() {
-        let told = Told {
-            long_name: Some("Pastoriza".into()),
-            short_name: Some("PSTZ".into()),
-            node_id: Some("!12345678".into()),
-            hops: Some(3),
-            snr: Some(7.5),
-            rssi: Some(-95),
-            channel: Some("Galicia".into()),
-            date: "2026-11-25".into(),
-            time: "09:30".into(),
-        };
-        assert_eq!(
-            render(
-                "🤖 Pong, {HOPS} 🦘 {KANGAROO_HOPS}, {LONG_NAME} ({SHORT_NAME}, {NODE_ID})",
-                &told
-            ),
-            "🤖 Pong, 3 🦘 🦘🦘🦘, Pastoriza (PSTZ, !12345678)"
-        );
-        assert_eq!(
-            render(
-                "SNR: {SNR}dB RSSI: {RSSI}dBm #{CHANNEL} {DATE} {TIME}",
-                &told
-            ),
-            "SNR: 7.5dB RSSI: -95dBm #Galicia 2026-11-25 09:30"
-        );
-        // Unknown or unclosed: as written; one not told: empty.
-        assert_eq!(render("{NOPE} {HOPS", &told), "{NOPE} {HOPS");
-        assert_eq!(render("hops: {HOPS}", &Told::default()), "hops:");
-        // Cut to what a message takes, on a character.
-        let long = render(&"ñ".repeat(150), &told);
-        assert!(long.len() <= MAX_TEXT_BYTES && long.chars().all(|c| c == 'ñ'));
-    }
-
-    #[test]
-    fn hops_are_told_as_an_emoji() {
-        assert_eq!(hops_emoji(0), "🎯");
-        assert_eq!(hops_emoji(3), "3️⃣");
-        assert_eq!(hops_emoji(10), "🔟");
-        assert_eq!(hops_emoji(12), "🦘");
     }
 }

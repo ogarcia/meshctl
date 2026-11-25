@@ -89,6 +89,8 @@ pub enum Page {
     Preferences,
     /// meshctl's: the radios it connects to.
     Radios,
+    /// meshctl's: what it answers on its own, and where.
+    AutoReplies,
     /// meshctl's: what it keeps, and for how long.
     Data,
     /// On a phone: the selected radio's channels and direct conversations,
@@ -102,7 +104,10 @@ pub enum Page {
 impl Page {
     /// Whether it is one of meshctl's own settings, not a radio's.
     fn is_meshctl(self) -> bool {
-        matches!(self, Self::Preferences | Self::Radios | Self::Data)
+        matches!(
+            self,
+            Self::Preferences | Self::Radios | Self::AutoReplies | Self::Data
+        )
     }
 }
 
@@ -150,6 +155,10 @@ pub struct Live {
     pub meshcore_tab: RwSignal<crate::meshcore_settings::MeshcoreTab>,
     /// What the radios' editor is open on.
     pub radio_editing: RwSignal<Editing>,
+    /// The automatic replies, in order, once read.
+    pub auto_replies: RwSignal<Option<Vec<meshctl_api::AutoReply>>>,
+    /// What the automatic replies' editor is open on.
+    pub reply_editing: RwSignal<crate::auto_replies::ReplyEditing>,
     /// Of the selected radio.
     pub status: RwSignal<Option<Status>>,
     /// Of the selected radio.
@@ -279,6 +288,8 @@ impl Live {
             settings_tab: RwSignal::new(crate::settings::Tab::User),
             meshcore_tab: RwSignal::new(crate::meshcore_settings::MeshcoreTab::User),
             radio_editing: RwSignal::new(Editing::Closed),
+            auto_replies: RwSignal::new(None),
+            reply_editing: RwSignal::new(crate::auto_replies::ReplyEditing::Closed),
             status: RwSignal::new(None),
             nodes: RwSignal::new(BTreeMap::new()),
             loaded: RwSignal::new(None),
@@ -1593,6 +1604,7 @@ fn Content() -> impl IntoView {
             (_, None, _) => Shown::Nothing,
             (_, _, Page::Preferences) => Shown::Page(Page::Preferences),
             (_, _, Page::Radios) => Shown::Page(Page::Radios),
+            (_, _, Page::AutoReplies) => Shown::Page(Page::AutoReplies),
             (_, _, Page::Data) => Shown::Page(Page::Data),
             // The welcome, over the whole screen, instead.
             (_, Some(0), _) => Shown::Nothing,
@@ -1611,6 +1623,9 @@ fn Content() -> impl IntoView {
         Shown::Nothing => ().into_any(),
         Shown::Page(Page::Preferences) => view! { <PreferencesView /> }.into_any(),
         Shown::Page(Page::Radios) => view! { <RadiosView /> }.into_any(),
+        Shown::Page(Page::AutoReplies) => {
+            view! { <crate::auto_replies::AutoRepliesView /> }.into_any()
+        }
         Shown::Page(Page::Data) => view! { <crate::storage::DataView /> }.into_any(),
         Shown::Page(Page::Map) => view! { <MapView /> }.into_any(),
         Shown::Page(Page::Nodes) => view! { <MeshView /> }.into_any(),
@@ -1772,12 +1787,18 @@ fn MeshctlSidebar() -> impl IntoView {
         let label = move || match page {
             Page::Preferences => t!(i18n, prefs_title).into_any(),
             Page::Data => t!(i18n, data_title).into_any(),
+            Page::AutoReplies => t!(i18n, replies_title).into_any(),
             _ => t!(i18n, radios_title).into_any(),
         };
-        // The radios' page opens on their list, the editor closed.
+        // The radios' page opens on their list, the editor closed; the
+        // replies' too.
         let open = move |_| {
             if page == Page::Radios && live.page.get_untracked() != page {
                 live.radio_editing.set(Editing::Closed);
+            }
+            if page == Page::AutoReplies && live.page.get_untracked() != page {
+                live.reply_editing
+                    .set(crate::auto_replies::ReplyEditing::Closed);
             }
             live.go(page);
         };
@@ -1789,7 +1810,8 @@ fn MeshctlSidebar() -> impl IntoView {
             <span class="dim">{t!(i18n, nav_meshctl_settings)}</span>
         </header>
         <div class="sidebar-body">
-            {item(Page::Radios)} {item(Page::Data)} {item(Page::Preferences)}
+            {item(Page::Radios)} {item(Page::AutoReplies)} {item(Page::Data)}
+            {item(Page::Preferences)}
         </div>
         <crate::about::AboutFoot />
     }
@@ -2215,6 +2237,25 @@ fn Topbar() -> impl IntoView {
             <div class="heading">
                 <h1>{t!(i18n, data_title)}</h1>
                 <span class="dim">{t!(i18n, data_text)}</span>
+            </div>
+        }
+        .into_any(),
+        Page::AutoReplies => view! {
+            <div class="heading">
+                <h1>{t!(i18n, replies_title)}</h1>
+                <span class="dim">{t!(i18n, replies_text)}</span>
+            </div>
+            <div class="actions">
+                <button
+                    class="primary with-icon"
+                    title=move || t_string!(i18n, reply_add_title)
+                    on:click=move |_| {
+                        live.reply_editing.set(crate::auto_replies::ReplyEditing::Adding(false));
+                    }
+                >
+                    <span class="icon" inner_html=PLUS></span>
+                    <span class="label">{t!(i18n, replies_add)}</span>
+                </button>
             </div>
         }
         .into_any(),
