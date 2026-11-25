@@ -25,6 +25,20 @@
       "groupName": "rust crates (non-major)"
     },
     {
+      "description": "RustCrypto's crates share their traits (cipher, digest): a new generation of one does not build without the others.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["aes", "hmac", "sha2", "cipher", "digest"],
+      "matchUpdateTypes": ["minor", "major"],
+      "groupName": "rustcrypto"
+    },
+    {
+      "description": "gloo's crates, together, as they are released.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["/^gloo/"],
+      "matchUpdateTypes": ["minor", "major"],
+      "groupName": "gloo"
+    },
+    {
       "description": "Tauri's crates and its CLI go together: the CLI that builds the Android app wants the crates' own minor.",
       "matchPackageNames": ["/^tauri/"],
       "groupName": "tauri"
