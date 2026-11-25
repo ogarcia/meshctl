@@ -920,6 +920,7 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
             aria-modal="true"
             on:submit=submit
         >
+            <div class="dialog-top">
             <header class="editor-head">
                 <span class="reply-face" inner_html=ROBOT></span>
                 <span class="who">
@@ -1105,6 +1106,7 @@ fn ReplyEditor(id: Option<AutoReplyId>, ping: bool) -> impl IntoView {
             </div>
 
             <p class="error">{message}</p>
+            </div>
             <div class="buttons">
                 {id
                     .is_some()

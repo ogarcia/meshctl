@@ -484,6 +484,7 @@ fn ChannelEditor(
                 aria-modal="true"
                 on:submit=submit
             >
+                <div class="dialog-top">
                 <header class="editor-head">
                     <span class="channel-mark big" inner_html=HASH></span>
                     <span class="who">
@@ -598,6 +599,7 @@ fn ChannelEditor(
                     </div>
                 </div>
                 <p class="error">{message}</p>
+                </div>
                 <div class="removing" class:gone=move || !removing.get()>
                     <p>{t!(i18n, mc_channel_remove_question)}</p>
                     <div class="buttons">

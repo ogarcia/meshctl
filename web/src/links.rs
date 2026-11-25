@@ -603,6 +603,7 @@ pub fn LinkAdder() -> impl IntoView {
                         aria-modal="true"
                         on:click=|ev| ev.stop_propagation()
                     >
+                        <div class="dialog-top">
                         <header>
                             <h2>
                                 {match want {
@@ -685,6 +686,7 @@ pub fn LinkAdder() -> impl IntoView {
                             }}
                             {move || (!scanning.get()).then(shown)}
                             {move || problem.get().map(|p| view! { <p class="error">{failure_words(i18n, p)}</p> })}
+                        </div>
                         </div>
                         <div class="buttons">
                             <button type="button" on:click=move |_| close()>

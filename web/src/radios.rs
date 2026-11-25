@@ -638,6 +638,7 @@ pub fn RadioEditor(
             aria-modal=modal.then_some("true")
             on:submit=submit
         >
+            <div class="dialog-top">
             <header class="editor-head">
                 <span
                     class=move || look.with(badge::class)
@@ -740,6 +741,7 @@ pub fn RadioEditor(
             </div>
 
             <p class="error">{message}</p>
+            </div>
             <div class="buttons">
                 {id
                     .is_some()
