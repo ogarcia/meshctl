@@ -28,7 +28,8 @@ val meshctlVersion = rootProject.file("../../../Cargo.toml").readLines()
 
 // What tells Android one build is newer than another: the day it is built
 // on, in UTC, and a last digit for a second one the same day, 0 unless
-// MESHCTL_VERSION_CODE says otherwise, whole, as 202611251.
+// MESHCTL_VERSION_CODE says otherwise, whole, as 202611251: the release
+// workflow counts the releases tagged that day.
 val meshctlVersionCode = System.getenv("MESHCTL_VERSION_CODE")?.toInt()
     ?: (LocalDate.now(ZoneOffset.UTC)
         .format(DateTimeFormatter.BASIC_ISO_DATE) + "0").toInt()

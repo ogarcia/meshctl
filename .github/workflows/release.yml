@@ -270,11 +270,30 @@ jobs:
     needs: web
     runs-on: ubuntu-latest
     steps:
+      # Every tag, to number the build by the releases before it.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Load build versions
         shell: bash
         run: grep -E '^[A-Za-z_]+=' versions.env >> "$GITHUB_ENV"
+
+      # The versionCode: the day of the tagged commit, in UTC, and a last
+      # digit for the releases tagged before it that day, so that a second
+      # one the same day comes as an update.
+      - name: Number the build
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          export TZ=UTC
+          day=$(git log -1 --format=%cd --date=format-local:%Y%m%d)
+          n=$(git for-each-ref refs/tags --format='%(creatordate:format-local:%Y%m%d)' | grep -c "^$day$")
+          if [ "$n" -gt 10 ]; then
+            echo "::error::Eleven releases on $day: the versionCode has one digit for them."
+            exit 1
+          fi
+          echo "MESHCTL_VERSION_CODE=$day$((n - 1))" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
