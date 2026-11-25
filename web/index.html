@@ -384,6 +384,34 @@
        */
       :root { accent-color: var(--mc-primary); }
       :focus-visible { outline: 2px solid var(--mc-primary); outline-offset: 2px; }
+      /* Touched, not the browser's blue box but a shade over the thing itself,
+         in its own colour and shape, while the finger is on it, as a phone's
+         apps have it: darker on light, lighter on dark. Only where there is
+         no pointer to hover with; and there, what is to be touched is not
+         text to select, held a moment. */
+      :root { -webkit-tap-highlight-color: transparent; }
+      @media (hover: none) {
+        button,
+        summary,
+        [role="button"],
+        [role="radio"],
+        [role="tab"] {
+          -webkit-user-select: none;
+          user-select: none;
+        }
+        button:not(:disabled):active,
+        a[href]:active,
+        summary:active,
+        label:active,
+        [role="button"]:active,
+        [role="radio"]:not([aria-disabled="true"]):active,
+        [role="tab"]:active {
+          background-image: linear-gradient(
+            color-mix(in srgb, var(--mc-text) 10%, transparent),
+            color-mix(in srgb, var(--mc-text) 10%, transparent)
+          );
+        }
+      }
       input:focus, select:focus, textarea:focus {
         outline: none;
         border-color: var(--mc-primary);
