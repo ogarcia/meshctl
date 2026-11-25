@@ -131,6 +131,58 @@ pub fn NotificationsView() -> impl IntoView {
         }
     };
 
+    // A notification as it will look, with its text or without: the one
+    // picked, as notifications are to be.
+    let sample = move |with_text: bool| {
+        let on = move || show_text() == with_text;
+        let caption = move || {
+            if with_text {
+                t_string!(i18n, notifications_with_text)
+            } else {
+                t_string!(i18n, notifications_without_text)
+            }
+        };
+        view! {
+            <button
+                type="button"
+                role="radio"
+                class="notify-choice"
+                class:on=on
+                aria-checked=move || on().to_string()
+                aria-label=caption
+                on:click=move |_| {
+                    if !on() {
+                        change(&|n| n.show_text = with_text);
+                    }
+                }
+            >
+                <span class="notify-sample" aria-hidden="true">
+                    <img class="sample-app" src="/favicon.svg" alt="" />
+                    <span class="sample-body">
+                        <span class="sample-top">
+                            <span>"meshctl"</span>
+                            <span class="dim">{t!(i18n, notifications_sample_when)}</span>
+                        </span>
+                        <b>{t!(i18n, notifications_sample_title)}</b>
+                        {if with_text {
+                            view! { <span>{t!(i18n, notifications_sample_text)}</span> }
+                                .into_any()
+                        } else {
+                            view! {
+                                <span class="dim hidden-text">
+                                    {t!(i18n, notifications_sample_hidden)}
+                                </span>
+                            }
+                                .into_any()
+                        }}
+                    </span>
+                    <span class="tick" inner_html=CHECK></span>
+                </span>
+                <span class="choice-caption">{caption}</span>
+            </button>
+        }
+    };
+
     let (radios, channels) = radio_channels(live);
     let empty = radios.is_empty();
     let wheres = radios
@@ -161,44 +213,17 @@ pub fn NotificationsView() -> impl IntoView {
             </div>
 
             <div class="card notify-look">
-                <div class="notify-head">
-                    <div class="notify-what">
-                        <h3>{t!(i18n, notifications_show_text)}</h3>
-                        <span class="dim">{t!(i18n, notifications_show_text_hint)}</span>
-                    </div>
-                    <Switch
-                        on=Signal::derive(show_text)
-                        label=Signal::derive(move || {
-                            t_string!(i18n, notifications_show_text).to_string()
-                        })
-                        flip=move |_| {
-                            let on = !show_text();
-                            change(&|n| n.show_text = on);
-                        }
-                    />
+                <div class="notify-what">
+                    <h3>{t!(i18n, notifications_look)}</h3>
+                    <span class="dim">{t!(i18n, notifications_look_hint)}</span>
                 </div>
-                <div class="notify-sample" aria-hidden="true">
-                    <img class="sample-app" src="/favicon.svg" alt="" />
-                    <div class="sample-body">
-                        <span class="sample-top">
-                            <span>"meshctl"</span>
-                            <span class="dim">{t!(i18n, notifications_sample_when)}</span>
-                        </span>
-                        <b>{t!(i18n, notifications_sample_title)}</b>
-                        {move || {
-                            if show_text() {
-                                view! { <span>{t!(i18n, notifications_sample_text)}</span> }
-                                    .into_any()
-                            } else {
-                                view! {
-                                    <span class="dim hidden-text">
-                                        {t!(i18n, notifications_sample_hidden)}
-                                    </span>
-                                }
-                                    .into_any()
-                            }
-                        }}
-                    </div>
+                <div
+                    class="notify-samples"
+                    role="radiogroup"
+                    aria-label=move || t_string!(i18n, notifications_look)
+                >
+                    {sample(true)}
+                    {sample(false)}
                 </div>
             </div>
 
