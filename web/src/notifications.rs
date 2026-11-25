@@ -14,7 +14,7 @@ use crate::badge::{self, Face};
 use crate::daemon;
 use crate::i18n::{t, t_string, use_i18n};
 use crate::notify::{self, Permission};
-use crate::preferences::{Choice, pills};
+use crate::preferences::{Choice, pills, slide};
 use crate::radios::Switch;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -26,6 +26,9 @@ const MESSAGES: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline
 const HASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/hash.svg");
 const USER: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/user.svg");
 const CHECK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/check.svg");
+const BELL_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/bell-off.svg");
+const BELL_PLAIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/bell.svg");
+const CHEVRON: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 const WARNING: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/alert-triangle.svg");
 
@@ -328,6 +331,7 @@ fn RadioPlaces(
             false,
         )
     };
+    let loaded = Memo::new(move |_| settings.with(Option::is_some));
     // Its channels as it has them, and those it was given that it has not
     // now; then the nodes it was given.
     let rest = move || {
@@ -348,8 +352,8 @@ fn RadioPlaces(
             None => {}
         }
         // Again once read, not as each is picked: a place taken out stays
-        // where it was, to be put back.
-        settings.with(|s| s.is_some());
+        // where it was, to be put back, and each pill slides as it is.
+        loaded.get();
         let others: Vec<NotificationPlace> =
             settings.with_untracked(|s| s.as_ref().map(|s| s.places.clone()).unwrap_or_default());
         for given in others {
@@ -394,21 +398,138 @@ fn RadioPlaces(
             n => t_string!(i18n, notifications_radio_count).replace("{count}", &n.to_string()),
         }
     };
+    // How much of it is notified of: none, some, or all, every channel
+    // it has and its direct conversations, everything said. None or all is
+    // picked at once; some, by opening it.
+    let level = Memo::new(move |_| {
+        settings.with(|s| {
+            let Some(s) = s else { return 0 };
+            let mine: Vec<&NotificationPlace> = s
+                .places
+                .iter()
+                .filter(|p| place_radio(&p.place) == radio)
+                .collect();
+            if mine.is_empty() {
+                return 0;
+            }
+            let every = mine.iter().all(|p| !p.mentions)
+                && mine
+                    .iter()
+                    .any(|p| p.place == AutoReplyPlace::Directs { radio })
+                && channels.with(|c| match c.get(&radio) {
+                    Some(Some(list)) => list.iter().all(|channel| {
+                        let place = channel_place(radio, channel);
+                        mine.iter().any(|p| same_place(&p.place, &place))
+                    }),
+                    _ => true,
+                });
+            if every { 2 } else { 1 }
+        })
+    });
+    let set_all = move |on: bool| {
+        let Some(mut changed) = settings.get_untracked() else {
+            return;
+        };
+        changed.places.retain(|p| place_radio(&p.place) != radio);
+        if on {
+            let all = |place| NotificationPlace {
+                place,
+                mentions: false,
+            };
+            changed.places.push(all(AutoReplyPlace::Directs { radio }));
+            channels.with_untracked(|c| {
+                if let Some(Some(list)) = c.get(&radio) {
+                    for channel in list {
+                        changed.places.push(all(channel_place(radio, channel)));
+                    }
+                }
+            });
+        }
+        keep(settings, changed);
+    };
+    // Folded until opened, to pick each of its conversations.
+    let open = RwSignal::new(false);
     let style = badge::style(&badge);
     let class = format!("rail-button radio notify-badge {}", badge::class(&badge));
     view! {
-        <div class="card notify-radio">
+        <div class="card notify-radio" class:open=move || open.get()>
             <header>
-                <span class=class style=style>
-                    <Face name=name.clone() badge=badge short=short />
-                </span>
-                <span class="notify-radio-name">
-                    <b>{name}</b>
-                    <span class="dim">{summary}</span>
-                </span>
+                <button
+                    type="button"
+                    class="notify-radio-head"
+                    aria-expanded=move || open.get().to_string()
+                    on:click=move |_| open.update(|o| *o = !*o)
+                >
+                    <span class=class style=style>
+                        <Face name=name.clone() badge=badge short=short />
+                    </span>
+                    <span class="notify-radio-name">
+                        <b>{name}</b>
+                        <span class="dim">{summary}</span>
+                    </span>
+                    <span class="chevron" inner_html=CHEVRON></span>
+                </button>
+                <Level level set_all />
             </header>
-            {directs}
-            {rest}
+            <Show when=move || open.get()>
+                <div class="notify-radio-body">{directs} {rest}</div>
+            </Show>
+        </div>
+    }
+}
+
+/// How much of a radio is notified of, as a pill of three: none and all
+/// are picked; some is so when it is, and is not picked but by picking
+/// within the radio. Words where there is room; on a phone, bells.
+#[component]
+fn Level(level: Memo<usize>, set_all: impl Fn(bool) + Copy + 'static) -> impl IntoView {
+    let i18n = use_i18n();
+    let strip = NodeRef::<leptos::html::Div>::new();
+    let pill = slide(strip, level);
+    let word = move |at: usize| {
+        match at {
+            0 => t_string!(i18n, notifications_level_none),
+            1 => t_string!(i18n, notifications_level_some),
+            _ => t_string!(i18n, notifications_level_all),
+        }
+        .to_owned()
+    };
+    let buttons = [BELL_OFF, BELL_PLAIN, BELL]
+        .into_iter()
+        .enumerate()
+        .map(|(at, icon)| {
+            let on = move || level.get() == at;
+            view! {
+                <button
+                    type="button"
+                    role="radio"
+                    class:on=on
+                    class:some=at == 1
+                    aria-checked=move || on().to_string()
+                    aria-disabled=(at == 1).then_some("true")
+                    data-label=move || word(at)
+                    title=move || word(at)
+                    aria-label=move || word(at)
+                    on:click=move |_| match at {
+                        0 => set_all(false),
+                        1 => {}
+                        _ => set_all(true),
+                    }
+                >
+                    <span class="level-icon" inner_html=icon></span>
+                    <span class="level-word">{move || word(at)}</span>
+                </button>
+            }
+        })
+        .collect_view();
+    view! {
+        <div
+            class="segmented fitted notify-level"
+            role="radiogroup"
+            node_ref=strip
+            style=move || format!("--n: 3; --at: {}; {}", level.get(), pill.get())
+        >
+            {buttons}
         </div>
     }
 }

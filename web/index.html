@@ -4313,6 +4313,8 @@
         display: flex;
         align-items: flex-start;
         gap: 12px;
+        align-self: center;
+        width: 100%;
         max-width: 400px;
         padding: 12px 14px;
         border: 1px solid var(--mc-border);
@@ -4331,8 +4333,39 @@
       .notify-where h2 { margin: 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--mc-muted); }
       .notify-where .dim { font-size: 13px; }
       .notify-places { display: flex; flex-direction: column; gap: 12px; }
-      .notifications .notify-radio { gap: 4px; padding: 12px 14px 8px; }
-      .notify-radio > header { display: flex; align-items: center; gap: 12px; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--mc-border); }
+      .notifications .notify-radio { gap: 0; padding: 10px 14px; }
+      .notify-radio > header { display: flex; align-items: center; gap: 12px; }
+      .notify-radio-head {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 2px 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .notify-radio-head .chevron { flex: none; display: flex; margin-left: auto; color: var(--mc-muted); transition: transform 0.2s ease; }
+      .notify-radio-head .chevron svg { width: 18px; height: 18px; }
+      .notify-radio.open .notify-radio-head .chevron { transform: rotate(180deg); }
+      .notify-radio-head:hover .chevron { color: var(--mc-text); }
+      /* How much of a radio: words, or on a phone bells; some, chosen
+         only as it is, in grey as never is. */
+      .notify-level { flex: none; }
+      .notify-level button { min-height: 32px; font-size: 13px; }
+      .notify-level .level-icon { display: none; }
+      .notify-level .level-icon svg { width: 18px; height: 18px; }
+      .notify-level button.some { font-style: italic; cursor: default; }
+      .notify-level button.some:hover { color: var(--mc-muted); }
+      .notify-level button.some.on:hover { color: var(--mc-text); }
+      .notify-level:has(button:first-child.on)::before,
+      .notify-level:has(button.some.on)::before { background: var(--mc-raised); box-shadow: inset 0 0 0 1px var(--mc-border); }
+      .notify-level button:first-child.on,
+      .notify-level button.some.on { color: var(--mc-text); }
+      .notify-radio-body { display: flex; flex-direction: column; margin-top: 10px; padding-top: 4px; border-top: 1px solid var(--mc-border); }
       .notify-radio .notify-badge { width: 40px; height: 40px; border-radius: 20px; cursor: default; }
       .notify-radio-name { display: flex; flex-direction: column; min-width: 0; }
       .notify-radio-name .dim { font-size: 12px; }
@@ -4350,7 +4383,7 @@
       /* Never, chosen, in grey: the accent is for what is notified of. */
       .notify-row.quiet .segmented::before { background: var(--mc-raised); box-shadow: inset 0 0 0 1px var(--mc-border); }
       .notify-row.quiet .segmented button.on { color: var(--mc-text); }
-      .notify-radio > .hint { margin: 6px 0; }
+      .notify-radio-body > .hint { margin: 6px 0; }
       @media (max-width: 835px) {
         .notifications .card { padding: 14px; }
         .notify-hero .reply-face { width: 44px; height: 44px; border-radius: 12px; }
@@ -4358,6 +4391,10 @@
         .notify-row { flex-wrap: wrap; row-gap: 6px; padding: 6px 0; }
         .notify-row .segmented.pref-control { flex: 1 1 100%; }
         .notify-sample { max-width: none; }
+        .notify-level .level-word { display: none; }
+        .notify-level button::before { content: none; }
+        .notify-level .level-icon { display: flex; }
+        .notify-level button { width: 38px; min-width: 0; padding: 0; }
       }
 
       /* The emoji picker: a search, the groups, and the emojis. */
