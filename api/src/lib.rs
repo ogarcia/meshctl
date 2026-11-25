@@ -300,28 +300,34 @@ impl BadgeIcon {
     ];
 }
 
-/// Where the interface's map was left for a radio: its centre and its zoom,
-/// to go back to.
+/// Where the interface's map was left for a radio: the area it showed, its
+/// edges in degrees, to show it all again, on a screen of any size. Its
+/// centre is within -180 and 180 of longitude; its edges may go past them,
+/// as an area across the antimeridian does.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct MapView {
-    #[cfg_attr(feature = "openapi", schema(example = 43.36))]
-    pub latitude: f64,
-    #[cfg_attr(feature = "openapi", schema(example = -8.41))]
-    pub longitude: f64,
-    #[cfg_attr(feature = "openapi", schema(example = 11.0))]
-    pub zoom: f64,
+    #[cfg_attr(feature = "openapi", schema(example = 43.2))]
+    pub south: f64,
+    #[cfg_attr(feature = "openapi", schema(example = -8.7))]
+    pub west: f64,
+    #[cfg_attr(feature = "openapi", schema(example = 43.5))]
+    pub north: f64,
+    #[cfg_attr(feature = "openapi", schema(example = -8.1))]
+    pub east: f64,
 }
 
 impl MapView {
-    /// The most a map zooms in.
-    pub const ZOOM_MAX: f64 = 22.0;
-
-    /// Whether it is a place on the map.
+    /// Whether it is an area on the map: south under north, west before
+    /// east, no wider than the world, its centre on it.
     pub fn is_valid(&self) -> bool {
-        (-90.0..=90.0).contains(&self.latitude)
-            && (-180.0..=180.0).contains(&self.longitude)
-            && (0.0..=Self::ZOOM_MAX).contains(&self.zoom)
+        let centre = (self.west + self.east) / 2.0;
+        (-90.0..=90.0).contains(&self.south)
+            && (-90.0..=90.0).contains(&self.north)
+            && self.south < self.north
+            && self.west < self.east
+            && self.east - self.west <= 360.0
+            && (-180.0..=180.0).contains(&centre)
     }
 }
 
@@ -2352,6 +2358,34 @@ pub enum Language {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_map_view_is_an_area_on_the_map() {
+        let view = |south, west, north, east| MapView {
+            south,
+            west,
+            north,
+            east,
+        };
+        // A Coruña; across the antimeridian; the whole world.
+        for valid in [
+            view(43.2, -8.7, 43.5, -8.1),
+            view(-20.0, 170.0, -10.0, 190.0),
+            view(-90.0, -180.0, 90.0, 180.0),
+        ] {
+            assert!(valid.is_valid(), "{valid:?}");
+        }
+        for not in [
+            view(43.5, -8.7, 43.2, -8.1),
+            view(43.2, -8.1, 43.5, -8.7),
+            view(-91.0, -8.7, 43.5, -8.1),
+            view(0.0, -200.0, 10.0, 200.0),
+            view(0.0, 200.0, 10.0, 210.0),
+            view(f64::NAN, -8.7, 43.5, -8.1),
+        ] {
+            assert!(!not.is_valid(), "{not:?}");
+        }
+    }
 
     #[test]
     fn a_badge_says_what_it_shows() {

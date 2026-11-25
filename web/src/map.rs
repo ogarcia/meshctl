@@ -354,14 +354,15 @@ pub fn MapView() -> impl IntoView {
             }
         });
         // Where the person leaves the map, kept for the radio it shows.
-        let moved = Closure::<dyn Fn(f64, f64, f64)>::new(move |latitude, longitude, zoom| {
+        let moved = Closure::<dyn Fn(f64, f64, f64, f64)>::new(move |south, west, north, east| {
             let Some(radio) = on_map.get_value() else {
                 return;
             };
             let view = MapView {
-                latitude,
-                longitude,
-                zoom,
+                south,
+                west,
+                north,
+                east,
             };
             spawn_local(async move {
                 let _ = daemon::save_map_view(radio, &view).await;

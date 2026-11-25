@@ -1884,9 +1884,10 @@ mod tests {
         // Where its map was left, from never to somewhere.
         assert_eq!(store.map_view(added.id).await.unwrap(), Some(None));
         let view = MapView {
-            latitude: 43.36,
-            longitude: -8.41,
-            zoom: 11.0,
+            south: 43.2,
+            west: -8.7,
+            north: 43.5,
+            east: -8.1,
         };
         assert!(store.set_map_view(added.id, &view).await.unwrap());
         assert_eq!(store.map_view(added.id).await.unwrap(), Some(Some(view)));

@@ -610,12 +610,24 @@ window.meshctlMap = (() => {
     beforeRoute = null;
   }
 
-  // Tells where the map is left, now.
+  // Tells where the map is left, now: the area it shows, to show it all
+  // again on any screen. Its centre within -180 and 180 of longitude, and no
+  // wider or taller than the world, as one zoomed out shows it.
   function save() {
     saveTimer = null;
     if (!map || !moved) return;
-    const centre = map.getCenter().wrap();
-    moved(centre.lat, centre.lng, map.getZoom());
+    const bounds = map.getBounds();
+    const shift = map.getCenter().wrap().lng - map.getCenter().lng;
+    const west = bounds.getWest() + shift;
+    const east = bounds.getEast() + shift;
+    const width = Math.min(east - west, 360);
+    const middle = (west + east) / 2;
+    moved(
+      Math.max(bounds.getSouth(), -90),
+      middle - width / 2,
+      Math.min(bounds.getNorth(), 90),
+      middle + width / 2,
+    );
   }
 
   // Other nodes, of another radio: the view goes to them, as the first time.
@@ -631,8 +643,8 @@ window.meshctlMap = (() => {
     beforeRoute = null;
   }
 
-  // Where the map was left for the radio, as JSON {latitude, longitude,
-  // zoom}, or null if it never was.
+  // Where the map was left for the radio, as JSON {south, west, north,
+  // east}, or null if it never was.
   function view(json) {
     savedView = json ? JSON.parse(json) : null;
     place();
@@ -641,14 +653,15 @@ window.meshctlMap = (() => {
   // The first view of a radio, once, with both where it was left read and
   // all of its nodes there: where it was left, or else its nodes. Not if the
   // person has moved the map meanwhile. It jumps there: an animation from
-  // the last radio's place says nothing.
+  // the last radio's place says nothing. The area left, all of it, at the
+  // zoom it fits in on this screen, which may be another than it was left
+  // on: a phone's shows less of it at the same zoom.
   function place() {
     if (!map || placed || touched || savedView === undefined || !shown.ready) return;
     if (savedView) {
       placed = true;
-      map.setView([savedView.latitude, savedView.longitude], savedView.zoom, {
-        animate: false,
-      });
+      const { south, west, north, east } = savedView;
+      map.fitBounds([[south, west], [north, east]], { animate: false });
     } else {
       placeAll();
     }
