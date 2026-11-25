@@ -1,3 +1,6 @@
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -5,13 +8,6 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("rust")
-}
-
-val tauriProperties = Properties().apply {
-    val propFile = file("tauri.properties")
-    if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
-    }
 }
 
 // The key releases are signed with, where keystore.properties tells it,
@@ -23,6 +19,19 @@ val keystoreProperties = Properties().apply {
         propFile.inputStream().use { load(it) }
     }
 }
+
+// meshctl's version, as the workspace's Cargo.toml has it.
+val meshctlVersion = rootProject.file("../../../Cargo.toml").readLines()
+    .first { it.startsWith("version = ") }
+    .substringAfter('"')
+    .substringBefore('"')
+
+// What tells Android one build is newer than another: the day it is built
+// on, in UTC, and a last digit for a second one the same day, 0 unless
+// MESHCTL_VERSION_CODE says otherwise, whole, as 202611251.
+val meshctlVersionCode = System.getenv("MESHCTL_VERSION_CODE")?.toInt()
+    ?: (LocalDate.now(ZoneOffset.UTC)
+        .format(DateTimeFormatter.BASIC_ISO_DATE) + "0").toInt()
 
 android {
     compileSdk = 37
@@ -42,8 +51,8 @@ android {
         applicationId = "me.ogarcia.meshctl"
         minSdk = 24
         targetSdk = 37
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        versionCode = meshctlVersionCode
+        versionName = meshctlVersion
     }
     buildTypes {
         getByName("debug") {
