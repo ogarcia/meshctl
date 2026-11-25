@@ -53,6 +53,10 @@ meshctl-core.workspace = true
 sys-locale = "0.3"
 
 # No tray on Linux's desktops: kept running as a background app through the
-# XDG portal instead, which the desktop lists and can stop.
+# XDG portal instead, which the desktop lists and can stop; and messages
+# notified of through its portal too, as a Flatpak's are, in the system's
+# language.
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.14", default-features = false, features = ["tokio", "background"] }
+ashpd = { version = "0.14", default-features = false, features = ["tokio", "background", "notification"] }
+futures-util = { version = "0.3", default-features = false }
+sys-locale = "0.3"

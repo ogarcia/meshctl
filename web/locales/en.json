@@ -1113,7 +1113,7 @@
   "reply_sign_hint": "Before the text, unless it starts so: an automatic reply is told apart so, and other bots do not answer it.",
   "app_title": "On this phone",
   "app_background": "Keep listening with the app closed",
-  "app_background_hint": "The radios stay connected, and automatic replies answer, with a notification that says so. Off, meshctl listens only while you use it.",
+  "app_background_hint": "The radios stay connected, automatic replies answer and notifications reach you. Off, closing meshctl ends it, and it listens only while you use it.",
   "plugged_unknown": "USB device",
   "plugged_asked": "Android is asking you for leave to use it: say yes.",
   "plugged_none": "No radio plugged in. Plug it in and it will show here.",

@@ -47,6 +47,8 @@ fn kept_state() -> tauri_plugin_window_state::StateFlags {
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_os = "linux")]
+mod linux;
 
 /// A port nothing uses now on this machine, so that the daemon does not
 /// clash with a `meshctld` of its own, or anything else. Another program
@@ -169,6 +171,11 @@ pub fn run() {
     // started as the window opens.
     let stop = Arc::new(Mutex::new(None::<oneshot::Sender<()>>));
     let daemon = Arc::new(Mutex::new(None::<tauri::async_runtime::JoinHandle<()>>));
+    // Whether closing the window leaves it running, listening, as the
+    // daemon says it was set: on Linux, where it lets it be set; always
+    // elsewhere.
+    #[cfg(desktop)]
+    let keep = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
     let builder = tauri::Builder::default();
     // The first: launched again, the one running shows itself, and takes
@@ -185,15 +192,23 @@ pub fn run() {
                 .with_state_flags(kept_state())
                 .build(),
         )
-        // Closing the window hides it: the app, and the daemon, go on.
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Its size kept now, while it is there: hidden, the app may
-                // be ended later without a chance to.
-                use tauri_plugin_window_state::AppHandleExt;
-                let _ = window.app_handle().save_window_state(kept_state());
-                api.prevent_close();
-                let _ = window.hide();
+        // Closing the window hides it: the app, and the daemon, go on; or,
+        // set not to, it quits.
+        .on_window_event({
+            let keep = Arc::clone(&keep);
+            move |window, event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    // Its size kept now, while it is there: hidden, the app
+                    // may be ended later without a chance to.
+                    use tauri_plugin_window_state::AppHandleExt;
+                    let _ = window.app_handle().save_window_state(kept_state());
+                    api.prevent_close();
+                    if keep.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = window.hide();
+                    } else {
+                        window.app_handle().exit(0);
+                    }
+                }
             }
         });
     #[cfg(mobile)]
@@ -204,11 +219,19 @@ pub fn run() {
         .setup(move |app| {
             #[cfg(desktop)]
             {
+                // On Linux, the app as its host: whether it goes on with its
+                // window closed, and the notifications.
+                #[cfg(target_os = "linux")]
+                let host: Option<Arc<dyn meshctld::Host>> = Some(Arc::new(linux::Shared(
+                    linux::Host::new(app.handle().clone(), Arc::clone(&keep)),
+                )));
+                #[cfg(not(target_os = "linux"))]
+                let host = None;
                 let config = meshctld::Config {
                     data: data_dir(),
                     listen: SocketAddr::from((HOST, port)),
                     token: None,
-                    host: None,
+                    host,
                 };
                 let (stopping, stopped) = oneshot::channel::<()>();
                 let task = tauri::async_runtime::spawn(async move {

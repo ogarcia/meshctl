@@ -1113,7 +1113,7 @@
   "reply_sign_hint": "Delante del texto, si no empieza ya por él: así se reconoce una respuesta automática, y otros bots no la contestan.",
   "app_title": "En este móvil",
   "app_background": "Seguir escuchando con la app cerrada",
-  "app_background_hint": "Las radios siguen conectadas, y las respuestas automáticas responden, con una notificación que lo dice. Apagado, meshctl solo escucha mientras lo usas.",
+  "app_background_hint": "Las radios siguen conectadas, las respuestas automáticas responden y te llegan las notificaciones. Apagado, cerrar meshctl lo cierra del todo, y solo escucha mientras lo usas.",
   "plugged_unknown": "Dispositivo USB",
   "plugged_asked": "Android te está pidiendo permiso para usarla: acéptalo.",
   "plugged_none": "No hay ninguna radio enchufada. Enchúfala y aparecerá aquí.",
