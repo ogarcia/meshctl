@@ -3459,6 +3459,8 @@
       .radios {
         width: 100%;
         max-width: 760px;
+        /* No wider than the page however long a row's line: cut instead. */
+        min-width: 0;
         margin: 0 auto;
         display: flex;
         flex-direction: column;

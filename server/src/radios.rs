@@ -3283,10 +3283,11 @@ impl Radios {
         &self,
         settings: &meshctl_api::AutoReplySettings,
     ) -> Result<crate::store::Keeping> {
-        if !crate::auto_replies::valid(settings) {
+        let settings = crate::auto_replies::tidy(settings.clone());
+        if !crate::auto_replies::valid(&settings) {
             return Ok(crate::store::Keeping::Invalid);
         }
-        self.store.add_auto_reply(settings).await
+        self.store.add_auto_reply(&settings).await
     }
 
     /// Changes an automatic reply.
@@ -3295,10 +3296,11 @@ impl Radios {
         id: meshctl_api::AutoReplyId,
         settings: &meshctl_api::AutoReplySettings,
     ) -> Result<crate::store::Keeping> {
-        if !crate::auto_replies::valid(settings) {
+        let settings = crate::auto_replies::tidy(settings.clone());
+        if !crate::auto_replies::valid(&settings) {
             return Ok(crate::store::Keeping::Invalid);
         }
-        self.store.set_auto_reply(id, settings).await
+        self.store.set_auto_reply(id, &settings).await
     }
 
     /// What holds every automatic reply back.

@@ -214,6 +214,24 @@ impl Answering {
     }
 }
 
+/// An automatic reply as it is kept: each trigger trimmed, and once, the
+/// first of those a message could not tell apart; none that says nothing.
+pub fn tidy(mut settings: AutoReplySettings) -> AutoReplySettings {
+    let mut seen = Vec::new();
+    settings.triggers = settings
+        .triggers
+        .into_iter()
+        .map(|t| t.trim().to_owned())
+        .filter(|t| {
+            let folded = fold(t);
+            let new = !folded.is_empty() && !seen.contains(&folded);
+            seen.push(folded);
+            new
+        })
+        .collect();
+    settings
+}
+
 /// Whether an automatic reply is one: named, waiting for something, and
 /// answering with something, its texts no longer than a message takes.
 pub fn valid(settings: &AutoReplySettings) -> bool {
@@ -448,6 +466,17 @@ mod tests {
         assert_eq!(busy_percent((100, then), (5, later)), None);
         assert_eq!(busy_percent((100, then), (115, then)), None);
         assert_eq!(busy_percent((0, then), (600, later)), Some(100.0));
+    }
+
+    #[test]
+    fn triggers_are_kept_once() {
+        let mut settings = reply(Vec::new()).settings;
+        settings.triggers = [
+            "ping", " test", "Ping!", "", "!", "test", "prueba", "PRÚEBA",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert_eq!(tidy(settings).triggers, ["ping", "test", "prueba"]);
     }
 
     #[test]

@@ -477,13 +477,18 @@ impl Draft {
         AutoReplySettings {
             name: self.name.trim().to_owned(),
             enabled: self.enabled,
-            triggers: self
-                .triggers
-                .split(',')
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .map(str::to_owned)
-                .collect(),
+            triggers: {
+                // Each once, however it was written again: as the daemon
+                // keeps them.
+                let mut triggers: Vec<String> = Vec::new();
+                for trigger in self.triggers.split(',').map(str::trim) {
+                    let lower = trigger.to_lowercase();
+                    if !trigger.is_empty() && !triggers.iter().any(|t| t.to_lowercase() == lower) {
+                        triggers.push(trigger.to_owned());
+                    }
+                }
+                triggers
+            },
             matching: self.matching,
             react: self.react,
             reply: text(self.texts, &self.reply),
@@ -1195,8 +1200,8 @@ mod tests {
         assert_eq!(draft.settings(), ping());
         draft.direct = false;
         assert_eq!(draft.settings().direct_reply, None);
-        // Triggers written loosely.
-        draft.triggers = " ping ,, test,".into();
+        // Triggers written loosely, and again.
+        draft.triggers = " ping ,, test, Ping, test".into();
         assert_eq!(draft.settings().triggers, ["ping", "test"]);
     }
 }
