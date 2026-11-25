@@ -49,6 +49,10 @@ fn kept_state() -> tauri_plugin_window_state::StateFlags {
 mod android;
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod notifying;
+#[cfg(target_os = "windows")]
+mod win;
 
 /// A port nothing uses now on this machine, so that the daemon does not
 /// clash with a `meshctld` of its own, or anything else. Another program
@@ -172,8 +176,8 @@ pub fn run() {
     let stop = Arc::new(Mutex::new(None::<oneshot::Sender<()>>));
     let daemon = Arc::new(Mutex::new(None::<tauri::async_runtime::JoinHandle<()>>));
     // Whether closing the window leaves it running, listening, as the
-    // daemon says it was set: on Linux, where it lets it be set; always
-    // elsewhere.
+    // daemon says it was set: on Linux and Windows, where it lets it be
+    // set; always elsewhere.
     #[cfg(desktop)]
     let keep = Arc::new(std::sync::atomic::AtomicBool::new(true));
 
@@ -219,13 +223,19 @@ pub fn run() {
         .setup(move |app| {
             #[cfg(desktop)]
             {
-                // On Linux, the app as its host: whether it goes on with its
-                // window closed, and the notifications.
+                // On Linux and Windows, the app as its host: whether it goes
+                // on with its window closed, and the notifications.
                 #[cfg(target_os = "linux")]
                 let host: Option<Arc<dyn meshctld::Host>> = Some(Arc::new(linux::Shared(
                     linux::Host::new(app.handle().clone(), Arc::clone(&keep)),
                 )));
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(target_os = "windows")]
+                let host: Option<Arc<dyn meshctld::Host>> = Some(Arc::new(win::Host::new(
+                    app.handle().clone(),
+                    Arc::clone(&keep),
+                    &data_dir(),
+                )));
+                #[cfg(not(any(target_os = "linux", target_os = "windows")))]
                 let host = None;
                 let config = meshctld::Config {
                     data: data_dir(),

@@ -7,12 +7,13 @@
 //! conversation, the newest in place of the one before; picked, the window
 //! shows on its conversation; read anywhere, it goes.
 
+use crate::notifying::{body, chat, id, open, title};
 use futures_util::StreamExt;
 use meshctl_api::{Notification, Peer, RadioId};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tokio::sync::OnceCell;
 
 use ashpd::desktop::notification::{Category, Notification as Shown, NotificationProxy, Priority};
@@ -29,23 +30,15 @@ pub struct Host {
     /// Each notification shown, by its id: its conversation, as the panel
     /// takes it, in JSON.
     shown: Mutex<HashMap<String, String>>,
-    /// The panel's words for a message whose text is not shown.
-    new_message: &'static str,
 }
 
 impl Host {
     pub fn new(app: AppHandle, keep: Arc<AtomicBool>) -> Arc<Self> {
-        let spanish = sys_locale::get_locale().is_some_and(|locale| locale.starts_with("es"));
         Arc::new(Self {
             app,
             keep,
             portal: OnceCell::new(),
             shown: Mutex::new(HashMap::new()),
-            new_message: if spanish {
-                "Mensaje nuevo"
-            } else {
-                "New message"
-            },
         })
     }
 
@@ -97,30 +90,10 @@ impl Host {
                     .ok()
                     .and_then(|mut shown| shown.remove(action.id()));
                 if let Some(chat) = chat {
-                    host.open(&chat);
+                    open(&host.app, &chat);
                 }
             }
         });
-    }
-
-    /// Shows the window, and tells its panel to open a conversation.
-    fn open(&self, chat: &str) {
-        crate::show(&self.app);
-        let Some(window) = self.app.get_webview_window("main") else {
-            return;
-        };
-        let detail = serde_json::to_string(chat).unwrap_or_default();
-        let _ = window.eval(format!(
-            "window.dispatchEvent(new CustomEvent('meshctl-chat', {{ detail: {detail} }}))"
-        ));
-    }
-}
-
-/// A conversation's notification's id: its radio, and its channel or node.
-fn id(radio: RadioId, peer: Peer) -> String {
-    match peer {
-        Peer::Channel { channel } => format!("meshctl-{radio}-c{channel}"),
-        Peer::Node { node } => format!("meshctl-{radio}-n{node}"),
     }
 }
 
@@ -141,24 +114,13 @@ impl meshctld::Host for Shared {
                 return;
             };
             let id = id(notification.radio, notification.peer);
-            let chat = serde_json::json!({
-                "radio": notification.radio,
-                "peer": notification.peer,
-            })
-            .to_string();
-            let mut title = notification.sender.clone();
-            if let Some(channel) = &notification.channel {
-                title.push_str(&format!(" · #{channel}"));
-            }
-            title.push_str(&format!(" · {}", notification.radio_name));
-            let body = notification.text.as_deref().unwrap_or(host.new_message);
-            let shown = Shown::new(&title)
-                .body(body)
+            let shown = Shown::new(&title(&notification))
+                .body(body(&notification))
                 .category(Category::ImMessage)
                 .priority(Priority::High)
                 .default_action(OPEN);
             if let Ok(mut kept) = host.shown.lock() {
-                kept.insert(id.clone(), chat);
+                kept.insert(id.clone(), chat(&notification));
             }
             if let Err(error) = portal.add_notification(&id, shown).await {
                 tracing::warn!("cannot notify: {error}");

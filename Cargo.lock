@@ -4056,6 +4056,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "windows",
+ "windows-registry",
 ]
 
 [[package]]

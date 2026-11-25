@@ -52,6 +52,12 @@ meshctl-core.workspace = true
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 sys-locale = "0.3"
 
+# Messages notified of as Windows' own toasts, the app made known to it by
+# its id in the user's registry, as a portable folder installs nothing.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications"] }
+windows-registry = "0.6"
+
 # No tray on Linux's desktops: kept running as a background app through the
 # XDG portal instead, which the desktop lists and can stop; and messages
 # notified of through its portal too, as a Flatpak's are, in the system's
