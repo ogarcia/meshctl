@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 #
 # meshctl in a container: the daemon, with its interface embedded, on Alpine.
 # The image is tagged after what it was built from: "master" for the latest
@@ -44,7 +44,7 @@ ARG BUILDER=builder
 # e.g. --build-arg TRUNK_VERSION=x.y.z.
 ARG ALPINE_VERSION=3.24
 ARG RUST_VERSION=1
-ARG TRUNK_VERSION=0.22.1
+ARG TRUNK_VERSION=0.22.2
 
 FROM docker.io/rust:${RUST_VERSION}-alpine${ALPINE_VERSION} AS builder
 
