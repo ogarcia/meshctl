@@ -3,6 +3,39 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.3.0 (2026-11-25)
+
+meshctl on Android, and radios picked from a list rather than written.
+
+### The Android app
+
+- meshctl as an app of its own, for ARM64 phones and older 32-bit ones: the
+  daemon inside, on the phone alone, as in the desktop app.
+- Radios over the network, by USB, with a cable or an OTG adapter, and by
+  Bluetooth.
+- Listening to them with the app closed, if you say so in its settings,
+  with a notification that tells it is.
+- `meshcore://` links, and links shared to it from the Meshtastic or
+  MeshCore apps, open in it to add what they hold.
+- Its own icon, in layers as Android's are and in one colour where icons are
+  themed; the system's bars in meshctl's colours.
+
+### Adding radios
+
+- How meshctl reaches a radio picked from cards (on the network, by USB,
+  by Bluetooth where there is a way), and the radio itself from those plugged
+  in or heard nearby; its path still written by hand where there are paths.
+- A radio's connection changed in the same words it was added in.
+
+### The panel
+
+- Five more accents: blue, teal, violet, coral, and gray, for the interface
+  in one colour.
+- On a phone, switches beside what they are, a shade over what is touched
+  instead of the browser's blue box, and dialogs with room to write in while
+  the keyboard takes half the screen.
+- The welcome, About and the language picker say what fits in an app too.
+
 ## 0.2.0 (2026-11-25)
 
 Automatic replies, and the panel easier at hand.
