@@ -48,6 +48,8 @@ pub struct Place {
 pub fn via_of(address: &str) -> Via {
     let address = address.trim();
     let port = address.to_ascii_uppercase();
+    let port = port.split('@').next().unwrap_or(&port);
+    let port = port.strip_prefix(r"\\.\").unwrap_or(port);
     if address.starts_with("ble://") {
         return Via::Bluetooth;
     }
@@ -90,6 +92,7 @@ impl Place {
         let address = self.address.get_untracked().trim().to_owned();
         let bare = !address.is_empty()
             && !address.starts_with('/')
+            && !address.starts_with('\\')
             && !address.starts_with("usb")
             && !address.to_ascii_uppercase().starts_with("COM");
         match self.via.get_untracked() {

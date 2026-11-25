@@ -55,7 +55,7 @@ impl std::fmt::Display for Transport {
 ///
 /// - `tcp://host`, `tcp://host:port`, or just `host` or `host:port`;
 /// - `serial:///dev/ttyACM0`, `serial:///dev/ttyACM0@115200`, or just the
-///   device's path;
+///   device's path; on Windows, its port, as `COM3`;
 /// - `usb`, `usb://`, `usb://1a86:55d4`, any with `@115200`: by USB, where
 ///   an app opens it.
 impl std::str::FromStr for Transport {
@@ -83,7 +83,7 @@ impl Transport {
         if let Some(rest) = s.strip_prefix("serial://") {
             return serial_from(rest);
         }
-        if s.starts_with('/') {
+        if s.starts_with('/') || is_windows_port(s) {
             return serial_from(s);
         }
         let rest = s.strip_prefix("tcp://").unwrap_or(s);
@@ -107,6 +107,16 @@ impl Transport {
             port,
         })
     }
+}
+
+/// Whether it names a Windows serial port, as `COM3` or `\\.\COM12`, with
+/// or without its speed after an `@`.
+fn is_windows_port(s: &str) -> bool {
+    let name = s.split('@').next().unwrap_or(s);
+    let name = name.strip_prefix(r"\\.\").unwrap_or(name);
+    name.len() > 3
+        && name[..3].eq_ignore_ascii_case("com")
+        && name[3..].chars().all(|c| c.is_ascii_digit())
 }
 
 fn serial_from(s: &str) -> Result<Transport, String> {
@@ -352,6 +362,10 @@ mod tests {
             ("[::1]:4403", tcp("::1", 4403)),
             ("fe80::1", tcp("fe80::1", 4403)),
             ("/dev/ttyACM0", serial("/dev/ttyACM0", 115_200)),
+            ("COM3", serial("COM3", 115_200)),
+            ("com12@921600", serial("com12", 921_600)),
+            (r"\\.\COM12", serial(r"\\.\COM12", 115_200)),
+            ("serial://COM4", serial("COM4", 115_200)),
             (
                 "serial:///dev/ttyUSB1@921600",
                 serial("/dev/ttyUSB1", 921_600),
@@ -377,6 +391,7 @@ mod tests {
             "host:port",
             "serial://",
             "/dev/tty@fast",
+            "COM3@fast",
             "usb://radio",
             "usb://1a86:55d",
             "usb@fast",
@@ -392,6 +407,7 @@ mod tests {
         for transport in [
             tcp("radio.lan", 4403),
             serial("/dev/ttyACM0", 115_200),
+            serial("COM3", 115_200),
             usb(None, 115_200),
             usb(Some("1a86:55d4"), 921_600),
             Transport::Ble {
