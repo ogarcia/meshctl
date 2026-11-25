@@ -166,6 +166,9 @@ impl From<anyhow::Error> for SendFailure {
     }
 }
 
+/// How long what a radio said of its channel's business holds.
+const BUSY_FRESH: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 /// How often requests waited for too long are looked for.
 const EXPIRY_TICK: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -1092,6 +1095,9 @@ pub struct Radios {
     /// How the last of those failed, and when: what waited for it fails
     /// alike, with nothing sent again.
     login_failed: Arc<Mutex<HashMap<(RadioId, u32), LoginFailed>>>,
+    /// How busy each radio last said it hears its channel, in percent, and
+    /// when.
+    busy: Arc<Mutex<HashMap<RadioId, (f32, std::time::Instant)>>>,
     changes: broadcast::Sender<Change>,
     stopped: watch::Sender<bool>,
 }
@@ -1106,6 +1112,7 @@ impl Radios {
             logins: Arc::default(),
             logging_in: Arc::default(),
             login_failed: Arc::default(),
+            busy: Arc::default(),
             changes: broadcast::channel(EVENT_BACKLOG).0,
             stopped: watch::channel(false).0,
         };
@@ -3292,6 +3299,59 @@ impl Radios {
             return Ok(crate::store::Keeping::Invalid);
         }
         self.store.set_auto_reply(id, settings).await
+    }
+
+    /// What holds every automatic reply back.
+    pub async fn auto_reply_limits(&self) -> Result<meshctl_api::AutoReplyLimits> {
+        self.store.auto_reply_limits().await
+    }
+
+    pub async fn set_auto_reply_limits(&self, limits: &meshctl_api::AutoReplyLimits) -> Result<()> {
+        self.store.set_auto_reply_limits(limits).await
+    }
+
+    /// Keeps how busy a radio hears its channel now, in percent.
+    pub fn set_channel_busy(&self, id: RadioId, percent: f32) {
+        self.busy
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, (percent, std::time::Instant::now()));
+    }
+
+    /// How busy a radio hears its channel, in percent, if it said so lately.
+    pub fn channel_busy(&self, id: RadioId) -> Option<f32> {
+        self.busy
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .filter(|(_, at)| at.elapsed() < BUSY_FRESH)
+            .map(|(percent, _)| *percent)
+    }
+
+    /// How busy every radio hears its channel, in their order.
+    pub async fn channels_busy(&self) -> Result<Vec<meshctl_api::ChannelBusy>> {
+        Ok(self
+            .store
+            .radios()
+            .await?
+            .into_iter()
+            .map(|record| meshctl_api::ChannelBusy {
+                radio: record.id,
+                percent: self.channel_busy(record.id),
+            })
+            .collect())
+    }
+
+    /// The MeshCore radios connected and ready, to be asked their figures.
+    pub fn meshcore_ready(&self) -> Vec<(RadioId, Mesh)> {
+        self.lock()
+            .iter()
+            .filter(|(_, running)| {
+                running.protocol == Protocol::Meshcore
+                    && running.mesh.read(|s| s.link) == mesh::LinkState::Ready
+            })
+            .map(|(id, running)| (*id, running.mesh.clone()))
+            .collect()
     }
 
     /// Removes an automatic reply; `false` if there is no such one.

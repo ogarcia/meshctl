@@ -416,6 +416,45 @@ pub enum AutoReplyPlace {
     },
 }
 
+/// What holds every automatic reply back, whatever it is set to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AutoReplyLimits {
+    /// No reply answers on a radio that hears its channel busier than this, in
+    /// percent of the time, from 1 to 100; none, however busy. 25 unless set.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(example = 25))]
+    pub busy_channel: Option<u8>,
+}
+
+impl Default for AutoReplyLimits {
+    fn default() -> Self {
+        Self {
+            busy_channel: Some(25),
+        }
+    }
+}
+
+impl AutoReplyLimits {
+    /// Whether they are limits: a threshold from 1 to 100.
+    pub fn is_valid(&self) -> bool {
+        self.busy_channel
+            .is_none_or(|busy| (1..=100).contains(&busy))
+    }
+}
+
+/// How busy a radio hears its channel, as it last said, if lately.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ChannelBusy {
+    pub radio: RadioId,
+    /// In percent of the time: Meshtastic's channel utilization, or, on
+    /// MeshCore, the airtime its radio counts over the last minute. None if
+    /// it has said nothing in a quarter of an hour.
+    #[cfg_attr(feature = "openapi", schema(example = 12.5))]
+    pub percent: Option<f32>,
+}
+
 /// The order of the automatic replies: every one's id, each once. A message
 /// two of them would answer is answered by the first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

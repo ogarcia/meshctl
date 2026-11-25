@@ -7,7 +7,8 @@
 use super::Store;
 use anyhow::Result;
 use meshctl_api::{
-    AutoReply, AutoReplyId, AutoReplyMatch, AutoReplyPlace, AutoReplySettings, BROADCAST, RadioId,
+    AutoReply, AutoReplyId, AutoReplyLimits, AutoReplyMatch, AutoReplyPlace, AutoReplySettings,
+    BROADCAST, RadioId,
 };
 use sqlx::SqliteConnection;
 use std::collections::HashMap;
@@ -198,6 +199,29 @@ impl Store {
             .auto_reply(id)
             .await?
             .map_or(Keeping::NotFound, Keeping::Kept))
+    }
+
+    /// What holds every automatic reply back, or the defaults when nothing
+    /// was set. A row that does not read counts as none.
+    pub async fn auto_reply_limits(&self) -> Result<AutoReplyLimits> {
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT value FROM preference WHERE key = 'auto_replies'")
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row
+            .and_then(|(value,)| serde_json::from_str(&value).ok())
+            .unwrap_or_default())
+    }
+
+    pub async fn set_auto_reply_limits(&self, limits: &AutoReplyLimits) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO preference (key, value) VALUES ('auto_replies', ?) \
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(serde_json::to_string(limits)?)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// Removes an automatic reply; `false` if there is no such one.

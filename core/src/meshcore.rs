@@ -366,6 +366,24 @@ impl Client {
         }
     }
 
+    /// The seconds it has spent sending and receiving since it started, as
+    /// its radio's figures say; none if its firmware has none.
+    pub async fn airtime(&self) -> Result<Option<(u32, u32)>, AdminError> {
+        match self
+            .ask_one(command::get_stats(1), |r| matches!(r, Response::Stats(_)))
+            .await
+        {
+            Ok(Response::Stats(Stats::Radio {
+                tx_air_secs,
+                rx_air_secs,
+                ..
+            })) => Ok(Some((tx_air_secs, rx_air_secs))),
+            Ok(_) => Ok(None),
+            Err("the radio did not answer") => Err(AdminError::NoAnswer),
+            Err(_) => Err(AdminError::NotConnected),
+        }
+    }
+
     /// Its battery and storage, and each kind of figure it has.
     pub async fn status(&self) -> Result<Status, AdminError> {
         let mut status = Status::default();
@@ -1302,6 +1320,12 @@ impl Mesh {
     /// A MeshCore radio's figures, asked for now.
     pub async fn meshcore_status(&self) -> Result<Status, AdminError> {
         self.meshcore_session()?.client.status().await
+    }
+
+    /// The seconds a MeshCore radio has spent sending and receiving since it
+    /// started, asked for now; none if its firmware does not say.
+    pub async fn meshcore_airtime(&self) -> Result<Option<(u32, u32)>, AdminError> {
+        self.meshcore_session()?.client.airtime().await
     }
 
     /// Has the radio keep a contact, as a link gives it: its key, kind and

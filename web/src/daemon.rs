@@ -876,3 +876,23 @@ pub async fn order_auto_replies(order: &[meshctl_api::AutoReplyId]) -> Result<()
         .map_err(|_| Failure::Unreachable)?;
     answer(request.send().await).await.map(|_| ())
 }
+
+/// What holds every automatic reply back.
+pub async fn auto_reply_limits() -> Result<meshctl_api::AutoReplyLimits, Failure> {
+    get("/auto-replies/limits").await
+}
+
+pub async fn save_auto_reply_limits(
+    limits: &meshctl_api::AutoReplyLimits,
+) -> Result<meshctl_api::AutoReplyLimits, Failure> {
+    let request = with_token(Request::put(&url("/auto-replies/limits")))
+        .json(limits)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// How busy each radio hears its channel, as it last said.
+pub async fn channels_busy() -> Result<Vec<meshctl_api::ChannelBusy>, Failure> {
+    get("/auto-replies/busy").await
+}

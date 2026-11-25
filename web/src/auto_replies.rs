@@ -13,8 +13,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::auto_replies::{MAX_TEXT_BYTES, Told, VARIABLES, hops_emoji, render};
 use meshctl_api::{
-    AutoReply, AutoReplyId, AutoReplyMatch, AutoReplyPlace, AutoReplySettings, Channel, ErrorCode,
-    RadioId, RadioKind,
+    AutoReply, AutoReplyId, AutoReplyLimits, AutoReplyMatch, AutoReplyPlace, AutoReplySettings,
+    Channel, ChannelBusy, ErrorCode, RadioId, RadioKind,
 };
 use std::collections::HashMap;
 
@@ -159,6 +159,9 @@ pub fn AutoRepliesView() -> impl IntoView {
                     </div>
                 </div>
             </Show>
+            <Show when=move || live.auto_replies.with(|r| r.as_ref().is_some_and(|r| !r.is_empty()))>
+                <BusyLimit />
+            </Show>
             <For
                 each=replies
                 key=|(at, count, reply)| (*at, *count, format!("{reply:?}"))
@@ -178,6 +181,126 @@ pub fn AutoRepliesView() -> impl IntoView {
             ReplyEditing::Adding(ping) => view! { <ReplyEditor id=None ping /> }.into_any(),
             ReplyEditing::Reply(id) => view! { <ReplyEditor id=Some(id) ping=false /> }.into_any(),
         }}
+    }
+}
+
+/// How often how busy the radios hear their channels is read again.
+const BUSY_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The limit on a busy channel, for every reply: on or off, its threshold,
+/// and how busy each radio hears its channel now.
+#[component]
+fn BusyLimit() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let limits = RwSignal::new(None::<AutoReplyLimits>);
+    // The threshold last set, to turn it on again at.
+    let last = RwSignal::new(AutoReplyLimits::default().busy_channel.unwrap_or(25));
+    let busy = RwSignal::new(Vec::<ChannelBusy>::new());
+    spawn_local(async move {
+        if let Ok(read) = daemon::auto_reply_limits().await {
+            if let Some(most) = read.busy_channel {
+                last.try_set(most);
+            }
+            limits.try_set(Some(read));
+        }
+    });
+    let read_busy = move || {
+        spawn_local(async move {
+            if let Ok(read) = daemon::channels_busy().await {
+                busy.try_set(read);
+            }
+        });
+    };
+    read_busy();
+    let every = set_interval_with_handle(read_busy, BUSY_EVERY).ok();
+    on_cleanup(move || {
+        if let Some(every) = every {
+            every.clear();
+        }
+    });
+    let save = move |changed: AutoReplyLimits| {
+        limits.set(Some(changed));
+        spawn_local(async move {
+            if let Ok(saved) = daemon::save_auto_reply_limits(&changed).await {
+                limits.try_set(Some(saved));
+            }
+        });
+    };
+    let on = move || limits.with(|l| l.is_some_and(|l| l.busy_channel.is_some()));
+    let flip = move |_| {
+        let busy_channel = if on() {
+            None
+        } else {
+            Some(last.get_untracked())
+        };
+        save(AutoReplyLimits { busy_channel });
+    };
+    let set = move |ev: leptos::ev::Event| {
+        let Ok(most) = event_target_value(&ev).trim().parse::<u8>() else {
+            return;
+        };
+        let most = most.clamp(1, 100);
+        last.set(most);
+        save(AutoReplyLimits {
+            busy_channel: Some(most),
+        });
+    };
+    // Each radio's, by its name: paused if past the threshold.
+    let now = move || {
+        let most = limits.with(|l| l.and_then(|l| l.busy_channel));
+        busy.get()
+            .into_iter()
+            .map(|b| {
+                let name = radio_name(live, b.radio);
+                let paused = matches!((b.percent, most), (Some(p), Some(m)) if p > f32::from(m));
+                let value = b.percent.map_or_else(
+                    || t_string!(i18n, replies_busy_unknown).to_owned(),
+                    |p| format!("{p:.0} %"),
+                );
+                view! {
+                    <span class="busy-radio" class:paused=paused>
+                        <b>{name}</b>
+                        " "
+                        {value}
+                        {paused
+                            .then(|| {
+                                view! { <span class="tag">{t!(i18n, replies_busy_paused)}</span> }
+                            })}
+                    </span>
+                }
+            })
+            .collect_view()
+    };
+    view! {
+        <div class="card busy-limit" class:gone=move || limits.with(Option::is_none)>
+            <div class="toggle">
+                <Switch
+                    on=Signal::derive(on)
+                    label=Signal::derive(move || t_string!(i18n, replies_busy).to_string())
+                    flip
+                />
+                <span>
+                    {t!(i18n, replies_busy)}
+                    <span class="dim">{t!(i18n, replies_busy_hint)}</span>
+                </span>
+                <label class="busy-most" class:gone=move || !on()>
+                    <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        inputmode="numeric"
+                        prop:value=move || last.get().to_string()
+                        on:change=set
+                    />
+                    " %"
+                </label>
+            </div>
+            <p class="busy-now dim">
+                <span>{t!(i18n, replies_busy_now)}</span>
+                {now}
+            </p>
+        </div>
     }
 }
 

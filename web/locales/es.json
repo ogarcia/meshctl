@@ -1064,5 +1064,10 @@
   "reply_var_channel": "El canal por el que llegó",
   "reply_var_date": "La fecha en que se responde",
   "reply_var_time": "La hora en que se responde",
-  "error_invalid_auto_reply": "Le hace falta un nombre, algo que esperar y algo con que responder, con textos de hasta 200 bytes."
+  "error_invalid_auto_reply": "Le hace falta un nombre, algo que esperar y algo con que responder, con textos de hasta 200 bytes.",
+  "replies_busy": "Callar con el canal ocupado",
+  "replies_busy_hint": "Ninguna responde en una radio que oiga su canal ocupado más de este tiempo.",
+  "replies_busy_now": "Ahora:",
+  "replies_busy_unknown": "sin dato aún",
+  "replies_busy_paused": "en pausa"
 }

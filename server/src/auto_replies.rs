@@ -10,8 +10,8 @@
 //! own, one come through MQTT, a reaction, a room's post, or one that looks
 //! like another's automatic reply (it starts with 🤖); never one heard as the
 //! radio catches up on what it kept while away, nor one from long ago; the
-//! same node answered by the same reply once in a while; and a radio's
-//! replies few a minute.
+//! same node answered by the same reply once in a while; a radio's replies
+//! few a minute; and none on a channel busier than the user lets be.
 
 use crate::radios::{Change, Radios};
 use crate::store::now;
@@ -42,9 +42,13 @@ const MOST_A_MINUTE: usize = 6;
 /// that two never answer each other.
 const BOT: &str = "🤖";
 
+/// How often a MeshCore radio is asked how long it has been on the air.
+const AIRTIME_EVERY: Duration = Duration::from_secs(60);
+
 /// Answers what the automatic replies wait for, from what the radios hear,
-/// until they stop.
+/// until they stop; and follows how busy each hears its channel.
 pub fn spawn(radios: Radios) {
+    tokio::spawn(follow_airtime(radios.clone()));
     tokio::spawn(async move {
         let mut changes = radios.subscribe();
         let mut answering = Answering::default();
@@ -56,6 +60,23 @@ pub fn spawn(radios: Radios) {
             match change {
                 Ok(Change::Mesh(radio, mesh::Event::Link(LinkState::Ready))) => {
                     answering.ready.insert(radio, Instant::now());
+                    // A Meshtastic radio's own node, as it was just read.
+                    if let Some(busy) = radios.mesh(radio).and_then(|mesh| {
+                        mesh.read(|s| s.nodes.get(&s.local.as_ref()?.num)?.channel_utilization)
+                    }) {
+                        radios.set_channel_busy(radio, busy);
+                    }
+                }
+                // A Meshtastic radio's own node, as it tells of itself.
+                Ok(Change::Mesh(radio, mesh::Event::Node(node))) => {
+                    let own = radios
+                        .mesh(radio)
+                        .and_then(|mesh| mesh.read(|s| s.local.as_ref().map(|l| l.num)));
+                    if own == Some(node.num)
+                        && let Some(busy) = node.channel_utilization
+                    {
+                        radios.set_channel_busy(radio, busy);
+                    }
                 }
                 Ok(Change::Message(radio, message)) => {
                     answering.heard(&radios, radio, message).await;
@@ -65,6 +86,43 @@ pub fn spawn(radios: Radios) {
             }
         }
     });
+}
+
+/// How busy each MeshCore radio hears its channel: what it has spent on
+/// the air, sending and receiving, over the time between two askings.
+async fn follow_airtime(radios: Radios) {
+    let mut every = tokio::time::interval(AIRTIME_EVERY);
+    let mut last: HashMap<RadioId, (u32, Instant)> = HashMap::new();
+    loop {
+        tokio::select! {
+            _ = every.tick() => {}
+            () = radios.stopped() => return,
+        }
+        let ready = radios.meshcore_ready();
+        last.retain(|id, _| ready.iter().any(|(r, _)| r == id));
+        for (radio, mesh) in ready {
+            let Ok(Some((sent, received))) = mesh.meshcore_airtime().await else {
+                continue;
+            };
+            let (aired, at) = (sent.saturating_add(received), Instant::now());
+            if let Some(percent) = last
+                .insert(radio, (aired, at))
+                .and_then(|before| busy_percent(before, (aired, at)))
+            {
+                radios.set_channel_busy(radio, percent);
+            }
+        }
+    }
+}
+
+/// The share of the time between two figures of seconds on the air that
+/// was spent on it, in percent; none if the radio started again between
+/// them, its count from naught, or no time went by.
+fn busy_percent((before, then): (u32, Instant), (now, at): (u32, Instant)) -> Option<f32> {
+    let elapsed = at.checked_duration_since(then)?.as_secs_f32();
+    let aired = now.checked_sub(before)?;
+    #[allow(clippy::cast_precision_loss)]
+    (elapsed >= 1.0).then(|| (aired as f32 / elapsed * 100.0).min(100.0))
 }
 
 #[derive(Default)]
@@ -105,6 +163,20 @@ impl Answering {
         else {
             return;
         };
+        // Not on a channel busier than it is let be.
+        let limits = radios.auto_reply_limits().await.unwrap_or_default();
+        if let (Some(most), Some(busy)) = (limits.busy_channel, radios.channel_busy(radio))
+            && busy > f32::from(most)
+        {
+            tracing::info!(
+                radio,
+                reply = reply.id,
+                busy,
+                most,
+                "automatic reply: channel busy"
+            );
+            return;
+        }
         let sender = (message.from, message.sender_name.clone());
         let key = (reply.id, radio, sender);
         if self
@@ -364,6 +436,18 @@ mod tests {
                 places,
             },
         }
+    }
+
+    #[test]
+    fn busy_is_the_share_of_the_time_on_the_air() {
+        let then = Instant::now();
+        let later = then + Duration::from_secs(60);
+        assert_eq!(busy_percent((100, then), (115, later)), Some(25.0));
+        assert_eq!(busy_percent((100, then), (100, later)), Some(0.0));
+        // Started again, or no time between them: nothing to tell.
+        assert_eq!(busy_percent((100, then), (5, later)), None);
+        assert_eq!(busy_percent((100, then), (115, then)), None);
+        assert_eq!(busy_percent((0, then), (600, later)), Some(100.0));
     }
 
     #[test]

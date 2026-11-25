@@ -1064,5 +1064,10 @@
   "reply_var_channel": "The channel it came on",
   "reply_var_date": "The date it is answered",
   "reply_var_time": "The time it is answered",
-  "error_invalid_auto_reply": "It needs a name, something to wait for, and something to answer with, its texts up to 200 bytes."
+  "error_invalid_auto_reply": "It needs a name, something to wait for, and something to answer with, its texts up to 200 bytes.",
+  "replies_busy": "Quiet on a busy channel",
+  "replies_busy_hint": "None answers on a radio that hears its channel busy more than this share of the time.",
+  "replies_busy_now": "Now:",
+  "replies_busy_unknown": "not known yet",
+  "replies_busy_paused": "paused"
 }

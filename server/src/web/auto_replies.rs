@@ -9,7 +9,10 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{AutoReply, AutoReplyId, AutoReplyOrder, AutoReplySettings, Error, ErrorCode};
+use meshctl_api::{
+    AutoReply, AutoReplyId, AutoReplyLimits, AutoReplyOrder, AutoReplySettings, ChannelBusy, Error,
+    ErrorCode,
+};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -17,6 +20,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list, add))
         .routes(routes!(reorder))
+        .routes(routes!(limits, set_limits))
+        .routes(routes!(busy))
         .routes(routes!(change, remove))
 }
 
@@ -147,13 +152,82 @@ async fn reorder(State(state): State<AppState>, Json(order): Json<AutoReplyOrder
     }
 }
 
+/// Their limits
+///
+/// What holds every automatic reply back, whatever it is set to.
+#[utoipa::path(
+    get,
+    path = "/auto-replies/limits",
+    tag = "auto-replies",
+    responses(
+        (status = 200, description = "The limits", body = AutoReplyLimits),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+    )
+)]
+async fn limits(State(state): State<AppState>) -> Response {
+    match state.radios.auto_reply_limits().await {
+        Ok(limits) => Json(limits).into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Change their limits
+#[utoipa::path(
+    put,
+    path = "/auto-replies/limits",
+    tag = "auto-replies",
+    request_body = AutoReplyLimits,
+    responses(
+        (status = 200, description = "The limits, as kept", body = AutoReplyLimits),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 422, description = "Not limits: a threshold past 1 to 100, `invalid_auto_reply`", body = Error),
+    )
+)]
+async fn set_limits(
+    State(state): State<AppState>,
+    Json(limits): Json<AutoReplyLimits>,
+) -> Response {
+    if !limits.is_valid() {
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::InvalidAutoReply,
+        );
+    }
+    match state.radios.set_auto_reply_limits(&limits).await {
+        Ok(()) => Json(limits).into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
+/// How busy the channels are
+///
+/// How busy each radio hears its channel, as it last said, if lately: what
+/// the limit on a busy channel goes by.
+#[utoipa::path(
+    get,
+    path = "/auto-replies/busy",
+    tag = "auto-replies",
+    responses(
+        (status = 200, description = "Each radio's, in their order", body = Vec<ChannelBusy>),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+    )
+)]
+async fn busy(State(state): State<AppState>) -> Response {
+    match state.radios.channels_busy().await {
+        Ok(busy) => Json(busy).into_response(),
+        Err(err) => failed(&err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::web::tests::{ask, get, json, radios};
     use crate::web::{AppState, Auth, router};
     use axum::body::Body;
     use axum::http::{Request, StatusCode, header};
-    use meshctl_api::{AutoReply, AutoReplyPlace, RadioKind, RadioSettings};
+    use meshctl_api::{
+        AutoReply, AutoReplyLimits, AutoReplyPlace, ChannelBusy, RadioKind, RadioSettings,
+    };
 
     fn send(method: &str, uri: &str, body: String) -> Request<Body> {
         Request::builder()
@@ -162,6 +236,33 @@ mod tests {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(body))
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn their_limits_are_kept() {
+        let app = router(AppState {
+            auth: Auth::new(None),
+            radios: radios().await,
+        });
+        let (_, body) = ask(app.clone(), get("/api/v1/auto-replies/limits")).await;
+        assert_eq!(json::<AutoReplyLimits>(&body), AutoReplyLimits::default());
+        let uri = "/api/v1/auto-replies/limits";
+        let (status, _) = ask(
+            app.clone(),
+            send("PUT", uri, r#"{"busy_channel":null}"#.into()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, body) = ask(app.clone(), get(uri)).await;
+        assert_eq!(json::<AutoReplyLimits>(&body).busy_channel, None);
+        for not in [r#"{"busy_channel":0}"#, r#"{"busy_channel":101}"#] {
+            let (status, _) = ask(app.clone(), send("PUT", uri, not.into())).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{not}");
+        }
+        // Nothing said yet: none known.
+        let (_, body) = ask(app, get("/api/v1/auto-replies/busy")).await;
+        let busy: Vec<ChannelBusy> = json(&body);
+        assert!(busy.iter().all(|b| b.percent.is_none()) && !busy.is_empty());
     }
 
     #[tokio::test]

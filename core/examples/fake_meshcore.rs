@@ -19,6 +19,8 @@
 //! - `react <slot> <emoji>`: someone reacts to the latest said on a channel,
 //!   as MeshCore One does; `dmreact <emoji>`, Ana to the latest between her
 //!   and the radio.
+//! - `busy <percent>`: the channel is that much busier than it was, as
+//!   the radio's airtime says, up to 95%; `busy 0`, as it was.
 //! - `echoes off`: no repeater is heard passing on what the radio sends on a
 //!   channel, as when none heard it; `echoes on`, two are again.
 //! - `post <text>`: someone posts in Sala Coruña, a room: Ana, or someone
@@ -146,6 +148,9 @@ struct Radio {
     clock_offset: i64,
     /// When it started, for its uptime.
     started: u32,
+    /// How busy it hears the channel besides, in percent, from when, and
+    /// the seconds received that way so far.
+    busy: (u32, u32, u32),
     contacts: Vec<Contact>,
     /// Each slot's name and secret, both empty when unset.
     channels: Vec<(String, [u8; 16])>,
@@ -285,6 +290,7 @@ impl Radio {
             logins: std::collections::HashMap::new(),
             clock_offset: -3600,
             started: at,
+            busy: (0, at, 0),
             contacts: vec![
                 contact(0x41, 1, 0, "Ana", 43_365_000, -8_405_000),
                 contact(0x52, 2, 1, "Repetidor Monte", 43_340_000, -8_380_000),
@@ -1363,7 +1369,7 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                     frame.push((-70 - i8::try_from(random(30)).unwrap_or(0)).cast_unsigned());
                     frame.push(i8::try_from(random(40)).unwrap_or(0).cast_unsigned());
                     frame.extend((up / 400).to_le_bytes());
-                    frame.extend((up / 25).to_le_bytes());
+                    frame.extend((up / 25 + busy_secs(&mut radio)).to_le_bytes());
                     vec![frame]
                 }
                 Some(2) => {
@@ -1534,6 +1540,15 @@ async fn serve(
 }
 
 /// Does what a line of the control port says; what to answer it.
+/// The seconds received on a channel made busy with `busy`, so far.
+fn busy_secs(radio: &mut Radio) -> u32 {
+    let at = now();
+    let (percent, since, banked) = radio.busy;
+    let banked = banked + (at - since) * percent / 100;
+    radio.busy = (percent, at, banked);
+    banked
+}
+
 fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) -> String {
     let mut words = line.trim().splitn(3, ' ');
     let mut radio = radio.lock().unwrap_or_else(|e| e.into_inner());
@@ -1625,6 +1640,14 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
         Some("answers") => {
             radio.answers = words.next() != Some("off");
             format!("answers {}", if radio.answers { "given" } else { "none" })
+        }
+        Some("busy") => {
+            let Some(percent) = words.next().and_then(|w| w.parse::<u32>().ok()) else {
+                return "usage: busy <percent>".into();
+            };
+            busy_secs(&mut radio);
+            radio.busy.0 = percent.min(95);
+            format!("channel {}% busier", radio.busy.0)
         }
         Some("echoes") => {
             radio.echoes = words.next() != Some("off");
