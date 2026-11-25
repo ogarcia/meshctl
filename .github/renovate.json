@@ -1,0 +1,64 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", ":semanticCommits"],
+  "labels": ["dependencies"],
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "ignorePaths": ["Dockerfile"],
+  "packageRules": [
+    {
+      "description": "Respect the version ranges written in Cargo.toml: update Cargo.lock only, leaving e.g. `tokio = \"1\"` untouched. A major (out of range) still edits the manifest, since it must.",
+      "matchManagers": ["cargo"],
+      "rangeStrategy": "update-lockfile"
+    },
+    {
+      "description": "Batch routine crate updates into one weekly PR; majors stay separate.",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "rust crates (non-major)"
+    },
+    {
+      "description": "Tauri's crates and its CLI go together: the CLI that builds the Android app wants the crates' own minor.",
+      "matchPackageNames": ["/^tauri/"],
+      "groupName": "tauri"
+    },
+    {
+      "description": "The Android project's Gradle, plugins and libraries, together.",
+      "matchManagers": ["gradle", "gradle-wrapper"],
+      "groupName": "android (gradle)"
+    },
+    {
+      "description": "Group GitHub Actions bumps together.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Keep the trunk version pinned in versions.env and the Containerfile current; they must stay equal.",
+      "managerFilePatterns": ["/^versions\\.env$/", "/(^|/)Containerfile$/"],
+      "matchStrings": ["TRUNK_VERSION=\"?(?<currentValue>[0-9][0-9.]*)\"?"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "trunk-rs/trunk",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the Alpine release in versions.env and the Containerfile current, as major.minor; they must stay equal.",
+      "managerFilePatterns": ["/^versions\\.env$/", "/(^|/)Containerfile$/"],
+      "matchStrings": ["ALPINE_VERSION=\"?(?<currentValue>[0-9]+\\.[0-9]+)\"?"],
+      "datasourceTemplate": "docker",
+      "depNameTemplate": "alpine",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the Tauri CLI that builds the Android app, in versions.env, current.",
+      "managerFilePatterns": ["/^versions\\.env$/"],
+      "matchStrings": ["TAURI_CLI_VERSION=\"?(?<currentValue>[0-9][0-9.]*)\"?"],
+      "datasourceTemplate": "crate",
+      "depNameTemplate": "tauri-cli"
+    }
+  ]
+}
