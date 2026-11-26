@@ -886,6 +886,15 @@ pub async fn map_view(radio: RadioId) -> Result<Option<MapView>, Failure> {
 }
 
 /// Keeps where the map was left for a radio.
+/// Keeps how long ago a radio's nodes have to have been heard to be on its
+/// map: none for every node.
+pub async fn set_map_max_age(radio: RadioId, max_age: Option<u32>) -> Result<(), Failure> {
+    let request = with_token(Request::put(&url(&format!("/radios/{radio}/map-max-age"))))
+        .json(&meshctl_api::MapMaxAge { max_age })
+        .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 pub async fn save_map_view(radio: RadioId, view: &MapView) -> Result<(), Failure> {
     let request = with_token(Request::put(&url(&format!("/radios/{radio}/map-view"))))
         .json(view)

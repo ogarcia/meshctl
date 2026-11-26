@@ -385,6 +385,160 @@ pub fn placed(live: Live) -> usize {
         .with(|nodes| nodes.values().filter(|n| n.position.is_some()).count())
 }
 
+/// Whether a node is on the map: it says where it is, and was heard lately
+/// enough, as the preferences say; the radio's own, and one picked, always.
+fn heard_lately(
+    node: &Node,
+    now: u32,
+    local: Option<u32>,
+    picked: Option<u32>,
+    max_age: Option<u32>,
+) -> bool {
+    node.position.is_some()
+        && (local == Some(node.num)
+            || picked == Some(node.num)
+            || max_age.is_none_or(|age| {
+                node.last_heard
+                    .is_some_and(|at| now.saturating_sub(at) <= age)
+            }))
+}
+
+/// How long ago the selected radio's nodes have to have been heard to be
+/// on its map: none for every node.
+fn max_age_of(live: Live) -> Option<u32> {
+    live.selected_radio().and_then(|r| r.map_max_age)
+}
+
+/// How many of the selected radio's nodes are on the map.
+pub fn shown(live: Live) -> usize {
+    let now = live.now.get();
+    let local = live
+        .status
+        .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+    let max_age = max_age_of(live);
+    live.nodes.with(|nodes| {
+        nodes
+            .values()
+            .filter(|n| heard_lately(n, now, local, None, max_age))
+            .count()
+    })
+}
+
+/// How long ago nodes heard are on the map, as offered: none for all.
+const MAX_AGES: [Option<u32>; 6] = [
+    None,
+    Some(28_800),
+    Some(86_400),
+    Some(259_200),
+    Some(604_800),
+    Some(2_592_000),
+];
+
+/// How long ago, in short, as on the map.
+fn max_age_short(
+    i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
+    age: Option<u32>,
+) -> &'static str {
+    match age {
+        None => t_string!(i18n, map_age_all),
+        Some(28_800) => "8 h",
+        Some(86_400) => "24 h",
+        Some(259_200) => "3 d",
+        Some(604_800) => "7 d",
+        Some(_) => "30 d",
+    }
+}
+
+/// How long ago nodes heard are on the map, under the zoom's buttons: a
+/// clock, in the accent while some are left out, that opens to the right
+/// to pick another, and closes again once picked.
+#[component]
+fn AgeButton() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let open = RwSignal::new(false);
+    let closing = window_event_listener(leptos::ev::click, move |_| open.set(false));
+    on_cleanup(move || closing.remove());
+    let current = move || max_age_of(live);
+    let said = move || {
+        format!(
+            "{}: {}",
+            t_string!(i18n, prefs_map_age),
+            max_age_label(i18n, current())
+        )
+    };
+    // Kept with the radio: shown so at once, and said to every client.
+    let pick = move |age: Option<u32>| {
+        open.set(false);
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        if current() == age {
+            return;
+        }
+        live.radios.update(|radios| {
+            if let Some(r) = radios.iter_mut().flatten().find(|r| r.id == radio) {
+                r.map_max_age = age;
+            }
+        });
+        spawn_local(async move {
+            let _ = crate::daemon::set_map_max_age(radio, age).await;
+        });
+    };
+    view! {
+        <div class="map-age" class:open=move || open.get() on:click=|ev| ev.stop_propagation()>
+            <button
+                type="button"
+                class="map-age-toggle"
+                class:on=move || current().is_some()
+                aria-expanded=move || open.get().to_string()
+                title=said
+                aria-label=said
+                inner_html=CLOCK
+                on:click=move |_| open.update(|o| *o = !*o)
+            ></button>
+            <Show when=move || open.get()>
+                <div class="map-age-options" role="radiogroup">
+                    {MAX_AGES
+                        .iter()
+                        .map(|&age| {
+                            view! {
+                                <button
+                                    type="button"
+                                    role="radio"
+                                    class:on=move || current() == age
+                                    aria-checked=move || (current() == age).to_string()
+                                    title=move || max_age_label(i18n, age)
+                                    on:click=move |_| pick(age)
+                                >
+                                    {move || max_age_short(i18n, age)}
+                                </button>
+                            }
+                        })
+                        .collect_view()}
+                </div>
+            </Show>
+        </div>
+    }
+}
+
+const CLOCK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/clock.svg");
+
+/// How long ago, in words, as the preferences offer it.
+fn max_age_label(
+    i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
+    age: Option<u32>,
+) -> &'static str {
+    match age {
+        None => t_string!(i18n, map_age_all),
+        Some(28_800) => t_string!(i18n, map_age_hours),
+        Some(86_400) => t_string!(i18n, map_age_day),
+        Some(259_200) => t_string!(i18n, map_age_days),
+        Some(604_800) => t_string!(i18n, map_age_week),
+        Some(_) => t_string!(i18n, map_age_month),
+    }
+}
+
 #[component]
 pub fn MapView() -> impl IntoView {
     let i18n = use_i18n();
@@ -476,7 +630,7 @@ pub fn MapView() -> impl IntoView {
         if element.get().is_none() {
             return;
         }
-        live.preferences.track();
+        let max_age = max_age_of(live);
         let now = live.now.get();
         let local = live
             .status
@@ -529,6 +683,7 @@ pub fn MapView() -> impl IntoView {
         let mut markers: Vec<Marker> = live.nodes.with(|nodes| {
             nodes
                 .values()
+                .filter(|n| heard_lately(n, now, local, picked, max_age))
                 .filter_map(|n| {
                     let position = n.position.as_ref()?;
                     Some(Marker {
@@ -715,6 +870,7 @@ pub fn MapView() -> impl IntoView {
             <div class="map-offline">
                 <crate::offline::OfflineBanner />
             </div>
+            <AgeButton />
             <Show when=move || placed(live) == 0 && crate::offline::offline(live).is_none()>
                 <p class="map-empty card dim">{t!(i18n, map_empty)}</p>
             </Show>
@@ -981,6 +1137,66 @@ mod tests {
         assert_eq!(heard(&node, &words), "1 hop");
         node.via_mqtt = true;
         assert_eq!(heard(&node, &words), "MQTT");
+    }
+
+    #[test]
+    fn the_map_shows_those_heard_lately_and_the_radios_own() {
+        let node = |num: u32, heard: Option<u32>| Node {
+            num,
+            id: format!("!{num:08x}"),
+            long_name: None,
+            short_name: None,
+            hw_model: None,
+            role: None,
+            public_key: None,
+            licensed: false,
+            unmessagable: false,
+            position: Some(meshctl_api::Position {
+                latitude: 43.36,
+                longitude: -8.41,
+                altitude: None,
+                radius: None,
+                source: None,
+            }),
+            last_heard: heard,
+            snr: None,
+            rssi: None,
+            hops_away: None,
+            via_mqtt: false,
+            favorite: false,
+            battery_level: None,
+            voltage: None,
+            channel_utilization: None,
+            on_radio: None,
+            status: None,
+            status_at: None,
+        };
+        let now = 100_000;
+        let hours = Some(28_800);
+        // Every one, if there is no limit.
+        assert!(heard_lately(&node(2, None), now, Some(1), None, None));
+        assert!(heard_lately(
+            &node(2, Some(now - 10_000)),
+            now,
+            Some(1),
+            None,
+            hours
+        ));
+        assert!(!heard_lately(
+            &node(2, Some(now - 30_000)),
+            now,
+            Some(1),
+            None,
+            hours
+        ));
+        assert!(!heard_lately(&node(2, None), now, Some(1), None, hours));
+        // The radio's own, and the one picked, whenever heard.
+        assert!(heard_lately(&node(1, None), now, Some(1), None, hours));
+        assert!(heard_lately(&node(2, None), now, Some(1), Some(2), hours));
+        // Not one that says not where it is.
+        let mut nowhere = node(2, Some(now));
+        nowhere.position = None;
+        assert!(!heard_lately(&nowhere, now, Some(1), None, None));
     }
 
     #[test]

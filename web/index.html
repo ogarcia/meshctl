@@ -2452,6 +2452,35 @@
        * there is room, and on a narrow map out to its right edge, with no
        * room wasted there.
        */
+      /* How long ago nodes heard are on the map: a clock under the zoom's
+         buttons, raised as they are, opening to the right. */
+      .map-age {
+        position: absolute;
+        top: 138px;
+        left: 10px;
+        z-index: 500;
+        display: flex;
+        border: 1px solid var(--mc-border);
+        border-radius: 10px;
+        background: var(--mc-surface);
+        box-shadow: var(--mc-shadow);
+        overflow: hidden;
+      }
+      .map-age button {
+        min-height: 34px;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        color: var(--mc-text);
+      }
+      .map-age button:hover { background: var(--mc-raised); }
+      .map-age-toggle { display: flex; align-items: center; justify-content: center; width: 34px; padding: 0; }
+      .map-age-toggle svg { width: 18px; height: 18px; }
+      /* Some left out: said by the clock's colour. */
+      .map-age-toggle.on { color: var(--mc-primary); }
+      .map-age-options { display: flex; border-left: 1px solid var(--mc-border); }
+      .map-age-options button { padding: 0 10px; font-size: 12px; white-space: nowrap; }
+      .map-age-options button.on { color: var(--mc-primary); font-weight: 700; }
       .map-offline {
         position: absolute;
         top: 12px;

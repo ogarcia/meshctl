@@ -15,7 +15,7 @@ use crate::chat::{ChatView, peer_of, short_name, title};
 use crate::daemon::{self, Events, Failure};
 use crate::empty::EmptyState;
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
-use crate::map::{MapView, placed};
+use crate::map::MapView;
 use crate::mesh::{MESSAGE_OFF, MeshView, STAR, ago, avatar_class, model, reach_words};
 use crate::node::NodeView;
 use crate::packets::{KEPT, PacketsView};
@@ -1899,7 +1899,7 @@ fn RadioSidebar() -> impl IntoView {
         let (label, count) = match page {
             Page::Map => (
                 t!(i18n, page_map).into_any(),
-                Some(Signal::derive(move || placed(live))),
+                Some(Signal::derive(move || crate::map::shown(live))),
             ),
             Page::Nodes => (
                 t!(i18n, nodes_title).into_any(),
