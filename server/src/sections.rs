@@ -528,6 +528,27 @@ pub fn sections(settings: &Settings) -> Vec<SettingsSection> {
     sections
 }
 
+/// The sections a node may be asked for, by their ids, as the protobufs
+/// list them: every part of the configuration and every module, but those
+/// left out here and those it says it has not.
+pub fn offered(settings: &Settings) -> Vec<String> {
+    let names = |name: &str| {
+        message(name)
+            .fields()
+            .map(|f| f.name().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let config = names("meshtastic.Config")
+        .into_iter()
+        .filter(|n| !LEFT_OUT.contains(&n.as_str()) && has(settings, n))
+        .map(|n| format!("config.{n}"));
+    let modules = names("meshtastic.ModuleConfig")
+        .into_iter()
+        .filter(|n| !MODULES_LEFT_OUT.contains(&n.as_str()) && has(settings, n))
+        .map(|n| format!("module.{n}"));
+    config.chain(modules).collect()
+}
+
 /// A secret of a section offered, for the one who asks for it: a text field
 /// the protobufs mark sensitive, by its dotted path. `None` for any other.
 pub fn secret(settings: &Settings, section: &str, path: &str) -> Option<String> {

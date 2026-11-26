@@ -279,6 +279,13 @@ pub enum SettingsFailure {
     Unsupported,
     /// What meshctl keeps could not be read.
     Failed(anyhow::Error),
+    /// A node the radio does not know of.
+    UnknownNode,
+    /// A node that does not take the radio's key as an admin key.
+    NotAdmin,
+    /// The node, or the radio on its way, would not, and said why, as the
+    /// protobufs name it.
+    Refused(String),
 }
 
 /// The routes a traceroute answer tells, each from its first node to its last:
@@ -1108,6 +1115,9 @@ pub struct Radios {
     /// How busy each radio last said it hears its channel, in percent, and
     /// when.
     busy: Arc<Mutex<HashMap<RadioId, (f32, std::time::Instant)>>>,
+    /// What other nodes answered each radio of their settings, asked as
+    /// their admin. In memory only, secrets and all, as the radio's own.
+    remote: Arc<Mutex<HashMap<(RadioId, u32), meshctl_core::mesh::Settings>>>,
     /// The app it runs within, if any.
     host: Arc<std::sync::OnceLock<Arc<dyn crate::Host>>>,
     /// The conversation each client of the event stream shows, and is seen,
@@ -1128,6 +1138,7 @@ impl Radios {
             logging_in: Arc::default(),
             login_failed: Arc::default(),
             busy: Arc::default(),
+            remote: Arc::default(),
             host: Arc::default(),
             viewing: Arc::default(),
             changes: broadcast::channel(EVENT_BACKLOG).0,
@@ -3275,6 +3286,129 @@ impl Radios {
 
     /// The rest of a radio's configuration and its modules, section by
     /// section; like its settings, only while it is connected.
+    /// The sections of a node's settings it can be asked for over the mesh,
+    /// as its admin, by their ids: what it says it has, asked of it, which
+    /// tells too whether it takes the radio's key as an admin key at all.
+    pub async fn node_sections(
+        &self,
+        id: RadioId,
+        node: u32,
+    ) -> Result<Vec<String>, SettingsFailure> {
+        let mesh = self.configurable(id)?;
+        let request = meshctl_core::mesh::settings_request("metadata").expect("a request");
+        let answer = mesh
+            .ask_node(node, request)
+            .await
+            .map_err(node_admin_failure)?;
+        let mut remote = self.remote.lock().unwrap_or_else(|e| e.into_inner());
+        let settings = remote.entry((id, node)).or_default();
+        settings.keep_answer(&answer);
+        Ok(crate::sections::offered(settings))
+    }
+
+    /// One section of a node's settings, asked of it over the mesh as its
+    /// admin, as the radio's own are shown.
+    pub async fn node_section(
+        &self,
+        id: RadioId,
+        node: u32,
+        section: &str,
+    ) -> Result<SettingsSection, SettingsFailure> {
+        let mesh = self.configurable(id)?;
+        let offered = crate::sections::offered(&meshctl_core::mesh::Settings::default());
+        let request = offered
+            .iter()
+            .any(|s| s == section)
+            .then(|| meshctl_core::mesh::settings_request(section))
+            .flatten()
+            .ok_or_else(|| SettingsFailure::Invalid(section.to_owned()))?;
+        let answer = mesh
+            .ask_node(node, request)
+            .await
+            .map_err(node_admin_failure)?;
+        let mut remote = self.remote.lock().unwrap_or_else(|e| e.into_inner());
+        let settings = remote.entry((id, node)).or_default();
+        if !settings.keep_answer(&answer) {
+            return Err(SettingsFailure::NoAnswer);
+        }
+        crate::sections::sections(settings)
+            .into_iter()
+            .find(|s| s.id == section)
+            .ok_or(SettingsFailure::NoAnswer)
+    }
+
+    /// The keys a radio takes admin requests from over the mesh.
+    pub fn admin_keys(&self, id: RadioId) -> Result<meshctl_api::AdminKeys, SettingsFailure> {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD as BASE64;
+        self.configurable(id)?.read(|state| {
+            let security = state
+                .settings
+                .config
+                .security
+                .as_ref()
+                .ok_or(SettingsFailure::NotConnected)?;
+            Ok(meshctl_api::AdminKeys {
+                keys: security
+                    .admin_key
+                    .iter()
+                    .map(|k| BASE64.encode(k))
+                    .collect(),
+                managed: security.is_managed,
+            })
+        })
+    }
+
+    /// Sets the keys a radio takes admin requests from: the rest of its
+    /// security as it has it, its own keys and managed mode untouched. Up
+    /// to three, of 32 bytes each, once each; and, a managed radio, at
+    /// least one, or nothing could change it but a cable.
+    pub async fn change_admin_keys(
+        &self,
+        id: RadioId,
+        keys: &[String],
+    ) -> Result<SettingsApplied, SettingsFailure> {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD as BASE64;
+        let mesh = self.configurable(id)?;
+        let mut decoded: Vec<Vec<u8>> = Vec::with_capacity(keys.len());
+        for key in keys {
+            let bytes = BASE64
+                .decode(key.trim())
+                .ok()
+                .filter(|b| b.len() == 32)
+                .ok_or_else(|| SettingsFailure::Invalid("admin_key".into()))?;
+            if decoded.contains(&bytes) {
+                return Err(SettingsFailure::Invalid("admin_key".into()));
+            }
+            decoded.push(bytes);
+        }
+        if decoded.len() > 3 {
+            return Err(SettingsFailure::Invalid("admin_key".into()));
+        }
+        let security = mesh
+            .read(|state| state.settings.config.security.clone())
+            .ok_or(SettingsFailure::NotConnected)?;
+        if security.is_managed && decoded.is_empty() {
+            return Err(SettingsFailure::Invalid("admin_key".into()));
+        }
+        let security = meshctl_proto::meshtastic::config::SecurityConfig {
+            admin_key: decoded,
+            ..security
+        };
+        let change = meshctl_core::radio::SettingsChange {
+            configs: vec![meshctl_proto::meshtastic::Config {
+                payload_variant: Some(meshctl_proto::meshtastic::config::PayloadVariant::Security(
+                    security,
+                )),
+            }],
+            ..Default::default()
+        };
+        mesh.change_settings(change).await.map_err(admin_failure)?;
+        tracing::info!(radio = id, keys = keys.len(), "admin keys changed");
+        Ok(SettingsApplied { reboots: true })
+    }
+
     pub fn sections(&self, id: RadioId) -> Result<Vec<SettingsSection>, SettingsFailure> {
         Ok(self
             .configurable(id)?
@@ -4084,6 +4218,24 @@ fn meshcore_failure(error: AdminError) -> SettingsFailure {
         AdminError::Refused(why) => SettingsFailure::Invalid(why),
         AdminError::UnknownNode => SettingsFailure::Invalid("node".into()),
         other => admin_failure(other),
+    }
+}
+
+/// Why a node would not tell its settings: refused as its admin, or not
+/// reached.
+fn node_admin_failure(error: AdminError) -> SettingsFailure {
+    match error {
+        AdminError::NotConnected => SettingsFailure::NotConnected,
+        AdminError::Unsupported => SettingsFailure::Unsupported,
+        AdminError::UnknownNode | AdminError::NoPath => SettingsFailure::UnknownNode,
+        AdminError::OwnNode => SettingsFailure::Invalid("the radio's own node".into()),
+        AdminError::NoAnswer => SettingsFailure::NoAnswer,
+        AdminError::Refused(reason) => match reason.as_str() {
+            "ADMIN_PUBLIC_KEY_UNAUTHORIZED" | "NOT_AUTHORIZED" => SettingsFailure::NotAdmin,
+            // Sent, tried, and not heard back.
+            "MAX_RETRANSMIT" | "NO_RESPONSE" | "TIMEOUT" => SettingsFailure::NoAnswer,
+            _ => SettingsFailure::Refused(reason),
+        },
     }
 }
 

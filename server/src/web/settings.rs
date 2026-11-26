@@ -11,8 +11,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    ChannelHistory, ChannelOrder, Error, ErrorCode, NodeSettings, NodeSettingsChange, RadioId,
-    SectionChange, SettingsApplied, SettingsSection,
+    AdminKeys, ChannelHistory, ChannelOrder, Error, ErrorCode, NodeSettings, NodeSettingsChange,
+    RadioId, SectionChange, SettingsApplied, SettingsSection,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -23,6 +23,9 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(show, change))
         .routes(routes!(sections))
+        .routes(routes!(admin_keys, change_admin_keys))
+        .routes(routes!(node_sections))
+        .routes(routes!(node_section))
         .routes(routes!(change_section))
         .routes(routes!(reorder_channels))
         .routes(routes!(remove_channel))
@@ -54,6 +57,12 @@ pub(super) fn refused(failure: SettingsFailure) -> Response {
         }
         SettingsFailure::NoAnswer => {
             error(StatusCode::GATEWAY_TIMEOUT, ErrorCode::RadioDidNotAnswer)
+        }
+        SettingsFailure::UnknownNode => error(StatusCode::NOT_FOUND, ErrorCode::InvalidNode),
+        SettingsFailure::NotAdmin => error(StatusCode::FORBIDDEN, ErrorCode::NotAdmin),
+        SettingsFailure::Refused(reason) => {
+            tracing::debug!(%reason, "refused");
+            error(StatusCode::BAD_GATEWAY, ErrorCode::RadioRefused)
         }
         SettingsFailure::Failed(err) => {
             tracing::error!(error = format_args!("{err:#}"), "database");
@@ -151,6 +160,131 @@ async fn change(
 async fn sections(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
     match state.radios.sections(radio) {
         Ok(sections) => Json(sections).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Admin keys
+///
+/// The public keys the radio takes admin requests from, over the mesh and
+/// sealed to it, which let their radios read and change its settings: up
+/// to three. And whether it is managed, changed only so.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/admin-keys",
+    tag = "settings",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    responses(
+        (status = 200, description = "Its admin keys", body = AdminKeys),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+    )
+)]
+async fn admin_keys(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
+    match state.radios.admin_keys(radio) {
+        Ok(keys) => Json(keys).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Change admin keys
+///
+/// Sets the radio's admin keys, all of them, and leaves the rest of its
+/// security as it is: its own keys, and whether it is managed. Each in
+/// base64, of 32 bytes, once; none at all for a managed radio, which
+/// nothing but a cable could change then. The radio reboots.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/admin-keys",
+    tag = "settings",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = AdminKeys,
+    responses(
+        (status = 202, description = "Sent to the radio", body = SettingsApplied),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "More than three keys, one not of 32 bytes or twice, or none for a managed radio: `invalid_settings`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn change_admin_keys(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(change): Json<AdminKeys>,
+) -> Response {
+    match state.radios.change_admin_keys(radio, &change.keys).await {
+        Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// A node's sections
+///
+/// The sections of another node's settings that can be read from it over
+/// the mesh, by their ids, as its admin: the radio's public key has to be
+/// one of the node's admin keys. Asks the node what it has, which takes a
+/// few seconds, up to a minute, and tells whether it takes the radio's key.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/nodes/{node}/sections",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = u32, Path, description = "The node's number"),
+    ),
+    responses(
+        (status = 200, description = "The sections' ids", body = Vec<String>),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 403, description = "The node does not take the radio's key as an admin key: `not_admin`", body = Error),
+        (status = 404, description = "There is no such radio, or node: `invalid_node`", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 502, description = "The node, or the radio, would not: `radio_refused`", body = Error),
+        (status = 504, description = "The node did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn node_sections(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, u32)>,
+) -> Response {
+    match state.radios.node_sections(radio, node).await {
+        Ok(sections) => Json(sections).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// A node's section
+///
+/// One section of another node's settings, read from it over the mesh as
+/// its admin, as the radio's own are shown. Each is asked of it as it is
+/// wanted: a few seconds, up to a minute.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/nodes/{node}/sections/{section}",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = u32, Path, description = "The node's number"),
+        ("section" = String, Path, description = "The section's id", example = "module.telemetry"),
+    ),
+    responses(
+        (status = 200, description = "The section", body = SettingsSection),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 403, description = "The node does not take the radio's key as an admin key: `not_admin`", body = Error),
+        (status = 404, description = "There is no such radio, or node: `invalid_node`", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "No such section: `invalid_settings`", body = Error),
+        (status = 502, description = "The node, or the radio, would not: `radio_refused`", body = Error),
+        (status = 504, description = "The node did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn node_section(
+    State(state): State<AppState>,
+    Path((radio, node, section)): Path<(RadioId, u32, String)>,
+) -> Response {
+    match state.radios.node_section(radio, node, &section).await {
+        Ok(section) => Json(section).into_response(),
         Err(failure) => refused(failure),
     }
 }

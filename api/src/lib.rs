@@ -106,7 +106,8 @@ pub enum ErrorCode {
     /// it, as heard before.
     NotOnRadio,
     /// What only a node's admin may do: the radio is logged in to it as
-    /// less.
+    /// less, on MeshCore; on Meshtastic, the node does not take the radio's
+    /// key as one of its admin keys.
     NotAdmin,
     /// Not an automatic reply: no name, no trigger, nothing to answer with,
     /// a text of more than 200 bytes, or a place on a radio, channel or
@@ -2453,6 +2454,22 @@ pub struct SettingsApplied {
     /// Whether the radio reboots to apply them, and so drops its link for a
     /// moment.
     pub reboots: bool,
+}
+
+/// The public keys a Meshtastic radio takes admin requests from, over the
+/// mesh, sealed to it: up to three, each in base64 as the apps show it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct AdminKeys {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(example = json!(["DewQBQ3sEAUN7BAFDewQBQ3sEAUN7BAFDewQBQ3sEAU="]))
+    )]
+    pub keys: Vec<String>,
+    /// Whether the radio is managed: changed only by those keys, not by
+    /// its own apps. meshctl does not change it; it takes at least one key.
+    #[serde(default)]
+    pub managed: bool,
 }
 
 /// One radio's hearing of a packet, in the order they are kept.
