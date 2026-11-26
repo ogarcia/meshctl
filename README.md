@@ -17,7 +17,7 @@
 [![Desktop app](https://img.shields.io/badge/desktop-Windows%20%C2%B7%20Flatpak-4a5568?style=for-the-badge)](#installing)
 [![Container image](https://img.shields.io/badge/container-ghcr.io-2496ed?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/ogarcia/meshctl/pkgs/container/meshctl)
 
-[Website](https://meshctl.ogarcia.me/) · [Installing](#installing) · [Running](#running) · [Access](#access) · [Changelog](CHANGELOG.md)
+[Website](https://meshctl.ogarcia.me/) · [Installing](#installing) · [Running](#running) · [Access](#access) · [Message marks](#message-marks) · [Changelog](CHANGELOG.md)
 
 <img src="https://meshctl.ogarcia.me/shots/en-map.webp" alt="meshctl's map: the mesh around A Coruña, its nodes coloured by how many hops away they are, beside the radio's pages and channels" width="860">
 
@@ -230,6 +230,19 @@ location / {
 ```
 
 meshctl warns at startup when it listens beyond this machine without a token.
+
+## Message marks
+
+Each message you send carries a mark that says how far it went, the same on
+Meshtastic and MeshCore; holding the pointer over it says it in words.
+
+| Mark | What it means |
+|------|---------------|
+| A clock | Not in the radio yet. Only on MeshCore: a Meshtastic radio has it at once. |
+| One grey tick | Sent, with nobody known to have heard it. On a Meshtastic direct message, it may also be on its way: a node passed it on, and the one it was sent to has not confirmed it yet. If that confirmation never comes, it stays so for good: it went out and was passed on, but nobody said it arrived. |
+| Two blue ticks | Got. On a channel, another node was heard passing it on, as far as anyone can tell; to a node, that node said it received it. |
+| A crossed antenna | Nobody heard it, after the radio's tries: it can be sent again. |
+| A red alert | It failed otherwise; the mark says why. |
 
 ## Building
 
