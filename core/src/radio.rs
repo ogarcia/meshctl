@@ -185,6 +185,23 @@ pub enum AdminError {
     Refused(String),
 }
 
+/// The admin messages a change of settings takes, in their order: within
+/// one edit, so that the radio saves them, and reboots, once.
+fn steps(change: SettingsChange) -> Vec<admin_message::PayloadVariant> {
+    use admin_message::PayloadVariant as A;
+    let mut steps = vec![A::BeginEditSettings(true)];
+    steps.extend(change.owner.map(A::SetOwner));
+    steps.extend(change.configs.into_iter().map(A::SetConfig));
+    steps.extend(change.module_configs.into_iter().map(A::SetModuleConfig));
+    steps.extend(change.channels.into_iter().map(A::SetChannel));
+    steps.extend(change.fixed_position.map(|fixed| match fixed {
+        FixedPosition::Set(position) => A::SetFixedPosition(position),
+        FixedPosition::Remove => A::RemoveFixedPosition(true),
+    }));
+    steps.push(A::CommitEditSettings(true));
+    steps
+}
+
 /// How long the radio has to answer an admin request.
 const ADMIN_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -459,19 +476,7 @@ impl Mesh {
             return Err(AdminError::Unsupported);
         }
         let (me, passkey) = self.passkey().await?;
-
-        use admin_message::PayloadVariant as A;
-        let mut steps = vec![A::BeginEditSettings(true)];
-        steps.extend(change.owner.map(A::SetOwner));
-        steps.extend(change.configs.into_iter().map(A::SetConfig));
-        steps.extend(change.module_configs.into_iter().map(A::SetModuleConfig));
-        steps.extend(change.channels.into_iter().map(A::SetChannel));
-        steps.extend(change.fixed_position.map(|fixed| match fixed {
-            FixedPosition::Set(position) => A::SetFixedPosition(position),
-            FixedPosition::Remove => A::RemoveFixedPosition(true),
-        }));
-        steps.push(A::CommitEditSettings(true));
-        for step in steps {
+        for step in steps(change) {
             let (_, packet) = self.admin(me, step, passkey.clone())?;
             self.send_raw(packet)?;
         }
@@ -483,6 +488,50 @@ impl Mesh {
             let _ = mesh.resync();
         });
         Ok(())
+    }
+
+    /// Changes another node's settings over the mesh, as its admin, all at
+    /// once as the radio's own are: sealed to it, with the passkey it gives
+    /// out when asked who it is, each step waited for until the node says
+    /// it has it. It saves them, and reboots if any of them needs it.
+    pub async fn change_node(&self, to: u32, change: SettingsChange) -> Result<(), AdminError> {
+        let passkey = self
+            .ask_node(to, admin_message::PayloadVariant::GetOwnerRequest(true))
+            .await?
+            .session_passkey;
+        for step in steps(change) {
+            self.delivered(to, step, passkey.clone()).await?;
+        }
+        Ok(())
+    }
+
+    /// Sends an admin message to another node, sealed to it, and waits until
+    /// the node itself acknowledges it: a relay heard passing it on is not
+    /// enough. Or why not.
+    async fn delivered(
+        &self,
+        to: u32,
+        variant: admin_message::PayloadVariant,
+        passkey: Vec<u8>,
+    ) -> Result<(), AdminError> {
+        let (id, packet) = self.admin_to(to, variant, passkey, true)?;
+        let mut events = self.subscribe();
+        self.send_raw(packet)?;
+        let outcome = tokio::time::timeout(REMOTE_ADMIN_TIMEOUT, async {
+            loop {
+                match events.recv().await {
+                    Ok(Event::Ack(ack)) if ack.packet_id == id => match ack.error {
+                        Some(reason) => return Some(Err(AdminError::Refused(reason))),
+                        None if ack.from == to => return Some(Ok(())),
+                        None => {}
+                    },
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        })
+        .await;
+        outcome.ok().flatten().unwrap_or(Err(AdminError::NoAnswer))
     }
 
     /// Marks a node a favourite of the radio, or no longer: the radio keeps
