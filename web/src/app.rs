@@ -2581,7 +2581,10 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         </button>
                     }
                 });
-                let chat = (page == Page::Node && !local()).then(|| {
+                // Written to only once a MeshCore radio keeps it.
+                let unkept = live.selected_kind() == Some(RadioKind::Meshcore)
+                    && known().is_some_and(|n| n.on_radio == Some(false));
+                let chat = (page == Page::Node && !local() && !unkept).then(|| {
                     if unmessagable() {
                         view! {
                             <button

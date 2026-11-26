@@ -2162,8 +2162,31 @@ fn Composer(peer: Peer) -> impl IntoView {
         live.status
             .with(|s| s.as_ref().is_some_and(|s| s.link == LinkState::Ready))
     };
+    // A MeshCore node the radio does not keep: not written to until added,
+    // as MeshCore sends only to its contacts.
+    let unkept = move || match peer {
+        Peer::Node { node } => {
+            live.selected_kind() == Some(RadioKind::Meshcore)
+                && live
+                    .nodes
+                    .with(|nodes| nodes.get(&node).is_some_and(|n| n.on_radio == Some(false)))
+        }
+        Peer::Channel { .. } => false,
+    };
+    let writable = move || connected() && !unkept();
+    let keeping = RwSignal::new(false);
+    let keep = move |_| {
+        let (Some(radio), Peer::Node { node }) = (live.selected.get_untracked(), peer) else {
+            return;
+        };
+        keeping.set(true);
+        spawn_local(async move {
+            let _ = daemon::keep_contact(radio, node).await;
+            let _ = keeping.try_set(false);
+        });
+    };
     let can_send = move || {
-        connected()
+        writable()
             && !busy.get()
             && !text.with(|t| t.trim().is_empty())
             && bytes() <= MAX_TEXT_BYTES
@@ -2454,6 +2477,26 @@ fn Composer(peer: Peer) -> impl IntoView {
     };
 
     view! {
+        // Not kept by the radio: said, and added from here.
+        {move || {
+            (connected() && unkept())
+                .then(|| {
+                    view! {
+                        <p class="unmessagable unkept">
+                            <span class="icon" inner_html=crate::mesh::MESSAGE_OFF></span>
+                            <span>{t!(i18n, chat_unkept)}</span>
+                            <button
+                                type="button"
+                                class="primary"
+                                disabled=move || keeping.get()
+                                on:click=keep
+                            >
+                                {t!(i18n, node_keep)}
+                            </button>
+                        </p>
+                    }
+                })
+        }}
         {move || {
             unmessagable()
                 .then(|| {
@@ -2474,7 +2517,7 @@ fn Composer(peer: Peer) -> impl IntoView {
                 class="field"
                 class:over=over
                 class:with-place=meshtastic
-                class:offline=move || !connected()
+                class:offline=move || !writable()
             >
                 <div class="backdrop" node_ref=backdrop aria-hidden="true">
                     {move || {
@@ -2491,12 +2534,14 @@ fn Composer(peer: Peer) -> impl IntoView {
                 <textarea
                     node_ref=field
                     rows="1"
-                    disabled=move || !connected()
+                    disabled=move || !writable()
                     placeholder=move || {
-                        if connected() {
-                            t_string!(i18n, chat_write)
-                        } else {
+                        if !connected() {
                             t_string!(i18n, chat_offline)
+                        } else if unkept() {
+                            t_string!(i18n, chat_unkept_short)
+                        } else {
+                            t_string!(i18n, chat_write)
                         }
                     }
                     prop:value=move || text.get()

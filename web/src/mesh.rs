@@ -48,12 +48,12 @@ enum Reach {
     All,
     /// Heard directly.
     Direct,
-    /// Heard through other nodes; on MeshCore, with a route through
-    /// repeaters.
+    /// Heard through other nodes.
     Mesh,
-    /// MeshCore's with no route known: what is sent to them floods.
-    NoRoute,
     Mqtt,
+    /// MeshCore's not among the radio's contacts: heard advertising and not
+    /// added, or had forget; to be added from their pages.
+    Unkept,
 }
 
 /// How a node sorts by a column, in its most useful order: names and
@@ -202,7 +202,7 @@ fn NodeList() -> impl IntoView {
                     Reach::All => true,
                     Reach::Direct => !node.via_mqtt && node.hops_away == Some(0),
                     Reach::Mesh => !node.via_mqtt && node.hops_away.is_some_and(|h| h > 0),
-                    Reach::NoRoute => node.hops_away.is_none(),
+                    Reach::Unkept => node.on_radio == Some(false),
                     Reach::Mqtt => node.via_mqtt,
                 })
                 .cloned()
@@ -241,27 +241,32 @@ fn NodeList() -> impl IntoView {
     // own filter, and all instead of the other's.
     let mqtt = Memo::new(move |_| is_meshtastic(live));
     Effect::new(move |_| {
-        let other = if mqtt.get() {
-            Reach::NoRoute
+        // Each radio's own: Meshtastic's how far, MeshCore's what it keeps.
+        let theirs = |r: Reach| matches!(r, Reach::Mesh | Reach::Mqtt);
+        let wrong = if mqtt.get() {
+            reach.get_untracked() == Reach::Unkept
         } else {
-            Reach::Mqtt
+            theirs(reach.get_untracked())
         };
-        if reach.get_untracked() == other {
+        if wrong {
             reach.set(Reach::All);
         }
     });
     let reaches = move || {
-        let mqtt = mqtt.get();
-        let last = if mqtt { Reach::Mqtt } else { Reach::NoRoute };
-        [Reach::All, Reach::Direct, Reach::Mesh, last]
-            .into_iter()
+        let shown: &[Reach] = if mqtt.get() {
+            &[Reach::All, Reach::Direct, Reach::Mesh, Reach::Mqtt]
+        } else {
+            &[Reach::All, Reach::Direct, Reach::Unkept]
+        };
+        shown
+            .iter()
+            .copied()
             .map(move |this| {
                 let label = move || match this {
                     Reach::All => t_string!(i18n, nodes_all).to_string(),
                     Reach::Direct => t_string!(i18n, nodes_direct).to_string(),
-                    Reach::Mesh if mqtt => t_string!(i18n, nodes_mesh).to_string(),
-                    Reach::Mesh => t_string!(i18n, nodes_repeaters).to_string(),
-                    Reach::NoRoute => t_string!(i18n, nodes_no_route).to_string(),
+                    Reach::Mesh => t_string!(i18n, nodes_mesh).to_string(),
+                    Reach::Unkept => t_string!(i18n, nodes_unkept).to_string(),
                     Reach::Mqtt => "MQTT".to_owned(),
                 };
                 (
@@ -602,6 +607,21 @@ fn NodeLine(node: Node, now: RwSignal<u32>) -> impl IntoView {
     // Not in the radio's list, as it said when last read in full: meshctl
     // alone keeps it.
     let kept = node.on_radio == Some(false);
+    // On MeshCore, such a node is added to the radio from its row too.
+    let keepable = kept && untrack(|| !is_meshtastic(live));
+    let keeping = RwSignal::new(false);
+    let keep = move |ev: leptos::ev::MouseEvent| {
+        ev.stop_propagation();
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        keeping.set(true);
+        leptos::task::spawn_local(async move {
+            let _ = crate::daemon::keep_contact(radio, num).await;
+            let _ = keeping.try_set(false);
+        });
+    };
+    let keep_label = move || t_string!(i18n, node_keep);
 
     view! {
         <tr class="node-row" on:click=move |_| live.open_node(num)>
@@ -651,17 +671,38 @@ fn NodeLine(node: Node, now: RwSignal<u32>) -> impl IntoView {
                 </span>
             </td>
             <td class="actions">
-                <button
-                    type="button"
-                    class="icon-button"
-                    title=move || t_string!(i18n, node_message)
-                    aria-label=move || t_string!(i18n, node_message)
-                    on:click=move |ev| {
-                        ev.stop_propagation();
-                        live.open_chat(Peer::Node { node: num });
-                    }
-                    inner_html=MESSAGE
-                ></button>
+                {keepable
+                    .then(|| {
+                        view! {
+                            <button
+                                type="button"
+                                class="icon-button keep"
+                                disabled=move || keeping.get()
+                                title=keep_label
+                                aria-label=keep_label
+                                on:click=keep
+                                inner_html=crate::links::ANTENNA_PLUS
+                            ></button>
+                        }
+                    })}
+                // Written to only once the radio keeps it, as MeshCore sends
+                // only to its contacts.
+                {(!keepable)
+                    .then(|| {
+                        view! {
+                            <button
+                                type="button"
+                                class="icon-button"
+                                title=move || t_string!(i18n, node_message)
+                                aria-label=move || t_string!(i18n, node_message)
+                                on:click=move |ev| {
+                                    ev.stop_propagation();
+                                    live.open_chat(Peer::Node { node: num });
+                                }
+                                inner_html=MESSAGE
+                            ></button>
+                        }
+                    })}
             </td>
         </tr>
     }

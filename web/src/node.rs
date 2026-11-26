@@ -495,16 +495,30 @@ fn Checks() -> impl IntoView {
                     .and_then(|n| n.role.as_deref())
                     .is_some_and(|role| matches!(role, "REPEATER" | "ROOM" | "SENSOR"))
             });
+        // Not among the radio's contacts: on MeshCore, heard advertising
+        // and not added, or had forget, and added from here; Meshtastic's
+        // come back on their own.
+        let kept = connected(live)
+            && live.nodes.with(|nodes| {
+                nodes
+                    .get(&asking.num)
+                    .is_some_and(|n| n.on_radio == Some(false))
+            });
+        let meshcore = live.selected_kind() == Some(RadioKind::Meshcore);
+        let keep = (kept && meshcore).then(|| {
+            view! {
+                <li class="info ask-row">
+                    <span>{t!(i18n, node_kept_meshcore)}</span>
+                    <KeepButton />
+                </li>
+            }
+        });
         let note = if companion {
             Some(t!(i18n, meshcore_companion).into_any())
         } else if !connected(live) {
             // Said over the page, as on every other.
             None
-        } else if live.nodes.with(|nodes| {
-            nodes
-                .get(&asking.num)
-                .is_some_and(|n| n.on_radio == Some(false))
-        }) {
+        } else if kept && !meshcore {
             Some(t!(i18n, node_kept_hint).into_any())
         } else if live
             .nodes
@@ -537,7 +551,7 @@ fn Checks() -> impl IntoView {
                 </li>
             }
         });
-        (note.is_some() || unknown.is_some() || !checks.is_empty()).then(|| {
+        (keep.is_some() || note.is_some() || unknown.is_some() || !checks.is_empty()).then(|| {
             let note = note.map(|note| view! { <li class="info">{note}</li> });
             let items = checks
                 .into_iter()
@@ -579,8 +593,43 @@ fn Checks() -> impl IntoView {
                     }
                 })
                 .collect_view();
-            view! { <ul class="node-checks">{unknown} {note} {items}</ul> }
+            view! { <ul class="node-checks">{keep} {unknown} {note} {items}</ul> }
         })
+    }
+}
+
+/// Has the radio keep the node as one of its contacts, which it says once
+/// done; or why not.
+#[component]
+fn KeepButton() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let asking = expect_context::<Asking>();
+    let busy = RwSignal::new(false);
+    let failed = RwSignal::new(false);
+    let keep = move |_| {
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        busy.set(true);
+        failed.set(false);
+        spawn_local(async move {
+            let kept = daemon::keep_contact(radio, asking.num).await;
+            let _ = failed.try_set(kept.is_err());
+            let _ = busy.try_set(false);
+        });
+    };
+    let label = move || {
+        if failed.get() {
+            t_string!(i18n, node_keep_failed)
+        } else {
+            t_string!(i18n, node_keep)
+        }
+    };
+    view! {
+        <button type="button" class="primary" disabled=move || busy.get() on:click=keep>
+            {label}
+        </button>
     }
 }
 

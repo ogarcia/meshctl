@@ -19,7 +19,7 @@ use meshctl_api::{ChannelKey, ErrorCode, LinkContents, LinkMode, RadioKind};
 /// A node added: Tabler's antenna, as the nodes' tab has it, with the plus
 /// its `*-plus` icons carry in a corner (`user-plus`'s), which none of its
 /// strokes reach.
-const ANTENNA_PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v8" /><path d="M16 4.5v7" /><path d="M12 5v16" /><path d="M8 5.5v5" /><path d="M4 6v4" /><path d="M20 8h-16" /><path d="M16 19h6" /><path d="M19 16v6" /></svg>"#;
+pub(crate) const ANTENNA_PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v8" /><path d="M16 4.5v7" /><path d="M12 5v16" /><path d="M8 5.5v5" /><path d="M4 6v4" /><path d="M20 8h-16" /><path d="M16 19h6" /><path d="M19 16v6" /></svg>"#;
 const LINK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/link.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
 const QRCODE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/qrcode.svg");

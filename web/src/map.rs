@@ -330,6 +330,9 @@ struct Marker {
     /// For the node picked, what its route button does: `show`, `hide`,
     /// `trace` or `tracing`; none when routes cannot be traced.
     route: Option<&'static str>,
+    /// Whether it can be written to: not a MeshCore node the radio does not
+    /// keep, as MeshCore sends only to its contacts.
+    writable: bool,
 }
 
 /// The node's traceroutes the map cares for: the newest, and the newest that
@@ -540,6 +543,7 @@ pub fn MapView() -> impl IntoView {
                         role: role(n.role.as_deref()),
                         selected: picked == Some(n.num),
                         route: route_button(n.num),
+                        writable: traceable || n.on_radio != Some(false),
                     })
                 })
                 .collect()

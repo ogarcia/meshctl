@@ -708,6 +708,14 @@ pub async fn reset_path(radio: RadioId, node: u32) -> Result<(), Failure> {
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Has a MeshCore radio keep a node it was heard of as one of its contacts.
+pub async fn keep_contact(radio: RadioId, node: u32) -> Result<(), Failure> {
+    let request = with_token(Request::post(&url(&format!(
+        "/radios/{radio}/nodes/{node}/keep"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// Has a MeshCore radio say who it is: nearby, or to the whole mesh.
 pub async fn advert(radio: RadioId, flood: bool) -> Result<(), Failure> {
     let request = with_token(Request::post(&url(&format!("/radios/{radio}/advert"))))

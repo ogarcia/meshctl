@@ -1585,6 +1585,10 @@
       .nodes-table .actions .icon-button { opacity: 0; }
       .node-row:hover .actions .icon-button,
       .nodes-table .actions .icon-button:focus-visible { opacity: 1; }
+      /* Adding one the radio does not keep: always in sight, in the accent. */
+      .nodes-table .actions { white-space: nowrap; }
+      .nodes-table .actions .icon-button { display: inline-flex; vertical-align: middle; }
+      .nodes-table .actions .icon-button.keep { opacity: 1; color: var(--mc-primary); }
       .flag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
       .flag-chips .choice { min-height: 32px; padding: 0 12px; font-size: 13px; }
       /*
@@ -1670,6 +1674,8 @@
         padding: 6px 8px 6px 14px;
         color: var(--mc-text);
       }
+      /* Its button whole, the words beside giving way. */
+      .node-checks li.ask-row > button { flex: none; white-space: nowrap; }
       .node-figures {
         display: flex;
         flex-wrap: wrap;
@@ -3260,6 +3266,9 @@
       }
       .unmessagable .icon { display: flex; flex: none; color: var(--mc-warn); }
       .unmessagable svg { width: 18px; height: 18px; }
+      /* Not kept by the radio: its button at the end, whole. */
+      .unmessagable.unkept > span:not(.icon) { flex: 1; }
+      .unmessagable.unkept > button { flex: none; white-space: nowrap; }
       /* A room the radio cannot post in, in place of the composer: why, and
          its password, in one line while they fit. */
       .room-bar {
@@ -4699,6 +4708,7 @@
         .sort-menu { display: flex; flex: none; }
         .nodes-table, .nodes-table tbody { display: block; }
         .nodes-table tr.node-row {
+          position: relative;
           display: flex;
           flex-wrap: wrap;
           align-items: baseline;
@@ -4717,6 +4727,18 @@
         .nodes-table tr.node-row td.reach:not(:empty) + td.power-cell:not(:empty)::before { content: "·"; margin: 0 6px; }
         .nodes-table tr.node-row td.hardware,
         .nodes-table tr.node-row td.actions { display: none; }
+        /* But adding one the radio does not keep: at the row's end. */
+        .nodes-table tr.node-row td.actions:has(.keep) {
+          display: block;
+          position: absolute;
+          top: 50%;
+          right: 4px;
+          width: auto;
+          transform: translateY(-50%);
+        }
+        .nodes-table tr.node-row td.actions:has(.keep) .icon-button:not(.keep) { display: none; }
+        .nodes-table tr.node-row td.actions .keep { width: 44px; height: 44px; }
+        .nodes-table tr.node-row:has(td.actions .keep) { padding-right: 52px; }
         .nodes-table .power svg { width: 13px; height: 13px; }
       }
       /*

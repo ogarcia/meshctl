@@ -320,6 +320,8 @@ window.meshctlMap = (() => {
       ["page", labels.page, false],
       ["chat", labels.chat, true],
     ]) {
+      // Not written to, the chat is not offered.
+      if (what === "chat" && node.writable === false) continue;
       const button = element("button", primary ? "primary" : "", label);
       button.type = "button";
       button.addEventListener("click", (event) => {
