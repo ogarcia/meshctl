@@ -579,6 +579,17 @@ fn role_name(kind: u8) -> String {
     }
 }
 
+/// A contact's kind, from the role [`role_name`] names: a chat's if it is
+/// none of the others.
+fn kind_of(role: &str) -> u8 {
+    match role {
+        "REPEATER" => 2,
+        "ROOM" => 3,
+        "SENSOR" => 4,
+        _ => 1,
+    }
+}
+
 /// A position as MeshCore gives it, in millionths of a degree; none at zero.
 fn position(lat: i32, lon: i32) -> Option<Position> {
     (lat != 0 || lon != 0).then(|| Position {
@@ -1394,6 +1405,34 @@ impl Mesh {
         Ok(num)
     }
 
+    /// Has the radio keep a node it does not, which it was heard of: one
+    /// that advertised and it did not add, or that it was had forget. As
+    /// a link adds one: its key, kind and name, no path known.
+    pub async fn meshcore_keep(&self, num: u32) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        if self.read(|state| state.local.as_ref().map(|l| l.num)) == Some(num) {
+            return Err(AdminError::OwnNode);
+        }
+        let (kind, name, known) = self
+            .read(|state| {
+                let user = state.nodes.get(&num)?.user.as_ref()?;
+                Some((
+                    kind_of(&user.role),
+                    user.long_name.clone(),
+                    <[u8; 32]>::try_from(user.public_key.as_slice()).ok(),
+                ))
+            })
+            .ok_or(AdminError::UnknownNode)?;
+        // The session's, as heard; or, had forget, the one kept of it.
+        let key = match self.meshcore_key(&session, num) {
+            Ok(key) => key,
+            Err(_) => known.ok_or(AdminError::UnknownNode)?,
+        };
+        self.meshcore_add_contact(key, kind, &name)
+            .await
+            .map(|_| ())
+    }
+
     /// The whole key of a contact, by its node number.
     fn meshcore_key(&self, session: &Session, num: u32) -> Result<[u8; 32], AdminError> {
         session
@@ -2057,9 +2096,15 @@ async fn session(
                 Some(Response::Advert | Response::PathUpdate) => {
                     contacts_due.get_or_insert(Instant::now() + CONTACTS_SETTLE);
                 }
+                // Heard advertising, but not kept by the radio: contacts
+                // added by hand, or not of its kind, or too far, or the list
+                // full. Known here, to be added from its page.
                 Some(Response::NewContact(contact)) => {
                     remember_keys(&session, std::slice::from_ref(&contact));
-                    let node = node_from(&contact);
+                    let node = Node {
+                        on_radio: Some(false),
+                        ..node_from(&contact)
+                    };
                     mesh.update(|state| {
                         state.nodes.insert(node.num, node.clone());
                         vec![Event::Node(node)]

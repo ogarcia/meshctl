@@ -35,7 +35,9 @@
 //! takes the radio's own only if it was let in to write. Its repeaters take
 //! `admin` as their admin's password and none as a guest's, and say nothing
 //! to any other.
-//! - `advert`: a contact not known before advertises, and the radio adds it.
+//! - `advert`: a node not known before advertises: the radio adds it, or,
+//!   with contacts added by hand, only tells it was heard, as the firmware
+//!   does.
 //! - `drop`: the link to every client drops, which reads it all anew.
 //!
 //! After a direct message to Ana, the radio says it was delivered, and now
@@ -1767,7 +1769,15 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
                 last_modified: at,
             };
             let name = new.name.clone();
-            let _ = events.send(Event::Push(contact(0x8a, &new)));
+            // Added, it says so by its key; by hand, the whole of it, to
+            // be added by the client if it will.
+            if radio.manual_add {
+                let _ = events.send(Event::Push(contact(0x8a, &new)));
+            } else {
+                let mut advert = vec![0x80];
+                advert.extend(new.key);
+                let _ = events.send(Event::Push(advert));
+            }
             // Heard raw too, its advert flooded through Monte.
             let mut payload = new.key.to_vec();
             payload.extend(at.to_le_bytes());
@@ -1778,8 +1788,11 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             payload.extend(new.name.as_bytes());
             let packet = flooded(raw::PAYLOAD_ADVERT, &[key(0x52)], None, &payload);
             let _ = events.send(Event::Push(rx_log(5, -95, &packet)));
+            if radio.manual_add {
+                return format!("{name} advertises, not added");
+            }
             radio.contacts.push(new);
-            format!("{name} advertises")
+            format!("{name} advertises, added")
         }
         // Someone else's trace heard, raw: along Monte, Torre and Monte
         // again, by two bytes of each, two of its hops gone; then the last.

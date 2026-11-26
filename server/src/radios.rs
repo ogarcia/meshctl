@@ -3100,6 +3100,12 @@ impl Radios {
             .map_err(meshcore_failure)
     }
 
+    /// Has a MeshCore radio keep a node it does not, which it was heard of.
+    pub async fn keep_contact(&self, id: RadioId, num: u32) -> Result<(), SettingsFailure> {
+        let mesh = self.meshcore(id)?;
+        mesh.meshcore_keep(num).await.map_err(meshcore_failure)
+    }
+
     /// Has a MeshCore radio say who it is.
     pub async fn advert(&self, id: RadioId, flood: bool) -> Result<(), SettingsFailure> {
         let mesh = self.meshcore(id)?;

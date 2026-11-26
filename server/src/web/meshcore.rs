@@ -29,6 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(channel_link))
         .routes(routes!(channel_scope))
         .routes(routes!(reset_path))
+        .routes(routes!(keep_contact))
         .routes(routes!(advert))
         .routes(routes!(regions))
         .routes(routes!(search_regions))
@@ -481,6 +482,49 @@ async fn reset_path(
             .into_response();
     };
     match state.radios.reset_path(radio, num).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Keep a node as a contact
+///
+/// Has a MeshCore radio keep a node it does not have among its contacts,
+/// which it was heard of: one that advertised and the radio did not add
+/// (contacts added by hand, not of a kind it adds, too far, or its list
+/// full), or one it was had forget. Its key, kind and name, no path known.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/nodes/{node}/keep",
+    tag = "nodes",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = String, Path, description = "The node's id or number", example = "!90cda275"),
+    ),
+    responses(
+        (status = 204, description = "Kept"),
+        (status = 400, description = "That is neither a node id nor a number", body = Error),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not a MeshCore radio: `unsupported_kind`; no such node, or not one heard with its key: `invalid_settings`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn keep_contact(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, String)>,
+) -> Response {
+    let Some(num) = super::radios::node_num(&node) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(Error {
+                error: ErrorCode::BadRequest,
+            }),
+        )
+            .into_response();
+    };
+    match state.radios.keep_contact(radio, num).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(failure) => refused(failure),
     }
