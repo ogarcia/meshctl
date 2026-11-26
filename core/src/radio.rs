@@ -157,6 +157,36 @@ pub struct SettingsChange {
     pub fixed_position: Option<FixedPosition>,
 }
 
+/// What can be done to a node as its admin, the radio itself or another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeAction {
+    /// It reboots, in a few seconds.
+    Reboot,
+    /// It shuts down, in a few seconds, until someone switches it on.
+    Shutdown,
+    /// It forgets the nodes it knows, but its favourites.
+    ForgetNodes,
+    /// Its configuration goes back to the factory's, keeping its Bluetooth
+    /// pairings.
+    FactoryReset,
+}
+
+impl NodeAction {
+    fn request(self) -> admin_message::PayloadVariant {
+        use admin_message::PayloadVariant as A;
+        match self {
+            Self::Reboot => A::RebootSeconds(ACTION_DELAY),
+            Self::Shutdown => A::ShutdownSeconds(ACTION_DELAY),
+            Self::ForgetNodes => A::NodedbReset(true),
+            Self::FactoryReset => A::FactoryResetConfig(1),
+        }
+    }
+}
+
+/// How many seconds a node waits to reboot or shut down: time enough to
+/// say it took it.
+const ACTION_DELAY: i32 = 5;
+
 /// A position set by hand on the radio, or let go.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FixedPosition {
@@ -488,6 +518,28 @@ impl Mesh {
             let _ = mesh.resync();
         });
         Ok(())
+    }
+
+    /// Has a node do something as its admin: the radio itself, or another
+    /// node over the mesh, sealed to it with the passkey it gives out. Once
+    /// it acknowledges it.
+    pub async fn act(&self, node: Option<u32>, action: NodeAction) -> Result<(), AdminError> {
+        if self.is_meshcore() {
+            return Err(AdminError::Unsupported);
+        }
+        match node {
+            None => {
+                let (me, passkey) = self.passkey().await?;
+                self.acknowledged(me, action.request(), passkey).await
+            }
+            Some(to) => {
+                let passkey = self
+                    .ask_node(to, admin_message::PayloadVariant::GetOwnerRequest(true))
+                    .await?
+                    .session_passkey;
+                self.delivered(to, action.request(), passkey).await
+            }
+        }
     }
 
     /// Changes another node's settings over the mesh, as its admin, all at
