@@ -39,6 +39,9 @@ use std::collections::BTreeMap;
 /// back loses nothing.
 pub type SectionEdits = RwSignal<BTreeMap<String, BTreeMap<String, Json>>>;
 
+/// The radio's admin keys, as a section among the configuration's.
+const SECURITY: &str = "security";
+
 /// The section where the radio's position can be fixed.
 const POSITION: &str = "config.position";
 /// Where the radio is, fixed, among a section's edits: by a name no field
@@ -74,7 +77,7 @@ pub fn words(name: &str) -> String {
 
 /// Whether a section is on, as the radio has it, for those that say: by
 /// their `enabled`, or, for the network, by Wi-Fi or Ethernet being so.
-fn enabled(section: &SettingsSection) -> Option<bool> {
+pub(crate) fn enabled(section: &SettingsSection) -> Option<bool> {
     let switches: &[&str] = match section.id.as_str() {
         "config.network" => &["wifi_enabled", "eth_enabled"],
         _ => &["enabled"],
@@ -163,9 +166,15 @@ pub fn SectionsTab(
         })
     });
     let picked = RwSignal::new(None::<String>);
+    // The radio's admin keys, among the configuration's, with a page of
+    // their own: the rest of its security is left alone.
+    let security = move || !module && picked.get().as_deref() == Some(SECURITY);
     // The one picked, or else the first.
     let current = Memo::new(move |_| {
         let picked = picked.get();
+        if picked.as_deref() == Some(SECURITY) {
+            return None;
+        }
         list.with(|l| {
             picked
                 .and_then(|id| l.iter().find(|s| s.id == id))
@@ -220,6 +229,19 @@ pub fn SectionsTab(
                         }
                     }
                 </For>
+                {(!module).then(|| view! {
+                    <button
+                        type="button"
+                        class:on=security
+                        on:click=move |_| picked.set(Some(SECURITY.to_owned()))
+                    >
+                        <span class="state none"></span>
+                        <span class="label">
+                            {move || names::section(i18n.get_locale(), "security")}
+                        </span>
+                        <span class="edited gone">"✎"</span>
+                    </button>
+                })}
             </nav>
             // Drawn anew for each section, and as the radio tells it anew,
             // rather than one's elements taken over by the next: a switch on
@@ -232,13 +254,20 @@ pub fn SectionsTab(
                 >
                     <SectionForm section edits />
                 </For>
+                {move || security().then(|| view! { <crate::admin_keys::AdminKeysPanel /> })}
             </div>
         </div>
     }
 }
 
+/// A section's form; only shown, with nothing to change, if `read_only`,
+/// as another node's are.
 #[component]
-fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
+pub(crate) fn SectionForm(
+    section: SettingsSection,
+    edits: SectionEdits,
+    #[prop(optional)] read_only: bool,
+) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     // How it went: whether the radio reboots for it, or why not.
@@ -354,13 +383,14 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
                 Signal::derive(move || crate::fields::shown(&id, &name, &value_of))
             };
             // Where the radio is, under the switch that fixes it.
-            let fixed = (id == POSITION && field.name == "fixed_position").then(|| {
-                let value_of = value_of.clone();
-                let visible = Signal::derive(move || {
-                    visible.get() && value_of("fixed_position") == Some(Json::Bool(true))
+            let fixed =
+                (!read_only && id == POSITION && field.name == "fixed_position").then(|| {
+                    let value_of = value_of.clone();
+                    let visible = Signal::derive(move || {
+                        visible.get() && value_of("fixed_position") == Some(Json::Bool(true))
+                    });
+                    view! { <FixedRow edits visible /> }
                 });
-                view! { <FixedRow edits visible /> }
-            });
             view! {
                 <FieldInput section=id.clone() field edits visible />
                 {fixed}
@@ -368,6 +398,14 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
         })
         .collect_view();
 
+    if read_only {
+        return view! {
+            <fieldset class="read-only" disabled>
+                <div class="preferences">{fields}</div>
+            </fieldset>
+        }
+        .into_any();
+    }
     view! {
         <div class="section-head">
             <h2>{move || names::section(i18n.get_locale(), &section.name)}</h2>
@@ -388,6 +426,7 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
             <SaveBar dirty busy=Signal::derive(move || busy.get()) save undo />
         </form>
     }
+    .into_any()
 }
 
 /// Where the radio is, with its position fixed: as it says it is now, or

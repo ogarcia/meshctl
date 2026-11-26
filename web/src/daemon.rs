@@ -378,6 +378,38 @@ pub async fn sections(radio: RadioId) -> Result<Vec<SettingsSection>, Failure> {
     get(&format!("/radios/{radio}/sections")).await
 }
 
+/// The keys the radio takes admin requests from, over the mesh.
+pub async fn admin_keys(radio: RadioId) -> Result<meshctl_api::AdminKeys, Failure> {
+    get(&format!("/radios/{radio}/admin-keys")).await
+}
+
+/// Sets the keys the radio takes admin requests from: all of them.
+pub async fn change_admin_keys(
+    radio: RadioId,
+    keys: &meshctl_api::AdminKeys,
+) -> Result<SettingsApplied, Failure> {
+    let request = with_token(Request::put(&url(&format!("/radios/{radio}/admin-keys"))))
+        .json(keys)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// The sections another node can be asked for, as its admin: asked of it,
+/// over the mesh.
+pub async fn node_sections(radio: RadioId, node: u32) -> Result<Vec<String>, Failure> {
+    get(&format!("/radios/{radio}/nodes/{node}/sections")).await
+}
+
+/// One section of another node's settings, asked of it over the mesh.
+pub async fn node_section(
+    radio: RadioId,
+    node: u32,
+    section: &str,
+) -> Result<SettingsSection, Failure> {
+    get(&format!("/radios/{radio}/nodes/{node}/sections/{section}")).await
+}
+
 pub async fn change_section(
     radio: RadioId,
     section: &str,

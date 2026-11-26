@@ -117,6 +117,7 @@ const ROLES: &[(&str, &str, &str)] = &[
 /// protobufs.
 const SECTIONS: &[(&str, &str, &str)] = &[
     ("device", "Dispositivo", "Device"),
+    ("security", "Seguridad", "Security"),
     ("position", "Posición", "Position"),
     ("power", "Energía", "Power"),
     ("network", "Red", "Network"),

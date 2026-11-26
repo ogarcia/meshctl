@@ -239,6 +239,9 @@ pub struct Live {
     pub newer: RwSignal<bool>,
     /// Whether the open node's requests are shown, in their drawer.
     pub history: RwSignal<bool>,
+    /// Whether the open node's settings are shown, read from it as its
+    /// admin, in their drawer.
+    pub administering: RwSignal<bool>,
     /// Whether the radios are shown to switch the selected one, on a phone.
     pub radio_sheet: RwSignal<bool>,
     /// The node picked on the map, if any.
@@ -320,6 +323,7 @@ impl Live {
             scroll_turn: StoredValue::new(0),
             came_from: RwSignal::new(Page::Map),
             history: RwSignal::new(false),
+            administering: RwSignal::new(false),
             removing: RwSignal::new(false),
             adding_link: RwSignal::new(None),
             offered_link: RwSignal::new(None),
@@ -2659,6 +2663,21 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         </button>
                     }
                 });
+                // Another Meshtastic node's settings, as its admin.
+                let can_admin = page == Page::Node
+                    && !local()
+                    && live.selected_kind() == Some(RadioKind::Meshtastic);
+                let admin = can_admin.then(|| {
+                    view! {
+                        <button
+                            class="icon-button spare"
+                            title=move || t_string!(i18n, admin_title)
+                            aria-label=move || t_string!(i18n, admin_title)
+                            inner_html=GEAR
+                            on:click=move |_| live.administering.set(true)
+                        ></button>
+                    }
+                });
                 // Silencing its conversation, from it.
                 let mute = (page == Page::Chat).then(|| view! { <MuteButton peer /> });
                 // Where there is no room for them, those in a menu.
@@ -2667,10 +2686,10 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 let muting = (page == Page::Chat).then_some(peer);
                 let more = (can_remove || can_history || muting.is_some()).then(|| match muting {
                     Some(mute) => view! { <HeadingMore can_history can_remove mute /> }.into_any(),
-                    None => view! { <HeadingMore can_history can_remove /> }.into_any(),
+                    None => view! { <HeadingMore can_history can_remove can_admin /> }.into_any(),
                 });
                 // The three dots last, against the edge, as menus go.
-                view! { {remove} {history} {mute} {profile} {settings} {chat} {more} }
+                view! { {remove} {history} {admin} {mute} {profile} {settings} {chat} {more} }
             };
             // Back to where its page was opened from, on its page.
             let back = move || {
@@ -2747,6 +2766,9 @@ pub fn link_class(link: LinkState) -> &'static str {
 fn HeadingMore(
     can_history: bool,
     can_remove: bool,
+    /// Whether the node's settings can be read from it, as its admin.
+    #[prop(optional)]
+    can_admin: bool,
     /// The conversation to silence from it, if any.
     #[prop(optional)]
     mute: Option<Peer>,
@@ -2797,6 +2819,15 @@ fn HeadingMore(
                                             t_string!(i18n, chat_mute)
                                         }
                                     }}
+                                </button>
+                            }
+                        })}
+                    {can_admin
+                        .then(|| {
+                            view! {
+                                <button role="menuitem" on:click=choose(live.administering)>
+                                    <span class="icon" inner_html=GEAR></span>
+                                    {t!(i18n, admin_title)}
                                 </button>
                             }
                         })}

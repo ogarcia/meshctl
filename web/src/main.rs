@@ -4,6 +4,7 @@
 include!(concat!(env!("OUT_DIR"), "/i18n/mod.rs"));
 
 mod about;
+mod admin_keys;
 mod app;
 mod auto_replies;
 mod badge;
@@ -23,6 +24,7 @@ mod meshcore_regions;
 mod meshcore_settings;
 mod names;
 mod node;
+mod node_admin;
 mod notifications;
 mod notify;
 mod offline;

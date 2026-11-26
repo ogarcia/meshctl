@@ -276,6 +276,7 @@ fn NodePage(num: u32) -> impl IntoView {
                     <TracesDrawer open=drawer />
                     <RequestsDrawer />
                     <RemoveDrawer />
+                    {(!meshcore).then(|| view! { <crate::node_admin::AdminDrawer num /> })}
                 })
             }}
             <Problem />

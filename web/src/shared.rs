@@ -846,7 +846,11 @@ fn ChannelPicker(meshtastic: bool, pick: Callback<String>, close: Callback<()>) 
 
 /// A list to pick from, over the page: its heading, its way out, and it.
 #[component]
-fn Picker(title: Signal<String>, close: Callback<()>, children: Children) -> impl IntoView {
+pub(crate) fn Picker(
+    title: Signal<String>,
+    close: Callback<()>,
+    children: Children,
+) -> impl IntoView {
     let i18n = use_i18n();
     let close_label = move || t_string!(i18n, radio_cancel);
     view! {

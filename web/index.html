@@ -2099,6 +2099,78 @@
       button.danger-outline { border-color: color-mix(in srgb, var(--mc-danger) 50%, var(--mc-border)); color: var(--mc-danger); }
       button.danger-outline:hover:not(:disabled) { border-color: var(--mc-danger); }
       .removal .problem { margin: 0; color: var(--mc-danger); font-size: 13px; }
+      /* Another node's settings, as its admin: each section a row, read from
+         it as it opens. */
+      .node-admin { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; }
+      .node-admin > p { margin: 0; font-size: 13px; line-height: 1.5; }
+      /* Its notes, as boxes: a tint of their colour behind them. */
+      .node-admin .note,
+      .admin-keys .note {
+        padding: 8px 12px;
+        border-radius: 0 6px 6px 0;
+        background: color-mix(in srgb, var(--mc-warn) 10%, transparent);
+        color: var(--mc-text);
+      }
+      .node-admin .note.bad,
+      .admin-keys .note.bad { background: color-mix(in srgb, var(--mc-danger) 10%, transparent); }
+      .node-admin > button { align-self: flex-start; }
+      .admin-waiting { display: flex; align-items: center; gap: 10px; }
+      .spinner {
+        flex: none;
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--mc-border);
+        border-top-color: var(--mc-primary);
+        border-radius: 50%;
+        animation: welcome-spin 0.9s linear infinite;
+      }
+      @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+      .admin-key { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .admin-key .public-key { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+      .admin-key .icon-button { flex: none; }
+      .admin-key .icon-button svg { width: 16px; height: 16px; }
+      .admin-sections { display: flex; flex-direction: column; border-top: 1px solid var(--mc-border); }
+      .admin-section { border-bottom: 1px solid var(--mc-border); }
+      .admin-section-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        min-height: 44px;
+        padding: 0 4px;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        font-weight: 500;
+        text-align: left;
+      }
+      .admin-section-head:hover { background: var(--mc-raised); }
+      .admin-section-head .label { flex: 1; min-width: 0; }
+      .admin-section-head .chevron { display: flex; color: var(--mc-muted); transform: rotate(-90deg); transition: transform 0.15s; }
+      .admin-section.open .chevron { transform: none; }
+      .admin-section-head .chevron svg { width: 16px; height: 16px; }
+      .admin-section-body { padding: 4px 4px 16px; }
+      .admin-section-body > p { margin: 8px 0; font-size: 13px; }
+      .admin-section-body > button { margin-bottom: 4px; }
+      fieldset.read-only { margin: 0; padding: 0; border: 0; min-width: 0; }
+      /* The radio's admin keys: each a row, whose and which, and its way
+         out. */
+      .admin-keys { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+      .admin-keys h3 { margin: 0; font-size: 15px; }
+      .admin-keys p { margin: 0; font-size: 13px; line-height: 1.5; }
+      .admin-keys .note { align-self: stretch; }
+      .admin-key-list { list-style: none; margin: 0; padding: 0; width: 100%; }
+      .admin-key-list:empty { display: none; }
+      .admin-key-list li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--mc-border); }
+      .admin-key-list li:first-child { border-top: 1px solid var(--mc-border); }
+      .admin-key-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+      .admin-key-who .public-key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--mc-muted); }
+      .admin-key-list .icon-button svg { width: 18px; height: 18px; }
+      .admin-keys .with-icon { display: inline-flex; align-items: center; gap: 6px; }
+      .admin-keys .with-icon .icon { display: flex; color: var(--mc-muted); }
+      .admin-keys .with-icon svg { width: 16px; height: 16px; }
+      .key-written { display: flex; gap: 8px; margin-bottom: 12px; }
+      .key-written input { flex: 1; min-width: 0; font-size: 13px; }
       /* What a node was asked for: each request a row, its answer whole on
          opening it. */
       .requests { list-style: none; margin: 0; padding: 0; }
