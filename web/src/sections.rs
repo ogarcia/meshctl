@@ -221,8 +221,17 @@ pub fn SectionsTab(
                     }
                 </For>
             </nav>
+            // Drawn anew for each section, and as the radio tells it anew,
+            // rather than one's elements taken over by the next: a switch on
+            // in one and off in the other would be seen to flip.
             <div class="section-panel">
-                {move || current.get().map(|section| view! { <SectionForm section edits /> })}
+                <For
+                    each=move || current.get().into_iter()
+                    key=|section| (section.id.clone(), serde_json::to_string(section).unwrap_or_default())
+                    let:section
+                >
+                    <SectionForm section edits />
+                </For>
             </div>
         </div>
     }
