@@ -491,6 +491,9 @@ fn FieldInput(
     let interval = field.kind == FieldKind::Integer
         && (field.unit.as_deref() == Some("s") || crate::fields::intervals(&field_id).is_some());
     let unit = field.unit.clone().filter(|_| !interval);
+    let precision = (field.kind == FieldKind::Integer)
+        .then(|| crate::fields::precision(&field_id))
+        .flatten();
     let original = field.value.clone().unwrap_or(Json::Null);
 
     // The edit of it, if any.
@@ -675,6 +678,51 @@ fn FieldInput(
                         }
                     }
                 </select>
+            }
+            .into_any()
+        }
+        // A position's precision: along its range, as a channel's, saying
+        // how far off it may be; what the firmware uses for anything else
+        // where it has that.
+        FieldKind::Integer if precision.is_some() => {
+            let (least, most, otherwise) = precision.unwrap_or_default();
+            let bits = {
+                let current = current.clone();
+                Signal::derive(move || {
+                    current()
+                        .as_u64()
+                        .and_then(|b| u32::try_from(b).ok())
+                        .filter(|b| (least..=most).contains(b))
+                        .unwrap_or(otherwise)
+                })
+            };
+            let far = |bits: u32| {
+                crate::mesh::precision_radius(bits)
+                    .map(crate::mesh::radius)
+                    .unwrap_or_default()
+            };
+            let put = put.clone();
+            view! {
+                <label class="pref-control precision-field">
+                    <b>{move || far(bits.get())}</b>
+                    <input
+                        type="range"
+                        min=least.to_string()
+                        max=most.to_string()
+                        step="1"
+                        aria-label=label
+                        prop:value=move || bits.get().to_string()
+                        on:input=move |ev| {
+                            if let Ok(bits) = event_target_value(&ev).parse::<u32>() {
+                                put(Json::from(bits));
+                            }
+                        }
+                    />
+                    <span class="ends dim">
+                        <span>{far(least)}</span>
+                        <span>{far(most)}</span>
+                    </span>
+                </label>
             }
             .into_any()
         }

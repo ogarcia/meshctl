@@ -573,7 +573,7 @@ const ES: &[(&str, &str, &str)] = &[
     (
         "module.mqtt.map_report_settings.position_precision",
         "Precisión de la posición en el mapa",
-        "",
+        "Lo lejos que puede estar del sitio que el mapa público muestra para el nodo.",
     ),
     (
         "module.mqtt.map_report_settings.should_report_location",
@@ -1115,6 +1115,17 @@ const CHOICES: &[(&str, &str, &str, &str)] = &[
 /// A value of an interval that means more than its seconds, and its words
 /// in Spanish and in English.
 pub type Special = (i64, &'static str, &'static str);
+
+/// A position's precision in bits, as a field takes it, where the firmware
+/// keeps it within a range: its least, its most and what it uses otherwise.
+pub fn precision(id: &str) -> Option<(u32, u32, u32)> {
+    match id {
+        // The MQTT map's: 12 to 15 bits, 14 for anything else, as the
+        // firmware coerces it.
+        "module.mqtt.map_report_settings.position_precision" => Some((12, 15, 14)),
+        _ => None,
+    }
+}
 
 /// The intervals a field offers when they are not the common ones: short
 /// waits, a screen on for an hour at most or for ever.

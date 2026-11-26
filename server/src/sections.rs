@@ -79,6 +79,28 @@ struct Said {
 }
 
 fn said(field: &FieldDescriptor) -> Said {
+    let mut said = said_by_protobufs(field);
+    // Limits the protobufs do not say, which the firmware holds to.
+    if let Some((least, most)) = limits(field.full_name()) {
+        said.min.get_or_insert(least);
+        said.max.get_or_insert(most);
+    }
+    said
+}
+
+/// Limits of fields the firmware keeps within a range the protobufs do not
+/// say, by their full names.
+fn limits(field: &str) -> Option<(f64, f64)> {
+    match field {
+        // The MQTT map's position precision, in bits: any other, the
+        // firmware takes as its default, 14.
+        "meshtastic.ModuleConfig.MapReportSettings.position_precision" => Some((12.0, 15.0)),
+        _ => None,
+    }
+}
+
+/// What the protobufs say of a field.
+fn said_by_protobufs(field: &FieldDescriptor) -> Said {
     let options = field.options();
     let deprecated_option = options
         .get_field_by_name("deprecated")
@@ -995,6 +1017,30 @@ mod tests {
             Some(radio::FixedPosition::Remove)
         );
         assert!(fixed(&settings, "config.position", &off, Some(&coruna)).is_err());
+    }
+
+    #[test]
+    fn the_map_precision_is_kept_as_the_firmware_keeps_it() {
+        let all = sections(&settings());
+        let mqtt = all.iter().find(|s| s.id == "module.mqtt").unwrap();
+        let precision = mqtt
+            .fields
+            .iter()
+            .find(|f| f.name == "map_report_settings.position_precision")
+            .unwrap();
+        assert_eq!((precision.min, precision.max), (Some(12.0), Some(15.0)));
+        let with = |bits: u32| {
+            let values = BTreeMap::from([(
+                "map_report_settings.position_precision".to_owned(),
+                Json::from(bits),
+            )]);
+            change(&settings(), "module.mqtt", &values).is_ok()
+        };
+        assert!(with(13));
+        // Zero is its default, as anywhere.
+        assert!(with(0));
+        assert!(!with(20));
+        assert!(!with(11));
     }
 
     #[test]

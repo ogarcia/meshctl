@@ -1420,6 +1420,12 @@
         margin: 4px 0 0;
         accent-color: var(--mc-primary);
       }
+      /* A position's precision among a section's settings: how far off,
+         over its range, and its ends under it. */
+      .precision-field { display: flex; flex-direction: column; gap: 2px; }
+      .precision-field b { font-weight: 600; }
+      .precision-field input[type=range] { width: 100%; margin: 4px 0 0; accent-color: var(--mc-primary); }
+      .precision-field .ends { display: flex; justify-content: space-between; font-size: 11px; }
       .channel-editor .precision .ends {
         display: flex;
         justify-content: space-between;
