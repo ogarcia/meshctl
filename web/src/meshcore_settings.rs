@@ -320,6 +320,8 @@ fn UserTab(draft: Draft) -> impl IntoView {
     let i18n = use_i18n();
     let (name, set_name) = field(draft, |d| d.name.clone(), |d, v| d.name = v);
     let (position, set_position) = field(draft, |d| d.position, |d, v| d.position = v);
+    let (gps, set_gps) = field(draft, |d| d.gps, |d, v| d.gps = v);
+    let gps_on = Signal::derive(move || gps.get() == Some(true));
     // Each coordinate as written, so that half a number is not lost; the
     // position changes once both read, and goes once both are empty.
     let latitude = RwSignal::new(
@@ -332,6 +334,30 @@ fn UserTab(draft: Draft) -> impl IntoView {
             .get_untracked()
             .map_or_else(String::new, |p| written(p.longitude)),
     );
+    // As the radio says anew, as its GPS moves it, or undone: what is
+    // written follows, unless it already reads as that.
+    Effect::new(move |_| {
+        let now = position.get();
+        let (lat, lon) = (latitude.get_untracked(), longitude.get_untracked());
+        let reads = coordinate(&lat)
+            .zip(coordinate(&lon))
+            .map(|(latitude, longitude)| MeshcorePosition {
+                latitude,
+                longitude,
+            });
+        let empty = lat.trim().is_empty() && lon.trim().is_empty();
+        let same = match now {
+            Some(now) => reads.is_some_and(|r| {
+                written(r.latitude) == written(now.latitude)
+                    && written(r.longitude) == written(now.longitude)
+            }),
+            None => empty,
+        };
+        if !same {
+            latitude.set(now.map_or_else(String::new, |p| written(p.latitude)));
+            longitude.set(now.map_or_else(String::new, |p| written(p.longitude)));
+        }
+    });
     let put = move || {
         let (lat, lon) = (latitude.get_untracked(), longitude.get_untracked());
         if lat.trim().is_empty() && lon.trim().is_empty() {
@@ -353,8 +379,37 @@ fn UserTab(draft: Draft) -> impl IntoView {
                     on:input=move |ev| set_name(event_target_value(&ev))
                 />
             </Row>
-            <Row title=t!(i18n, mc_position).into_any() hint=t!(i18n, mc_position_hint).into_any()>
-                <PositionInputs latitude longitude changed=move |()| put() />
+            // Its GPS, on a radio with one: then it says where the radio is.
+            {move || {
+                gps.get()
+                    .map(|_| {
+                        view! {
+                            <Row title=t!(i18n, mc_gps).into_any() hint=t!(i18n, mc_gps_hint).into_any()>
+                                <div class="pref-control switch-control">
+                                    <Switch
+                                        on=gps_on
+                                        label=Signal::derive(move || t_string!(i18n, mc_gps).to_owned())
+                                        flip=move |_| set_gps(Some(!gps_on.get_untracked()))
+                                    />
+                                </div>
+                            </Row>
+                        }
+                    })
+            }}
+            <Row
+                title=t!(i18n, mc_position).into_any()
+                hint=view! {
+                    {move || {
+                        if gps_on.get() {
+                            t_string!(i18n, mc_position_gps)
+                        } else {
+                            t_string!(i18n, mc_position_hint)
+                        }
+                    }}
+                }
+                    .into_any()
+            >
+                <PositionInputs latitude longitude changed=move |()| put() disabled=gps_on />
             </Row>
         </div>
     }

@@ -1597,6 +1597,12 @@
       .position-inputs input { min-width: 0; }
       .position-pick { display: flex; align-items: center; justify-content: center; padding: 0; min-height: 40px; }
       .position-pick svg { width: 18px; height: 18px; }
+      /* Off while a GPS says where the radio is. */
+      .position-inputs input:disabled,
+      .position-pick:disabled { opacity: 0.55; cursor: not-allowed; }
+      /* Off while a GPS says where the radio is. */
+      .position-inputs input:disabled,
+      .position-pick:disabled { opacity: 0.55; cursor: not-allowed; }
       /* The map to pick it on, its panes kept within it, under the dialog's
          edges; the pin, the interface's, its point where the place is. */
       .position-dialog { width: 640px; }

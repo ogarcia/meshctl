@@ -80,6 +80,9 @@ pub fn PositionInputs(
     longitude: RwSignal<String>,
     #[prop(optional)] altitude: Option<RwSignal<String>>,
     #[prop(into)] changed: Callback<()>,
+    /// Whether it is off, as while a GPS says where the radio is.
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let picking = RwSignal::new(false);
@@ -88,6 +91,7 @@ pub fn PositionInputs(
         <div class="pref-control position-inputs" class:with-altitude=altitude.is_some()>
             <input
                 inputmode="decimal"
+                disabled=disabled
                 placeholder=move || t_string!(i18n, position_latitude)
                 aria-label=move || t_string!(i18n, position_latitude)
                 prop:value=move || latitude.get()
@@ -98,6 +102,7 @@ pub fn PositionInputs(
             />
             <input
                 inputmode="decimal"
+                disabled=disabled
                 placeholder=move || t_string!(i18n, position_longitude)
                 aria-label=move || t_string!(i18n, position_longitude)
                 prop:value=move || longitude.get()
@@ -111,6 +116,7 @@ pub fn PositionInputs(
                     view! {
                         <input
                             inputmode="numeric"
+                            disabled=disabled
                             placeholder=move || t_string!(i18n, position_altitude)
                             aria-label=move || t_string!(i18n, position_altitude)
                             title=move || t_string!(i18n, position_altitude)
@@ -125,6 +131,7 @@ pub fn PositionInputs(
             <button
                 type="button"
                 class="position-pick"
+                disabled=disabled
                 title=pick_label
                 aria-label=pick_label
                 inner_html=MAP
