@@ -41,7 +41,7 @@ enum Secret {
 }
 
 /// The kind of a channel, in words.
-fn kind_label(
+pub(crate) fn kind_label(
     i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
     kind: MeshcoreChannelKind,
 ) -> &'static str {

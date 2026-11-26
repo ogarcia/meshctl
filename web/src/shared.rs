@@ -498,12 +498,26 @@ fn ContactPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
     }
 }
 
-/// The radio's channels to share, by their links.
+/// The radio's channels to share, by their links, each said as the
+/// channels' list says it: public, a #name or private.
 #[component]
 fn ChannelPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let failed = RwSignal::new(false);
+    let channels = RwSignal::new(None::<Vec<meshctl_api::MeshcoreChannel>>);
+    if let Some(radio) = live.selected.get_untracked() {
+        spawn_local(async move {
+            match crate::daemon::meshcore_channels(radio).await {
+                Ok(read) => {
+                    let _ = channels.try_set(Some(read.channels));
+                }
+                Err(_) => {
+                    let _ = failed.try_set(true);
+                }
+            }
+        });
+    }
     let share = move |slot: u32| {
         let Some(radio) = live.selected.get_untracked() else {
             return;
@@ -522,19 +536,23 @@ fn ChannelPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
         <Picker title close>
             <ul class="picker-list">
                 {move || {
-                    live.channels
+                    channels
                         .get()
+                        .unwrap_or_default()
                         .into_iter()
-                        .filter(|c| c.role != "DISABLED" && !c.name.is_empty())
+                        .filter(|c| !c.name.is_empty())
                         .map(|c| {
                             let slot = c.index;
+                            let kind = c.kind;
                             view! {
                                 <li>
                                     <button type="button" on:click=move |_| share(slot)>
                                         <span class="shared-mark channel">"#"</span>
                                         <span class="shared-what">
                                             <b>{c.name.clone()}</b>
-                                            <span class="dim">{move || t!(i18n, channel_slot, slot = slot)}</span>
+                                            <span class="dim">
+                                                {move || crate::meshcore_channels::kind_label(i18n, kind)}
+                                            </span>
                                         </span>
                                     </button>
                                 </li>
