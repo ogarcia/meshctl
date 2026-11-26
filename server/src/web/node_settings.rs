@@ -16,8 +16,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    AdminKeys, ChannelHistory, ChannelOrder, ChannelSecret, Contact, Error, NodeSettings,
-    NodeSettingsChange, RadioId, SectionChange, SectionSecret, SettingsApplied,
+    ActionRequest, AdminKeys, ChannelHistory, ChannelOrder, ChannelSecret, Contact, Error,
+    NodeSettings, NodeSettingsChange, RadioId, SectionChange, SectionSecret, SettingsApplied,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -29,6 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(show, change))
         .routes(routes!(change_section))
         .routes(routes!(admin_keys, change_admin_keys))
+        .routes(routes!(act))
         .routes(routes!(reorder_channels))
         .routes(routes!(remove_channel))
         .routes(routes!(channel_link))
@@ -170,6 +171,45 @@ async fn change_section(
         .await
     {
         Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Have a node do something
+///
+/// Has another node reboot, shut down, forget the nodes it knows but its
+/// favourites, or take its factory configuration again, over the mesh as
+/// its admin. The last leaves it with no admin keys, and so out of reach.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/nodes/{node}/actions",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = u32, Path, description = "The node's number"),
+    ),
+    request_body = ActionRequest,
+    responses(
+        (status = 202, description = "Taken by the node"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 403, description = "The node does not take the radio's key as an admin key: `not_admin`", body = Error),
+        (status = 404, description = "There is no such radio, or node: `invalid_node`", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 502, description = "The node, or the radio, would not: `radio_refused`", body = Error),
+        (status = 504, description = "The node did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn act(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, u32)>,
+    Json(request): Json<ActionRequest>,
+) -> Response {
+    match state
+        .radios
+        .act(radio, Whose::Node(node), request.action)
+        .await
+    {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(failure) => refused(failure),
     }
 }

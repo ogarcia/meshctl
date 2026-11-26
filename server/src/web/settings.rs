@@ -11,8 +11,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    AdminKeys, ChannelHistory, ChannelOrder, Error, ErrorCode, NodeSettings, NodeSettingsChange,
-    RadioId, SectionChange, SettingsApplied, SettingsSection,
+    ActionRequest, AdminKeys, ChannelHistory, ChannelOrder, Error, ErrorCode, NodeSettings,
+    NodeSettingsChange, RadioId, SectionChange, SettingsApplied, SettingsSection,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -24,6 +24,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(show, change))
         .routes(routes!(sections))
         .routes(routes!(admin_keys, change_admin_keys))
+        .routes(routes!(act))
         .routes(routes!(node_sections))
         .routes(routes!(node_section))
         .routes(routes!(change_section))
@@ -168,6 +169,40 @@ async fn change(
 async fn sections(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
     match state.radios.sections(radio) {
         Ok(sections) => Json(sections).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Do something
+///
+/// Has the radio reboot, shut down, forget the nodes it knows but its
+/// favourites, or take its factory configuration again. Once it says it
+/// took it; it does it in a few seconds.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/actions",
+    tag = "settings",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = ActionRequest,
+    responses(
+        (status = 202, description = "Taken by the radio"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn act(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(request): Json<ActionRequest>,
+) -> Response {
+    match state
+        .radios
+        .act(radio, crate::radios::Whose::Radio, request.action)
+        .await
+    {
+        Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(failure) => refused(failure),
     }
 }

@@ -3466,6 +3466,42 @@ impl Radios {
             .ok_or(SettingsFailure::NoAnswer)
     }
 
+    /// Has whose node do something, as its admin: the radio itself, or
+    /// another node over the mesh.
+    pub async fn act(
+        &self,
+        id: RadioId,
+        whose: Whose,
+        action: meshctl_api::NodeAction,
+    ) -> Result<(), SettingsFailure> {
+        use meshctl_api::NodeAction as A;
+        use meshctl_core::radio::NodeAction as N;
+        let mesh = self.configurable(id)?;
+        let action = match action {
+            A::Reboot => N::Reboot,
+            A::Shutdown => N::Shutdown,
+            A::ForgetNodes => N::ForgetNodes,
+            A::FactoryReset => N::FactoryReset,
+        };
+        match whose {
+            Whose::Radio => mesh.act(None, action).await.map_err(admin_failure)?,
+            Whose::Node(node) => {
+                mesh.act(Some(node), action)
+                    .await
+                    .map_err(node_admin_failure)?;
+                // What meshctl had of it is no longer so.
+                if matches!(action, N::FactoryReset) {
+                    self.remote
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&(id, node));
+                }
+            }
+        }
+        tracing::info!(radio = id, ?whose, ?action, "node told to act");
+        Ok(())
+    }
+
     /// The keys a radio takes admin requests from over the mesh.
     pub async fn admin_keys(
         &self,

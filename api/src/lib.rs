@@ -2456,6 +2456,30 @@ pub struct SettingsApplied {
     pub reboots: bool,
 }
 
+/// What a Meshtastic node can be told to do, as its admin: the radio
+/// itself, or another node over the mesh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum NodeAction {
+    /// Reboot, in a few seconds.
+    Reboot,
+    /// Shut down, in a few seconds, until someone switches it on.
+    Shutdown,
+    /// Forget the nodes it knows, but its favourites.
+    ForgetNodes,
+    /// Take the factory's configuration again: names, LoRa, channels and
+    /// admin keys among it; its Bluetooth pairings are kept.
+    FactoryReset,
+}
+
+/// An action for a node to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ActionRequest {
+    pub action: NodeAction,
+}
+
 /// The public keys a Meshtastic radio takes admin requests from, over the
 /// mesh, sealed to it: up to three, each in base64 as the apps show it.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
