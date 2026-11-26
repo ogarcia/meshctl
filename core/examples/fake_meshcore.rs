@@ -248,7 +248,7 @@ impl Radio {
         .into_iter()
         .enumerate()
         {
-            channels[slot] = (name.into(), region_key(&name.to_lowercase()));
+            channels[slot] = (name.into(), region_key(name));
         }
         Self {
             // A ship of the Culture's, as Iain M. Banks named them: Just Testing.
