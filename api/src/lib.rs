@@ -816,6 +816,10 @@ pub struct MeshcoreSettings {
     /// only.
     #[serde(default)]
     pub repeat_frequencies: Vec<MeshcoreFrequencies>,
+    /// Whether its GPS is on: then it, not `position`, says where the radio
+    /// is. None on a radio with no GPS, or firmware without it.
+    #[serde(default)]
+    pub gps: Option<bool>,
 }
 
 /// The regions a MeshCore radio's repeaters and rooms said they repeat on,

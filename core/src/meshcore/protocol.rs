@@ -114,6 +114,8 @@ pub mod command {
     const SET_PATH_HASH_MODE: u8 = 0x3d;
     const SET_DEFAULT_FLOOD_SCOPE: u8 = 0x3f;
     const GET_DEFAULT_FLOOD_SCOPE: u8 = 0x40;
+    const GET_CUSTOM_VARS: u8 = 0x28;
+    const SET_CUSTOM_VAR: u8 = 0x29;
     /// Plain text, as opposed to a CLI command or a signed message.
     const TEXT_PLAIN: u8 = 0;
     /// A command for a node's console, and its answer.
@@ -438,6 +440,20 @@ pub mod command {
         vec![SET_AUTOADD_CONFIG, config, max_hops]
     }
 
+    /// What the radio's sensors let be set, as `name:value`, such as its
+    /// GPS. Answered with `CustomVars`.
+    pub fn get_custom_vars() -> Vec<u8> {
+        vec![GET_CUSTOM_VARS]
+    }
+
+    /// Sets one of what [`get_custom_vars`] tells: `gps` to `1` or `0`,
+    /// or `gps_interval` in seconds, which is not told.
+    pub fn set_custom_var(name: &str, value: &str) -> Vec<u8> {
+        let mut payload = vec![SET_CUSTOM_VAR];
+        payload.extend_from_slice(format!("{name}:{value}").as_bytes());
+        payload
+    }
+
     /// Answered with `RepeatFrequencies`.
     pub fn get_repeat_frequencies() -> Vec<u8> {
         vec![GET_ALLOWED_REPEAT_FREQ]
@@ -659,6 +675,9 @@ pub enum Response {
     },
     /// The frequency ranges it repeats on, in kHz, both ends included.
     RepeatFrequencies(Vec<(u32, u32)>),
+    /// What its sensors let be set, by name, as it says it: `gps` with a
+    /// GPS it detected.
+    CustomVars(Vec<(String, String)>),
     /// What the radio's own console answered a command.
     CliReply(String),
     /// The region what it floods is scoped to, name and key; none if none.
@@ -765,6 +784,16 @@ impl Response {
                 rx_delay: u32_at(data, 0)?,
                 airtime_factor: u32_at(data, 4)?,
             },
+            0x15 => Self::CustomVars(
+                String::from_utf8_lossy(data)
+                    .trim_end_matches('\0')
+                    .split(',')
+                    .filter_map(|pair| {
+                        let (name, value) = pair.split_once(':')?;
+                        Some((name.to_owned(), value.to_owned()))
+                    })
+                    .collect(),
+            ),
             0x18 => Self::Stats(stats(data)?),
             0x19 => Self::AutoAdd {
                 config: *data.first()?,
@@ -1500,6 +1529,16 @@ mod tests {
                 (869_495, 869_495)
             ]))
         );
+        // As the firmware lists them, and none at all without a GPS.
+        assert_eq!(
+            Response::parse(b"\x15gps:1,other:x"),
+            Some(Response::CustomVars(vec![
+                ("gps".into(), "1".into()),
+                ("other".into(), "x".into())
+            ]))
+        );
+        assert_eq!(Response::parse(&[0x15]), Some(Response::CustomVars(vec![])));
+        assert_eq!(command::set_custom_var("gps", "0"), b"\x29gps:0");
         // No scope is the code alone; one, its name in 31 and its key.
         assert_eq!(Response::parse(&[0x1c]), Some(Response::DefaultScope(None)));
         let mut scope = vec![0x1c];

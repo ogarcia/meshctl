@@ -47,6 +47,12 @@
 //! reset; channels set and emptied, each with its secret, Galicia's #names
 //! at first; its adverts only printed. Its tuning, auto-add, path
 //! hash size and default flood scope are kept as the firmware keeps them.
+//! It has a GPS, off at first: on, it says it is at the Tower of Hercules,
+//! whatever it was told, until it is off again.
+
+/// Where its GPS says it is, in millionths of a degree: the Tower of
+/// Hercules.
+const GPS_AT: (i32, i32) = (43_385_833, -8_406_389);
 
 /// The frequencies, in kHz, on which the firmware lets a client repeat.
 const REPEAT_FREQUENCIES: [u32; 3] = [433_000, 869_495, 918_000];
@@ -116,6 +122,8 @@ struct Radio {
     autoadd: (u8, u8),
     /// The region what it floods is scoped to, name and key.
     default_scope: Option<(String, [u8; 16])>,
+    /// Where it was told it is, kept while its GPS is on and says instead.
+    told: Option<(i32, i32)>,
     /// The region what it floods next goes in, as a client set it: none for
     /// its default.
     send_scope: Option<SendScope>,
@@ -261,6 +269,7 @@ impl Radio {
             tuning: (0, 1000),
             autoadd: (31, 0),
             default_scope: None,
+            told: None,
             send_scope: None,
             said: std::collections::HashMap::new(),
             with_ana: None,
@@ -1236,8 +1245,14 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
                 if (-90_000_000..=90_000_000).contains(&lat)
                     && (-180_000_000..=180_000_000).contains(&lon) =>
             {
-                (radio.lat, radio.lon) = (lat, lon);
-                println!("at {lat}, {lon}");
+                // With the GPS on, it says where the radio is all the same.
+                if radio.told.is_some() {
+                    radio.told = Some((lat, lon));
+                    println!("told {lat}, {lon}, but the GPS says where");
+                } else {
+                    (radio.lat, radio.lon) = (lat, lon);
+                    println!("at {lat}, {lon}");
+                }
                 ok()
             }
             _ => error(6),
@@ -1265,6 +1280,36 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
             println!("tuning {:?}", radio.tuning);
             ok()
         }
+        // GET_CUSTOM_VARS: its GPS, on or off.
+        0x28 => {
+            let on = if radio.told.is_some() { "1" } else { "0" };
+            let mut frame = vec![0x15];
+            frame.extend(format!("gps:{on}").as_bytes());
+            vec![frame]
+        }
+        // SET_CUSTOM_VAR: `gps:0` or `gps:1`, and `gps_interval`, taken.
+        0x29 => match String::from_utf8_lossy(data).split_once(':') {
+            Some(("gps", "1")) => {
+                if radio.told.is_none() {
+                    radio.told = Some((radio.lat, radio.lon));
+                    (radio.lat, radio.lon) = GPS_AT;
+                }
+                println!("GPS on: at {}, {}", radio.lat, radio.lon);
+                ok()
+            }
+            Some(("gps", _)) => {
+                if let Some(told) = radio.told.take() {
+                    (radio.lat, radio.lon) = told;
+                }
+                println!("GPS off: at {}, {}", radio.lat, radio.lon);
+                ok()
+            }
+            Some(("gps_interval", secs)) if secs.parse::<u32>().is_ok() => {
+                println!("GPS every {secs} s");
+                ok()
+            }
+            _ => error(6),
+        },
         // GET_TUNING_PARAMS
         0x2b => {
             let mut frame = vec![0x17];

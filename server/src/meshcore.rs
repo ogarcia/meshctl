@@ -106,6 +106,7 @@ pub fn view(settings: &Settings) -> MeshcoreSettings {
             .iter()
             .map(|&(from, to)| MeshcoreFrequencies { from, to })
             .collect(),
+        gps: settings.gps,
     }
 }
 
@@ -220,6 +221,8 @@ pub fn change(current: &Settings, wanted: &MeshcoreSettings) -> Result<Settings,
         autoadd,
         repeat_frequencies: current.repeat_frequencies.clone(),
         default_scope,
+        // Only on a radio with one.
+        gps: current.gps.map(|now| wanted.gps.unwrap_or(now)),
     })
 }
 
@@ -302,7 +305,26 @@ mod tests {
             autoadd: Some((31, 0)),
             repeat_frequencies: vec![(433_000, 433_000), (869_495, 869_495)],
             default_scope: Some(None),
+            gps: Some(false),
         }
+    }
+
+    #[test]
+    fn a_gps_is_turned_on_only_where_there_is_one() {
+        let mut wanted = view(&radio());
+        assert_eq!(wanted.gps, Some(false));
+        wanted.gps = Some(true);
+        assert_eq!(change(&radio(), &wanted).unwrap().gps, Some(true));
+        // Left out, as it is.
+        wanted.gps = None;
+        assert_eq!(change(&radio(), &wanted).unwrap().gps, Some(false));
+        // None to turn on.
+        let without = Settings {
+            gps: None,
+            ..radio()
+        };
+        wanted.gps = Some(true);
+        assert_eq!(change(&without, &wanted).unwrap().gps, None);
     }
 
     #[test]

@@ -119,6 +119,9 @@ pub struct Settings {
     /// The region what it floods is scoped to, name and key, or none; none
     /// at all on firmware without it.
     pub default_scope: Option<Option<(String, [u8; 16])>>,
+    /// Whether its GPS is on, which then says where it is; none on a radio
+    /// with no GPS, or firmware without it.
+    pub gps: Option<bool>,
 }
 
 /// The frequencies a client repeats on, in kHz, where the radio does not say.
@@ -149,6 +152,7 @@ impl Settings {
                 .repeat_frequencies
                 .unwrap_or_else(|| REPEAT_FREQUENCIES.to_vec()),
             default_scope: extras.default_scope,
+            gps: extras.gps,
         }
     }
 }
@@ -165,6 +169,8 @@ pub struct Extras {
     pub repeat_frequencies: Option<Vec<(u32, u32)>>,
     /// The region what it floods is scoped to, name and key, or none.
     pub default_scope: Option<Option<(String, [u8; 16])>>,
+    /// Whether its GPS is on.
+    pub gps: Option<bool>,
 }
 
 /// A MeshCore radio's channels: how many slots it has, and each set one's
@@ -461,6 +467,17 @@ impl Client {
             .await
         {
             extras.default_scope = Some(scope);
+        }
+        if let Ok(Response::CustomVars(vars)) = self
+            .ask_one(command::get_custom_vars(), |r| {
+                matches!(r, Response::CustomVars(_))
+            })
+            .await
+        {
+            extras.gps = vars
+                .iter()
+                .find(|(name, _)| name == "gps")
+                .map(|(_, value)| value == "1");
         }
         extras
     }
@@ -1286,6 +1303,12 @@ impl Mesh {
                 .done(command::set_default_scope(
                     scope.as_ref().map(|(name, key)| (name.as_str(), key)),
                 ))
+                .await?;
+        }
+        // Its GPS last: on, it says where the radio is from then on.
+        if let (Some(on), true) = (wanted.gps, wanted.gps != current.gps) {
+            client
+                .done(command::set_custom_var("gps", if on { "1" } else { "0" }))
                 .await?;
         }
         self.meshcore_read_back(client).await
