@@ -550,9 +550,7 @@ fn ChannelPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
                                         <span class="shared-mark channel">"#"</span>
                                         <span class="shared-what">
                                             <b>{c.name.clone()}</b>
-                                            <span class="dim">
-                                                {move || crate::meshcore_channels::kind_label(i18n, kind)}
-                                            </span>
+                                            {crate::meshcore_channels::kind_view(i18n, kind)}
                                         </span>
                                     </button>
                                 </li>

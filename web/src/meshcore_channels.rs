@@ -40,6 +40,20 @@ enum Secret {
     Own,
 }
 
+/// A channel's kind as its list says it: its padlock, shut for a private
+/// one, open for those anyone may read, and its word.
+pub(crate) fn kind_view(
+    i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
+    kind: MeshcoreChannelKind,
+) -> impl IntoView {
+    view! {
+        <span class="key" class:open=open(kind)>
+            <span class="icon" inner_html=if open(kind) { LOCK_OPEN } else { LOCK }></span>
+            {move || kind_label(i18n, kind)}
+        </span>
+    }
+}
+
 /// The kind of a channel, in words.
 pub(crate) fn kind_label(
     i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
@@ -240,10 +254,7 @@ fn ChannelRow(
                     <span class="dim mono">{move || t!(i18n, channel_slot, slot = slot)}</span>
                 </span>
                 <span class="channel-facts">
-                    <span class="key" class:open=open(kind)>
-                        <span class="icon" inner_html=if open(kind) { LOCK_OPEN } else { LOCK }></span>
-                        {move || kind_label(i18n, kind)}
-                    </span>
+                    {kind_view(i18n, kind)}
                 </span>
             </button>
         </div>
@@ -458,10 +469,7 @@ fn ChannelEditor(
     let kind_now = start_kind.map(|kind| {
         view! {
             <div class="key-now">
-                <span class="key" class:open=open(kind)>
-                    <span class="icon" inner_html=if open(kind) { LOCK_OPEN } else { LOCK }></span>
-                    {move || kind_label(i18n, kind)}
-                </span>
+                {kind_view(i18n, kind)}
             </div>
         }
     });
