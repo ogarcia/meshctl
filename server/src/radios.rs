@@ -2011,7 +2011,10 @@ impl Radios {
     /// Silences a conversation of a radio, or no longer, and tells every
     /// client: false if there is no such radio, or channel on it.
     pub async fn set_muted(&self, id: RadioId, peer: Peer, muted: bool) -> Result<bool> {
-        if self.mesh(id).is_none() || !self.store.set_muted(id, peer, muted).await? {
+        let Some(mesh) = self.mesh(id) else {
+            return Ok(false);
+        };
+        if !self.store.set_muted(id, peer, muted).await? {
             return Ok(false);
         }
         let _ = self.changes.send(Change::ConversationMuted {
@@ -2019,6 +2022,12 @@ impl Radios {
             peer,
             muted,
         });
+        // A Meshtastic channel's, on the radio too, if it is there to take
+        // it; if not, once it syncs.
+        if matches!(peer, Peer::Channel { .. }) && self.link(id) == LinkState::Ready {
+            let store = self.store.clone();
+            tokio::spawn(async move { push_mutes(&store, id, &mesh).await });
+        }
         Ok(true)
     }
 
@@ -2539,10 +2548,24 @@ impl Radios {
     /// A radio's own settings, as it sent them on syncing. Only while it is
     /// connected: they are not kept, and a radio that is not there cannot be
     /// changed anyway.
-    pub fn settings(&self, id: RadioId) -> Result<NodeSettings, SettingsFailure> {
-        self.configurable(id)?
+    pub async fn settings(&self, id: RadioId) -> Result<NodeSettings, SettingsFailure> {
+        let mut settings = self
+            .configurable(id)?
             .read(|state| crate::settings::view(&state.settings))
-            .ok_or(SettingsFailure::NotConnected)
+            .ok_or(SettingsFailure::NotConnected)?;
+        // Whether each channel is silenced, as meshctl has it, which the
+        // radio is set to.
+        for channel in &mut settings.channels {
+            let peer = Peer::Channel {
+                channel: channel.index,
+            };
+            channel.muted = self
+                .store
+                .muted(id, peer)
+                .await
+                .map_err(SettingsFailure::Failed)?;
+        }
+        Ok(settings)
     }
 
     /// A channel's key, for the one who asks for it, and only then: nothing
@@ -3210,6 +3233,26 @@ impl Radios {
             })?;
         mesh.change_settings(change).await.map_err(admin_failure)?;
         tracing::info!(radio = id, reboots, "settings changed");
+        // A channel silenced, or no longer, is so in meshctl, which says.
+        for channel in &wanted.channels {
+            if let Some(muted) = channel.muted {
+                let peer = Peer::Channel {
+                    channel: channel.index,
+                };
+                if self
+                    .store
+                    .set_muted(id, peer, muted)
+                    .await
+                    .map_err(SettingsFailure::Failed)?
+                {
+                    let _ = self.changes.send(Change::ConversationMuted {
+                        radio: id,
+                        peer,
+                        muted,
+                    });
+                }
+            }
+        }
         Ok(SettingsApplied { reboots })
     }
 
@@ -3908,11 +3951,19 @@ impl Radios {
                         keep_route(&store, &changes, id, &mesh, &route).await
                     }
                     Ok(mesh::Event::Synced) => {
+                        let first = !connected;
                         connected = true;
-                        match save_all(&store, id, &mesh).await {
+                        let saved = match save_all(&store, id, &mesh).await {
                             Ok(()) => follow_channels(&store, &changes, id, &mesh).await,
                             other => other,
+                        };
+                        // Its channels silenced as meshctl has them, once a
+                        // link: not again as it syncs after taking them.
+                        if first && saved.is_ok() {
+                            let (store, mesh) = (store.clone(), mesh.clone());
+                            tokio::spawn(async move { push_mutes(&store, id, &mesh).await });
                         }
+                        saved
                     }
                     // Something was missed: store it all again, if it is current.
                     Err(RecvError::Lagged(_)) if connected => save_all(&store, id, &mesh).await,
@@ -4026,6 +4077,52 @@ fn admin_failure(error: AdminError) -> SettingsFailure {
 /// One from the radio itself was sent through it by another client (a phone,
 /// or another one behind the same tasticsplitter): it is ours as much as one
 /// sent from meshctl, and as far as anyone here can tell, it went out.
+/// Sets a Meshtastic radio's channels silenced as meshctl has them, which
+/// is what counts: each that differs, at once. Nothing on MeshCore, whose
+/// channels have no such setting.
+async fn push_mutes(store: &Store, id: RadioId, mesh: &Mesh) {
+    use meshctl_proto::meshtastic::channel::Role;
+    if mesh.read(|state| state.meshcore.is_some()) {
+        return;
+    }
+    let channels: Vec<meshctl_proto::meshtastic::Channel> =
+        mesh.read(|state| state.settings.channels.values().cloned().collect());
+    let mut changed = Vec::new();
+    for mut channel in channels {
+        if channel.role == Role::Disabled as i32 {
+            continue;
+        }
+        let Ok(slot) = u32::try_from(channel.index) else {
+            continue;
+        };
+        let Ok(muted) = store.muted(id, Peer::Channel { channel: slot }).await else {
+            continue;
+        };
+        let Some(settings) = channel.settings.as_mut() else {
+            continue;
+        };
+        let modules = settings
+            .module_settings
+            .get_or_insert_with(Default::default);
+        if modules.is_muted != muted {
+            modules.is_muted = muted;
+            changed.push(channel);
+        }
+    }
+    if changed.is_empty() {
+        return;
+    }
+    let slots: Vec<i32> = changed.iter().map(|c| c.index).collect();
+    let change = meshctl_core::radio::SettingsChange {
+        channels: changed,
+        ..Default::default()
+    };
+    match mesh.change_settings(change).await {
+        Ok(()) => tracing::info!(radio = id, ?slots, "channels silenced as meshctl has them"),
+        Err(error) => tracing::warn!(radio = id, ?error, "channels not silenced on the radio"),
+    }
+}
+
 /// Whether a position said to the radio is one to keep among its messages:
 /// sent to it on its own, or answering one the radio sent. Not one that
 /// answers the radio asking for it from a node's page, which goes to the

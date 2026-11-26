@@ -539,7 +539,7 @@
   "channel_public_hint": "Es un canal público: la radio no envía la posición con más precisión que esta.",
   "channel_public_precision": "Es un canal público: la radio no envía la posición con más precisión que ± 730 m. Elige menos precisión o una clave propia.",
   "channel_muted": "Silenciar",
-  "channel_muted_hint": "Sus mensajes llegan sin avisar: para canales con mucho movimiento que quieres conservar.",
+  "channel_muted_hint": "Como la campana de su chat: no cuenta como no leído ni avisa, aquí, en la radio ni en las apps de Meshtastic.",
   "settings_bandwidth": "Ancho de banda",
   "settings_bandwidth_hint": "Más ancho, más rápido y menos alcance.",
   "settings_spread_factor": "Factor de dispersión",

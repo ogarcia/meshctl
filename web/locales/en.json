@@ -539,7 +539,7 @@
   "channel_public_hint": "It is a public channel: the radio sends the position no more precisely than this.",
   "channel_public_precision": "It is a public channel: the radio sends the position no more precisely than ± 730 m. Choose less precision, or a key of your own.",
   "channel_muted": "Mute",
-  "channel_muted_hint": "What comes on it comes quietly: for busy channels you keep all the same.",
+  "channel_muted_hint": "As its chat's bell: not counted as unread nor notified of, here, on the radio and in the Meshtastic apps.",
   "settings_bandwidth": "Bandwidth",
   "settings_bandwidth_hint": "Wider is faster, and reaches less far.",
   "settings_spread_factor": "Spreading factor",

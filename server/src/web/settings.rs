@@ -79,7 +79,7 @@ pub(super) fn refused(failure: SettingsFailure) -> Response {
     )
 )]
 async fn show(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
-    match state.radios.settings(radio) {
+    match state.radios.settings(radio).await {
         Ok(settings) => Json(settings).into_response(),
         Err(failure) => refused(failure),
     }
