@@ -3,6 +3,51 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.6.0 (2026-11-26)
+
+Other Meshtastic nodes administered over the mesh.
+
+### Remote administration
+
+- *Administer*, on a Meshtastic node's page, opens the same settings page
+  as the radio's, for the node: its owner and role, its LoRa, its channels,
+  every section of its configuration and modules, read from it over the mesh
+  and changed on it, sealed to its key. Each section is asked for as it is
+  opened, and what the node took is read back.
+- Every change asks first; those to its LoRa and its channels say they may
+  leave it out of reach. What is on its way says so and holds still; a node
+  that does not answer, or does not take the radio's key, says so, with the
+  radio's key to give its owner.
+- Its fixed position, set as the radio's is, from where it was last heard.
+- Reboot, shut down, forget its nodes, or go back to its factory settings:
+  for a node administered, and for the radio itself, among its settings'
+  sections, as *Actions*.
+- The radio's own admin keys, up to three, added from the nodes known or
+  written, under *Device*, *Security*.
+
+### Chat
+
+- A trash can in every chat: a channel is emptied, and so is a MeshCore
+  room, both staying on the radio; a conversation with a node is deleted.
+  Each asked first, and only in meshctl, not on the mesh.
+
+### Map
+
+- A clock under the zoom's buttons picks how long ago a radio's nodes have
+  to have been heard to be on its map: all, or within 8 hours, a day, 3
+  days, a week or a month. Kept for each radio; the radio's own node is
+  always there.
+
+### Fixes
+
+- Adding a radio changes nothing on it: the channels it has silenced are
+  taken as meshctl's, rather than undone.
+- A heading's menu, on a phone, as wide as its items, and not pushed right.
+
+### Documentation
+
+- What a message's marks say, and how to administer a node, in the README.
+
 ## 0.5.0 (2026-11-26)
 
 Sharing in chats, conversations silenced, and where a radio is.
