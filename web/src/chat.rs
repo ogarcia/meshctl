@@ -1019,7 +1019,8 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
             .into_any();
         }
         let went = went(live, &message);
-        let (icon, class, _) = went.look(i18n);
+        // Its icon and class, which no language changes: read once.
+        let (icon, class, _) = untrack(|| went.look(i18n));
         let words = move || {
             let (_, _, words) = went.look(i18n);
             match &error {
