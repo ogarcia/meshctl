@@ -47,6 +47,8 @@ fn kept_state() -> tauri_plugin_window_state::StateFlags {
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod bluetooth;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -237,6 +239,9 @@ pub fn run() {
                 )));
                 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
                 let host = None;
+                // Radios by Bluetooth, reached by the app for the daemon.
+                #[cfg(any(target_os = "linux", target_os = "windows"))]
+                meshctl_core::link::ble::set_opener(Arc::new(bluetooth::Desktop));
                 let config = meshctld::Config {
                     data: data_dir(),
                     listen: SocketAddr::from((HOST, port)),

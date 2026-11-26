@@ -1153,10 +1153,10 @@
   "radio_add_name_hint": "Without one, the one plugged in's, or its address.",
   "radio_add_customize_hint": "Its icon or letters, and its colour on the bar, right after adding it.",
   "welcome_bluetooth": "By Bluetooth",
-  "welcome_bluetooth_detail": "Paired with this phone",
+  "welcome_bluetooth_detail": "Paired with this device",
   "nearby_title": "The radio nearby",
   "nearby_looking": "Looking for radios nearby…",
   "nearby_asked": "Android is asking you for leave to use Bluetooth: say yes, and look again.",
-  "nearby_none": "No radio heard nearby. Is its Bluetooth on, and that of this phone?",
+  "nearby_none": "No radio heard nearby. Is its Bluetooth on, and that of this device?",
   "nearby_again": "Look again"
 }

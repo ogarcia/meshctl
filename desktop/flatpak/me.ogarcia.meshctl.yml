@@ -26,6 +26,9 @@ finish-args:
   # no narrower permission reaches; it gives the GPU too. Nothing of the
   # user's files: what meshctl keeps stays in the sandbox.
   - --device=all
+  # Radios by Bluetooth, through BlueZ on the system's bus; paired in the
+  # system's settings, which ask for their PIN.
+  - --system-talk-name=org.bluez
 
 modules:
   - name: meshctl

@@ -47,6 +47,14 @@ jni = "0.22"
 # Radios by USB, opened by the service, as the daemon's core takes them.
 meshctl-core.workspace = true
 
+# Radios by Bluetooth, reached by the app as Android's are, for the daemon
+# within it: the daemon alone, meshctld, knows nothing of Bluetooth.
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+btleplug = "0.13"
+uuid = "1"
+meshctl-core.workspace = true
+futures-util = { version = "0.3", default-features = false }
+
 # A tray with its menu where there is one: its words in the system's
 # language.
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
@@ -64,5 +72,4 @@ windows-registry = "0.6"
 # language.
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.14", default-features = false, features = ["tokio", "background", "notification"] }
-futures-util = { version = "0.3", default-features = false }
 sys-locale = "0.3"
