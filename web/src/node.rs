@@ -488,7 +488,10 @@ fn Checks() -> impl IntoView {
     let asking = expect_context::<Asking>();
     move || {
         let checks = live.checks.get();
+        // Another companion, which is asked little; not the radio's own,
+        // which is not asked anything over the mesh.
         let companion = !supported(live)
+            && !own(live, asking.num)
             && !live.nodes.with(|nodes| {
                 nodes
                     .get(&asking.num)
