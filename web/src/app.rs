@@ -568,7 +568,7 @@ impl Live {
     pub fn unread(self, id: RadioId) -> u32 {
         if self.selected.get() == Some(id) {
             self.conversations
-                .with(|c| c.iter().map(|c| c.unread).sum())
+                .with(|c| c.iter().filter(|c| !c.muted).map(|c| c.unread).sum())
         } else {
             self.radios.with(|radios| {
                 radios
@@ -1146,7 +1146,10 @@ impl Live {
                     Ok(())
                 }
                 // All kept of it forgotten: out of what this page has too.
-                ServerMessage::ConversationRead { radio, .. } if self.is_selected(radio) => {
+                ServerMessage::ConversationRead { radio, .. }
+                | ServerMessage::ConversationMuted { radio, .. }
+                    if self.is_selected(radio) =>
+                {
                     self.refresh_conversations().await
                 }
                 // Cleaned away: what shows what was kept, read again.
@@ -1345,9 +1348,9 @@ impl Live {
                 ServerMessage::Radios | ServerMessage::Lagged => self.refresh().await,
                 // Another radio's messages, come or read: how many it has
                 // unread, on its button.
-                ServerMessage::Message { .. } | ServerMessage::ConversationRead { .. } => {
-                    self.refresh_radios().await
-                }
+                ServerMessage::Message { .. }
+                | ServerMessage::ConversationRead { .. }
+                | ServerMessage::ConversationMuted { .. } => self.refresh_radios().await,
                 _ => Ok(()),
             };
             if let Err(failure) = refreshed {
@@ -1671,6 +1674,7 @@ const CHEVRON: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/
 const GEAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/settings.svg");
 const TRASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/trash.svg");
 const HISTORY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/history.svg");
+const BELL_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/bell-off.svg");
 const DOTS_VERTICAL: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/dots-vertical.svg");
 const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message.svg");
@@ -2001,7 +2005,9 @@ fn Section(bit: u8, title: Signal<String>, peers: Signal<Vec<Peer>>) -> impl Int
         if folded() {
             live.conversations.with(|c| {
                 peers.retain(|peer| {
-                    Some(*peer) == open || c.iter().any(|c| c.peer == *peer && c.unread > 0)
+                    Some(*peer) == open
+                        || c.iter()
+                            .any(|c| c.peer == *peer && c.unread > 0 && !c.muted)
                 });
             });
         }
@@ -2092,21 +2098,89 @@ pub(crate) fn PeerItem(peer: Peer) -> impl IntoView {
             .strip_prefix("# ")
             .map_or_else(|| title.clone(), str::to_owned)
     };
-    // What others wrote in it not read yet: none while it is read.
+    // What others wrote in it not read yet: none while it is read; grey
+    // while it is silenced, which then says so.
+    let silenced = move || muted(live, peer);
     let unread = move || {
         let read_now = live.open.get() == Some(peer) && live.reading.get();
         let unread = live
             .conversations
             .with(|c| c.iter().find(|c| c.peer == peer).map_or(0, |c| c.unread));
-        (!read_now && unread > 0)
-            .then(|| view! { <span class="unread">{unread_count(unread)}</span> })
+        (!read_now && unread > 0).then(|| {
+            view! { <span class="unread" class:quiet=silenced>{unread_count(unread)}</span> }
+        })
     };
     view! {
-        <button class=class on:click=move |_| live.open_chat(peer)>
+        <button class=class class:muted=silenced on:click=move |_| live.open_chat(peer)>
             {marker}
             <span class="label">{label}</span>
             {unread}
+            {move || silenced().then(|| view! { <span class="muted-mark" inner_html=BELL_OFF></span> })}
         </button>
+    }
+}
+
+/// Whether a conversation of the selected radio is silenced.
+pub fn muted(live: Live, peer: Peer) -> bool {
+    live.conversations
+        .with(|c| c.iter().any(|c| c.peer == peer && c.muted))
+}
+
+/// Silences a conversation of the selected radio, or no longer: every
+/// client hears of it, this one too.
+pub fn toggle_muted(live: Live, peer: Peer) {
+    let Some(radio) = live.selected.get_untracked() else {
+        return;
+    };
+    let now = untrack(|| muted(live, peer));
+    spawn_local(async move {
+        let _ = daemon::set_muted(radio, peer, !now).await;
+    });
+}
+
+/// A bell crossed beside the open conversation's name, while it is
+/// silenced; its button in the heading, or its menu, gives it voice again.
+#[component]
+fn SilencedMark(peer: Peer) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    move || {
+        muted(live, peer).then(|| {
+            view! {
+                <span
+                    class="mark"
+                    title=move || t_string!(i18n, chat_muted)
+                    aria-label=move || t_string!(i18n, chat_muted)
+                    inner_html=BELL_OFF
+                ></span>
+            }
+        })
+    }
+}
+
+/// Silences the open conversation, or no longer: lit while it is.
+#[component]
+fn MuteButton(peer: Peer) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let on = move || muted(live, peer);
+    let label = move || {
+        if on() {
+            t_string!(i18n, chat_unmute)
+        } else {
+            t_string!(i18n, chat_mute)
+        }
+    };
+    view! {
+        <button
+            class="icon-button spare"
+            class:on=on
+            aria-pressed=move || on().to_string()
+            title=label
+            aria-label=label
+            inner_html=BELL_OFF
+            on:click=move |_| toggle_muted(live, peer)
+        ></button>
     }
 }
 
@@ -2347,7 +2421,10 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
             let meshcore = move || live.selected_kind() == Some(RadioKind::Meshcore);
             view! {
                 <div class="heading">
-                    <h1>{move || title(live, peer)}</h1>
+                    <h1>
+                        <span class="title-text">{move || title(live, peer)}</span>
+                        <SilencedMark peer />
+                    </h1>
                     <span class="dim">
                         {t!(i18n, nav_channel_slot, index = channel)}
                         {move || meshcore().then(|| view! {
@@ -2356,15 +2433,14 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         })}
                     </span>
                 </div>
-                {move || {
-                    meshcore().then(|| {
-                        view! {
-                            <div class="actions">
-                                <crate::meshcore_regions::ChannelRegion channel regions />
-                            </div>
-                        }
-                    })
-                }}
+                <div class="actions">
+                    {move || {
+                        meshcore()
+                            .then(|| view! { <crate::meshcore_regions::ChannelRegion channel regions /> })
+                    }}
+                    <MuteButton peer />
+                    <HeadingMore can_history=false can_remove=false mute=peer />
+                </div>
             }
             .into_any()
         }
@@ -2565,13 +2641,18 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         </button>
                     }
                 });
-                // Where there is no room for them, those two in a menu.
+                // Silencing its conversation, from it.
+                let mute = (page == Page::Chat).then(|| view! { <MuteButton peer /> });
+                // Where there is no room for them, those in a menu.
                 let can_remove = remove.is_some();
                 let can_history = history.is_some();
-                let more = (can_remove || can_history)
-                    .then(|| view! { <HeadingMore can_history can_remove /> });
+                let muting = (page == Page::Chat).then_some(peer);
+                let more = (can_remove || can_history || muting.is_some()).then(|| match muting {
+                    Some(mute) => view! { <HeadingMore can_history can_remove mute /> }.into_any(),
+                    None => view! { <HeadingMore can_history can_remove /> }.into_any(),
+                });
                 // The three dots last, against the edge, as menus go.
-                view! { {remove} {history} {profile} {settings} {chat} {more} }
+                view! { {remove} {history} {mute} {profile} {settings} {chat} {more} }
             };
             // Back to where its page was opened from, on its page.
             let back = move || {
@@ -2612,6 +2693,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         <span class="title-text">{move || title(live, peer)}</span>
                         {star}
                         {muted}
+                        {move || (live.page.get() == Page::Chat).then(|| view! { <SilencedMark peer /> })}
                     </h1>
                     <span class="dim">{detail}</span>
                 </div>
@@ -2644,7 +2726,13 @@ pub fn link_class(link: LinkState) -> &'static str {
 /// as icons: behind three dots, each by its icon and its words. Closed by
 /// a click anywhere else, or by choosing.
 #[component]
-fn HeadingMore(can_history: bool, can_remove: bool) -> impl IntoView {
+fn HeadingMore(
+    can_history: bool,
+    can_remove: bool,
+    /// The conversation to silence from it, if any.
+    #[prop(optional)]
+    mute: Option<Peer>,
+) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let open = RwSignal::new(false);
@@ -2673,6 +2761,27 @@ fn HeadingMore(can_history: bool, can_remove: bool) -> impl IntoView {
             ></button>
             <Show when=move || open.get()>
                 <div class="heading-menu" role="menu" on:click=|ev| ev.stop_propagation()>
+                    {mute
+                        .map(|peer| {
+                            view! {
+                                <button
+                                    role="menuitem"
+                                    on:click=move |_| {
+                                        open.set(false);
+                                        toggle_muted(live, peer);
+                                    }
+                                >
+                                    <span class="icon" inner_html=BELL_OFF></span>
+                                    {move || {
+                                        if muted(live, peer) {
+                                            t_string!(i18n, chat_unmute)
+                                        } else {
+                                            t_string!(i18n, chat_mute)
+                                        }
+                                    }}
+                                </button>
+                            }
+                        })}
                     {can_history
                         .then(|| {
                             view! {

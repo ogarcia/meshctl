@@ -232,6 +232,29 @@ pub async fn mark_read(
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Silences a conversation of a radio, or no longer.
+pub async fn set_muted(
+    radio: RadioId,
+    peer: meshctl_api::Peer,
+    muted: bool,
+) -> Result<(), Failure> {
+    let (channel, node) = match peer {
+        meshctl_api::Peer::Channel { channel } => (Some(channel), None),
+        meshctl_api::Peer::Node { node } => (None, Some(node)),
+    };
+    let mute = meshctl_api::ConversationMute {
+        channel,
+        node,
+        muted,
+    };
+    let request = with_token(Request::post(&url(&format!(
+        "/radios/{radio}/conversations/mute"
+    ))))
+    .json(&mute)
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// The packet that carried a message, as the radio heard or sent it.
 pub async fn message_packet(
     radio: RadioId,

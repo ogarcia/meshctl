@@ -3001,6 +3001,13 @@
         line-height: 1;
       }
       .item .unread { margin-left: auto; }
+      /* A conversation silenced: faint, a bell crossed always at the end,
+         what it has unread before it, in grey. */
+      .item.muted .label { color: var(--mc-muted); }
+      .item .muted-mark { display: flex; flex: none; justify-content: center; width: 18px; margin-left: auto; color: var(--mc-muted); }
+      .item .muted-mark svg { width: 14px; height: 14px; }
+      .item .unread + .muted-mark { margin-left: 0; }
+      .unread.quiet { background: var(--mc-border); color: var(--mc-muted); }
       .tabbar button { position: relative; }
       .tabbar .unread { position: absolute; top: 2px; left: calc(50% + 6px); }
       /* On a radio's button, at its corner; in the phone's list, at the end. */
