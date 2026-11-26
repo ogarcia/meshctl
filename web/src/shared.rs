@@ -375,13 +375,12 @@ fn LinkCard(link: String) -> impl IntoView {
                 short_name,
                 ..
             }) => {
-                // Known, with its key, its page; else, added.
+                // Known to meshctl with its key, its page, on the radio or
+                // not: Meshtastic's come back to it once heard. Else, added,
+                // for the node or the key its private messages take.
                 let kept = move || {
-                    live.nodes.with(|nodes| {
-                        nodes
-                            .get(&node)
-                            .is_some_and(|n| n.on_radio != Some(false) && n.public_key.is_some())
-                    })
+                    live.nodes
+                        .with(|nodes| nodes.get(&node).is_some_and(|n| n.public_key.is_some()))
                 };
                 view! {
                     <div class="shared-card">
