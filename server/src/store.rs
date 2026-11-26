@@ -1000,8 +1000,8 @@ impl Store {
         let id = sqlx::query(
             "INSERT INTO message (radio_id, packet_id, from_num, sender_name, to_num, channel,
                 channel_id, text, at, outgoing, status, reply_id, emoji, snr, rssi, hops_away,
-                via_mqtt, scope, sent_at, author_num)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                via_mqtt, scope, sent_at, author_num, latitude, longitude, altitude, radius)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (radio_id, from_num, packet_id) DO NOTHING",
         )
         .bind(radio)
@@ -1024,6 +1024,10 @@ impl Store {
         .bind(&message.scope)
         .bind(message.sent_at)
         .bind(message.author.map(i64::from))
+        .bind(message.position.map(|p| p.latitude))
+        .bind(message.position.map(|p| p.longitude))
+        .bind(message.position.and_then(|p| p.altitude))
+        .bind(message.position.and_then(|p| p.radius).map(i64::from))
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -1636,6 +1640,8 @@ pub struct NewMessageRow {
     pub sent_at: Option<i64>,
     /// Who wrote it, for a room's post: its author's node.
     pub author: Option<u32>,
+    /// Where its sender is, for a position.
+    pub position: Option<meshctl_api::Position>,
 }
 
 /// A packet as kept, with one radio's hearing of it.
@@ -1686,6 +1692,10 @@ struct MessageRow {
     sent_at: Option<i64>,
     repeaters: i64,
     author_num: Option<i64>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    altitude: Option<i32>,
+    radius: Option<i64>,
 }
 
 impl MessageRow {
@@ -1713,6 +1723,16 @@ impl MessageRow {
             sent_at: self.sent_at,
             repeaters: u32::try_from(self.repeaters).unwrap_or(0),
             author: self.author_num.map(u32_from),
+            position: self
+                .latitude
+                .zip(self.longitude)
+                .map(|(latitude, longitude)| meshctl_api::Position {
+                    latitude,
+                    longitude,
+                    altitude: self.altitude,
+                    radius: self.radius.and_then(|r| u32::try_from(r).ok()),
+                    source: None,
+                }),
         }
     }
 }
@@ -2213,7 +2233,42 @@ mod tests {
             scope: None,
             sent_at: None,
             author: None,
+            position: None,
         }
+    }
+
+    #[tokio::test]
+    async fn a_position_is_kept_among_the_messages() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        let at = meshctl_api::Position {
+            latitude: 43.384_832,
+            longitude: -8.414_822,
+            altitude: Some(54),
+            radius: Some(2918),
+            source: None,
+        };
+        let kept = store
+            .add_message(
+                radio,
+                &NewMessageRow {
+                    text: String::new(),
+                    position: Some(at),
+                    ..text(1, 7, 9, true)
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.position, Some(at));
+        assert_eq!(kept.text, "");
+        // A text has none.
+        let plain = store
+            .add_message(radio, &text(2, 7, 9, true))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(plain.position, None);
     }
 
     #[tokio::test]

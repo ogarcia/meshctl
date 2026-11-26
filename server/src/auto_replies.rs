@@ -246,6 +246,7 @@ pub fn valid(settings: &AutoReplySettings) -> bool {
 fn answerable(message: &Message, now: i64) -> bool {
     !message.outgoing
         && !message.emoji
+        && message.position.is_none()
         && !message.via_mqtt
         && message.packet_id != 0
         && message.author.is_none()
@@ -436,6 +437,7 @@ mod tests {
             sent_at: None,
             repeaters: 0,
             author: None,
+            position: None,
         }
     }
 
@@ -507,6 +509,15 @@ mod tests {
         };
         assert!(!changed(|m| m.outgoing = true));
         assert!(!changed(|m| m.emoji = true));
+        assert!(!changed(|m| {
+            m.position = Some(meshctl_api::Position {
+                latitude: 43.36,
+                longitude: -8.41,
+                altitude: None,
+                radius: None,
+                source: None,
+            });
+        }));
         assert!(!changed(|m| m.via_mqtt = true));
         assert!(!changed(|m| m.author = Some(9)));
         assert!(!changed(|m| m.packet_id = 0));

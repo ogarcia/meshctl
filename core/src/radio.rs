@@ -257,6 +257,32 @@ impl Mesh {
         })
     }
 
+    /// Sends where the radio is to a channel or a node, as a position of
+    /// its own: the firmware rounds it as the channel it goes on shares
+    /// positions. To a node, it asks for the node's back, which comes as a
+    /// position with the id returned as its `request_id`.
+    pub fn send_position(
+        &self,
+        to: u32,
+        channel: u32,
+        position: Position,
+    ) -> Result<u32, SendError> {
+        if self.is_meshcore() {
+            return Err(SendError::Unsupported);
+        }
+        self.send_packet(
+            to,
+            channel,
+            true,
+            Data {
+                portnum: PortNum::PositionApp as i32,
+                payload: position.encode_to_vec(),
+                want_response: to != crate::mesh::BROADCAST,
+                ..Default::default()
+            },
+        )
+    }
+
     /// Whether the radio is a MeshCore one, as far as its open session says.
     fn is_meshcore(&self) -> bool {
         self.meshcore

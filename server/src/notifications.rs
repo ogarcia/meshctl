@@ -112,9 +112,13 @@ async fn heard(radios: &Radios, radio: RadioId, message: &Message) {
     radios.notify(notification);
 }
 
-/// Whether a message is one to notify of at `now`, wherever it came.
+/// Whether a message is one to notify of at `now`, wherever it came: a
+/// text, not a reaction nor a position.
 fn notifiable(message: &Message, now: i64) -> bool {
-    !message.outgoing && !message.emoji && now - message.at <= FRESH_SECS
+    !message.outgoing
+        && !message.emoji
+        && message.position.is_none()
+        && now - message.at <= FRESH_SECS
 }
 
 /// Where a message heard is: its channel, or who sent it.
@@ -246,6 +250,7 @@ mod tests {
             sent_at: None,
             repeaters: 0,
             author: None,
+            position: None,
         }
     }
 
@@ -307,8 +312,17 @@ mod tests {
         let mut own = fresh.clone();
         own.outgoing = true;
         assert!(!notifiable(&own, 1_060));
-        let mut reaction = fresh;
+        let mut reaction = fresh.clone();
         reaction.emoji = true;
         assert!(!notifiable(&reaction, 1_060));
+        let mut position = fresh;
+        position.position = Some(meshctl_api::Position {
+            latitude: 43.36,
+            longitude: -8.41,
+            altitude: None,
+            radius: None,
+            source: None,
+        });
+        assert!(!notifiable(&position, 1_060));
     }
 }

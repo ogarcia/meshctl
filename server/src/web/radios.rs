@@ -375,7 +375,13 @@ async fn node_contact(
 async fn channels(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
     match mesh_of(&state, radio).await {
         Ok(mesh) => Json(mesh.map_or_else(Vec::new, |mesh| {
-            mesh.read(|mesh| mesh.channels.values().map(convert::channel).collect())
+            mesh.read(|state| {
+                state
+                    .channels
+                    .values()
+                    .map(|channel| convert::channel(state, channel))
+                    .collect()
+            })
         }))
         .into_response(),
         Err(missing) => missing.into_response(),

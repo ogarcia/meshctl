@@ -316,11 +316,15 @@ impl Radio {
         // A text that wants an acknowledgement gets one, as the firmware
         // gives it: on a channel, from the radio itself once it hears a
         // neighbour pass it on; to the neighbour, from the neighbour once it
-        // has it; to anyone else, after its tries, that nobody answered.
+        // has it; to anyone else, after its tries, that nobody answered. A
+        // position on a channel, the same; to the neighbour, its own answers
+        // it.
         if data.portnum == PortNum::TextMessageApp as i32 && data.emoji == 0 {
             self.last_text = Some(packet.id);
         }
-        if data.portnum == PortNum::TextMessageApp as i32 && packet.want_ack {
+        let acked = data.portnum == PortNum::TextMessageApp as i32
+            || (data.portnum == PortNum::PositionApp as i32 && packet.to == u32::MAX);
+        if acked && packet.want_ack {
             let (error, delay) = if packet.to == NEIGHBOUR || packet.to == u32::MAX {
                 (
                     pb::routing::Error::None,

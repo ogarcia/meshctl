@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
     Conversation, ConversationRead, Error, ErrorCode, Message, MessageId, MessageRoute, NewMessage,
-    Packet, Peer, RadioId,
+    Packet, Peer, PositionShare, RadioId,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -33,6 +33,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(message_packet))
         .routes(routes!(message_routes))
         .routes(routes!(resend))
+        .routes(routes!(share_position))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -187,6 +188,53 @@ async fn send(
         Err(SendFailure::Invalid) => {
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidMessage)
         }
+        Err(SendFailure::NotShared) => error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::PositionNotShared,
+        ),
+        Err(SendFailure::Failed(err)) => failed(&err),
+    }
+}
+
+/// Send where the radio is
+///
+/// Sends the radio's own position to a channel (`channel`) or to a node
+/// (`node`), as a position rather than a text: only on Meshtastic radios.
+/// The firmware rounds it as the channel shares positions, a direct
+/// message's being the primary's, and it is kept as it went, among the
+/// conversation's messages, with `position` and no text. To a node it asks
+/// for the node's back, which comes as a message of its own. It is answered
+/// at once, as `sending`.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/positions",
+    tag = "chat",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = PositionShare,
+    responses(
+        (status = 202, description = "Handed to the radio", body = Message),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "Not where a position can go, or not a Meshtastic radio: `invalid_message`; the radio does not know where it is, or the channel shares no position: `position_not_shared`", body = Error),
+    )
+)]
+async fn share_position(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(share): Json<PositionShare>,
+) -> Response {
+    match state.radios.share_position(radio, share).await {
+        Ok(message) => (StatusCode::ACCEPTED, Json(message)).into_response(),
+        Err(SendFailure::NoSuchRadio) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(SendFailure::NotConnected) => error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
+        Err(SendFailure::Invalid) => {
+            error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidMessage)
+        }
+        Err(SendFailure::NotShared) => error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorCode::PositionNotShared,
+        ),
         Err(SendFailure::Failed(err)) => failed(&err),
     }
 }
@@ -224,7 +272,7 @@ async fn resend(
             error(StatusCode::NOT_FOUND, ErrorCode::NotFound)
         }
         Err(SendFailure::NotConnected) => error(StatusCode::CONFLICT, ErrorCode::RadioNotConnected),
-        Err(SendFailure::Invalid) => {
+        Err(SendFailure::Invalid | SendFailure::NotShared) => {
             error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidMessage)
         }
         Err(SendFailure::Failed(err)) => failed(&err),

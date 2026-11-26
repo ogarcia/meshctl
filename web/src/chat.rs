@@ -472,7 +472,7 @@ enum Item {
     Unread,
     /// A message, and whether it starts a run of its author's: only that
     /// one says who it is.
-    Said(Message, bool),
+    Said(Box<Message>, bool),
 }
 
 impl Item {
@@ -640,7 +640,7 @@ pub fn ChatView() -> impl IntoView {
                     _ => true,
                 };
                 before = author.map(|(from, name)| (from, name, m.at));
-                items.push(Item::Said(m.clone(), first));
+                items.push(Item::Said(Box::new(m.clone()), first));
             }
             items
         })
@@ -862,7 +862,7 @@ pub fn ChatView() -> impl IntoView {
                                 }
                                 .into_any(),
                                 Item::Said(message, first) => {
-                                    view! { <Bubble message peer first /> }.into_any()
+                                    view! { <Bubble message=*message peer first /> }.into_any()
                                 }
                             }}
                         </For>

@@ -12,9 +12,9 @@ use meshctl_api::{
     BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, FixedPosition, Hop,
     LinkContents, LinkState, MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest,
     NodeAccess, NodeCheck, NodeLatest, NodeLogin, NodeSettings, NodeSettingsChange, NodeTelemetry,
-    Pace, Packet, PacketFilter, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
-    Request, RequestKind, SectionSecret, SettingsApplied, SettingsSection, SightingId, Status,
-    TelemetryPoint, TelemetrySeries, Waits,
+    Pace, Packet, PacketFilter, Peer, PositionShare, Preferences, Radio, RadioId, RadioKind,
+    RadioSettings, Request, RequestKind, SectionSecret, SettingsApplied, SettingsSection,
+    SightingId, Status, TelemetryPoint, TelemetrySeries, Waits,
 };
 use meshctl_core::link::Transport;
 use meshctl_core::mesh::{self, MeshState};
@@ -159,6 +159,9 @@ pub enum SendFailure {
     NoSuchRadio,
     NotConnected,
     Invalid,
+    /// No position to send: the radio does not know where it is, or the
+    /// channel it would go on shares none.
+    NotShared,
     Failed(anyhow::Error),
 }
 
@@ -1511,6 +1514,98 @@ impl Radios {
             scope: scope_kept,
             sent_at: sent.sent_at.map(i64::from),
             author: None,
+            position: None,
+        };
+        let kept = self
+            .store
+            .add_message(id, &row)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("a packet id was used twice"))?;
+        let _ = self.changes.send(Change::Message(id, kept.clone()));
+        Ok(kept)
+    }
+
+    /// Sends where the radio is to a channel or a node, as a position, and
+    /// keeps it among the conversation's messages as it went: rounded as
+    /// the channel shares positions, which a direct message's is the
+    /// primary's. Only on Meshtastic, which has positions to send.
+    pub async fn share_position(
+        &self,
+        id: RadioId,
+        share: PositionShare,
+    ) -> Result<Message, SendFailure> {
+        let mesh = self.mesh(id).ok_or(SendFailure::NoSuchRadio)?;
+        if self.protocol(id) == Some(Protocol::Meshcore) {
+            return Err(SendFailure::Invalid);
+        }
+        let (to, channel) = match (share.channel, share.node) {
+            (Some(channel), None) => (mesh::BROADCAST, channel),
+            (None, Some(node)) if node != mesh::BROADCAST => (node, 0),
+            _ => return Err(SendFailure::Invalid),
+        };
+        if self.link(id) != LinkState::Ready {
+            return Err(SendFailure::NotConnected);
+        }
+        let (here, precision) = mesh.read(|state| {
+            let here = state
+                .local
+                .as_ref()
+                .and_then(|l| state.nodes.get(&l.num)?.position);
+            (here, shared_precision(&state.settings, channel))
+        });
+        let precision = precision.ok_or(SendFailure::Invalid)?;
+        let here = here.ok_or(SendFailure::NotShared)?;
+        if precision == 0 {
+            return Err(SendFailure::NotShared);
+        }
+        // In ten millionths of a degree, as the protobufs carry it.
+        #[allow(clippy::cast_possible_truncation)]
+        let degrees = |d: f64| (d * 1e7).round() as i32;
+        let (latitude, longitude) = (degrees(here.latitude), degrees(here.longitude));
+        let position = meshctl_proto::meshtastic::Position {
+            latitude_i: Some(latitude),
+            longitude_i: Some(longitude),
+            altitude: here.altitude,
+            time: u32::try_from(now()).unwrap_or(0),
+            ..Default::default()
+        };
+        let packet_id = mesh
+            .send_position(to, channel, position)
+            .map_err(|error| match error {
+                SendError::NotConnected => SendFailure::NotConnected,
+                SendError::BadText | SendError::Refused | SendError::Unsupported => {
+                    SendFailure::Invalid
+                }
+            })?;
+        let from = mesh.read(|state| state.local.as_ref().map_or(0, |l| l.num));
+        // As the others have it: rounded as the firmware rounds it on its way.
+        let went = |coordinate| f64::from(mesh::truncated(coordinate, precision)) * 1e-7;
+        let row = NewMessageRow {
+            packet_id,
+            from,
+            sender_name: None,
+            to,
+            channel,
+            text: String::new(),
+            at: now(),
+            outgoing: true,
+            status: MessageStatus::Sending,
+            reply_id: None,
+            emoji: false,
+            snr: None,
+            rssi: None,
+            hops_away: None,
+            via_mqtt: false,
+            scope: None,
+            sent_at: None,
+            author: None,
+            position: Some(meshctl_api::Position {
+                latitude: went(latitude),
+                longitude: went(longitude),
+                altitude: here.altitude,
+                radius: mesh::radius(precision),
+                source: None,
+            }),
         };
         let kept = self
             .store
@@ -3673,8 +3768,19 @@ impl Radios {
                     Ok(mesh::Event::Traceroute(answer)) => {
                         answer_traceroute(&store, &changes, id, &mesh, &answer).await
                     }
+                    Ok(mesh::Event::Message(heard))
+                        if heard.position.is_some()
+                            && !answers_ours(&store, id, heard.request_id).await =>
+                    {
+                        Ok(())
+                    }
                     Ok(mesh::Event::Message(heard)) => {
                         let local = mesh.read(|s| s.local.as_ref().map(|l| l.num));
+                        // A position answering ours says ours got there.
+                        let answered = heard
+                            .position
+                            .and(heard.request_id)
+                            .map(|asked| (asked, heard.from));
                         let mut row = heard_row(heard, local);
                         // MeshCore's reactions come as text.
                         if mesh.read(|s| s.meshcore.is_some())
@@ -3683,6 +3789,24 @@ impl Radios {
                             tracing::warn!(radio = id, error = format_args!("{err:#}"), "reaction");
                         }
                         let kept = store.add_message(id, &row).await;
+                        if let Some((asked, from)) = answered {
+                            match store.ack(id, asked, from, None).await {
+                                Ok(Some((message, status, error))) => {
+                                    let _ = changes.send(Change::MessageStatus {
+                                        radio: id,
+                                        id: message,
+                                        status,
+                                        error,
+                                    });
+                                }
+                                Ok(None) => {}
+                                Err(err) => tracing::warn!(
+                                    radio = id,
+                                    error = format_args!("{err:#}"),
+                                    "cannot store"
+                                ),
+                            }
+                        }
                         kept.map(|kept| {
                             if let Some(message) = kept {
                                 let _ = changes.send(Change::Message(id, message));
@@ -3875,6 +3999,52 @@ fn admin_failure(error: AdminError) -> SettingsFailure {
 /// One from the radio itself was sent through it by another client (a phone,
 /// or another one behind the same tasticsplitter): it is ours as much as one
 /// sent from meshctl, and as far as anyone here can tell, it went out.
+/// Whether a position said to the radio is one to keep among its messages:
+/// sent to it on its own, or answering one the radio sent. Not one that
+/// answers the radio asking for it from a node's page, which goes to the
+/// node alone.
+async fn answers_ours(store: &Store, radio: RadioId, request_id: Option<u32>) -> bool {
+    let Some(request_id) = request_id else {
+        return true;
+    };
+    store
+        .message_by_packet(radio, request_id)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|asked| asked.outgoing && asked.position.is_some())
+}
+
+/// How precisely a channel of a Meshtastic radio shares positions, in bits,
+/// as the firmware has it: 0 for none, and no more than a public key lets.
+/// None if there is no such channel, or it is off.
+pub(crate) fn shared_precision(settings: &mesh::Settings, slot: u32) -> Option<u32> {
+    use meshctl_proto::meshtastic::channel::Role;
+    let channel = settings.channels.get(&slot)?;
+    if channel.role == Role::Disabled as i32 {
+        return None;
+    }
+    let config = channel.settings.as_ref();
+    let precision = config
+        .and_then(|c| c.module_settings.as_ref())
+        .map_or(0, |m| m.position_precision);
+    let primary_psk = settings
+        .channels
+        .get(&0)
+        .and_then(|c| c.settings.as_ref())
+        .map_or(&[][..], |s| s.psk.as_slice());
+    let public = crate::channels::public_key(
+        config.map_or(&[][..], |c| c.psk.as_slice()),
+        channel.role == Role::Secondary as i32,
+        primary_psk,
+    );
+    Some(if public {
+        precision.min(meshctl_api::PUBLIC_POSITION_PRECISION)
+    } else {
+        precision
+    })
+}
+
 fn heard_row(heard: mesh::TextMessage, local: Option<u32>) -> NewMessageRow {
     let ours = local == Some(heard.from);
     NewMessageRow {
@@ -3900,6 +4070,7 @@ fn heard_row(heard: mesh::TextMessage, local: Option<u32>) -> NewMessageRow {
         scope: None,
         sent_at: heard.sent_at.map(i64::from),
         author: heard.author,
+        position: heard.position.as_ref().map(crate::web::convert::position),
     }
 }
 
@@ -4171,6 +4342,8 @@ mod tests {
             via_mqtt: false,
             sent_at: None,
             author: None,
+            position: None,
+            request_id: None,
         };
         let ours = heard_row(heard.clone(), Some(7));
         assert!(ours.outgoing);

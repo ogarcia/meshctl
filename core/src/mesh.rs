@@ -444,6 +444,12 @@ pub struct TextMessage {
     /// Who wrote it, when that is not who sent it: a MeshCore room's post,
     /// which the room sends, by its author's node number.
     pub author: Option<u32>,
+    /// Where its sender is, for a position sent to the radio rather than a
+    /// text, which it then has none of.
+    pub position: Option<Position>,
+    /// The packet it answers, for a position: one of the radio's asking for
+    /// the sender's.
+    pub request_id: Option<u32>,
 }
 
 /// A packet as the radio heard it.
@@ -921,6 +927,35 @@ fn said(packet: &pb::MeshPacket, now: u32) -> Option<Event> {
                 via_mqtt: packet.via_mqtt,
                 sent_at: None,
                 author: None,
+                position: None,
+                request_id: None,
+            }))
+        }
+        // A position sent to the radio itself, rather than to everyone as
+        // nodes do now and then, is said to it: a message of its own. One
+        // that says nowhere is someone asking for the radio's.
+        Ok(PortNum::PositionApp) if packet.to != BROADCAST => {
+            let position = position_from(pb::Position::decode(data.payload.as_slice()).ok()?)?;
+            let reception = !packet.via_mqtt;
+            Some(Event::Message(TextMessage {
+                packet_id: packet.id,
+                from: packet.from,
+                to: packet.to,
+                channel: packet.channel,
+                text: String::new(),
+                at: packet.rx_time.filter(|t| *t > 0).unwrap_or(now),
+                reply_id: None,
+                sender_name: None,
+                emoji: false,
+                snr: reception.then_some(packet.rx_snr).filter(|s| *s != 0.0),
+                rssi: packet.rx_rssi.filter(|_| reception),
+                hops_away: (reception && packet.hop_start > 0)
+                    .then(|| packet.hop_start.saturating_sub(packet.hop_limit)),
+                via_mqtt: packet.via_mqtt,
+                sent_at: None,
+                author: None,
+                position: Some(position),
+                request_id: (data.request_id != 0).then_some(data.request_id),
             }))
         }
         Ok(PortNum::AdminApp) if data.request_id != 0 => {
@@ -997,10 +1032,21 @@ fn position_from(position: pb::Position) -> Option<Position> {
     })
 }
 
+/// A coordinate, in 1e-7 degrees, as a channel with so many bits of
+/// precision shares it: the middle of the cell it falls in, as the firmware
+/// rounds it; as it is with 32 bits or more.
+pub fn truncated(coordinate: i32, precision_bits: u32) -> i32 {
+    if precision_bits == 0 || precision_bits >= 32 {
+        return coordinate;
+    }
+    let bits = coordinate.cast_unsigned() & (u32::MAX << (32 - precision_bits));
+    bits.wrapping_add(1 << (31 - precision_bits)).cast_signed()
+}
+
 /// How far, in metres, a position shared rounded may be from where the node
 /// is: half the side of the cell its precision rounds to, as the official
 /// apps tell it. None when it is exact (32 bits) or does not say (0).
-fn radius(precision_bits: u32) -> Option<u32> {
+pub fn radius(precision_bits: u32) -> Option<u32> {
     if !(1..32).contains(&precision_bits) {
         return None;
     }
@@ -1096,6 +1142,45 @@ mod tests {
         assert_eq!(radius(16), Some(365));
         assert_eq!(radius(32), None);
         assert_eq!(radius(0), None);
+    }
+
+    #[test]
+    fn a_shared_position_is_rounded_as_the_firmware_does() {
+        // As worked out apart, by the firmware's own arithmetic.
+        assert_eq!(truncated(433_623_000, 13), 433_848_320);
+        assert_eq!(truncated(-84_115_000, 13), -84_148_224);
+        assert_eq!(truncated(433_623_000, 16), 433_618_944);
+        assert_eq!(truncated(-84_115_000, 32), -84_115_000);
+        assert_eq!(truncated(-84_115_000, 0), -84_115_000);
+    }
+
+    #[test]
+    fn a_position_sent_to_the_radio_is_said_to_it() {
+        let here = pb::Position {
+            latitude_i: Some(433_623_000),
+            longitude_i: Some(-84_115_000),
+            ..Default::default()
+        };
+        let mut to_us = packet(7, PortNum::PositionApp, here.encode_to_vec());
+        to_us.to = 9;
+        if let Some(mesh_packet::PayloadVariant::Decoded(data)) = &mut to_us.payload_variant {
+            data.request_id = 42;
+        }
+        let Some(Event::Message(heard)) = said(&to_us, 1000) else {
+            panic!("a message");
+        };
+        assert_eq!(heard.text, "");
+        assert_eq!(heard.request_id, Some(42));
+        let at = heard.position.expect("where");
+        assert!((at.latitude - 43.3623).abs() < 1e-9);
+
+        // To everyone, as nodes say where they are now and then: no message.
+        let to_all = packet(7, PortNum::PositionApp, here.encode_to_vec());
+        assert_eq!(said(&to_all, 1000), None);
+        // Empty, asking for ours: none either.
+        let mut asking = packet(7, PortNum::PositionApp, Vec::new());
+        asking.to = 9;
+        assert_eq!(said(&asking, 1000), None);
     }
 
     #[test]

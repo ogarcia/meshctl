@@ -2392,6 +2392,8 @@ fn direct(state: &mut MeshState, message: &ContactMessage) -> Vec<Event> {
         via_mqtt: false,
         sent_at: Some(message.timestamp),
         author: message.author.map(u32::from_be_bytes),
+        position: None,
+        request_id: None,
     }));
     events
 }
@@ -2431,6 +2433,8 @@ fn channel(state: &mut MeshState, message: &ChannelMessage) -> Vec<Event> {
         via_mqtt: false,
         sent_at: Some(message.timestamp),
         author: None,
+        position: None,
+        request_id: None,
     })]
 }
 

@@ -31,11 +31,15 @@ pub fn local(local: &mesh::LocalNode) -> api::LocalNode {
     }
 }
 
-pub fn channel(channel: &mesh::Channel) -> api::Channel {
+/// A channel as the API tells it, with how the radio shares its position
+/// on it.
+pub fn channel(state: &mesh::MeshState, channel: &mesh::Channel) -> api::Channel {
     api::Channel {
         index: channel.index,
         name: channel.name.clone(),
         role: channel.role.clone(),
+        position_precision: crate::radios::shared_precision(&state.settings, channel.index)
+            .unwrap_or(0),
     }
 }
 
@@ -54,17 +58,7 @@ pub fn node(node: &mesh::Node) -> api::Node {
             .map(|key| BASE64.encode(key)),
         licensed: user.is_some_and(|u| u.licensed),
         unmessagable: user.is_some_and(|u| u.unmessagable),
-        position: node.position.map(|p| api::Position {
-            latitude: p.latitude,
-            longitude: p.longitude,
-            altitude: p.altitude,
-            radius: p.radius,
-            source: p.source.map(|source| match source {
-                mesh::PositionSource::Manual => api::PositionSource::Manual,
-                mesh::PositionSource::Internal => api::PositionSource::Internal,
-                mesh::PositionSource::External => api::PositionSource::External,
-            }),
-        }),
+        position: node.position.as_ref().map(position),
         last_heard: node.last_heard,
         snr: node.snr,
         rssi: node.rssi,
@@ -164,4 +158,19 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
             error,
         },
     })
+}
+
+/// Where a node says it is, as the API tells it.
+pub fn position(p: &mesh::Position) -> api::Position {
+    api::Position {
+        latitude: p.latitude,
+        longitude: p.longitude,
+        altitude: p.altitude,
+        radius: p.radius,
+        source: p.source.map(|source| match source {
+            mesh::PositionSource::Manual => api::PositionSource::Manual,
+            mesh::PositionSource::Internal => api::PositionSource::Internal,
+            mesh::PositionSource::External => api::PositionSource::External,
+        }),
+    }
 }

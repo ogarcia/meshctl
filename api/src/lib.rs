@@ -115,6 +115,9 @@ pub enum ErrorCode {
     /// A place to notify of messages on a radio, channel or node there is
     /// not.
     InvalidNotifications,
+    /// The radio does not know where it is, or the channel it would go on
+    /// shares no position.
+    PositionNotShared,
 }
 
 /// The body of every error the API answers with.
@@ -1177,6 +1180,12 @@ pub struct Channel {
     /// `PRIMARY`, `SECONDARY` or `DISABLED`.
     #[cfg_attr(feature = "openapi", schema(example = "SECONDARY"))]
     pub role: String,
+    /// How precisely the radio shares its position on it, in bits, as the
+    /// firmware will round it: 0 for not at all, as on any MeshCore
+    /// channel. A direct message's is the primary's.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(example = 13))]
+    pub position_precision: u32,
 }
 
 /// Where a node says it is.
@@ -1403,7 +1412,8 @@ pub enum MessageStatus {
     Failed,
 }
 
-/// A text message, heard or sent.
+/// A text message, heard or sent; or a position, sent to a conversation or
+/// to the radio.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Message {
@@ -1461,6 +1471,11 @@ pub struct Message {
     /// the node its author's key starts with, known or not.
     #[serde(default)]
     pub author: Option<u32>,
+    /// Where its sender is, for a position rather than a text: as it went,
+    /// rounded as its channel shares positions, `radius` saying how far off
+    /// it may be. Its text is then empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<Position>,
 }
 
 /// What a MeshCore room let the radio in as.
@@ -1582,6 +1597,18 @@ pub struct NewMessage {
     /// the radio's default.
     #[serde(default)]
     pub scope: Option<String>,
+}
+
+/// Where to send where the radio is: a channel, by its slot, or a node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PositionShare {
+    /// The channel's slot.
+    #[serde(default)]
+    pub channel: Option<u32>,
+    /// The node's number.
+    #[serde(default)]
+    pub node: Option<u32>,
 }
 
 /// Where messages are exchanged: a channel, or a node.
