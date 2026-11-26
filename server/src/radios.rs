@@ -80,6 +80,9 @@ pub enum Change {
     NodeForgotten(RadioId, u32),
     /// Messages forgotten, as asked: one, and the reactions to it.
     MessagesForgotten(RadioId, Vec<MessageId>),
+    /// A conversation's messages forgotten, as asked: a channel emptied, or
+    /// a conversation with a node gone.
+    ConversationForgotten(RadioId, Peer),
     /// A message to notify of.
     Notification(meshctl_api::Notification),
     /// A conversation read further, up to a message.
@@ -1356,6 +1359,18 @@ impl Radios {
             return Ok(false);
         }
         let _ = self.changes.send(Change::MessagesForgotten(id, forgotten));
+        Ok(true)
+    }
+
+    /// Forgets a conversation's messages, only here, and tells every
+    /// client: a channel's, which stays on the radio; or those exchanged
+    /// with a node. False if there is no such radio, or channel.
+    pub async fn forget_conversation(&self, id: RadioId, peer: Peer) -> Result<bool> {
+        if self.mesh(id).is_none() || !self.store.forget_conversation(id, peer).await? {
+            return Ok(false);
+        }
+        tracing::info!(radio = id, ?peer, "conversation forgotten");
+        let _ = self.changes.send(Change::ConversationForgotten(id, peer));
         Ok(true)
     }
 

@@ -29,7 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(conversations))
         .routes(routes!(read))
         .routes(routes!(mute))
-        .routes(routes!(messages, send))
+        .routes(routes!(messages, send, forget_conversation))
         .routes(routes!(forget))
         .routes(routes!(message_packet))
         .routes(routes!(message_routes))
@@ -374,6 +374,42 @@ async fn message_routes(
     match state.radios.routes(radio, id).await {
         Ok(Some(routes)) => Json(routes).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Forget a conversation
+///
+/// Forgets the messages of a channel (`channel`) heard through the radio,
+/// emptying it, the channel staying on the radio; or those exchanged with
+/// a node (`node`), the conversation gone. Only here, not on the mesh. Every
+/// client connected hears of it on the event stream, as
+/// `conversation_forgotten`.
+#[utoipa::path(
+    delete,
+    path = "/radios/{radio}/messages",
+    tag = "chat",
+    params(("radio" = RadioId, Path, description = "The radio's id"), Which),
+    responses(
+        (status = 204, description = "Forgotten"),
+        (status = 400, description = "Neither a channel nor a node, or both", body = Error),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio, or channel", body = Error),
+    )
+)]
+async fn forget_conversation(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Query(which): Query<Which>,
+) -> Response {
+    let peer = match (which.channel, which.node) {
+        (Some(channel), None) => Peer::Channel { channel },
+        (None, Some(node)) => Peer::Node { node },
+        _ => return error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest),
+    };
+    match state.radios.forget_conversation(radio, peer).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         Err(err) => failed(&err),
     }
 }

@@ -1637,6 +1637,52 @@ impl Store {
         Ok(before != after)
     }
 
+    /// Forgets a conversation's messages, only here: a channel's heard
+    /// through this radio, the channel staying on it; those exchanged with a
+    /// node. False if the radio has no channel in that slot.
+    pub async fn forget_conversation(&self, radio: RadioId, peer: Peer) -> Result<bool> {
+        match peer {
+            Peer::Channel { channel } => {
+                let Some((channel_id,)): Option<(i64,)> = sqlx::query_as(
+                    "SELECT channel_id FROM channel_slot WHERE radio_id = ? AND slot = ?",
+                )
+                .bind(radio)
+                .bind(i64::from(channel))
+                .fetch_optional(&self.pool)
+                .await?
+                else {
+                    return Ok(false);
+                };
+                sqlx::query("DELETE FROM message WHERE radio_id = ? AND channel_id = ?")
+                    .bind(radio)
+                    .bind(channel_id)
+                    .execute(&self.pool)
+                    .await?;
+            }
+            Peer::Node { node } => {
+                let node = i64::from(node);
+                let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+                sqlx::query(
+                    "DELETE FROM message WHERE radio_id = ? AND to_num != ?
+                        AND (from_num = ? OR to_num = ?)",
+                )
+                .bind(radio)
+                .bind(i64::from(BROADCAST))
+                .bind(node)
+                .bind(node)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query("DELETE FROM conversation_read WHERE radio_id = ? AND node = ?")
+                    .bind(radio)
+                    .bind(node)
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await?;
+            }
+        }
+        Ok(true)
+    }
+
     /// Forgets the conversation of the channel in a slot, with its messages;
     /// not one another slot has too, the very same channel twice.
     pub async fn forget_channel(&self, radio: RadioId, slot: u32) -> Result<()> {
@@ -2130,6 +2176,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn forgetting_a_conversation_leaves_the_others() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        for message in [
+            text(1, 9, 7, false),
+            text(2, 7, 9, true),
+            text(3, 5, 7, false),
+            text(4, 9, BROADCAST, false),
+        ] {
+            store.add_message(radio, &message).await.unwrap();
+        }
+        assert!(
+            store
+                .forget_conversation(radio, Peer::Node { node: 9 })
+                .await
+                .unwrap()
+        );
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM message")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        // The other node's, and what it said on a channel.
+        assert_eq!(left, 2);
+        // A slot with no channel has nothing to forget.
+        assert!(
+            !store
+                .forget_conversation(radio, Peer::Channel { channel: 6 })
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

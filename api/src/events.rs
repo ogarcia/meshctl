@@ -106,6 +106,10 @@ pub enum ServerMessage {
     /// Messages forgotten, as asked of the daemon: one, and the reactions to
     /// it.
     MessagesForgotten { radio: RadioId, ids: Vec<MessageId> },
+    /// A conversation's messages forgotten, as asked of the daemon: a
+    /// channel emptied, which stays on the radio, or a conversation with a
+    /// node gone.
+    ConversationForgotten { radio: RadioId, peer: Peer },
     /// What was kept for longer than it is kept, or as asked, cleaned away:
     /// whatever shows what was kept is to be read again.
     Cleaned { cleaned: crate::Cleaned },
