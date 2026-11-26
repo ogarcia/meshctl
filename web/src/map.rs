@@ -557,8 +557,10 @@ pub fn MapView() -> impl IntoView {
             return false;
         };
         let pick = Closure::<dyn Fn(Option<u32>)>::new(move |num| live.map_pick.set(num));
+        // Called by the map, not by anything reactive: what it reads, it
+        // reads as it is now.
         let act = Closure::<dyn Fn(u32, String)>::new(move |num, what: String| {
-            match what.as_str() {
+            untrack(|| match what.as_str() {
                 "chat" => live.open_chat(Peer::Node { node: num }),
                 "unroute" => live.map_route.set(None),
                 "route" => {
@@ -574,7 +576,7 @@ pub fn MapView() -> impl IntoView {
                     }
                 }
                 _ => live.open_node(num),
-            }
+            })
         });
         // Where the person leaves the map, kept for the radio it shows.
         let moved = Closure::<dyn Fn(f64, f64, f64, f64)>::new(move |south, west, north, east| {
