@@ -3,6 +3,48 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.5.0 (2026-11-26)
+
+Sharing in chats, conversations silenced, and where a radio is.
+
+### Chat
+
+- A "+" beside what is written, to share a contact, a channel or a place.
+  On MeshCore as its apps write them: a contact as its key, kind and name,
+  a channel by its `meshcore://` link, a place as `latitude,longitude`, any
+  picked on a map. On Meshtastic, contacts and channels by their links, and
+  where the radio is as its position packet, as precisely as the channel
+  shares it.
+- What is shared shown as what it is: a contact to see or to add to the
+  radio, a channel, with its padlock, to see or to add, a place on a small
+  map that opens the big one. On Meshtastic, a place written by hand too.
+- A conversation silenced from its heading, for good: no notifications,
+  its unread count quiet, a crossed bell beside its name. On a Meshtastic
+  channel it is the radio's own silence too, set as meshctl has it.
+- While the radio is off, what a message is written in says so itself.
+
+### Radios
+
+- Where a radio is, picked on a map, written, or taken from the device
+  meshctl runs on: Meshtastic's fixed position, MeshCore's advertised one.
+- A MeshCore radio's GPS on or off, where it has one.
+- MeshCore's nodes heard but not added by the radio listed apart, and added
+  from their row, their page or their chat; those with no route listed too,
+  and the filter through repeaters said as it is.
+- The MQTT map's precision on a slider, within what the firmware takes.
+
+### The apps
+
+- On Linux and Windows, radios by Bluetooth, as on Android, paired by the
+  system first. Not yet tried on a radio: tell how it goes.
+- On Android, the system's back goes back, and twice to leave; where the
+  phone is asked for only when a radio's position is taken from it.
+
+### Fixes
+
+- A module's switch is seen to flip as it shows after another.
+- No companion's note on the radio's own node.
+
 ## 0.4.0 (2026-11-25)
 
 Notifications of the messages heard, wherever meshctl runs.

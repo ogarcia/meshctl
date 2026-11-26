@@ -97,7 +97,8 @@ Each [release](https://github.com/ogarcia/meshctl/releases) brings:
 The desktop app runs the daemon within itself, on this machine alone, and
 shows the panel in its own window. Closing it keeps it listening to your
 radios, and notifying you, unless you say otherwise in its settings: in the
-tray on Windows, as a background app on Linux. `meshcore://` links open in
+tray on Windows, as a background app on Linux. It reaches radios by
+Bluetooth too, once the system has paired them. `meshcore://` links open in
 it, to add the node or channel they hold.
 
 The Android app does the same on the phone: radios over the network, by USB
