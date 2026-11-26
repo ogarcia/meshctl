@@ -43,6 +43,10 @@
 //! - `limits on|off`: whether the neighbour keeps from answering too often.
 //! - `history <hours>`: the neighbour's telemetry and signal over the last so
 //!   many hours, as heard then, for charts to show.
+//! - `admin allow|deny`: whether the neighbour takes the radio's key as an
+//!   admin key. Allowed, it answers admin requests sealed to it with its
+//!   settings, the radio's own but for who it is, after a few seconds;
+//!   denied, it says the key is not one of its own, as the firmware does.
 
 use meshctl_proto::descriptors;
 use meshctl_proto::frame::{self, FrameParser};
@@ -102,6 +106,8 @@ struct Radio {
     fixed: Option<pb::Position>,
     /// Contacts a client added, as nodes it keeps.
     contacts: BTreeMap<u32, pb::User>,
+    /// Whether the neighbour takes the radio's key as an admin key.
+    admin_key: bool,
 }
 
 /// How the neighbour answers.
@@ -281,7 +287,88 @@ impl Radio {
             last_text: None,
             fixed: None,
             contacts: BTreeMap::new(),
+            admin_key: true,
         }
+    }
+
+    /// What the neighbour answers an admin request to it, and after how
+    /// long: part of its settings, if it is sealed to it and it takes the
+    /// radio's key; the routing error the firmware gives, if not.
+    fn neighbour_admin(
+        &self,
+        packet: &MeshPacket,
+        admin: AdminMessage,
+    ) -> Option<(Duration, MeshPacket)> {
+        use admin_message::PayloadVariant as A;
+        let delay = Duration::from_millis(1_500 + random(3_000));
+        let refused = |error: pb::routing::Error| {
+            println!("neighbour refuses admin: {error:?}");
+            let routing = pb::Routing {
+                variant: Some(pb::routing::Variant::ErrorReason(error as i32)),
+                ..Default::default()
+            };
+            Some((
+                delay,
+                self.reply(packet, PortNum::RoutingApp, routing.encode_to_vec(), 6.0),
+            ))
+        };
+        if !packet.pki_encrypted {
+            return refused(pb::routing::Error::NotAuthorized);
+        }
+        if !self.admin_key {
+            return refused(pb::routing::Error::AdminPublicKeyUnauthorized);
+        }
+        // A part by its request's number, one less than the protobufs'.
+        let part = |message: &str, number: i32| {
+            meshctl_proto::descriptors()
+                .get_message_by_name(message)?
+                .get_field((number + 1) as u32)
+                .map(|f| f.name().to_owned())
+        };
+        let answer = match admin.payload_variant? {
+            A::GetOwnerRequest(_) => A::GetOwnerResponse(neighbour()),
+            A::GetDeviceMetadataRequest(_) => A::GetDeviceMetadataResponse(pb::DeviceMetadata {
+                firmware_version: "0.0.0.fake".into(),
+                hw_model: pb::HardwareModel::WismeshTag as i32,
+                has_wifi: true,
+                has_bluetooth: true,
+                ..Default::default()
+            }),
+            A::GetConfigRequest(number) => A::GetConfigResponse(
+                self.configs
+                    .get(&part("meshtastic.Config", number)?)?
+                    .clone(),
+            ),
+            A::GetModuleConfigRequest(number) => A::GetModuleConfigResponse(
+                self.modules
+                    .get(&part("meshtastic.ModuleConfig", number)?)?
+                    .clone(),
+            ),
+            A::GetChannelRequest(asked) => {
+                let index = asked as i32 - 1;
+                A::GetChannelResponse(self.channels.get(&index).cloned().unwrap_or(pb::Channel {
+                    index,
+                    ..Default::default()
+                }))
+            }
+            other => {
+                println!("neighbour admin, ignored: {other:?}");
+                return None;
+            }
+        };
+        println!("neighbour answers admin in {} ms", delay.as_millis());
+        let mut reply = self.reply(
+            packet,
+            PortNum::AdminApp,
+            AdminMessage {
+                session_passkey: vec![9; 8],
+                payload_variant: Some(answer),
+            }
+            .encode_to_vec(),
+            6.0,
+        );
+        reply.pki_encrypted = true;
+        Some((delay, reply))
     }
 
     /// Whether a client sent on a paced port too soon after the last time,
@@ -763,6 +850,18 @@ async fn serve(
                     let Ok(admin) = AdminMessage::decode(data.payload.as_slice()) else {
                         continue;
                     };
+                    // To the neighbour, over the air: it answers in its time.
+                    if packet.to == NEIGHBOUR {
+                        let answer = radio.lock().unwrap().neighbour_admin(&packet, admin);
+                        if let Some((delay, reply)) = answer {
+                            let sender = sender.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(delay).await;
+                                let _ = sender.send(Event::Heard(reply));
+                            });
+                        }
+                        continue;
+                    }
                     let answer = radio.lock().unwrap().admin(admin);
                     // What has its own answer gets it; what does not, but
                     // wants one, an acknowledgement, as the firmware's admin
@@ -1285,7 +1384,16 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             radio.answered.clear();
             format!("the neighbour keeps from answering too often: {limits}")
         }
-        _ => "hear <slot> <text> | twin <from> <to> | off <slot> | drop | answers always|sometimes|never | limits on|off | history <hours>".into(),
+        Some("admin") => {
+            let allowed = match words.next() {
+                Some("allow") => true,
+                Some("deny") => false,
+                _ => return "usage: admin allow|deny".into(),
+            };
+            radio.lock().unwrap().admin_key = allowed;
+            format!("the neighbour takes the radio's key as an admin key: {allowed}")
+        }
+        _ => "hear <slot> <text> | twin <from> <to> | off <slot> | drop | answers always|sometimes|never | limits on|off | history <hours> | admin allow|deny".into(),
     }
 }
 
