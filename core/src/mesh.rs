@@ -168,11 +168,13 @@ pub enum Event {
     Ack(Ack),
     /// The answer to a traceroute sent.
     Traceroute(TracerouteAnswer),
-    /// The radio's answer to an admin request: the session passkey that
-    /// changing its settings takes. Taken by whoever asked; never broadcast.
+    /// The answer to an admin request, the radio's own or a node's asked
+    /// over the mesh, with the session passkey that changing its settings
+    /// takes. Taken by whoever asked; never broadcast.
     AdminAnswer {
         request_id: u32,
-        passkey: Vec<u8>,
+        from: u32,
+        admin: Box<pb::AdminMessage>,
     },
     /// What a node answered a request with that comes as no packet, as
     /// MeshCore nodes answer.
@@ -596,7 +598,7 @@ impl std::fmt::Debug for Settings {
 
 impl Settings {
     /// Takes in one module's configuration.
-    fn keep_module(&mut self, module: &pb::ModuleConfig) {
+    pub fn keep_module(&mut self, module: &pb::ModuleConfig) {
         let Some(descriptor) =
             meshctl_proto::descriptors().get_message_by_name("meshtastic.ModuleConfig")
         else {
@@ -614,7 +616,7 @@ impl Settings {
     }
 
     /// Takes in one part of the configuration.
-    fn keep(&mut self, config: &pb::Config) {
+    pub fn keep(&mut self, config: &pb::Config) {
         use config::PayloadVariant as C;
         let local = &mut self.config;
         match config.payload_variant.clone() {
@@ -628,6 +630,57 @@ impl Settings {
             Some(C::Security(c)) => local.security = Some(c),
             _ => {}
         }
+    }
+}
+
+/// What asks a node for one part of its settings, by the name the part has
+/// in the protobufs, `config.device` or `module.mqtt`: their requests number
+/// the parts as the protobufs do, one less. Its owner is `owner`, a channel
+/// `channel.N`, what it has `metadata`.
+pub fn settings_request(part: &str) -> Option<pb::admin_message::PayloadVariant> {
+    use pb::admin_message::PayloadVariant as A;
+    let number = |message: &str, name: &str| {
+        meshctl_proto::descriptors()
+            .get_message_by_name(message)?
+            .get_field_by_name(name)
+            .map(|f| (f.number() - 1) as i32)
+    };
+    match part.split_once('.') {
+        Some(("config", name)) => number("meshtastic.Config", name).map(A::GetConfigRequest),
+        Some(("module", name)) => {
+            number("meshtastic.ModuleConfig", name).map(A::GetModuleConfigRequest)
+        }
+        // Asked for one more than its index, as zero says none.
+        Some(("channel", index)) => index
+            .parse::<u32>()
+            .ok()
+            .filter(|i| *i < 8)
+            .map(|i| A::GetChannelRequest(i + 1)),
+        _ => match part {
+            "owner" => Some(A::GetOwnerRequest(true)),
+            "metadata" => Some(A::GetDeviceMetadataRequest(true)),
+            _ => None,
+        },
+    }
+}
+
+impl Settings {
+    /// Takes in what a node answered a request for its settings with: a
+    /// part of its configuration, a module's, a channel, its owner or what
+    /// it has. False for anything else.
+    pub fn keep_answer(&mut self, answer: &pb::AdminMessage) -> bool {
+        use pb::admin_message::PayloadVariant as A;
+        match &answer.payload_variant {
+            Some(A::GetConfigResponse(config)) => self.keep(config),
+            Some(A::GetModuleConfigResponse(module)) => self.keep_module(module),
+            Some(A::GetChannelResponse(channel)) => {
+                self.channels.insert(channel.index as u32, channel.clone());
+            }
+            Some(A::GetOwnerResponse(owner)) => self.owner = Some(owner.clone()),
+            Some(A::GetDeviceMetadataResponse(metadata)) => self.metadata = Some(metadata.clone()),
+            _ => return false,
+        }
+        true
     }
 }
 
@@ -962,7 +1015,8 @@ fn said(packet: &pb::MeshPacket, now: u32) -> Option<Event> {
             let admin = pb::AdminMessage::decode(data.payload.as_slice()).ok()?;
             Some(Event::AdminAnswer {
                 request_id: data.request_id,
-                passkey: admin.session_passkey,
+                from: packet.from,
+                admin: Box::new(admin),
             })
         }
         // Only answers: a request to us the firmware answers on its own.
@@ -1081,6 +1135,44 @@ fn role_name(value: i32) -> String {
 mod tests {
     use super::*;
     use from_radio::PayloadVariant as V;
+
+    #[test]
+    fn a_part_of_a_nodes_settings_is_asked_for_as_the_firmware_numbers_it() {
+        use pb::admin_message::{ConfigType, ModuleConfigType, PayloadVariant as A};
+        assert_eq!(
+            settings_request("config.device"),
+            Some(A::GetConfigRequest(ConfigType::DeviceConfig as i32))
+        );
+        assert_eq!(
+            settings_request("config.security"),
+            Some(A::GetConfigRequest(ConfigType::SecurityConfig as i32))
+        );
+        assert_eq!(
+            settings_request("module.external_notification"),
+            Some(A::GetModuleConfigRequest(
+                ModuleConfigType::ExtnotifConfig as i32
+            ))
+        );
+        assert_eq!(
+            settings_request("module.paxcounter"),
+            Some(A::GetModuleConfigRequest(
+                ModuleConfigType::PaxcounterConfig as i32
+            ))
+        );
+        assert_eq!(settings_request("channel.0"), Some(A::GetChannelRequest(1)));
+        assert_eq!(settings_request("channel.8"), None);
+        assert_eq!(settings_request("owner"), Some(A::GetOwnerRequest(true)));
+        assert_eq!(settings_request("config.nothing"), None);
+
+        let mut settings = Settings::default();
+        assert!(settings.keep_answer(&pb::AdminMessage {
+            payload_variant: Some(A::GetModuleConfigResponse(pb::ModuleConfig {
+                payload_variant: Some(pb::module_config::PayloadVariant::Mqtt(Default::default())),
+            })),
+            ..Default::default()
+        }));
+        assert!(settings.modules.contains_key("mqtt"));
+    }
 
     fn from_radio(variant: V) -> pb::FromRadio {
         pb::FromRadio {

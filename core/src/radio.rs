@@ -138,7 +138,7 @@ pub struct Mesh {
     /// The want_config nonce the radio's answer is expected with.
     nonce: Arc<AtomicU32>,
     /// Admin requests waiting for their answer, by packet id.
-    waiting: Arc<Mutex<HashMap<u32, oneshot::Sender<Vec<u8>>>>>,
+    waiting: Arc<Mutex<HashMap<u32, oneshot::Sender<AdminMessage>>>>,
     /// When the last sync started, which the radio has [`SYNC_TIMEOUT`] to
     /// answer from.
     sync_started: Arc<Mutex<Instant>>,
@@ -187,6 +187,10 @@ pub enum AdminError {
 
 /// How long the radio has to answer an admin request.
 const ADMIN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long another node has to answer one over the mesh, a few hops each
+/// way, and resent if lost.
+const REMOTE_ADMIN_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long after changing settings to read them back: the radio applies them
 /// after queueing them, and may reboot to.
@@ -429,8 +433,7 @@ impl Mesh {
         let events = f(&mut self.state.write().unwrap_or_else(|e| e.into_inner()));
         for event in events {
             if let Event::AdminAnswer {
-                request_id,
-                passkey,
+                request_id, admin, ..
             } = event
             {
                 let waiting = self
@@ -439,7 +442,7 @@ impl Mesh {
                     .unwrap_or_else(|e| e.into_inner())
                     .remove(&request_id);
                 if let Some(waiting) = waiting {
-                    let _ = waiting.send(passkey);
+                    let _ = waiting.send(*admin);
                 }
                 continue;
             }
@@ -639,7 +642,7 @@ impl Mesh {
             .insert(request.0, answer);
         self.send_raw(request.1)?;
         match tokio::time::timeout(ADMIN_TIMEOUT, answered).await {
-            Ok(Ok(passkey)) => Ok((me, passkey)),
+            Ok(Ok(answer)) => Ok((me, answer.session_passkey)),
             _ => {
                 self.waiting
                     .lock()
@@ -650,6 +653,71 @@ impl Mesh {
         }
     }
 
+    /// Asks another node for something of its own, part of its settings,
+    /// over the mesh: sealed to its key, as the firmware takes admin
+    /// requests only from a key it is told to, and answers so. Its answer,
+    /// which carries the passkey a change to it takes; or why none.
+    pub async fn ask_node(
+        &self,
+        to: u32,
+        request: admin_message::PayloadVariant,
+    ) -> Result<AdminMessage, AdminError> {
+        if self.is_meshcore() {
+            return Err(AdminError::Unsupported);
+        }
+        let (me, known) = self.read(|state| {
+            (
+                state.local.as_ref().map(|l| l.num),
+                state.nodes.contains_key(&to),
+            )
+        });
+        let me = me.ok_or(AdminError::NotConnected)?;
+        if to == me {
+            return Err(AdminError::OwnNode);
+        }
+        if !known {
+            return Err(AdminError::UnknownNode);
+        }
+        let (id, packet) = self.admin_to(to, request, vec![], true)?;
+        let (answer, answered) = oneshot::channel();
+        self.waiting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, answer);
+        let mut events = self.subscribe();
+        let sent = self.send_raw(packet);
+        // Refused, by the node or by the radio on its way: as the routing
+        // error that answers the packet.
+        let refused = async move {
+            loop {
+                match events.recv().await {
+                    Ok(Event::Ack(ack)) if ack.packet_id == id && ack.error.is_some() => {
+                        return ack.error;
+                    }
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        };
+        let outcome = match sent {
+            Ok(()) => tokio::time::timeout(REMOTE_ADMIN_TIMEOUT, async {
+                tokio::select! {
+                    answer = answered => answer.ok().map(Ok),
+                    reason = refused => reason.map(|r| Err(AdminError::Refused(r))),
+                }
+            })
+            .await
+            .ok()
+            .flatten(),
+            Err(error) => Some(Err(error)),
+        };
+        self.waiting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
+        outcome.unwrap_or(Err(AdminError::NoAnswer))
+    }
+
     /// An admin message to the radio itself, as the packet that carries it,
     /// and that packet's id.
     fn admin(
@@ -657,6 +725,18 @@ impl Mesh {
         me: u32,
         variant: admin_message::PayloadVariant,
         passkey: Vec<u8>,
+    ) -> Result<(u32, Vec<u8>), AdminError> {
+        self.admin_to(me, variant, passkey, false)
+    }
+
+    /// An admin message to a node, the radio itself or another, sealed to
+    /// its key if said, as the packet that carries it, and that packet's id.
+    fn admin_to(
+        &self,
+        to: u32,
+        variant: admin_message::PayloadVariant,
+        passkey: Vec<u8>,
+        sealed: bool,
     ) -> Result<(u32, Vec<u8>), AdminError> {
         if self.read(|state| state.link) != LinkState::Ready {
             return Err(AdminError::NotConnected);
@@ -667,8 +747,10 @@ impl Mesh {
         };
         let id = self.next_packet_id();
         let packet = MeshPacket {
-            to: me,
+            to,
             id,
+            pki_encrypted: sealed,
+            want_ack: sealed,
             payload_variant: Some(mesh_packet::PayloadVariant::Decoded(Data {
                 portnum: PortNum::AdminApp as i32,
                 payload: admin.encode_to_vec(),
