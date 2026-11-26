@@ -7,9 +7,12 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.Keep
 import androidx.core.app.ActivityCompat
@@ -40,6 +43,7 @@ class MainActivity : TauriActivity() {
       view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
       WindowInsetsCompat.CONSUMED
     }
+    onBackPressedDispatcher.addCallback(this, back)
     ask(intent)
     open(intent)
     // The notification that says it goes on listening, where Android asks
@@ -52,6 +56,43 @@ class MainActivity : TauriActivity() {
         this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATIONS_ASKED
       )
     }
+  }
+
+  /**
+   * When back was last pressed with nowhere to go back to, to leave on the
+   * next press soon after.
+   */
+  private var backArmedAt = 0L
+
+  /**
+   * The system's back: the panel's own first, which closes what is over
+   * it or goes back a page; with nowhere to go back to, it says another
+   * press leaves, and the next one soon after does.
+   */
+  private val back = object : OnBackPressedCallback(true) {
+    override fun handleOnBackPressed() {
+      val view = webView ?: return leave()
+      view.evaluateJavascript("window.meshctlBack ? window.meshctlBack() === true : false") {
+        if (it == "true") {
+          return@evaluateJavascript
+        }
+        val now = SystemClock.uptimeMillis()
+        if (backArmedAt != 0L && now - backArmedAt < LEAVE_WITHIN) {
+          backArmedAt = 0L
+          leave()
+        } else {
+          backArmedAt = now
+          Toast.makeText(this@MainActivity, R.string.back_again, Toast.LENGTH_SHORT).show()
+        }
+      }
+    }
+  }
+
+  /** Leaves, as back does with nothing of the app's to go back to. */
+  private fun leave() {
+    back.isEnabled = false
+    onBackPressedDispatcher.onBackPressed()
+    back.isEnabled = true
   }
 
   /** The panel's webview, once made. */
@@ -207,5 +248,8 @@ class MainActivity : TauriActivity() {
     const val CHAT = "chat"
     private const val NOTIFICATIONS_ASKED = 7434
     private const val BLUETOOTH_ASKED = 7435
+
+    /** How soon a second back has to come to leave, in ms: a toast's. */
+    private const val LEAVE_WITHIN = 2000L
   }
 }

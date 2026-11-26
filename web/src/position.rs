@@ -222,7 +222,13 @@ fn PositionDialog(
         }
         drawn.set_value(Some(div));
     });
+    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            close.run(());
+        }
+    });
     on_cleanup(move || {
+        escape.remove();
         if let Some(div) = drawn.get_value() {
             map_picker_close(&div);
         }

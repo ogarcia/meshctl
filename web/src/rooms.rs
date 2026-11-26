@@ -174,6 +174,12 @@ pub fn RoomGone(node: u32) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let asking = RwSignal::new(true);
+    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            asking.set(false);
+        }
+    });
+    on_cleanup(move || escape.remove());
     let busy = RwSignal::new(false);
     let problem = RwSignal::new(false);
     let removed = RwSignal::new(false);

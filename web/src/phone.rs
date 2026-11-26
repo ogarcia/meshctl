@@ -328,3 +328,61 @@ pub fn MoreView() -> impl IntoView {
         </div>
     }
 }
+
+/// What the system's back does, as the Android app asks: closes what is
+/// over the page, a dialog, a sheet, a menu, the emojis; else lets go of
+/// the node picked on the map, or its route; else goes back a page, as
+/// the heading's arrow does, and from any tab to the map. False when there
+/// is nowhere back to go: the app then leaves, if asked twice.
+fn hardware_back(live: Live) -> bool {
+    let document = document();
+    let has = |selector: &str| document.query_selector(selector).ok().flatten().is_some();
+    // Each of these closes on Escape.
+    if has(".modal-back, .sheet-back, .drawer, .emoji-popover") {
+        let init = web_sys::KeyboardEventInit::new();
+        init.set_key("Escape");
+        if let Ok(escape) =
+            web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init)
+        {
+            let _ = window().dispatch_event(&escape);
+        }
+        return true;
+    }
+    // A menu, on a click anywhere else.
+    if has("[role=menu]") {
+        if let Some(body) = document.body() {
+            body.click();
+        }
+        return true;
+    }
+    let page = live.page.get_untracked();
+    if page == Page::Map {
+        if live.map_route.get_untracked().is_some() {
+            live.map_route.set(None);
+            return true;
+        }
+        if live.map_pick.get_untracked().is_some() {
+            live.map_pick.set(None);
+            return true;
+        }
+        return false;
+    }
+    if page == Page::Node {
+        live.go_back();
+    } else if let Some(to) = back_of(page) {
+        live.go_back_to(to);
+    } else {
+        live.go(Page::Map);
+    }
+    true
+}
+
+/// Lets the Android app ask for [`hardware_back`], as
+/// `window.meshctlBack()`.
+pub fn wire_back(live: Live) {
+    use wasm_bindgen::prelude::*;
+    let back = Closure::<dyn Fn() -> bool>::new(move || hardware_back(live));
+    let _ = js_sys::Reflect::set(&window(), &JsValue::from_str("meshctlBack"), back.as_ref());
+    // For as long as the page is.
+    back.forget();
+}

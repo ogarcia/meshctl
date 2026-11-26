@@ -5,4 +5,5 @@
     <string name="listening_text">Listening to your radios with the app closed</string>
     <string name="messages_channel">Messages</string>
     <string name="message_new">New message</string>
+    <string name="back_again">Press back again to leave</string>
 </resources>

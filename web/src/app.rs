@@ -1480,6 +1480,7 @@ fn Shell() -> impl IntoView {
     let live = Live::new();
     provide_context(live);
     crate::notify::watch(live);
+    crate::phone::wire_back(live);
     follow(live);
 
     Effect::new(move |_| {

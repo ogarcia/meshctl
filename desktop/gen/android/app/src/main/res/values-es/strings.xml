@@ -3,4 +3,5 @@
     <string name="listening_text">Escuchando tus radios con la app cerrada</string>
     <string name="messages_channel">Mensajes</string>
     <string name="message_new">Mensaje nuevo</string>
+    <string name="back_again">Pulsa atrás otra vez para salir</string>
 </resources>
