@@ -108,6 +108,7 @@ window.meshctlMap = (() => {
     act = onAct;
     placed = false;
     map.setView([20, 0], 2);
+    showSpot();
     // A click off every node lets the picked one go.
     map.on("click", (event) => {
       if (!pickAt(event.containerPoint, event.originalEvent)) {
@@ -138,9 +139,39 @@ window.meshctlMap = (() => {
     });
   }
 
+  // A place shown on the map rather than a node, as one shared in a
+  // conversation: the map centred there, with a pin, once it is there.
+  let spotted = null;
+  let spotMarker = null;
+
+  function spot(lat, lon, icon) {
+    spotted = { lat, lon, icon };
+    showSpot();
+  }
+
+  function showSpot() {
+    if (!map || !spotted) return;
+    const { lat, lon, icon } = spotted;
+    spotted = null;
+    if (spotMarker) spotMarker.remove();
+    spotMarker = L.marker([lat, lon], {
+      icon: L.divIcon({
+        className: "",
+        html: `<span class="mc-picked">${icon}</span>`,
+        iconSize: [36, 36],
+        iconAnchor: [18, 34],
+      }),
+      interactive: false,
+      keyboard: false,
+    }).addTo(map);
+    placed = true;
+    map.setView([lat, lon], Math.max(map.getZoom(), FOCUS_ZOOM), { animate: false });
+  }
+
   function close() {
     if (map) map.remove();
     map = null;
+    spotMarker = null;
     markers = null;
     pick = null;
     act = null;
@@ -923,6 +954,6 @@ window.meshctlMap = (() => {
 
   return {
     open, close, nodes, focus, route, stay, reset, resize, view, mini, miniRoute, miniClose,
-    picker, pickerAt, pickerClose,
+    picker, pickerAt, pickerClose, spot,
   };
 })();

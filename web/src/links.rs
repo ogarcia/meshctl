@@ -249,6 +249,20 @@ pub fn LinkAdder() -> impl IntoView {
         url.set(link.url);
         live.adding_link.set(Some(link.want));
     });
+    // A link offered from elsewhere, as one shared in a conversation: read
+    // as if pasted, for what it holds.
+    Effect::new(move |_| {
+        if let Some(link) = live.offered_link.get() {
+            live.offered_link.set(None);
+            let want = if link.to_ascii_lowercase().contains("channel/add") {
+                LinkWant::Channels
+            } else {
+                LinkWant::Node
+            };
+            url.set(link);
+            live.adding_link.set(Some(want));
+        }
+    });
     // Whether a QR is being read for it.
     let scanning = RwSignal::new(false);
     let close = move || {

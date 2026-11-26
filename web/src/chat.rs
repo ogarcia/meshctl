@@ -419,7 +419,7 @@ fn said(text: &str, quoted: bool) -> AnyView {
 }
 
 /// Sends a message, and puts it in the open conversation as sent.
-async fn send(
+pub(crate) async fn send(
     live: Live,
     peer: Peer,
     text: String,
@@ -1037,6 +1037,10 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
     let id = message.id;
     let packet = message.packet_id;
     let place = message.position;
+    // On MeshCore, a contact, a channel or a place its apps share as text.
+    let shared = (!message.emoji && untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore))
+        .then(|| crate::shared::read(&message.text))
+        .flatten();
     // Replies and reactions refer to its packet: one it has, on a radio
     // that has them; a text's, as a position is answered by none.
     let can_answer = packet != 0 && place.is_none() && untrack(move || answerable(live));
@@ -1294,6 +1298,8 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                     .into_any()
                 } else if let Some(at) = place {
                     view! { <Place at mine from=message.from /> }.into_any()
+                } else if let Some(shared) = shared {
+                    view! { <crate::shared::SharedCard shared mine from=message.from /> }.into_any()
                 } else {
                     view! { <p>{said(&message.text, message.reply_id.is_some())}</p> }.into_any()
                 }}
@@ -1326,8 +1332,16 @@ fn coordinates(at: &meshctl_api::Position) -> String {
 /// A position sent in a conversation: where, on a small map, with the
 /// circle of how far off it may be as its channel rounds it; whose, its
 /// coordinates and that. The map shows the node on the big one.
+///
+/// A place shared as text, on MeshCore, is any place, not its sender's: so
+/// said, and shown on the big map where it is.
 #[component]
-fn Place(at: meshctl_api::Position, mine: bool, from: u32) -> impl IntoView {
+pub(crate) fn Place(
+    at: meshctl_api::Position,
+    mine: bool,
+    from: u32,
+    #[prop(optional)] point: bool,
+) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let local = live
@@ -1357,13 +1371,21 @@ fn Place(at: meshctl_api::Position, mine: bool, from: u32) -> impl IntoView {
                 radius=at.radius
                 pin
                 label
-                open=move |()| live.show_on_map(whose)
+                open=move |()| {
+                    if point {
+                        live.show_place(at.latitude, at.longitude);
+                    } else {
+                        live.show_on_map(whose);
+                    }
+                }
             />
             <p class="place-words">
                 <span class="icon" inner_html=PIN></span>
                 <span class="what">
                     {move || {
-                        if mine {
+                        if point {
+                            t_string!(i18n, shared_place)
+                        } else if mine {
                             t_string!(i18n, chat_position_mine)
                         } else {
                             t_string!(i18n, chat_position_theirs)
@@ -2516,7 +2538,7 @@ fn Composer(peer: Peer) -> impl IntoView {
             <div
                 class="field"
                 class:over=over
-                class:with-place=meshtastic
+                class:with-place=move || live.selected_kind().is_some()
                 class:offline=move || !writable()
             >
                 <div class="backdrop" node_ref=backdrop aria-hidden="true">
@@ -2566,6 +2588,17 @@ fn Composer(peer: Peer) -> impl IntoView {
                         picking.update(|p| *p = !*p);
                     }
                 ></button>
+                // On MeshCore, a contact, a channel or a place to share.
+                {move || {
+                    (live.selected_kind() == Some(RadioKind::Meshcore)).then(|| {
+                        view! {
+                            <crate::shared::ShareButton
+                                peer
+                                disabled=Signal::derive(move || !writable() || busy.get())
+                            />
+                        }
+                    })
+                }}
                 {move || {
                     meshtastic()
                         .then(|| {

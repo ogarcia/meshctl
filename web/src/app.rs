@@ -218,6 +218,11 @@ pub struct Live {
     pub removing: RwSignal<bool>,
     /// Whether the window to add from a link is open.
     pub adding_link: RwSignal<Option<crate::links::LinkWant>>,
+    /// A link to add offered from elsewhere, as a contact or a channel
+    /// shared in a conversation: the dialog that adds links opens with it.
+    pub offered_link: RwSignal<Option<String>>,
+    /// A place to show on the map, not a node's.
+    pub map_spot: RwSignal<Option<(f64, f64)>>,
     /// Whether the about window is open.
     pub about: RwSignal<bool>,
     /// meshctl's version, and the commit it was built from, once asked.
@@ -317,6 +322,8 @@ impl Live {
             history: RwSignal::new(false),
             removing: RwSignal::new(false),
             adding_link: RwSignal::new(None),
+            offered_link: RwSignal::new(None),
+            map_spot: RwSignal::new(None),
             about: RwSignal::new(false),
             version: RwSignal::new(None),
             lora_from_link: RwSignal::new(None),
@@ -489,6 +496,14 @@ impl Live {
         self.menu.set(false);
         // A page gone to anew: nothing to go back to from it.
         self.back.set(Vec::new());
+    }
+
+    /// Shows a place on the map, as one shared in a conversation: no node
+    /// picked, and the map gone to it with a pin.
+    pub fn show_place(self, lat: f64, lon: f64) {
+        self.map_pick.set(None);
+        self.map_spot.set(Some((lat, lon)));
+        self.go(Page::Map);
     }
 
     /// Shows a node on the map: picked, with its card, and the map gone to

@@ -740,7 +740,13 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         0x01 => vec![self_info(&radio)],
         // SEND_TEXT: to the contact its key prefix names.
         0x02 => {
-            println!("direct text, {}", radio.scope_words());
+            println!(
+                "direct text, {}: {:?}",
+                radio.scope_words(),
+                data.get(12..)
+                    .map(String::from_utf8_lossy)
+                    .unwrap_or_default()
+            );
             // A command for a node's console: answered to its admin only, as
             // the firmware does, and acknowledged never.
             if data.first() == Some(&1) {
@@ -1127,7 +1133,13 @@ fn answer(command: &[u8], radio: &Mutex<Radio>, events: &broadcast::Sender<Event
         // SEND_CHANNEL_TEXT: taken, and nothing ever said of it again.
         0x03 => {
             let slot = data.get(1).copied().unwrap_or(0);
-            println!("channel text on slot {slot}, {}", radio.scope_words());
+            println!(
+                "channel text on slot {slot}, {}: {:?}",
+                radio.scope_words(),
+                data.get(6..)
+                    .map(String::from_utf8_lossy)
+                    .unwrap_or_default()
+            );
             // Kept, and heard back as two repeaters pass it on: Torre, then
             // Monte from Torre.
             if let (Some(at), Some(text)) = (u32_in(data, 2), data.get(6..)) {

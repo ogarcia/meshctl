@@ -31,6 +31,8 @@ extern "C" {
     fn map_nodes(json: &str);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = focus)]
     fn map_focus(num: u32);
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = spot)]
+    fn map_spot(lat: f64, lon: f64, icon: &str);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = route)]
     fn map_route(json: Option<String>);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = stay)]
@@ -639,6 +641,16 @@ pub fn MapView() -> impl IntoView {
         if let Some(num) = live.map_focus.get() {
             map_focus(num);
             live.map_focus.set(None);
+        }
+    });
+    // A place to go to, shared in a conversation: likewise.
+    Effect::new(move |_| {
+        if element.get().is_none() {
+            return;
+        }
+        if let Some((lat, lon)) = live.map_spot.get() {
+            map_spot(lat, lon, crate::position::PIN);
+            live.map_spot.set(None);
         }
     });
 

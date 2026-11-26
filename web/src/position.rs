@@ -13,7 +13,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 const MAP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map.svg");
-const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/filled/map-pin.svg");
+pub(crate) const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/filled/map-pin.svg");
 const HERE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/current-location.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
 
@@ -153,12 +153,16 @@ pub fn PositionInputs(
 /// A map to pick where the radio is on: a pin put by a touch or dragged,
 /// and where this device is, if it can tell.
 #[component]
-fn PositionDialog(
+pub(crate) fn PositionDialog(
     latitude: RwSignal<String>,
     longitude: RwSignal<String>,
     altitude: Option<RwSignal<String>>,
     changed: Callback<()>,
     close: Callback<()>,
+    /// Its heading and its button's word, where not a radio's own place.
+    #[prop(optional, into)]
+    title: Option<Signal<String>>,
+    #[prop(optional, into)] accept_label: Option<Signal<String>>,
 ) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
@@ -324,7 +328,14 @@ fn PositionDialog(
             <div class="card radio-editor modal position-dialog" role="dialog" aria-modal="true">
                 <header class="editor-head">
                     <span class="who">
-                        <h2>{t!(i18n, position_pick_title)}</h2>
+                        <h2>
+                            {move || {
+                                title.map_or_else(
+                                    || t_string!(i18n, position_pick_title).to_owned(),
+                                    |t| t.get(),
+                                )
+                            }}
+                        </h2>
                     </span>
                     <button
                         type="button"
@@ -363,7 +374,10 @@ fn PositionDialog(
                         disabled=move || picked.with(Option::is_none)
                         on:click=accept
                     >
-                        {t!(i18n, position_use)}
+                        {move || {
+                            accept_label
+                                .map_or_else(|| t_string!(i18n, position_use).to_owned(), |l| l.get())
+                        }}
                     </button>
                 </div>
             </div>
