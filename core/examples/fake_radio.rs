@@ -45,8 +45,11 @@
 //!   many hours, as heard then, for charts to show.
 //! - `admin allow|deny`: whether the neighbour takes the radio's key as an
 //!   admin key. Allowed, it answers admin requests sealed to it with its
-//!   settings, the radio's own but for who it is, after a few seconds;
+//!   settings, the radio's own as they were but for who it is, after a few
+//!   seconds, and takes changes to them, with the passkey it gave out;
 //!   denied, it says the key is not one of its own, as the firmware does.
+//!   Admin requests to any other node go unanswered: the radio gives up on
+//!   them after two seconds.
 
 use meshctl_proto::descriptors;
 use meshctl_proto::frame::{self, FrameParser};
@@ -66,6 +69,8 @@ use tokio::sync::broadcast;
 
 const ME: u32 = 0x1234_abcd;
 const PASSKEY: [u8; 8] = [7; 8];
+/// What the neighbour gives out to change its settings.
+const NEIGHBOUR_PASSKEY: [u8; 8] = [9; 8];
 const BROADCAST: u32 = 0xffff_ffff;
 /// The node of its mesh heard directly, who `hear` has speak.
 const NEIGHBOUR: u32 = 0x0bad_cafe;
@@ -108,6 +113,16 @@ struct Radio {
     contacts: BTreeMap<u32, pb::User>,
     /// Whether the neighbour takes the radio's key as an admin key.
     admin_key: bool,
+    /// The neighbour's own settings, once asked as its admin.
+    neighbour: Option<NeighbourSettings>,
+}
+
+/// The neighbour's settings, which its admin reads and changes.
+struct NeighbourSettings {
+    owner: pb::User,
+    configs: BTreeMap<String, pb::Config>,
+    modules: BTreeMap<String, pb::ModuleConfig>,
+    channels: BTreeMap<i32, pb::Channel>,
 }
 
 /// How the neighbour answers.
@@ -288,36 +303,47 @@ impl Radio {
             fixed: None,
             contacts: BTreeMap::new(),
             admin_key: true,
+            neighbour: None,
         }
     }
 
     /// What the neighbour answers an admin request to it, and after how
-    /// long: part of its settings, if it is sealed to it and it takes the
-    /// radio's key; the routing error the firmware gives, if not.
+    /// long, if it is sealed to it and it takes the radio's key: part of
+    /// its settings, asked for; a change to them, with the passkey it gave
+    /// out, acknowledged and kept. The routing error the firmware gives, if
+    /// not.
     fn neighbour_admin(
-        &self,
+        &mut self,
         packet: &MeshPacket,
         admin: AdminMessage,
     ) -> Option<(Duration, MeshPacket)> {
         use admin_message::PayloadVariant as A;
         let delay = Duration::from_millis(1_500 + random(3_000));
-        let refused = |error: pb::routing::Error| {
-            println!("neighbour refuses admin: {error:?}");
+        let routed = |radio: &Self, error: pb::routing::Error| {
             let routing = pb::Routing {
                 variant: Some(pb::routing::Variant::ErrorReason(error as i32)),
                 ..Default::default()
             };
             Some((
                 delay,
-                self.reply(packet, PortNum::RoutingApp, routing.encode_to_vec(), 6.0),
+                radio.reply(packet, PortNum::RoutingApp, routing.encode_to_vec(), 6.0),
             ))
         };
         if !packet.pki_encrypted {
-            return refused(pb::routing::Error::NotAuthorized);
+            println!("neighbour refuses admin: not sealed");
+            return routed(self, pb::routing::Error::NotAuthorized);
         }
         if !self.admin_key {
-            return refused(pb::routing::Error::AdminPublicKeyUnauthorized);
+            println!("neighbour refuses admin: not its admin key");
+            return routed(self, pb::routing::Error::AdminPublicKeyUnauthorized);
         }
+        // Its own settings, the radio's as they were when first asked.
+        let settings = self.neighbour.get_or_insert_with(|| NeighbourSettings {
+            owner: neighbour(),
+            configs: self.configs.clone(),
+            modules: self.modules.clone(),
+            channels: self.channels.clone(),
+        });
         // A part by its request's number, one less than the protobufs'.
         let part = |message: &str, number: i32| {
             meshctl_proto::descriptors()
@@ -325,8 +351,22 @@ impl Radio {
                 .get_field((number + 1) as u32)
                 .map(|f| f.name().to_owned())
         };
+        let asked = matches!(
+            admin.payload_variant,
+            Some(
+                A::GetOwnerRequest(_)
+                    | A::GetDeviceMetadataRequest(_)
+                    | A::GetConfigRequest(_)
+                    | A::GetModuleConfigRequest(_)
+                    | A::GetChannelRequest(_)
+            )
+        );
+        if !asked && admin.session_passkey != NEIGHBOUR_PASSKEY {
+            println!("neighbour refuses admin: wrong passkey");
+            return routed(self, pb::routing::Error::AdminBadSessionKey);
+        }
         let answer = match admin.payload_variant? {
-            A::GetOwnerRequest(_) => A::GetOwnerResponse(neighbour()),
+            A::GetOwnerRequest(_) => A::GetOwnerResponse(settings.owner.clone()),
             A::GetDeviceMetadataRequest(_) => A::GetDeviceMetadataResponse(pb::DeviceMetadata {
                 firmware_version: "0.0.0.fake".into(),
                 hw_model: pb::HardwareModel::WismeshTag as i32,
@@ -335,25 +375,61 @@ impl Radio {
                 ..Default::default()
             }),
             A::GetConfigRequest(number) => A::GetConfigResponse(
-                self.configs
+                settings
+                    .configs
                     .get(&part("meshtastic.Config", number)?)?
                     .clone(),
             ),
             A::GetModuleConfigRequest(number) => A::GetModuleConfigResponse(
-                self.modules
+                settings
+                    .modules
                     .get(&part("meshtastic.ModuleConfig", number)?)?
                     .clone(),
             ),
             A::GetChannelRequest(asked) => {
                 let index = asked as i32 - 1;
-                A::GetChannelResponse(self.channels.get(&index).cloned().unwrap_or(pb::Channel {
-                    index,
-                    ..Default::default()
-                }))
+                A::GetChannelResponse(settings.channels.get(&index).cloned().unwrap_or(
+                    pb::Channel {
+                        index,
+                        ..Default::default()
+                    },
+                ))
             }
-            other => {
-                println!("neighbour admin, ignored: {other:?}");
-                return None;
+            // Changes, kept, and acknowledged by the neighbour itself.
+            change => {
+                match change {
+                    A::SetOwner(owner) => {
+                        println!(
+                            "neighbour owner: {} / {}",
+                            owner.long_name, owner.short_name
+                        );
+                        settings.owner = owner;
+                    }
+                    A::SetConfig(config) => {
+                        let name = part_name("meshtastic.Config", &config)?;
+                        println!("neighbour config.{name}: {config:?}");
+                        settings.configs.insert(name, config);
+                    }
+                    A::SetModuleConfig(module) => {
+                        let name = part_name("meshtastic.ModuleConfig", &module)?;
+                        println!("neighbour module.{name}: {module:?}");
+                        settings.modules.insert(name, module);
+                    }
+                    A::SetChannel(channel) => {
+                        println!(
+                            "neighbour channel {}: {:?}",
+                            channel.index,
+                            channel.settings.as_ref().map(|s| &s.name)
+                        );
+                        settings.channels.insert(channel.index, channel);
+                    }
+                    A::BeginEditSettings(_) => println!("neighbour begins an edit"),
+                    A::CommitEditSettings(_) => {
+                        println!("neighbour commits the edit (a real node might reboot now)");
+                    }
+                    other => println!("neighbour admin, ignored: {other:?}"),
+                }
+                return routed(self, pb::routing::Error::None);
             }
         };
         println!("neighbour answers admin in {} ms", delay.as_millis());
@@ -361,7 +437,7 @@ impl Radio {
             packet,
             PortNum::AdminApp,
             AdminMessage {
-                session_passkey: vec![9; 8],
+                session_passkey: NEIGHBOUR_PASSKEY.to_vec(),
                 payload_variant: Some(answer),
             }
             .encode_to_vec(),
@@ -850,6 +926,34 @@ async fn serve(
                     let Ok(admin) = AdminMessage::decode(data.payload.as_slice()) else {
                         continue;
                     };
+                    // To any other node, over the air: nobody answers, and
+                    // the radio gives up soon, as after its tries.
+                    if packet.to != ME && packet.to != NEIGHBOUR {
+                        println!("admin to !{:08x}: nobody answers", packet.to);
+                        let gave_up = MeshPacket {
+                            from: ME,
+                            to: ME,
+                            payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                                portnum: PortNum::RoutingApp as i32,
+                                payload: pb::Routing {
+                                    variant: Some(pb::routing::Variant::ErrorReason(
+                                        pb::routing::Error::MaxRetransmit as i32,
+                                    )),
+                                    ..Default::default()
+                                }
+                                .encode_to_vec(),
+                                request_id: packet.id,
+                                ..Default::default()
+                            })),
+                            ..Default::default()
+                        };
+                        let sender = sender.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            let _ = sender.send(Event::Heard(gave_up));
+                        });
+                        continue;
+                    }
                     // To the neighbour, over the air: it answers in its time.
                     if packet.to == NEIGHBOUR {
                         let answer = radio.lock().unwrap().neighbour_admin(&packet, admin);
