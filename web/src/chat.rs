@@ -936,17 +936,16 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
         let class = {
             let short = short.clone();
             move || {
-                let kind = live.nodes.with(|nodes| {
-                    nodes
-                        .get(&from)
-                        .map(|node| crate::mesh::avatar_class(node, false))
-                });
-                let mut class = kind.unwrap_or_else(|| "node-avatar".to_owned());
                 if crate::badge::is_emoji(&short()) {
-                    class.push_str(" emoji");
+                    "bubble-avatar node-avatar emoji"
+                } else {
+                    "bubble-avatar node-avatar"
                 }
-                format!("bubble-avatar {class}")
             }
+        };
+        let style = {
+            let name = name.clone();
+            move || crate::mesh::avatar_style(live, from, &name())
         };
         let page = move |ev: leptos::ev::MouseEvent| {
             ev.stop_propagation();
@@ -958,6 +957,7 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
             <button
                 type="button"
                 class=class
+                style=style
                 title=name.clone()
                 aria-label=name
                 disabled=!known

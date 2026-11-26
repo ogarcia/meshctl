@@ -112,13 +112,44 @@ fn unknown(column: Column, node: &Node, local: Option<u32>) -> bool {
     }
 }
 
-/// The class of a node's avatar: the colours of the map's legend, or its
-/// radio's own.
-pub fn avatar_class(node: &Node, local: bool) -> String {
-    format!(
-        "node-avatar {}",
-        if local { "local" } else { distance(node) }
-    )
+/// The colour of a node's avatar, as the hue the page's own lightness and
+/// chroma are drawn with: Meshtastic's apps colour a node by its number's
+/// lower three bytes, taken as red, green and blue, and here that colour's
+/// hue is kept. A MeshCore contact, known on channels by its name alone, is
+/// coloured by its whole name instead, the same either way: not by its
+/// avatar's letters, which many share (call signs all begin alike).
+pub fn avatar_style(live: Live, num: u32, name: &str) -> String {
+    // A radio does not change its kind: nothing to follow.
+    let seed = if untrack(|| is_meshtastic(live)) {
+        num
+    } else {
+        // FNV-1a: the same name, the same colour, everywhere.
+        name.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+            (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+        })
+    };
+    format!("--hue: {}", hue(seed))
+}
+
+/// The hue, in OKLCH's degrees, of the colour a number's lower three bytes
+/// make as red, green and blue.
+fn hue(seed: u32) -> u16 {
+    let [_, r, g, b] = seed.to_be_bytes();
+    let linear = |c: u8| {
+        let c = f64::from(c) / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (linear(r), linear(g), linear(b));
+    let l = (0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b).cbrt();
+    let m = (0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b).cbrt();
+    let s = (0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b).cbrt();
+    let a = 1.977_998_495_1 * l - 2.428_592_205 * m + 0.450_593_709_9 * s;
+    let b = 0.025_904_037_1 * l + 0.782_771_766_2 * m - 0.808_675_766 * s;
+    (b.atan2(a).to_degrees().rem_euclid(360.0).round() as u16) % 360
 }
 
 /// How a node is reached, in words: its own radio, directly, through so many
@@ -564,10 +595,12 @@ fn NodeLine(node: Node, now: RwSignal<u32>) -> impl IntoView {
         .status
         .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num))
         == Some(num);
-    let mut class = avatar_class(&node, local);
-    if crate::badge::is_emoji(&short) {
-        class.push_str(" emoji");
-    }
+    let class = if crate::badge::is_emoji(&short) {
+        "node-avatar emoji"
+    } else {
+        "node-avatar"
+    };
+    let avatar_style = avatar_style(live, num, &name);
     // Heard through others, the SNR is the last relay's, not this node's.
     let reach = {
         let node = node.clone();
@@ -627,7 +660,7 @@ fn NodeLine(node: Node, now: RwSignal<u32>) -> impl IntoView {
         <tr class="node-row" on:click=move |_| live.open_node(num)>
             <td>
                 <span class="who">
-                    <span class=class>{crate::badge::fit(&short)}</span>
+                    <span class=class style=avatar_style>{crate::badge::fit(&short)}</span>
                     <span class="names">
                         <span class="name">
                             <span class="text">{name}</span>

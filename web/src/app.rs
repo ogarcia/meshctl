@@ -11,12 +11,12 @@
 //! Over the page, a bar says what is showing and what can be done with it.
 
 use crate::badge::{self, Face};
-use crate::chat::{ChatView, peer_of, short_name, title};
+use crate::chat::{ChatView, node_name, peer_of, short_name, title};
 use crate::daemon::{self, Events, Failure};
 use crate::empty::EmptyState;
 use crate::i18n::{I18nContextProvider, Locale, t, t_string, use_i18n};
 use crate::map::MapView;
-use crate::mesh::{MESSAGE_OFF, MeshView, STAR, ago, avatar_class, model, reach_words};
+use crate::mesh::{MESSAGE_OFF, MeshView, STAR, ago, avatar_style, model, reach_words};
 use crate::node::NodeView;
 use crate::packets::{KEPT, PacketsView};
 use crate::preferences::PreferencesView;
@@ -2571,15 +2571,13 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 Some(joined.collect_view())
             };
             let class = move || {
-                let mut class = known().map_or_else(
-                    || "node-avatar".to_owned(),
-                    |known| avatar_class(&known, local()),
-                );
                 if badge::is_emoji(&short_name(live, node)) {
-                    class.push_str(" emoji");
+                    "node-avatar emoji"
+                } else {
+                    "node-avatar"
                 }
-                class
             };
+            let avatar_style = move || avatar_style(live, node, &node_name(live, node));
             let favorite = move || known().is_some_and(|n| n.favorite);
             let unmessagable = move || known().is_some_and(|n| n.unmessagable);
             // A favourite of the radio's, or not: marked here, on a Meshtastic
@@ -2790,7 +2788,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
             };
             view! {
                 {back}
-                <span class=class>{move || badge::fit(&short_name(live, node))}</span>
+                <span class=class style=avatar_style>{move || badge::fit(&short_name(live, node))}</span>
                 <div class="heading">
                     <h1>
                         <span class="title-text">{move || title(live, peer)}</span>
