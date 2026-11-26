@@ -3771,6 +3771,16 @@ impl Radios {
         self.store.set_map_view(id, view).await
     }
 
+    /// Keeps how long ago a radio's nodes have to have been heard to be on
+    /// its map, and tells every client; `false` if there is no such radio.
+    pub async fn set_map_max_age(&self, id: RadioId, max_age: Option<u32>) -> Result<bool> {
+        if !self.store.set_map_max_age(id, max_age).await? {
+            return Ok(false);
+        }
+        self.changed();
+        Ok(true)
+    }
+
     /// Removes a radio and disconnects from it; `false` if there was none.
     pub async fn remove(&self, id: RadioId) -> Result<bool> {
         if !self.store.remove_radio(id).await? {
@@ -4057,6 +4067,7 @@ impl Radios {
                 .flatten(),
             badge: record.settings.badge,
             last_connected: record.last_connected,
+            map_max_age: record.map_max_age,
             // Read from the store where it is asked for.
             unread: 0,
         }

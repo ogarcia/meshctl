@@ -47,6 +47,8 @@ pub struct RadioRecord {
     pub settings: RadioSettings,
     /// When it was last connected and in sync, in seconds since the epoch.
     pub last_connected: Option<i64>,
+    /// How long ago its nodes have to have been heard to be on its map.
+    pub map_max_age: Option<u32>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -59,6 +61,7 @@ struct RadioRow {
     shown: bool,
     badge: Option<String>,
     last_connected: Option<i64>,
+    map_max_age: Option<i64>,
 }
 
 impl RadioRow {
@@ -80,6 +83,7 @@ impl RadioRow {
                     .unwrap_or_default(),
             },
             last_connected: self.last_connected,
+            map_max_age: self.map_max_age.and_then(|age| u32::try_from(age).ok()),
         })
     }
 }
@@ -413,8 +417,8 @@ impl Store {
 
     pub async fn radios(&self) -> Result<Vec<RadioRecord>> {
         let rows: Vec<RadioRow> = sqlx::query_as(
-            "SELECT id, name, kind, address, enabled, shown, badge, last_connected FROM radio
-            ORDER BY position, id",
+            "SELECT id, name, kind, address, enabled, shown, badge, last_connected, map_max_age
+            FROM radio ORDER BY position, id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -423,8 +427,8 @@ impl Store {
 
     pub async fn radio(&self, id: RadioId) -> Result<Option<RadioRecord>> {
         let row: Option<RadioRow> = sqlx::query_as(
-            "SELECT id, name, kind, address, enabled, shown, badge, last_connected FROM radio
-            WHERE id = ?",
+            "SELECT id, name, kind, address, enabled, shown, badge, last_connected, map_max_age
+            FROM radio WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -451,6 +455,7 @@ impl Store {
             id,
             settings: settings.clone(),
             last_connected: None,
+            map_max_age: None,
         })
     }
 
@@ -489,6 +494,18 @@ impl Store {
     pub async fn set_map_view(&self, radio: RadioId, view: &MapView) -> Result<bool> {
         let changed = sqlx::query("UPDATE radio SET map_view = ? WHERE id = ?")
             .bind(serde_json::to_string(view)?)
+            .bind(radio)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        Ok(changed > 0)
+    }
+
+    /// Keeps how long ago a radio's nodes have to have been heard to be on
+    /// its map; `false` if there is no such radio.
+    pub async fn set_map_max_age(&self, radio: RadioId, max_age: Option<u32>) -> Result<bool> {
+        let changed = sqlx::query("UPDATE radio SET map_max_age = ? WHERE id = ?")
+            .bind(max_age.map(i64::from))
             .bind(radio)
             .execute(&self.pool)
             .await?
@@ -2176,6 +2193,22 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0);
+    }
+
+    #[tokio::test]
+    async fn each_radio_keeps_its_nodes_on_the_map() {
+        let store = Store::in_memory().await;
+        let one = store.add_radio(&home()).await.unwrap().id;
+        let other = store.add_radio(&home()).await.unwrap().id;
+        assert!(store.set_map_max_age(one, Some(86_400)).await.unwrap());
+        assert_eq!(
+            store.radio(one).await.unwrap().unwrap().map_max_age,
+            Some(86_400)
+        );
+        assert_eq!(store.radio(other).await.unwrap().unwrap().map_max_age, None);
+        assert!(store.set_map_max_age(one, None).await.unwrap());
+        assert_eq!(store.radio(one).await.unwrap().unwrap().map_max_age, None);
+        assert!(!store.set_map_max_age(999, None).await.unwrap());
     }
 
     #[tokio::test]

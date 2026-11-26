@@ -168,6 +168,11 @@ pub struct Radio {
     /// none if it never was. What meshctl shows of a radio that is not
     /// connected is what it knew then.
     pub last_connected: Option<i64>,
+    /// How long ago its nodes have to have been heard to be on its map, in
+    /// seconds; none for every node, however long ago. Its own is always
+    /// there.
+    #[serde(default)]
+    pub map_max_age: Option<u32>,
     /// How many messages others wrote in its conversations that were not
     /// read yet, all of them.
     #[serde(default)]
@@ -327,6 +332,15 @@ pub struct MapView {
     pub north: f64,
     #[cfg_attr(feature = "openapi", schema(example = -8.1))]
     pub east: f64,
+}
+
+/// How long ago a radio's nodes have to have been heard to be on its map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MapMaxAge {
+    /// In seconds; none for every node.
+    #[cfg_attr(feature = "openapi", schema(example = 86400))]
+    pub max_age: Option<u32>,
 }
 
 impl MapView {

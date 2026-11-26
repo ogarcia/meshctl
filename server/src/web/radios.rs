@@ -11,8 +11,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Channel, Contact, Error, ErrorCode, LinkState, MapView, Node, NodeCheck, NodeFavorite,
-    NodeLatest, NodeTelemetry, Radio, RadioId, RadioOrder, RadioSettings, Status,
+    Channel, Contact, Error, ErrorCode, LinkState, MapMaxAge, MapView, Node, NodeCheck,
+    NodeFavorite, NodeLatest, NodeTelemetry, Radio, RadioId, RadioOrder, RadioSettings, Status,
 };
 use meshctl_core::radio::{AdminError, Mesh};
 use serde::Deserialize;
@@ -25,6 +25,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list, add))
         .routes(routes!(reorder))
         .routes(routes!(map_view, set_map_view))
+        .routes(routes!(set_map_max_age))
         .routes(routes!(get, update, remove))
         .routes(routes!(status))
         .routes(routes!(contact))
@@ -165,6 +166,35 @@ async fn set_map_view(
         return error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::InvalidMapView);
     }
     match state.radios.set_map_view(radio, &view).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => not_found(),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Nodes on the map
+///
+/// How long ago a radio's nodes have to have been heard to be on its map,
+/// in seconds; null for every node. Its own is always there. Every client
+/// hears of it, as the radios changed.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/map-max-age",
+    tag = "radios",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = MapMaxAge,
+    responses(
+        (status = 204, description = "Kept"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+    )
+)]
+async fn set_map_max_age(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(age): Json<MapMaxAge>,
+) -> Response {
+    match state.radios.set_map_max_age(radio, age.max_age).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => not_found(),
         Err(err) => failed(&err),
