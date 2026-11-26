@@ -26,6 +26,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(change_section))
         .routes(routes!(reorder_channels))
         .routes(routes!(remove_channel))
+        .routes(routes!(channel_link))
 }
 
 fn error(status: StatusCode, error: ErrorCode) -> Response {
@@ -242,6 +243,38 @@ struct Removal {
     /// `keep`, if not said, or `forget`.
     #[serde(default)]
     history: ChannelHistory,
+}
+
+/// Channel link
+///
+/// A channel's link, as the apps of its radio's mesh read it, its key in
+/// it: a Meshtastic one, after `meshtastic.org/e/?add=true#`, to be added
+/// rather than in place of the channels there, with the radio's LoRa; a
+/// MeshCore one, as `meshcore/channels/{index}/link` gives it.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/channels/{index}/link",
+    tag = "secrets",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("index" = u32, Path, description = "The channel's slot"),
+    ),
+    responses(
+        (status = 200, description = "The link", body = meshctl_api::Contact),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "No channel in that slot: `invalid_settings`", body = Error),
+    )
+)]
+async fn channel_link(
+    State(state): State<AppState>,
+    Path((radio, index)): Path<(RadioId, u32)>,
+) -> Response {
+    match state.radios.channel_link(radio, index).await {
+        Ok(url) => Json(meshctl_api::Contact { url }).into_response(),
+        Err(failure) => refused(failure),
+    }
 }
 
 /// Remove a channel

@@ -3074,6 +3074,17 @@ impl Radios {
         let _ = self.changes.send(Change::Mesh(id, mesh::Event::Synced));
     }
 
+    /// A channel's link, to share it, as its radio's apps read it: a
+    /// Meshtastic one to be added, a MeshCore one with its region.
+    pub async fn channel_link(&self, id: RadioId, index: u32) -> Result<String, SettingsFailure> {
+        if self.protocol(id) == Some(Protocol::Meshcore) {
+            return self.meshcore_channel_link(id, index).await;
+        }
+        let mesh = self.configurable(id)?;
+        mesh.read(|state| crate::links::channel_link(&state.settings, index))
+            .ok_or(SettingsFailure::Invalid("index".into()))
+    }
+
     /// A MeshCore channel's link, to share it: with its secret, and its
     /// region if it has one.
     pub async fn meshcore_channel_link(

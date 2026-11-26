@@ -63,6 +63,24 @@ pub fn parse(url: &str) -> Option<Parsed> {
     }
 }
 
+/// A channel of the radio's to share, as the apps share one to be added:
+/// it alone, key and all, with the radio's LoRa, after
+/// `meshtastic.org/e/?add=true#`. None for a slot with no channel on.
+pub fn channel_link(settings: &Settings, slot: u32) -> Option<String> {
+    let channel = settings.channels.get(&slot)?;
+    if channel.role == channel::Role::Disabled as i32 {
+        return None;
+    }
+    let set = ChannelSet {
+        settings: vec![channel.settings.clone()?],
+        lora_config: settings.config.lora.clone(),
+    };
+    Some(format!(
+        "https://meshtastic.org/e/?add=true#{}",
+        URL_SAFE_NO_PAD.encode(set.encode_to_vec())
+    ))
+}
+
 /// The kind of a channel's key, as the settings say it.
 fn key_kind(psk: &[u8]) -> ChannelKey {
     match psk {
@@ -308,6 +326,23 @@ mod tests {
             "https://meshtastic.org/{kind}/#{}",
             URL_SAFE_NO_PAD.encode(message.encode_to_vec())
         )
+    }
+
+    #[test]
+    fn a_channel_is_shared_to_be_added() {
+        let radio = radio(&[(0, "", &[1]), (1, "Lab", &[9; 32])]);
+        let link = channel_link(&radio, 1).unwrap();
+        assert!(link.starts_with("https://meshtastic.org/e/?add=true#"));
+        let Some(Parsed::Channels(set, replaces)) = parse(&link) else {
+            panic!("channels");
+        };
+        assert!(!replaces);
+        assert_eq!(set.settings.len(), 1);
+        assert_eq!(set.settings[0].name, "Lab");
+        assert_eq!(set.settings[0].psk, vec![9; 32]);
+        assert_eq!(set.lora_config, radio.config.lora);
+        // None where there is none.
+        assert_eq!(channel_link(&radio, 5), None);
     }
 
     fn radio(channels: &[(u32, &str, &[u8])]) -> Settings {
