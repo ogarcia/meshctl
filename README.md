@@ -151,7 +151,7 @@ in front and give meshctl its address instead.
 ### In a container
 
 Each release, and every push to master, builds an image, for amd64 and arm64:
-`latest` is the last release (`0.5.0`, `0.5` name them too), `master` the
+`latest` is the last release (`0.6.0`, `0.6` name them too), `master` the
 last commit. To try it on your own machine:
 
 ```sh
