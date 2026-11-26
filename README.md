@@ -77,8 +77,9 @@ a reason to point at another tool, not to grow this one.
   [tasticsplitter](https://github.com/ogarcia/tasticsplitter) in front of it,
   and point meshctl at it as if it were the radio.
 
-Meshtastic comes first. MeshCore radios connect, and show their nodes and
-chats, but they can do less than Meshtastic ones for now.
+Meshtastic and MeshCore are both supported, side by side, each as far as its
+firmware goes: what one mesh has and the other has not is offered only where
+it applies.
 
 ## Installing
 
