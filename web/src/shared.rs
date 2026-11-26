@@ -234,22 +234,71 @@ pub fn SharedCard(shared: Shared, mine: bool, from: u32) -> impl IntoView {
             }
             .into_any()
         }
-        Shared::Channel { link, name } => view! {
-            <div class="shared-card">
-                <span class="shared-mark channel">"#"</span>
-                <span class="shared-what">
-                    <span class="shared-said">{t!(i18n, shared_channel)}</span>
-                    <b>{name}</b>
-                </span>
-                <button type="button" class="primary" on:click=move |ev| {
-                    ev.stop_propagation();
-                    live.offered_link.set(Some(link.clone()));
-                }>
-                    {t!(i18n, shared_add_channel)}
-                </button>
-            </div>
+        Shared::Channel { link, name } => {
+            // Whether the radio has it, name and key, as the link says:
+            // asked again as its channels change, as when it is added.
+            let present = RwSignal::new(None::<bool>);
+            let asked = link.clone();
+            Effect::new(move |_| {
+                live.channels.track();
+                let Some(radio) = live.selected.get_untracked() else {
+                    return;
+                };
+                let link = asked.clone();
+                spawn_local(async move {
+                    if let Ok(meshctl_api::LinkContents::Channels { channels, .. }) =
+                        crate::daemon::read_link(radio, &link).await
+                    {
+                        let _ = present.try_set(Some(channels.iter().all(|c| c.present)));
+                    }
+                });
+            });
+            // Its slot, by its name, to see it.
+            let slot = {
+                let name = name.clone();
+                move || {
+                    live.channels.with(|channels| {
+                        channels
+                            .iter()
+                            .find(|c| c.role != "DISABLED" && c.name.eq_ignore_ascii_case(&name))
+                            .map(|c| c.index)
+                    })
+                }
+            };
+            view! {
+                <div class="shared-card">
+                    <span class="shared-mark channel">"#"</span>
+                    <span class="shared-what">
+                        <span class="shared-said">{t!(i18n, shared_channel)}</span>
+                        <b>{name}</b>
+                    </span>
+                    {move || match (present.get(), slot()) {
+                        (Some(true), Some(channel)) => view! {
+                            <button type="button" on:click=move |ev| {
+                                ev.stop_propagation();
+                                live.open_chat(Peer::Channel { channel });
+                            }>
+                                {t!(i18n, shared_open_channel)}
+                            </button>
+                        }
+                        .into_any(),
+                        _ => {
+                            let link = link.clone();
+                            view! {
+                                <button type="button" class="primary" on:click=move |ev| {
+                                    ev.stop_propagation();
+                                    live.offered_link.set(Some(link.clone()));
+                                }>
+                                    {t!(i18n, shared_add_channel)}
+                                </button>
+                            }
+                            .into_any()
+                        }
+                    }}
+                </div>
+            }
+            .into_any()
         }
-        .into_any(),
     }
 }
 
