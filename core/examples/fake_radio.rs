@@ -98,6 +98,8 @@ struct Radio {
     removed: std::collections::BTreeSet<u32>,
     /// The last text a client sent, for the mesh's examples to answer.
     last_text: Option<u32>,
+    /// Where it was told it is, fixed, as its own node says.
+    fixed: Option<pb::Position>,
     /// Contacts a client added, as nodes it keeps.
     contacts: BTreeMap<u32, pb::User>,
 }
@@ -277,6 +279,7 @@ impl Radio {
             favorites: std::collections::BTreeSet::new(),
             removed: std::collections::BTreeSet::new(),
             last_text: None,
+            fixed: None,
             contacts: BTreeMap::new(),
         }
     }
@@ -522,6 +525,7 @@ impl Radio {
             V::NodeInfo(pb::NodeInfo {
                 num: ME,
                 user: Some(self.owner.clone()),
+                position: self.fixed,
                 ..Default::default()
             }),
             V::NodeInfo(pb::NodeInfo {
@@ -569,6 +573,22 @@ impl Radio {
         out
     }
 
+    /// Has its position fixed, or no longer, as the firmware does along
+    /// with setting or removing one.
+    fn fix(&mut self, fixed: bool) {
+        let entry = self
+            .configs
+            .entry("position".to_owned())
+            .or_insert_with(|| pb::Config {
+                payload_variant: Some(config::PayloadVariant::Position(
+                    config::PositionConfig::default(),
+                )),
+            });
+        if let Some(config::PayloadVariant::Position(position)) = &mut entry.payload_variant {
+            position.fixed_position = fixed;
+        }
+    }
+
     /// Takes in an admin message; returns the answer, if it asks for one.
     fn admin(&mut self, admin: AdminMessage) -> Option<AdminMessage> {
         use admin_message::PayloadVariant as A;
@@ -609,6 +629,21 @@ impl Radio {
                     channel.settings.as_ref().map(|s| &s.name)
                 );
                 self.channels.insert(channel.index, channel);
+                None
+            }
+            A::SetFixedPosition(position) => {
+                println!(
+                    "fixed position: {:?}, {:?}, {:?} m",
+                    position.latitude_i, position.longitude_i, position.altitude
+                );
+                self.fixed = Some(position);
+                self.fix(true);
+                None
+            }
+            A::RemoveFixedPosition(_) => {
+                println!("fixed position removed");
+                self.fixed = None;
+                self.fix(false);
                 None
             }
             A::BeginEditSettings(_) => {

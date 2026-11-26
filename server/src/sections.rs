@@ -10,9 +10,9 @@
 //! Left out: what has a page of its own (LoRa, the role) and what could lock
 //! the owner out of their radio (security: keys, admin keys, managed mode).
 
-use meshctl_api::{FieldKind, SettingsField, SettingsSection};
+use meshctl_api::{FieldKind, FixedPosition, SettingsField, SettingsSection};
 use meshctl_core::mesh::Settings;
-use meshctl_core::radio::SettingsChange;
+use meshctl_core::radio::{self, SettingsChange};
 use meshctl_proto::descriptors;
 use meshctl_proto::meshtastic as pb;
 use prost::Message;
@@ -676,6 +676,51 @@ pub fn change(
     Ok(change)
 }
 
+/// The section whose fixed position can be given along with it.
+const POSITION: &str = "config.position";
+
+/// What a change to a section does to the radio's fixed position: set it
+/// where given, which takes the position fixed, as it is or as changed
+/// along; or let it go, as the position stops being fixed.
+pub fn fixed(
+    settings: &Settings,
+    id: &str,
+    values: &BTreeMap<String, Json>,
+    at: Option<&FixedPosition>,
+) -> Result<Option<radio::FixedPosition>, Invalid> {
+    let was = settings
+        .config
+        .position
+        .as_ref()
+        .is_some_and(|p| p.fixed_position);
+    let will = match values.get("fixed_position") {
+        Some(Json::Bool(will)) if id == POSITION => *will,
+        _ => was,
+    };
+    let Some(at) = at else {
+        return Ok((was && !will).then_some(radio::FixedPosition::Remove));
+    };
+    let inside = (-90.0..=90.0).contains(&at.latitude) && (-180.0..=180.0).contains(&at.longitude);
+    if id != POSITION || !will || !inside {
+        return Err(invalid("fixed_position"));
+    }
+    // In ten millionths of a degree, as the protobufs carry it: well
+    // within an i32 for any degree in range.
+    #[allow(clippy::cast_possible_truncation)]
+    let degrees = |d: f64| Some((d * 1e7).round() as i32);
+    let time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u32::try_from(d.as_secs()).unwrap_or(0));
+    Ok(Some(radio::FixedPosition::Set(pb::Position {
+        latitude_i: degrees(at.latitude),
+        longitude_i: degrees(at.longitude),
+        altitude: at.altitude,
+        time,
+        location_source: pb::position::LocSource::LocManual as i32,
+        ..Default::default()
+    })))
+}
+
 /// A section, back into the message that carries one: `Config` or
 /// `ModuleConfig`, decoded into prost's own type to send.
 fn wrap<M: Message + Default>(
@@ -893,6 +938,63 @@ mod tests {
         );
         let bad = BTreeMap::from([("position_flags".to_owned(), Json::from(vec!["NOPE"]))]);
         assert!(super::change(&settings, "config.position", &bad).is_err());
+    }
+
+    #[test]
+    fn a_fixed_position_goes_with_its_setting() {
+        let mut settings = settings();
+        settings.config.position = Some(config::PositionConfig::default());
+        let coruna = FixedPosition {
+            latitude: 43.362_3,
+            longitude: -8.411_5,
+            altitude: Some(54),
+        };
+        let on = BTreeMap::from([("fixed_position".to_owned(), Json::Bool(true))]);
+        let none = BTreeMap::new();
+
+        // Set along with fixing it.
+        let Some(radio::FixedPosition::Set(at)) =
+            fixed(&settings, "config.position", &on, Some(&coruna)).unwrap()
+        else {
+            panic!("a position set");
+        };
+        assert_eq!(at.latitude_i, Some(433_623_000));
+        assert_eq!(at.longitude_i, Some(-84_115_000));
+        assert_eq!(at.altitude, Some(54));
+        assert_eq!(
+            at.location_source,
+            pb::position::LocSource::LocManual as i32
+        );
+        // Not on a position that is not fixed, nor elsewhere, nor off the
+        // globe.
+        assert!(fixed(&settings, "config.position", &none, Some(&coruna)).is_err());
+        assert!(fixed(&settings, "config.device", &on, Some(&coruna)).is_err());
+        let nowhere = FixedPosition {
+            latitude: 91.0,
+            ..coruna
+        };
+        assert!(fixed(&settings, "config.position", &on, Some(&nowhere)).is_err());
+        // Fixing it with none given keeps what the radio has.
+        assert_eq!(
+            fixed(&settings, "config.position", &on, None).unwrap(),
+            None
+        );
+
+        // Once fixed: moved alone, or let go.
+        settings.config.position = Some(config::PositionConfig {
+            fixed_position: true,
+            ..Default::default()
+        });
+        assert!(matches!(
+            fixed(&settings, "config.position", &none, Some(&coruna)),
+            Ok(Some(radio::FixedPosition::Set(_)))
+        ));
+        let off = BTreeMap::from([("fixed_position".to_owned(), Json::Bool(false))]);
+        assert_eq!(
+            fixed(&settings, "config.position", &off, None).unwrap(),
+            Some(radio::FixedPosition::Remove)
+        );
+        assert!(fixed(&settings, "config.position", &off, Some(&coruna)).is_err());
     }
 
     #[test]

@@ -9,11 +9,11 @@
 use crate::store::{NewMessageRow, RadioRecord, Store, now};
 use anyhow::Result;
 use meshctl_api::{
-    BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, Hop, LinkContents,
-    LinkState, MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest, NodeAccess,
-    NodeCheck, NodeLatest, NodeLogin, NodeSettings, NodeSettingsChange, NodeTelemetry, Pace,
-    Packet, PacketFilter, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings, Request,
-    RequestKind, SectionSecret, SettingsApplied, SettingsSection, SightingId, Status,
+    BADGE_COLORS, Badge, BadgeContent, ChannelSecret, Conversation, ErrorCode, FixedPosition, Hop,
+    LinkContents, LinkState, MapView, Message, MessageId, MessageStatus, NewMessage, NewRequest,
+    NodeAccess, NodeCheck, NodeLatest, NodeLogin, NodeSettings, NodeSettingsChange, NodeTelemetry,
+    Pace, Packet, PacketFilter, Peer, Preferences, Radio, RadioId, RadioKind, RadioSettings,
+    Request, RequestKind, SectionSecret, SettingsApplied, SettingsSection, SightingId, Status,
     TelemetryPoint, TelemetrySeries, Waits,
 };
 use meshctl_core::link::Transport;
@@ -3099,24 +3099,38 @@ impl Radios {
             .read(|state| crate::sections::sections(&state.settings)))
     }
 
-    /// Changes some settings of one section. The firmware reboots for nearly
-    /// any of them, so it is always said that it does.
+    /// Changes some settings of one section, and where the radio is, fixed,
+    /// if given. The firmware reboots for nearly any setting, so it is
+    /// always said that it does; a fixed position moved alone it takes as
+    /// it is.
     pub async fn change_section(
         &self,
         id: RadioId,
         section: &str,
         values: &BTreeMap<String, serde_json::Value>,
+        at: Option<&FixedPosition>,
     ) -> Result<SettingsApplied, SettingsFailure> {
         let mesh = self.configurable(id)?;
-        if values.is_empty() {
+        if values.is_empty() && at.is_none() {
             return Err(SettingsFailure::Invalid(section.to_owned()));
         }
         let change = mesh
-            .read(|state| crate::sections::change(&state.settings, section, values))
-            .map_err(|why| SettingsFailure::Invalid(why.0))?;
+            .read(|state| {
+                let mut change = if values.is_empty() {
+                    meshctl_core::radio::SettingsChange::default()
+                } else {
+                    crate::sections::change(&state.settings, section, values)?
+                };
+                change.fixed_position =
+                    crate::sections::fixed(&state.settings, section, values, at)?;
+                Ok(change)
+            })
+            .map_err(|why: crate::sections::Invalid| SettingsFailure::Invalid(why.0))?;
         mesh.change_settings(change).await.map_err(admin_failure)?;
         tracing::info!(radio = id, section, "settings changed");
-        Ok(SettingsApplied { reboots: true })
+        Ok(SettingsApplied {
+            reboots: !values.is_empty(),
+        })
     }
 
     /// The packets a radio heard, the newest first, or `None` if there is no

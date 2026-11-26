@@ -11,9 +11,9 @@ use crate::link::{self, Link, Transport};
 use crate::mesh::{Event, LinkState, MeshState};
 use meshctl_proto::meshtastic::{
     AdminMessage, Channel, Config, Data, DeviceMetrics, EnvironmentMetrics, FromRadio, Heartbeat,
-    LocalStats, MeshPacket, ModuleConfig, NeighborInfo, PortNum, PowerMetrics, RouteDiscovery,
-    SharedContact, Telemetry, ToRadio, User, admin_message, from_radio, mesh_packet, telemetry,
-    to_radio,
+    LocalStats, MeshPacket, ModuleConfig, NeighborInfo, PortNum, Position, PowerMetrics,
+    RouteDiscovery, SharedContact, Telemetry, ToRadio, User, admin_message, from_radio,
+    mesh_packet, telemetry, to_radio,
 };
 use prost::Message;
 use std::collections::HashMap;
@@ -152,6 +152,18 @@ pub struct SettingsChange {
     pub configs: Vec<Config>,
     pub module_configs: Vec<ModuleConfig>,
     pub channels: Vec<Channel>,
+    /// Where the radio is, as set by hand, or no longer: sent after the
+    /// configuration, which would otherwise undo it.
+    pub fixed_position: Option<FixedPosition>,
+}
+
+/// A position set by hand on the radio, or let go.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FixedPosition {
+    /// The radio says it is there, instead of what its GPS reads.
+    Set(Position),
+    /// The radio goes back to its GPS, if it has one.
+    Remove,
 }
 
 /// Why the radio's settings were not changed.
@@ -425,6 +437,10 @@ impl Mesh {
         steps.extend(change.configs.into_iter().map(A::SetConfig));
         steps.extend(change.module_configs.into_iter().map(A::SetModuleConfig));
         steps.extend(change.channels.into_iter().map(A::SetChannel));
+        steps.extend(change.fixed_position.map(|fixed| match fixed {
+            FixedPosition::Set(position) => A::SetFixedPosition(position),
+            FixedPosition::Remove => A::RemoveFixedPosition(true),
+        }));
         steps.push(A::CommitEditSettings(true));
         for step in steps {
             let (_, packet) = self.admin(me, step, passkey.clone())?;
@@ -1147,6 +1163,11 @@ mod tests {
                 long_name: "Faro".into(),
                 ..Default::default()
             }),
+            fixed_position: Some(FixedPosition::Set(Position {
+                latitude_i: Some(433_623_000),
+                longitude_i: Some(-84_115_000),
+                ..Default::default()
+            })),
             ..Default::default()
         };
         let changing = tokio::spawn({
@@ -1179,9 +1200,10 @@ mod tests {
             }))
             .await;
 
-        // ...then the change, wrapped so that the radio applies it once.
+        // ...then the change, wrapped so that the radio applies it once, the
+        // position last.
         let mut steps = Vec::new();
-        for _ in 0..3 {
+        for _ in 0..4 {
             let (_, step) = admin_of(radio.receive().await);
             assert_eq!(step.session_passkey, vec![7; 8]);
             steps.push(step.payload_variant.unwrap());
@@ -1194,7 +1216,11 @@ mod tests {
             matches!(&steps[1], admin_message::PayloadVariant::SetOwner(u) if u.long_name == "Faro")
         );
         assert!(matches!(
-            steps[2],
+            &steps[2],
+            admin_message::PayloadVariant::SetFixedPosition(p) if p.latitude_i == Some(433_623_000)
+        ));
+        assert!(matches!(
+            steps[3],
             admin_message::PayloadVariant::CommitEditSettings(true)
         ));
         assert_eq!(changing.await.unwrap(), Ok(()));

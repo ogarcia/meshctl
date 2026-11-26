@@ -351,7 +351,10 @@ pub async fn change_section(
     let request = with_token(Request::put(&url(&format!(
         "/radios/{radio}/sections/{section}"
     ))))
-    .json(&SectionChange { values })
+    .json(&SectionChange {
+        values,
+        fixed_position: None,
+    })
     .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)

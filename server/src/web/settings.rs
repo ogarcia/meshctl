@@ -159,6 +159,10 @@ async fn sections(State(state): State<AppState>, Path(radio): Path<RadioId>) -> 
 /// Sets the fields given, by their names in the section, and leaves the rest
 /// as the radio has them; a secret is written only when given. The radio
 /// reboots for nearly any of them, and drops its link for a moment.
+///
+/// `config.position` takes `fixed_position` too, where the radio is, with
+/// its position fixed, already or along with it; that alone needs no
+/// reboot. Turning `fixed_position` off lets the one it had go.
 #[utoipa::path(
     put,
     path = "/radios/{radio}/sections/{section}",
@@ -173,7 +177,7 @@ async fn sections(State(state): State<AppState>, Path(radio): Path<RadioId>) -> 
         (status = 401, description = "The access token is missing or wrong", body = Error),
         (status = 404, description = "There is no such radio", body = Error),
         (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
-        (status = 422, description = "No such section or field, or a value it does not take: `invalid_settings`", body = Error),
+        (status = 422, description = "No such section or field, a value it does not take, or a fixed position not fixed or off the globe: `invalid_settings`", body = Error),
         (status = 504, description = "The radio did not answer: `radio_did_not_answer`", body = Error),
     )
 )]
@@ -184,7 +188,12 @@ async fn change_section(
 ) -> Response {
     match state
         .radios
-        .change_section(radio, &section, &change.values)
+        .change_section(
+            radio,
+            &section,
+            &change.values,
+            change.fixed_position.as_ref(),
+        )
         .await
     {
         Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),

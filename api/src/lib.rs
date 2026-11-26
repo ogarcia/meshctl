@@ -2374,7 +2374,29 @@ pub struct SettingsSection {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct SectionChange {
     #[cfg_attr(feature = "openapi", schema(value_type = Object, example = json!({"device_update_interval": 1800})))]
+    #[serde(default)]
     pub values: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Only for `config.position`, with `fixed_position` on, as it is or as
+    /// set along: where the radio is, which it says instead of what its GPS
+    /// reads. Without it, a position fixed keeps the one it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_position: Option<FixedPosition>,
+}
+
+/// Where a radio is, as set by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct FixedPosition {
+    /// Degrees north, from -90 to 90.
+    #[cfg_attr(feature = "openapi", schema(example = 43.3623))]
+    pub latitude: f64,
+    /// Degrees east, from -180 to 180.
+    #[cfg_attr(feature = "openapi", schema(example = -8.4115))]
+    pub longitude: f64,
+    /// Metres above sea level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(example = 54))]
+    pub altitude: Option<i32>,
 }
 
 /// What a change of settings set off.
