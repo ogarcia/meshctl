@@ -860,5 +860,67 @@ window.meshctlMap = (() => {
     }
   }
 
-  return { open, close, nodes, focus, route, stay, reset, resize, view, mini, miniRoute, miniClose };
+  // Maps to pick a place on, by the element each is drawn on.
+  const pickers = new Map();
+
+  // A map to pick a place on, as JSON: {lat, lon, zoom} where it looks
+  // first, pin whether a pin starts there, and icon the pin's own drawing.
+  // The pin is dragged, or put where the map is clicked, and moved(lat,
+  // lon) told where it went.
+  function picker(element, json, moved) {
+    const at = JSON.parse(json);
+    const map = L.map(element, { zoomSnap: 0.5 });
+    map.attributionControl.setPrefix(false);
+    L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(map);
+    // Its point at its foot, where the place is.
+    const icon = L.divIcon({
+      className: "",
+      html: `<span class="mc-picked">${at.icon}</span>`,
+      iconSize: [36, 36],
+      iconAnchor: [18, 34],
+    });
+    let marker = null;
+    const put = (latlng) => {
+      if (marker) {
+        marker.setLatLng(latlng);
+        return;
+      }
+      marker = L.marker(latlng, { icon, draggable: true, keyboard: false }).addTo(map);
+      marker.on("dragend", () => {
+        const where = marker.getLatLng().wrap();
+        moved(where.lat, where.lng);
+      });
+    };
+    map.on("click", (event) => {
+      const where = event.latlng.wrap();
+      put(where);
+      moved(where.lat, where.lng);
+    });
+    map.setView([at.lat, at.lon], at.zoom, { animate: false });
+    if (at.pin) put([at.lat, at.lon]);
+    pickers.set(element, { map, put });
+    // Laid out by then, in a dialog that has just opened.
+    requestAnimationFrame(() => map.invalidateSize());
+  }
+
+  // Puts the pin of a map to pick on somewhere, and goes there.
+  function pickerAt(element, lat, lon) {
+    const picking = pickers.get(element);
+    if (!picking) return;
+    picking.put([lat, lon]);
+    picking.map.setView([lat, lon], Math.max(picking.map.getZoom(), FOCUS_ZOOM + 2));
+  }
+
+  function pickerClose(element) {
+    const picking = pickers.get(element);
+    if (picking) {
+      picking.map.remove();
+      pickers.delete(element);
+    }
+  }
+
+  return {
+    open, close, nodes, focus, route, stay, reset, resize, view, mini, miniRoute, miniClose,
+    picker, pickerAt, pickerClose,
+  };
 })();

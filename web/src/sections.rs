@@ -30,7 +30,7 @@ const EYE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye.
 const EYE_OFF: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/eye-off.svg");
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::{ErrorCode, FieldKind, SettingsField, SettingsSection};
+use meshctl_api::{ErrorCode, FieldKind, FixedPosition, SettingsField, SettingsSection};
 use serde_json::Value as Json;
 use std::collections::BTreeMap;
 
@@ -38,6 +38,29 @@ use std::collections::BTreeMap;
 /// names: kept by the page, so that going to another section or tab and
 /// back loses nothing.
 pub type SectionEdits = RwSignal<BTreeMap<String, BTreeMap<String, Json>>>;
+
+/// The section where the radio's position can be fixed.
+const POSITION: &str = "config.position";
+/// Where the radio is, fixed, among a section's edits: by a name no field
+/// of the protobufs has, its coordinates as written.
+const FIXED: &str = "@fixed_position";
+
+/// Where the radio is, as written in the edits of its position, or why
+/// not: latitude and longitude, on the globe, and a whole altitude if any.
+fn fixed_position(written: &Json) -> Option<FixedPosition> {
+    let text = |name: &str| written.get(name).and_then(Json::as_str).unwrap_or_default();
+    let latitude = crate::position::coordinate(text("latitude")).filter(|d| d.abs() <= 90.0)?;
+    let longitude = crate::position::coordinate(text("longitude")).filter(|d| d.abs() <= 180.0)?;
+    let altitude = match text("altitude").trim() {
+        "" => None,
+        metres => Some(metres.parse::<i32>().ok()?),
+    };
+    Some(FixedPosition {
+        latitude,
+        longitude,
+        altitude,
+    })
+}
 
 /// A name from the protobufs as words: `external_notification` reads as
 /// "External notification".
@@ -209,7 +232,8 @@ pub fn SectionsTab(
 fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let notice = RwSignal::new(None::<Result<(), Failure>>);
+    // How it went: whether the radio reboots for it, or why not.
+    let notice = RwSignal::new(None::<Result<bool, Failure>>);
     clear_when_synced(live, notice);
     let busy = RwSignal::new(false);
     let id = section.id.clone();
@@ -217,60 +241,6 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
     let dirty = {
         let id = id.clone();
         Signal::derive(move || edits.with(|e| e.contains_key(&id)))
-    };
-
-    let save = {
-        let id = id.clone();
-        move || {
-            let Some(radio) = live.selected.get_untracked() else {
-                return;
-            };
-            let Some(values) = edits.with_untracked(|e| e.get(&id).cloned()) else {
-                return;
-            };
-            let sure = web_sys::window()
-                .and_then(|w| {
-                    w.confirm_with_message(t_string!(i18n, settings_reboot_confirm))
-                        .ok()
-                })
-                .unwrap_or(false);
-            if !sure {
-                return;
-            }
-            let id = id.clone();
-            busy.set(true);
-            spawn_local(async move {
-                let outcome = daemon::change_section(radio, &id, values).await;
-                if outcome.is_ok() {
-                    edits.update(|e| {
-                        e.remove(&id);
-                    });
-                }
-                notice.set(Some(outcome.map(|_| ())));
-                busy.set(false);
-            });
-        }
-    };
-    let undo = {
-        let id = id.clone();
-        move || {
-            edits.update(|e| {
-                e.remove(&id);
-            });
-        }
-    };
-
-    let notice_view = move || {
-        notice.get().map(|outcome| match outcome {
-            Ok(()) => view! { <p class="note">{t!(i18n, settings_applied_reboot)}</p> }.into_any(),
-            Err(Failure::Rejected(ErrorCode::InvalidSettings)) => {
-                view! { <p class="note bad">{t!(i18n, section_invalid)}</p> }.into_any()
-            }
-            Err(Failure::Rejected(ErrorCode::RadioDidNotAnswer)) => {
-                view! { <p class="note bad">{t!(i18n, settings_no_answer)}</p> }.into_any()
-            }
-            Err(_) => view! { <p class="note bad">{t!(i18n, error_failed)}</p> }.into_any(),
-        })
     };
 
     // What each field is now, edited or as the radio has it: some are only
@@ -288,6 +258,84 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
                 .or_else(|| originals.get(name).cloned())
         }
     };
+
+    let save = {
+        let id = id.clone();
+        let value_of = value_of.clone();
+        move || {
+            let Some(radio) = live.selected.get_untracked() else {
+                return;
+            };
+            let Some(mut values) = edits.with_untracked(|e| e.get(&id).cloned()) else {
+                return;
+            };
+            // Where the radio is goes apart, and only with its position
+            // fixed: otherwise it is not even shown.
+            let fixed = values.remove(FIXED);
+            let fixed_on = untrack(|| value_of("fixed_position")) == Some(Json::Bool(true));
+            let fixed = match fixed {
+                Some(written) if fixed_on => match fixed_position(&written) {
+                    Some(at) => Some(at),
+                    None => {
+                        notice.set(Some(Err(Failure::Rejected(ErrorCode::InvalidSettings))));
+                        return;
+                    }
+                },
+                _ => None,
+            };
+            if values.is_empty() && fixed.is_none() {
+                return;
+            }
+            // Moving where it is alone reboots nothing.
+            let sure = values.is_empty()
+                || web_sys::window()
+                    .and_then(|w| {
+                        w.confirm_with_message(t_string!(i18n, settings_reboot_confirm))
+                            .ok()
+                    })
+                    .unwrap_or(false);
+            if !sure {
+                return;
+            }
+            let id = id.clone();
+            busy.set(true);
+            spawn_local(async move {
+                let outcome = daemon::change_section(radio, &id, values, fixed).await;
+                if outcome.is_ok() {
+                    edits.update(|e| {
+                        e.remove(&id);
+                    });
+                }
+                notice.set(Some(outcome.map(|applied| applied.reboots)));
+                busy.set(false);
+            });
+        }
+    };
+    let undo = {
+        let id = id.clone();
+        move || {
+            edits.update(|e| {
+                e.remove(&id);
+            });
+        }
+    };
+
+    let notice_view = move || {
+        notice.get().map(|outcome| match outcome {
+            Ok(true) => {
+                view! { <p class="note">{t!(i18n, settings_applied_reboot)}</p> }.into_any()
+            }
+            Ok(false) => view! { <p class="note">{t!(i18n, position_applied)}</p> }.into_any(),
+            Err(Failure::Rejected(ErrorCode::InvalidSettings)) => {
+                view! { <p class="note bad">{t!(i18n, section_invalid)}</p> }.into_any()
+            }
+            Err(Failure::Rejected(ErrorCode::RadioDidNotAnswer)) => {
+                view! { <p class="note bad">{t!(i18n, settings_no_answer)}</p> }.into_any()
+            }
+            Err(_) => view! { <p class="note bad">{t!(i18n, error_failed)}</p> }.into_any(),
+        })
+    };
+
     let fields = section
         .fields
         .into_iter()
@@ -296,7 +344,18 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
                 let (id, name, value_of) = (id.clone(), field.name.clone(), value_of.clone());
                 Signal::derive(move || crate::fields::shown(&id, &name, &value_of))
             };
-            view! { <FieldInput section=id.clone() field edits visible /> }
+            // Where the radio is, under the switch that fixes it.
+            let fixed = (id == POSITION && field.name == "fixed_position").then(|| {
+                let value_of = value_of.clone();
+                let visible = Signal::derive(move || {
+                    visible.get() && value_of("fixed_position") == Some(Json::Bool(true))
+                });
+                view! { <FixedRow edits visible /> }
+            });
+            view! {
+                <FieldInput section=id.clone() field edits visible />
+                {fixed}
+            }
         })
         .collect_view();
 
@@ -319,6 +378,86 @@ fn SectionForm(section: SettingsSection, edits: SectionEdits) -> impl IntoView {
             {notice_view}
             <SaveBar dirty busy=Signal::derive(move || busy.get()) save undo />
         </form>
+    }
+}
+
+/// Where the radio is, with its position fixed: as it says it is now, or
+/// as written, and picked on a map.
+#[component]
+fn FixedRow(edits: SectionEdits, visible: Signal<bool>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    // Where it says it is, as written: by its GPS until fixed, and then
+    // where it was fixed; again as it says anew.
+    let said = Memo::new(move |_| {
+        let now = live.status.with(|s| {
+            let num = s.as_ref()?.local.as_ref()?.num;
+            live.nodes.with(|nodes| nodes.get(&num)?.position)
+        });
+        (
+            now.map(|at| crate::position::written(at.latitude))
+                .unwrap_or_default(),
+            now.map(|at| crate::position::written(at.longitude))
+                .unwrap_or_default(),
+            now.and_then(|at| at.altitude)
+                .map(|metres| metres.to_string())
+                .unwrap_or_default(),
+        )
+    });
+    let (latitude, longitude, altitude) = said.with_untracked(|(lat, lon, alt)| {
+        (
+            RwSignal::new(lat.clone()),
+            RwSignal::new(lon.clone()),
+            RwSignal::new(alt.clone()),
+        )
+    });
+    // As written, among the edits while it differs from what the radio
+    // says, even half written: saving says if it does not read.
+    let changed = move |()| {
+        let written = (
+            latitude.get_untracked(),
+            longitude.get_untracked(),
+            altitude.get_untracked(),
+        );
+        let same = said.with_untracked(|said| *said == written);
+        edits.update(|e| {
+            let fields = e.entry(POSITION.to_owned()).or_default();
+            if same {
+                fields.remove(FIXED);
+            } else {
+                fields.insert(
+                    FIXED.to_owned(),
+                    serde_json::json!({
+                        "latitude": written.0,
+                        "longitude": written.1,
+                        "altitude": written.2,
+                    }),
+                );
+            }
+            if fields.is_empty() {
+                e.remove(POSITION);
+            }
+        });
+    };
+    // Not edited, undone or saved: as the radio says, now and as it says
+    // anew.
+    Effect::new(move |_| {
+        let edited = edits.with(|e| e.get(POSITION).is_some_and(|f| f.contains_key(FIXED)));
+        let (lat, lon, alt) = said.get();
+        if !edited {
+            latitude.set(lat);
+            longitude.set(lon);
+            altitude.set(alt);
+        }
+    });
+    view! {
+        <div class="pref-row" class:gone=move || !visible.get()>
+            <div class="pref-what">
+                <span class="pref-title">{t!(i18n, position_fixed)}</span>
+                <span class="dim">{t!(i18n, position_fixed_hint)}</span>
+            </div>
+            <crate::position::PositionInputs latitude longitude altitude changed />
+        </div>
     }
 }
 

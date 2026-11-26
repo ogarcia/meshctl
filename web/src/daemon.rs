@@ -347,13 +347,14 @@ pub async fn change_section(
     radio: RadioId,
     section: &str,
     values: std::collections::BTreeMap<String, serde_json::Value>,
+    fixed_position: Option<meshctl_api::FixedPosition>,
 ) -> Result<SettingsApplied, Failure> {
     let request = with_token(Request::put(&url(&format!(
         "/radios/{radio}/sections/{section}"
     ))))
     .json(&SectionChange {
         values,
-        fixed_position: None,
+        fixed_position,
     })
     .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;

@@ -29,6 +29,7 @@ mod offline;
 mod packets;
 mod phone;
 mod plugged;
+mod position;
 mod preferences;
 mod qr;
 mod radios;

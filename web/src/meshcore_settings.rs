@@ -8,6 +8,7 @@
 use crate::app::Live;
 use crate::daemon::{self, Failure};
 use crate::i18n::{t, t_string, use_i18n};
+use crate::position::{PositionInputs, coordinate, written};
 use crate::radios::Switch;
 use crate::sections::SaveBar;
 use leptos::prelude::*;
@@ -324,19 +325,18 @@ fn UserTab(draft: Draft) -> impl IntoView {
     let latitude = RwSignal::new(
         position
             .get_untracked()
-            .map_or_else(String::new, |p| p.latitude.to_string()),
+            .map_or_else(String::new, |p| written(p.latitude)),
     );
     let longitude = RwSignal::new(
         position
             .get_untracked()
-            .map_or_else(String::new, |p| p.longitude.to_string()),
+            .map_or_else(String::new, |p| written(p.longitude)),
     );
     let put = move || {
         let (lat, lon) = (latitude.get_untracked(), longitude.get_untracked());
-        let (lat, lon) = (lat.trim().replace(',', "."), lon.trim().replace(',', "."));
-        if lat.is_empty() && lon.is_empty() {
+        if lat.trim().is_empty() && lon.trim().is_empty() {
             set_position(None);
-        } else if let (Ok(latitude), Ok(longitude)) = (lat.parse::<f64>(), lon.parse::<f64>()) {
+        } else if let (Some(latitude), Some(longitude)) = (coordinate(&lat), coordinate(&lon)) {
             set_position(Some(MeshcorePosition {
                 latitude,
                 longitude,
@@ -354,28 +354,7 @@ fn UserTab(draft: Draft) -> impl IntoView {
                 />
             </Row>
             <Row title=t!(i18n, mc_position).into_any() hint=t!(i18n, mc_position_hint).into_any()>
-                <div class="pref-control mc-position">
-                    <input
-                        inputmode="decimal"
-                        placeholder=move || t_string!(i18n, mc_latitude)
-                        aria-label=move || t_string!(i18n, mc_latitude)
-                        prop:value=move || latitude.get()
-                        on:input=move |ev| {
-                            latitude.set(event_target_value(&ev));
-                            put();
-                        }
-                    />
-                    <input
-                        inputmode="decimal"
-                        placeholder=move || t_string!(i18n, mc_longitude)
-                        aria-label=move || t_string!(i18n, mc_longitude)
-                        prop:value=move || longitude.get()
-                        on:input=move |ev| {
-                            longitude.set(event_target_value(&ev));
-                            put();
-                        }
-                    />
-                </div>
+                <PositionInputs latitude longitude changed=move |()| put() />
             </Row>
         </div>
     }

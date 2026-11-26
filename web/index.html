@@ -1182,9 +1182,7 @@
       }
       /* Its figures as a node's, four to the width of the page. */
       .data-figures { padding-top: 6px; }
-      /* A MeshCore radio's settings: a place in two, a figure with its unit. */
-      .mc-position { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-      .mc-position input { min-width: 0; }
+      /* A MeshCore radio's settings: a figure with its unit. */
       .mc-unit { display: flex; align-items: center; gap: 8px; }
       .mc-unit .number-field { flex: 1; min-width: 0; }
       /* What a node says of itself, as it says it. */
@@ -1589,6 +1587,43 @@
       .nodes-table .actions .icon-button:focus-visible { opacity: 1; }
       .flag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
       .flag-chips .choice { min-height: 32px; padding: 0 12px; font-size: 13px; }
+      /*
+       * Where a radio is: its latitude and longitude, its altitude if it
+       * takes one, and a button to pick it on a map; all in a row, on a
+       * phone too.
+       */
+      .position-inputs { display: grid; grid-template-columns: 1fr 1fr 40px; gap: 8px; }
+      .position-inputs.with-altitude { grid-template-columns: 1fr 1fr 0.7fr 40px; }
+      .position-inputs input { min-width: 0; }
+      .position-pick { display: flex; align-items: center; justify-content: center; padding: 0; min-height: 40px; }
+      .position-pick svg { width: 18px; height: 18px; }
+      /* The map to pick it on, its panes kept within it, under the dialog's
+         edges; the pin, the interface's, its point where the place is. */
+      .position-dialog { width: 640px; }
+      .position-map {
+        position: relative;
+        z-index: 0;
+        height: min(420px, 55vh);
+        border: 1px solid var(--mc-border);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      /* What is picked, and the button for where this device is, side by
+         side however narrow: the place breaks in two before it moves. */
+      .position-under { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+      .position-readout { flex: 1; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+      .position-here { flex: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+      /* On a phone, its buttons side by side across the whole of it, each
+         as wide as its words and the room left shared out. */
+      @media (max-width: 835px) {
+        .position-dialog .buttons button { flex: 1 1 auto; padding-left: 12px; padding-right: 12px; white-space: nowrap; }
+      }
+      .position-here .icon { display: flex; }
+      .position-here .icon svg { width: 18px; height: 18px; }
+      .position-note { margin: 8px 0 0; font-size: 13px; }
+      .mc-picked { display: block; width: 36px; height: 36px; color: var(--mc-primary); filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35)); }
+      .mc-picked svg { display: block; width: 36px; height: 36px; fill: currentColor; stroke: none; }
+      .leaflet-marker-draggable .mc-picked { cursor: grab; }
       .secret-field { display: flex; align-items: center; gap: 6px; }
       .secret-field input { flex: 1; min-width: 0; }
       .section-panel .note { padding: 8px 12px; }
