@@ -2128,6 +2128,8 @@
       .channel-list > .admin-waiting { margin: 4px 0; font-size: 13px; }
       .channel-editor .admin-waiting { margin: 0 20px; font-size: 13px; }
       fieldset.busy-lock { margin: 0; padding: 0; border: 0; min-width: 0; }
+      /* All as wide, the widest's words in them. */
+      .node-actions .pref-row button { justify-self: end; width: 13.5em; }
       fieldset.busy-lock:disabled { opacity: 0.6; }
       .section-panel > .node-admin { padding: 0; }
       .node-admin { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; }
@@ -4945,6 +4947,9 @@
         .composer .emoji-toggle { width: 44px; height: 44px; }
         .composer .share-toggle { right: 44px; width: 44px; height: 44px; }
         .admin-bar .retry .label { display: none; }
+        /* Their buttons, the row's width, as they go under what they do. */
+        .node-actions .pref-row button { justify-self: stretch; width: 100%; }
+        .admin-keys > .with-icon { align-self: stretch; justify-content: center; }
         .admin-bar .retry { min-width: 44px; justify-content: center; }
         .composer .field.with-place textarea,
         .composer .field.with-place .backdrop { padding-right: 90px; }

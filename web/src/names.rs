@@ -118,6 +118,7 @@ const ROLES: &[(&str, &str, &str)] = &[
 const SECTIONS: &[(&str, &str, &str)] = &[
     ("device", "Dispositivo", "Device"),
     ("security", "Seguridad", "Security"),
+    ("actions", "Acciones", "Actions"),
     ("position", "Posición", "Position"),
     ("power", "Energía", "Power"),
     ("network", "Red", "Network"),

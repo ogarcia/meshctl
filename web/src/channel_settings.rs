@@ -860,7 +860,13 @@ fn ChannelEditor(
                             />
                             <span>
                                 {t!(i18n, channel_muted)}
-                                <span class="dim">{t!(i18n, channel_muted_hint)}</span>
+                                <span class="dim">
+                                    {if node.is_some() {
+                                        t!(i18n, admin_channel_muted_hint).into_any()
+                                    } else {
+                                        t!(i18n, channel_muted_hint).into_any()
+                                    }}
+                                </span>
                             </span>
                         </div>
                     </div>

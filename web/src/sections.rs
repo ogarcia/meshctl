@@ -41,6 +41,9 @@ pub type SectionEdits = RwSignal<BTreeMap<String, BTreeMap<String, Json>>>;
 
 /// The radio's admin keys, as a section among the configuration's.
 const SECURITY: &str = "security";
+/// What the radio can be told to do, as a section among the
+/// configuration's.
+const ACTIONS: &str = "actions";
 
 /// How saving each section went, by its id, kept by the tab.
 #[derive(Debug, Clone, Copy)]
@@ -179,10 +182,12 @@ pub fn SectionsTab(
     // The radio's admin keys, among the configuration's, with a page of
     // their own: the rest of its security is left alone.
     let security = move || !module && picked.get().as_deref() == Some(SECURITY);
+    // And what it can be told to do.
+    let actions = move || !module && picked.get().as_deref() == Some(ACTIONS);
     // The one picked, or else the first.
     let current = Memo::new(move |_| {
         let picked = picked.get();
-        if picked.as_deref() == Some(SECURITY) {
+        if matches!(picked.as_deref(), Some(SECURITY | ACTIONS)) {
             return None;
         }
         list.with(|l| {
@@ -315,6 +320,17 @@ pub fn SectionsTab(
                         </span>
                         <span class="edited gone">"✎"</span>
                     </button>
+                    <button
+                        type="button"
+                        class:on=actions
+                        on:click=move |_| picked.set(Some(ACTIONS.to_owned()))
+                    >
+                        <span class="state none"></span>
+                        <span class="label">
+                            {move || names::section(i18n.get_locale(), "actions")}
+                        </span>
+                        <span class="edited gone">"✎"</span>
+                    </button>
                 })}
             </nav>
             // Drawn anew for each section, and as the radio tells it anew,
@@ -330,6 +346,7 @@ pub fn SectionsTab(
                     <SectionForm section edits />
                 </For>
                 {move || security().then(|| view! { <crate::admin_keys::AdminKeysPanel /> })}
+                {move || actions().then(|| view! { <crate::node_actions::ActionsPanel /> })}
             </div>
         </div>
     }
@@ -492,14 +509,13 @@ pub(crate) fn SectionForm(
             };
             // Where the radio is, under the switch that fixes it.
             let fixed =
-                (!read_only && node.is_none() && id == POSITION && field.name == "fixed_position")
-                    .then(|| {
-                        let value_of = value_of.clone();
-                        let visible = Signal::derive(move || {
-                            visible.get() && value_of("fixed_position") == Some(Json::Bool(true))
-                        });
-                        view! { <FixedRow edits visible /> }
+                (!read_only && id == POSITION && field.name == "fixed_position").then(|| {
+                    let value_of = value_of.clone();
+                    let visible = Signal::derive(move || {
+                        visible.get() && value_of("fixed_position") == Some(Json::Bool(true))
                     });
+                    view! { <FixedRow edits visible /> }
+                });
             view! {
                 <FieldInput section=id.clone() field edits visible />
                 {fixed}
@@ -544,13 +560,13 @@ pub(crate) fn SectionForm(
 fn FixedRow(edits: SectionEdits, visible: Signal<bool>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    // The radio's, or the node administered.
+    let node = crate::settings::node_of();
     // Where it says it is, as written: by its GPS until fixed, and then
-    // where it was fixed; again as it says anew.
+    // where it was fixed; again as it says anew. A node's, as last heard.
     let said = Memo::new(move |_| {
-        let now = live.status.with(|s| {
-            let num = s.as_ref()?.local.as_ref()?.num;
-            live.nodes.with(|nodes| nodes.get(&num)?.position)
-        });
+        let num = node.or_else(|| live.status.with(|s| Some(s.as_ref()?.local.as_ref()?.num)));
+        let now = num.and_then(|num| live.nodes.with(|nodes| nodes.get(&num)?.position));
         (
             now.map(|at| crate::position::written(at.latitude))
                 .unwrap_or_default(),

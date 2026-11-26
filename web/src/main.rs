@@ -24,6 +24,7 @@ mod meshcore_regions;
 mod meshcore_settings;
 mod names;
 mod node;
+mod node_actions;
 mod node_admin;
 mod notifications;
 mod notify;

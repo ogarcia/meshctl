@@ -400,6 +400,18 @@ pub async fn sections(radio: RadioId) -> Result<Vec<SettingsSection>, Failure> {
     get(&format!("/radios/{radio}/sections")).await
 }
 
+/// Has whose node do something, as its admin.
+pub async fn act(
+    radio: RadioId,
+    node: Option<u32>,
+    action: meshctl_api::NodeAction,
+) -> Result<(), Failure> {
+    let request = with_token(Request::post(&url(&format!("{}/actions", at(radio, node)))))
+        .json(&meshctl_api::ActionRequest { action })
+        .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// The keys the radio takes admin requests from, over the mesh.
 pub async fn admin_keys(
     radio: RadioId,
