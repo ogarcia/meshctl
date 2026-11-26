@@ -8,7 +8,8 @@
 //! as what it is; and written the same, so that their apps show it too.
 //!
 //! Meshtastic's apps share contacts and channels by their links, which go as
-//! a message's text as well; its positions, by a packet of their own.
+//! a message's text as well; its positions, by a packet of their own. A
+//! place written by hand, `latitude,longitude`, is shown on its map too.
 
 use crate::app::Live;
 use crate::i18n::{t, t_string, use_i18n};
@@ -39,10 +40,13 @@ pub fn read(text: &str) -> Option<Shared> {
 }
 
 /// What a Meshtastic message's text shares, if it is only a link of its
-/// apps: a contact's, `https://meshtastic.org/v/#…`, or channels',
-/// `https://meshtastic.org/e/…#…`.
+/// apps, a contact's, `https://meshtastic.org/v/#…`, or channels',
+/// `https://meshtastic.org/e/…#…`; or a place, as someone writes it.
 pub fn read_meshtastic(text: &str) -> Option<Shared> {
     let text = text.trim();
+    if let Some(place) = place(text) {
+        return Some(place);
+    }
     let rest = ["https://meshtastic.org/", "http://meshtastic.org/"]
         .iter()
         .find_map(|start| {
@@ -943,6 +947,18 @@ mod tests {
         assert_eq!(read_meshtastic("mira https://meshtastic.org/v/#CM2r"), None);
         assert_eq!(read_meshtastic("https://meshtastic.org/docs/#x"), None);
         assert_eq!(read_meshtastic("https://meshtastic.org/e/"), None);
+        assert_eq!(
+            read_meshtastic("43.3623, -8.4115"),
+            Some(Shared::Place {
+                lat: 43.3623,
+                lon: -8.4115
+            })
+        );
+        // MeshCore's contacts, not.
+        assert_eq!(
+            read_meshtastic(&format!("<{}:1:Ana>", "c0".repeat(32))),
+            None
+        );
     }
 
     #[test]

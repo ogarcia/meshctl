@@ -1038,7 +1038,8 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
     let packet = message.packet_id;
     let place = message.position;
     // A contact, a channel or a place its apps share as text: on
-    // Meshtastic, contacts and channels by their links.
+    // Meshtastic, contacts and channels by their links, and a place
+    // written by hand.
     let shared = (!message.emoji)
         .then(|| match untrack(|| live.selected_kind()) {
             Some(RadioKind::Meshcore) => crate::shared::read(&message.text),
@@ -1338,7 +1339,7 @@ fn coordinates(at: &meshctl_api::Position) -> String {
 /// circle of how far off it may be as its channel rounds it; whose, its
 /// coordinates and that. The map shows the node on the big one.
 ///
-/// A place shared as text, on MeshCore, is any place, not its sender's: so
+/// A place shared as text is any place, not its sender's: so
 /// said, and shown on the big map where it is.
 #[component]
 pub(crate) fn Place(
