@@ -3,6 +3,28 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.7.0 (2026-11-26)
+
+Each node in a colour of its own.
+
+### Nodes and chat
+
+- A node's avatar, on the list of nodes, in chats and on its page, is no
+  longer coloured by how many hops away it is, but as Meshtastic's apps
+  colour it: by its number, kept within a lightness and chroma that read
+  well on the light theme and on the dark. A MeshCore contact is coloured
+  by its whole name, the same in chats as on the list, so that call signs
+  that start alike do not look alike.
+- In a chat, who speaks is in that colour too: their name over their
+  messages, and a quote of theirs, made dark or light enough to read on the
+  bubble. What the radio itself sent, quoted, stays in the accent.
+- The map still colours its nodes by how many hops away they are.
+
+### Fixes
+
+- The map's buttons, on a node's popup, no longer warn in the browser's
+  console when used.
+
 ## 0.6.0 (2026-11-26)
 
 Other Meshtastic nodes administered over the mesh.
