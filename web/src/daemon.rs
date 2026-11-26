@@ -679,6 +679,11 @@ pub async fn remove_meshcore_channel(radio: RadioId, index: u32) -> Result<(), F
 }
 
 /// A MeshCore channel's link, its secret in it.
+/// A channel's link, to share it, as its radio's apps read it.
+pub async fn channel_link(radio: RadioId, index: u32) -> Result<meshctl_api::Contact, Failure> {
+    get(&format!("/radios/{radio}/channels/{index}/link")).await
+}
+
 pub async fn meshcore_channel_link(
     radio: RadioId,
     index: u32,

@@ -77,7 +77,7 @@ fn preset_of(settings: &NodeSettings) -> String {
 }
 
 /// A channel's name, or, for an unnamed one, the one the radio gives it.
-fn shown_name(settings: &NodeSettings, channel: &ChannelSettings) -> String {
+pub(crate) fn shown_name(settings: &NodeSettings, channel: &ChannelSettings) -> String {
     if channel.name.is_empty() {
         preset_of(settings)
     } else {
@@ -232,6 +232,20 @@ pub fn ChannelsTab(loaded: RwSignal<Option<NodeSettings>>, notice: Notice) -> im
 }
 
 /// What kind of key a channel has, in words.
+/// A channel's key as its list says it: its padlock, shut for a key that
+/// keeps it private, open for none or the default, and its word.
+pub(crate) fn key_view(
+    i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
+    key: ChannelKey,
+) -> impl IntoView {
+    view! {
+        <span class="key" class:open=!private(key)>
+            <span class="icon" inner_html=if private(key) { LOCK } else { LOCK_OPEN }></span>
+            {move || key_label(i18n, key)}
+        </span>
+    }
+}
+
 fn key_label(i18n: leptos_i18n::I18nContext<crate::i18n::Locale>, key: ChannelKey) -> String {
     match key {
         ChannelKey::None => t_string!(i18n, key_none).to_owned(),
@@ -319,10 +333,7 @@ fn ChannelRow(
                             }
                         })
                 }
-                <span class="key" class:open=!private(key)>
-                    <span class="icon" inner_html=if private(key) { LOCK } else { LOCK_OPEN }></span>
-                    {move || key_label(i18n, key)}
-                </span>
+                {key_view(i18n, key)}
             </span>
             </button>
         </div>

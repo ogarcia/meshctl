@@ -3363,14 +3363,8 @@
       .composer .emoji-toggle { border: 0; background: none; }
       .composer .emoji-toggle:hover { color: var(--mc-text); }
       .composer .emoji-toggle.on { color: var(--mc-primary); }
-      /* Where the radio is, sent: its button beside the emojis', and room
-         for both. */
-      .composer .place-share { position: absolute; right: 40px; bottom: 0; width: 40px; height: 40px; border: 0; background: none; }
-      .composer .place-share svg { width: 22px; height: 22px; }
-      .composer .place-share:hover:not(:disabled) { color: var(--mc-text); }
-      .composer .place-share:disabled { opacity: 0.4; }
-      /* On MeshCore, sharing in its place: a contact, a channel or a place,
-         from a menu over the field. */
+      /* Sharing, beside the emojis' button: a contact, a channel or a
+         place, from a menu over the field. */
       .composer .share-toggle { position: absolute; right: 40px; bottom: 0; width: 40px; height: 40px; border: 0; background: none; }
       .composer .share-toggle svg { width: 22px; height: 22px; }
       .composer .share-toggle:hover:not(:disabled), .composer .share-toggle.on { color: var(--mc-text); }
@@ -3396,6 +3390,7 @@
       .shared-what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
       .shared-what b, .shared-what .dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .shared-what .dim { font-size: 12px; }
+      .shared-what .shared-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
       .shared-said { font-size: 11px; font-style: italic; color: var(--mc-muted); }
       .bubble .shared-card button { flex: none; white-space: nowrap; }
       /* A list to pick what to share from. */
@@ -3417,8 +3412,7 @@
       .composer .field.with-place textarea,
       .composer .field.with-place .backdrop { padding-right: 82px; }
       /* Not connected: the field says so, greyed, with no buttons in it. */
-      .composer .field.offline .emoji-toggle,
-      .composer .field.offline .place-share { display: none; }
+      .composer .field.offline .emoji-toggle { display: none; }
       .composer .field.offline textarea,
       .composer .field.offline .backdrop { padding-right: 12px; }
       .composer .field.offline textarea { cursor: not-allowed; }
@@ -4649,7 +4643,8 @@
         text-align: left;
         white-space: nowrap;
       }
-      .heading-menu button:hover { background: var(--mc-raised); }
+      .heading-menu button:hover:not(:disabled) { background: var(--mc-raised); }
+      .heading-menu button:disabled { opacity: 0.5; cursor: default; }
       .heading-menu .icon { display: flex; color: var(--mc-muted); }
       .heading-menu svg { width: 18px; height: 18px; }
       .heading-menu .danger-item, .heading-menu .danger-item .icon { color: var(--mc-danger); }
@@ -4870,7 +4865,7 @@
         .composer textarea, .composer button { min-height: 44px; }
         .composer textarea, .composer .backdrop { padding: 11px 46px 11px 12px; }
         .composer .emoji-toggle { width: 44px; height: 44px; }
-        .composer .place-share { right: 44px; width: 44px; height: 44px; }
+        .composer .share-toggle { right: 44px; width: 44px; height: 44px; }
         .composer .field.with-place textarea,
         .composer .field.with-place .backdrop { padding-right: 90px; }
         .composer .field.offline textarea,

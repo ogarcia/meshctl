@@ -6,6 +6,9 @@
 //! name>`, a channel as its `meshcore://channel/add` link, a place as
 //! `latitude,longitude` to the millionth. Read in what is heard, to be shown
 //! as what it is; and written the same, so that their apps show it too.
+//!
+//! Meshtastic's apps share contacts and channels by their links, which go as
+//! a message's text as well; its positions, by a packet of their own.
 
 use crate::app::Live;
 use crate::i18n::{t, t_string, use_i18n};
@@ -23,6 +26,8 @@ pub enum Shared {
     Channel { link: String, name: String },
     /// A place.
     Place { lat: f64, lon: f64 },
+    /// A Meshtastic link, a contact's or channels', read by the daemon.
+    Link(String),
 }
 
 /// What a message's text shares, if that is all it holds.
@@ -31,6 +36,24 @@ pub fn read(text: &str) -> Option<Shared> {
     contact(text)
         .or_else(|| channel(text))
         .or_else(|| place(text))
+}
+
+/// What a Meshtastic message's text shares, if it is only a link of its
+/// apps: a contact's, `https://meshtastic.org/v/#…`, or channels',
+/// `https://meshtastic.org/e/…#…`.
+pub fn read_meshtastic(text: &str) -> Option<Shared> {
+    let text = text.trim();
+    let rest = ["https://meshtastic.org/", "http://meshtastic.org/"]
+        .iter()
+        .find_map(|start| {
+            text.get(..start.len())
+                .filter(|s| s.eq_ignore_ascii_case(start))
+                .map(|_| &text[start.len()..])
+        })?;
+    let (path, data) = rest.split_once('#')?;
+    let linked = path.starts_with("v/") || path.starts_with("e/") || path == "e" || path == "v";
+    (linked && !data.is_empty() && !text.contains(char::is_whitespace))
+        .then(|| Shared::Link(text.to_owned()))
 }
 
 fn contact(text: &str) -> Option<Shared> {
@@ -234,6 +257,7 @@ pub fn SharedCard(shared: Shared, mine: bool, from: u32) -> impl IntoView {
             }
             .into_any()
         }
+        Shared::Link(link) => view! { <LinkCard link /> }.into_any(),
         Shared::Channel { link, name } => {
             // Whether the radio has it, name and key, as the link says:
             // asked again as its channels change, as when it is added.
@@ -302,7 +326,153 @@ pub fn SharedCard(shared: Shared, mine: bool, from: u32) -> impl IntoView {
     }
 }
 
-/// What can be shared from a conversation on MeshCore.
+/// A Meshtastic link shared, as the daemon reads it: a contact, to see or
+/// to add; channels, to see or to add, asked again as the radio's change.
+#[component]
+fn LinkCard(link: String) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let read = RwSignal::new(None::<meshctl_api::LinkContents>);
+    let asked = link.clone();
+    Effect::new(move |_| {
+        live.channels.track();
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        let link = asked.clone();
+        spawn_local(async move {
+            if let Ok(contents) = crate::daemon::read_link(radio, &link).await {
+                let _ = read.try_set(Some(contents));
+            }
+        });
+    });
+    let offer = move |link: String| {
+        view! {
+            <button type="button" class="primary" on:click=move |ev| {
+                ev.stop_propagation();
+                live.offered_link.set(Some(link.clone()));
+            }>
+                {t!(i18n, shared_add_channel)}
+            </button>
+        }
+    };
+    move || {
+        let link = link.clone();
+        match read.get() {
+            None => view! {
+                <div class="shared-card">
+                    <span class="shared-mark channel">"…"</span>
+                    <span class="shared-what">
+                        <span class="mono shared-link">{link}</span>
+                    </span>
+                </div>
+            }
+            .into_any(),
+            Some(meshctl_api::LinkContents::Contact {
+                node,
+                id,
+                long_name,
+                short_name,
+                ..
+            }) => {
+                // Known, with its key, its page; else, added.
+                let kept = move || {
+                    live.nodes.with(|nodes| {
+                        nodes
+                            .get(&node)
+                            .is_some_and(|n| n.on_radio != Some(false) && n.public_key.is_some())
+                    })
+                };
+                view! {
+                    <div class="shared-card">
+                        <span class="shared-mark avatar">{short_name}</span>
+                        <span class="shared-what">
+                            <span class="shared-said">{t!(i18n, shared_contact)}</span>
+                            <b>{long_name}</b>
+                            <span class="dim mono">{id}</span>
+                        </span>
+                        {move || {
+                            if kept() {
+                                view! {
+                                    <button type="button" on:click=move |ev| {
+                                        ev.stop_propagation();
+                                        live.open_node(node);
+                                    }>
+                                        {t!(i18n, shared_open_node)}
+                                    </button>
+                                }
+                                .into_any()
+                            } else {
+                                let link = link.clone();
+                                view! {
+                                    <button type="button" class="primary" on:click=move |ev| {
+                                        ev.stop_propagation();
+                                        live.offered_link.set(Some(link.clone()));
+                                    }>
+                                        {t!(i18n, node_keep)}
+                                    </button>
+                                }
+                                .into_any()
+                            }
+                        }}
+                    </div>
+                }
+                .into_any()
+            }
+            Some(meshctl_api::LinkContents::Channels { channels, .. }) => {
+                let present = !channels.is_empty() && channels.iter().all(|c| c.present);
+                let names = channels
+                    .iter()
+                    .map(|c| c.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                // Its slot, by its name, to see it: an unnamed primary goes
+                // by its preset's.
+                let first = channels.first().map(|c| c.name.clone()).unwrap_or_default();
+                let slot = live.channels.with(|have| {
+                    have.iter()
+                        .find(|c| c.role != "DISABLED" && c.name.eq_ignore_ascii_case(&first))
+                        .or_else(|| have.iter().find(|c| c.index == 0 && c.name.is_empty()))
+                        .map(|c| c.index)
+                });
+                let key = (channels.len() == 1).then(|| channels[0].key);
+                view! {
+                    <div class="shared-card">
+                        <span class="shared-mark channel">"#"</span>
+                        <span class="shared-what">
+                            <span class="shared-said">
+                                {if channels.len() > 1 {
+                                    t!(i18n, shared_channels).into_any()
+                                } else {
+                                    t!(i18n, shared_channel).into_any()
+                                }}
+                            </span>
+                            <b>{names}</b>
+                            {key.map(|key| view! {
+                                <span class="dim">{crate::channel_settings::key_view(i18n, key)}</span>
+                            })}
+                        </span>
+                        {match (present, slot) {
+                            (true, Some(channel)) => view! {
+                                <button type="button" on:click=move |ev| {
+                                    ev.stop_propagation();
+                                    live.open_chat(Peer::Channel { channel });
+                                }>
+                                    {t!(i18n, shared_open_channel)}
+                                </button>
+                            }
+                            .into_any(),
+                            _ => offer(link).into_any(),
+                        }}
+                    </div>
+                }
+                .into_any()
+            }
+        }
+    }
+}
+
+/// What can be shared from a conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Sharing {
     Nothing,
@@ -312,13 +482,20 @@ enum Sharing {
     Place,
 }
 
-/// The way to share in a MeshCore conversation, beside what is written: a
-/// contact, a channel or a place, each picked and sent as the apps send
-/// them.
+/// The way to share in a conversation, beside what is written: a contact,
+/// a channel or a place, each picked and sent as the apps send them. On
+/// Meshtastic the place is where the radio is, sent by `position` as its
+/// packet, unless `unplaceable` says why not.
 #[component]
-pub fn ShareButton(peer: Peer, #[prop(into)] disabled: Signal<bool>) -> impl IntoView {
+pub fn ShareButton(
+    peer: Peer,
+    #[prop(into)] disabled: Signal<bool>,
+    #[prop(optional)] position: Option<Callback<()>>,
+    #[prop(optional, into)] unplaceable: MaybeProp<String>,
+) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    let meshtastic = position.is_some();
     let sharing = RwSignal::new(Sharing::Nothing);
     let closing = window_event_listener(leptos::ev::click, move |_| {
         if sharing.get_untracked() == Sharing::Menu {
@@ -388,17 +565,38 @@ pub fn ShareButton(peer: Peer, #[prop(into)] disabled: Signal<bool>) -> impl Int
             <div class="heading-menu share-menu" role="menu" on:click=|ev| ev.stop_propagation()>
                 {item(Sharing::Contact, CONTACT, Signal::derive(move || t_string!(i18n, shared_send_contact).to_owned()))}
                 {item(Sharing::Channel, HASH, Signal::derive(move || t_string!(i18n, shared_send_channel).to_owned()))}
-                {item(Sharing::Place, crate::position::PIN, Signal::derive(move || t_string!(i18n, shared_send_place).to_owned()))}
+                {match position {
+                    None => item(Sharing::Place, crate::position::PIN, Signal::derive(move || t_string!(i18n, shared_send_place).to_owned())).into_any(),
+                    Some(position) => view! {
+                        <button
+                            role="menuitem"
+                            type="button"
+                            disabled=move || unplaceable.get().is_some()
+                            title=move || unplaceable.get()
+                            on:click=move |ev| {
+                                ev.stop_propagation();
+                                sharing.set(Sharing::Nothing);
+                                position.run(());
+                            }
+                        >
+                            <span class="icon" inner_html=crate::position::PIN></span>
+                            {move || t_string!(i18n, chat_position_send)}
+                        </button>
+                    }
+                    .into_any(),
+                }}
             </div>
         </Show>
         <Show when=move || sharing.get() == Sharing::Contact>
             <ContactPicker
+                meshtastic
                 pick=Callback::new(move |text: String| send(text))
                 close=Callback::new(move |()| sharing.set(Sharing::Nothing))
             />
         </Show>
         <Show when=move || sharing.get() == Sharing::Channel>
             <ChannelPicker
+                meshtastic
                 pick=Callback::new(move |text: String| send(text))
                 close=Callback::new(move |()| sharing.set(Sharing::Nothing))
             />
@@ -426,28 +624,31 @@ pub fn ShareButton(peer: Peer, #[prop(into)] disabled: Signal<bool>) -> impl Int
 }
 
 /// The nodes to share, the radio's own first, then by name: those whose
-/// key is known.
+/// key is known. On MeshCore as its apps write a contact; on Meshtastic, by
+/// its link, which the daemon makes.
 #[component]
-fn ContactPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
+fn ContactPicker(meshtastic: bool, pick: Callback<String>, close: Callback<()>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let filter = RwSignal::new(String::new());
+    let failed = RwSignal::new(false);
     let own = live
         .status
         .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
     let nodes = move || {
         let needle = filter.get().to_lowercase();
-        let mut shown: Vec<(bool, String, String, u8)> = live.nodes.with(|nodes| {
-            nodes
-                .values()
-                .filter_map(|n| {
-                    let name = n.long_name.clone()?;
-                    let key = key_hex(n)?;
-                    (needle.is_empty() || name.to_lowercase().contains(&needle))
-                        .then(|| (Some(n.num) == own, name, key, kind_of(n.role.as_deref())))
-                })
-                .collect()
-        });
+        let mut shown: Vec<(bool, String, String, Option<String>, u32)> =
+            live.nodes.with(|nodes| {
+                nodes
+                    .values()
+                    .filter_map(|n| {
+                        let name = n.long_name.clone()?;
+                        let key = key_hex(n)?;
+                        (needle.is_empty() || name.to_lowercase().contains(&needle))
+                            .then(|| (Some(n.num) == own, name, key, n.role.clone(), n.num))
+                    })
+                    .collect()
+            });
         shown.sort_by(|a, b| {
             b.0.cmp(&a.0)
                 .then_with(|| a.1.to_lowercase().cmp(&b.1.to_lowercase()))
@@ -468,12 +669,39 @@ fn ContactPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
                 {move || {
                     nodes()
                         .into_iter()
-                        .map(|(mine, name, key, kind)| {
+                        .map(|(mine, name, key, role, num)| {
+                            let kind = kind_of(role.as_deref());
                             let text = contact_text(&key, kind, &name);
-                            let role = role_of(kind);
+                            let role = if meshtastic {
+                                role.unwrap_or_else(|| "CLIENT".to_owned())
+                            } else {
+                                role_of(kind).to_owned()
+                            };
+                            let chosen = move |_| {
+                                if !meshtastic {
+                                    pick.run(text.clone());
+                                    return;
+                                }
+                                let Some(radio) = live.selected.get_untracked() else {
+                                    return;
+                                };
+                                spawn_local(async move {
+                                    let link = if mine {
+                                        crate::daemon::contact(radio).await
+                                    } else {
+                                        crate::daemon::node_contact(radio, num).await
+                                    };
+                                    match link {
+                                        Ok(link) => pick.run(link.url),
+                                        Err(_) => {
+                                            let _ = failed.try_set(true);
+                                        }
+                                    }
+                                });
+                            };
                             view! {
                                 <li>
-                                    <button type="button" on:click=move |_| pick.run(text.clone())>
+                                    <button type="button" on:click=chosen>
                                         <span class="shared-mark avatar">{crate::badge::initials(&name)}</span>
                                         <span class="shared-what">
                                             <b>{name.clone()}</b>
@@ -482,7 +710,7 @@ fn ContactPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
                                                     if mine {
                                                         t_string!(i18n, shared_own).to_owned()
                                                     } else {
-                                                        crate::names::role_name(i18n.get_locale(), role)
+                                                        crate::names::role_name(i18n.get_locale(), &role)
                                                     }
                                                 }}
                                             </span>
@@ -494,23 +722,65 @@ fn ContactPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
                         .collect_view()
                 }}
             </ul>
+            <p class="error" class:gone=move || !failed.get()>{t!(i18n, error_failed)}</p>
         </Picker>
     }
 }
 
+/// A channel to pick: its slot, its name, and how its key is said.
+#[derive(Clone)]
+struct Pickable {
+    slot: u32,
+    name: String,
+    said: Said,
+}
+
+#[derive(Clone, Copy)]
+enum Said {
+    Meshcore(meshctl_api::MeshcoreChannelKind),
+    Meshtastic(meshctl_api::ChannelKey),
+}
+
 /// The radio's channels to share, by their links, each said as the
-/// channels' list says it: public, a #name or private.
+/// channels' list says it: on MeshCore public, a #name or private; on
+/// Meshtastic by its key.
 #[component]
-fn ChannelPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
+fn ChannelPicker(meshtastic: bool, pick: Callback<String>, close: Callback<()>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let failed = RwSignal::new(false);
-    let channels = RwSignal::new(None::<Vec<meshctl_api::MeshcoreChannel>>);
+    let channels = RwSignal::new(None::<Vec<Pickable>>);
     if let Some(radio) = live.selected.get_untracked() {
         spawn_local(async move {
-            match crate::daemon::meshcore_channels(radio).await {
+            let read = if meshtastic {
+                crate::daemon::settings(radio).await.map(|settings| {
+                    settings
+                        .channels
+                        .iter()
+                        .filter(|c| c.role != "DISABLED")
+                        .map(|c| Pickable {
+                            slot: c.index,
+                            name: crate::channel_settings::shown_name(&settings, c),
+                            said: Said::Meshtastic(c.key),
+                        })
+                        .collect()
+                })
+            } else {
+                crate::daemon::meshcore_channels(radio).await.map(|read| {
+                    read.channels
+                        .into_iter()
+                        .filter(|c| !c.name.is_empty())
+                        .map(|c| Pickable {
+                            slot: c.index,
+                            name: c.name,
+                            said: Said::Meshcore(c.kind),
+                        })
+                        .collect()
+                })
+            };
+            match read {
                 Ok(read) => {
-                    let _ = channels.try_set(Some(read.channels));
+                    let _ = channels.try_set(Some(read));
                 }
                 Err(_) => {
                     let _ = failed.try_set(true);
@@ -523,7 +793,7 @@ fn ChannelPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
             return;
         };
         spawn_local(async move {
-            match crate::daemon::meshcore_channel_link(radio, slot).await {
+            match crate::daemon::channel_link(radio, slot).await {
                 Ok(link) => pick.run(link.url),
                 Err(_) => {
                     let _ = failed.try_set(true);
@@ -540,17 +810,24 @@ fn ChannelPicker(pick: Callback<String>, close: Callback<()>) -> impl IntoView {
                         .get()
                         .unwrap_or_default()
                         .into_iter()
-                        .filter(|c| !c.name.is_empty())
                         .map(|c| {
-                            let slot = c.index;
-                            let kind = c.kind;
+                            let slot = c.slot;
+                            let said = match c.said {
+                                Said::Meshcore(kind) => {
+                                    crate::meshcore_channels::kind_view(i18n, kind).into_any()
+                                }
+                                Said::Meshtastic(key) => view! {
+                                    <span class="dim">{crate::channel_settings::key_view(i18n, key)}</span>
+                                }
+                                .into_any(),
+                            };
                             view! {
                                 <li>
                                     <button type="button" on:click=move |_| share(slot)>
                                         <span class="shared-mark channel">"#"</span>
                                         <span class="shared-what">
                                             <b>{c.name.clone()}</b>
-                                            {crate::meshcore_channels::kind_view(i18n, kind)}
+                                            {said}
                                         </span>
                                     </button>
                                 </li>
@@ -649,6 +926,24 @@ mod tests {
         assert_eq!(read("<abc:1:Ana>"), None);
         assert_eq!(read("hola"), None);
         assert_eq!(read("mira meshcore://channel/add?name=X&secret=00"), None);
+    }
+
+    #[test]
+    fn meshtastic_links_are_read_alone() {
+        let contact = "https://meshtastic.org/v/#CM2rNBISCglDYXNh";
+        assert_eq!(read_meshtastic(contact), Some(Shared::Link(contact.into())));
+        let channels = "https://meshtastic.org/e/?add=true#CgMSAQE";
+        assert_eq!(
+            read_meshtastic(channels),
+            Some(Shared::Link(channels.into()))
+        );
+        assert_eq!(
+            read_meshtastic("https://meshtastic.org/e/#CgMSAQE"),
+            Some(Shared::Link("https://meshtastic.org/e/#CgMSAQE".into()))
+        );
+        assert_eq!(read_meshtastic("mira https://meshtastic.org/v/#CM2r"), None);
+        assert_eq!(read_meshtastic("https://meshtastic.org/docs/#x"), None);
+        assert_eq!(read_meshtastic("https://meshtastic.org/e/"), None);
     }
 
     #[test]

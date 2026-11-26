@@ -166,6 +166,7 @@
   "chat_invalid": "Ese mensaje no se puede enviar: está vacío o es demasiado largo, o el canal no está en la radio.",
   "shared_contact": "Contacto compartido",
   "shared_channel": "Canal compartido",
+  "shared_channels": "Canales compartidos",
   "shared_place": "Una posición",
   "shared_open_node": "Ver nodo",
   "shared_add_channel": "Añadir canal",

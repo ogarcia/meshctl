@@ -1037,9 +1037,14 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
     let id = message.id;
     let packet = message.packet_id;
     let place = message.position;
-    // On MeshCore, a contact, a channel or a place its apps share as text.
-    let shared = (!message.emoji && untrack(|| live.selected_kind()) == Some(RadioKind::Meshcore))
-        .then(|| crate::shared::read(&message.text))
+    // A contact, a channel or a place its apps share as text: on
+    // Meshtastic, contacts and channels by their links.
+    let shared = (!message.emoji)
+        .then(|| match untrack(|| live.selected_kind()) {
+            Some(RadioKind::Meshcore) => crate::shared::read(&message.text),
+            Some(RadioKind::Meshtastic) => crate::shared::read_meshtastic(&message.text),
+            _ => None,
+        })
         .flatten();
     // Replies and reactions refer to its packet: one it has, on a radio
     // that has them; a text's, as a position is answered by none.
@@ -2387,7 +2392,6 @@ fn Composer(peer: Peer) -> impl IntoView {
     // whose positions are a packet of their own. As precisely as the
     // channel shares it, a direct message's the primary's; asked first, as
     // it says where the radio is.
-    let meshtastic = move || live.selected_kind() == Some(RadioKind::Meshtastic);
     let shared_bits = move || {
         let slot = match peer {
             Peer::Channel { channel } => channel,
@@ -2419,8 +2423,7 @@ fn Composer(peer: Peer) -> impl IntoView {
             None
         }
     };
-    let place_label = move || unplaceable().unwrap_or(t_string!(i18n, chat_position_send));
-    let share = move |_| {
+    let share = move |()| {
         let bits = shared_bits();
         let how = if bits >= 32 {
             t_string!(i18n, chat_position_exact).to_owned()
@@ -2588,34 +2591,27 @@ fn Composer(peer: Peer) -> impl IntoView {
                         picking.update(|p| *p = !*p);
                     }
                 ></button>
-                // On MeshCore, a contact, a channel or a place to share.
+                // A contact, a channel or a place to share; on Meshtastic
+                // the place is where the radio is, as its packet.
                 {move || {
-                    (live.selected_kind() == Some(RadioKind::Meshcore)).then(|| {
-                        view! {
-                            <crate::shared::ShareButton
-                                peer
-                                disabled=Signal::derive(move || !writable() || busy.get())
-                            />
+                    let disabled = Signal::derive(move || !writable() || busy.get());
+                    match live.selected_kind() {
+                        Some(RadioKind::Meshcore) => {
+                            Some(view! { <crate::shared::ShareButton peer disabled /> }.into_any())
                         }
-                    })
-                }}
-                {move || {
-                    meshtastic()
-                        .then(|| {
+                        Some(RadioKind::Meshtastic) => Some(
                             view! {
-                                <button
-                                    type="button"
-                                    class="icon-button place-share"
-                                    disabled=move || {
-                                        !connected() || busy.get() || unplaceable().is_some()
-                                    }
-                                    title=place_label
-                                    aria-label=place_label
-                                    inner_html=PIN
-                                    on:click=share
-                                ></button>
+                                <crate::shared::ShareButton
+                                    peer
+                                    disabled
+                                    position=Callback::new(share)
+                                    unplaceable=Signal::derive(move || unplaceable().map(str::to_owned))
+                                />
                             }
-                        })
+                            .into_any(),
+                        ),
+                        _ => None,
+                    }
                 }}
             </div>
             <Show when=move || picking.get()>
