@@ -89,7 +89,11 @@ pub(super) fn refused(failure: SettingsFailure) -> Response {
     )
 )]
 async fn show(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
-    match state.radios.settings(radio).await {
+    match state
+        .radios
+        .settings(radio, crate::radios::Whose::Radio, false)
+        .await
+    {
         Ok(settings) => Json(settings).into_response(),
         Err(failure) => refused(failure),
     }
@@ -132,7 +136,11 @@ async fn change(
     Path(radio): Path<RadioId>,
     Json(wanted): Json<NodeSettingsChange>,
 ) -> Response {
-    match state.radios.change_settings(radio, &wanted).await {
+    match state
+        .radios
+        .change_settings(radio, crate::radios::Whose::Radio, &wanted)
+        .await
+    {
         Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
         Err(failure) => refused(failure),
     }
@@ -182,7 +190,11 @@ async fn sections(State(state): State<AppState>, Path(radio): Path<RadioId>) -> 
     )
 )]
 async fn admin_keys(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Response {
-    match state.radios.admin_keys(radio) {
+    match state
+        .radios
+        .admin_keys(radio, crate::radios::Whose::Radio)
+        .await
+    {
         Ok(keys) => Json(keys).into_response(),
         Err(failure) => refused(failure),
     }
@@ -214,7 +226,11 @@ async fn change_admin_keys(
     Path(radio): Path<RadioId>,
     Json(change): Json<AdminKeys>,
 ) -> Response {
-    match state.radios.change_admin_keys(radio, &change.keys).await {
+    match state
+        .radios
+        .change_admin_keys(radio, crate::radios::Whose::Radio, &change.keys)
+        .await
+    {
         Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
         Err(failure) => refused(failure),
     }
@@ -325,6 +341,7 @@ async fn change_section(
         .radios
         .change_section(
             radio,
+            crate::radios::Whose::Radio,
             &section,
             &change.values,
             change.fixed_position.as_ref(),
@@ -364,7 +381,11 @@ async fn reorder_channels(
     Path(radio): Path<RadioId>,
     Json(order): Json<ChannelOrder>,
 ) -> Response {
-    match state.radios.reorder_channels(radio, &order.order).await {
+    match state
+        .radios
+        .reorder_channels(radio, crate::radios::Whose::Radio, &order.order)
+        .await
+    {
         Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
         Err(failure) => refused(failure),
     }
@@ -373,10 +394,10 @@ async fn reorder_channels(
 /// What becomes of a channel's messages.
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
-struct Removal {
+pub(super) struct Removal {
     /// `keep`, if not said, or `forget`.
     #[serde(default)]
-    history: ChannelHistory,
+    pub(super) history: ChannelHistory,
 }
 
 /// Channel link
@@ -405,7 +426,11 @@ async fn channel_link(
     State(state): State<AppState>,
     Path((radio, index)): Path<(RadioId, u32)>,
 ) -> Response {
-    match state.radios.channel_link(radio, index).await {
+    match state
+        .radios
+        .channel_link(radio, crate::radios::Whose::Radio, index)
+        .await
+    {
         Ok(url) => Json(meshctl_api::Contact { url }).into_response(),
         Err(failure) => refused(failure),
     }
@@ -442,7 +467,11 @@ async fn remove_channel(
     Query(removal): Query<Removal>,
 ) -> Response {
     let forget = removal.history == ChannelHistory::Forget;
-    match state.radios.remove_channel(radio, index, forget).await {
+    match state
+        .radios
+        .remove_channel(radio, crate::radios::Whose::Radio, index, forget)
+        .await
+    {
         Ok(applied) => (StatusCode::ACCEPTED, Json(applied)).into_response(),
         Err(failure) => refused(failure),
     }

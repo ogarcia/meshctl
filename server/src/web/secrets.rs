@@ -47,7 +47,11 @@ async fn channel_key(
     State(state): State<AppState>,
     Path((radio, index)): Path<(RadioId, u32)>,
 ) -> Response {
-    match state.radios.channel_secret(radio, index) {
+    match state
+        .radios
+        .channel_secret(radio, crate::radios::Whose::Radio, index)
+        .await
+    {
         Ok(Some(secret)) => ([(header::CACHE_CONTROL, "no-store")], Json(secret)).into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
@@ -60,7 +64,7 @@ async fn channel_key(
     }
 }
 
-fn not_found() -> Response {
+pub(super) fn not_found() -> Response {
     (
         StatusCode::NOT_FOUND,
         Json(Error {
@@ -97,7 +101,11 @@ async fn section_secret(
     State(state): State<AppState>,
     Path((radio, section, field)): Path<(RadioId, String, String)>,
 ) -> Response {
-    match state.radios.section_secret(radio, &section, &field) {
+    match state
+        .radios
+        .section_secret(radio, crate::radios::Whose::Radio, &section, &field)
+        .await
+    {
         Ok(Some(secret)) => ([(header::CACHE_CONTROL, "no-store")], Json(secret)).into_response(),
         Ok(None) => not_found(),
         Err(failure) => refused(failure),

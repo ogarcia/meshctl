@@ -2559,11 +2559,21 @@ impl Radios {
     /// A radio's own settings, as it sent them on syncing. Only while it is
     /// connected: they are not kept, and a radio that is not there cannot be
     /// changed anyway.
-    pub async fn settings(&self, id: RadioId) -> Result<NodeSettings, SettingsFailure> {
+    /// Whose settings, as its pages show them: a node's asked of it, all
+    /// of what they show, if meshctl has not them yet, or anew if `fresh`.
+    pub async fn settings(
+        &self,
+        id: RadioId,
+        whose: Whose,
+        fresh: bool,
+    ) -> Result<NodeSettings, SettingsFailure> {
         let mut settings = self
-            .configurable(id)?
-            .read(|state| crate::settings::view(&state.settings))
+            .with_settings(id, whose, &NODE_PARTS, fresh, crate::settings::view)
+            .await?
             .ok_or(SettingsFailure::NotConnected)?;
+        if whose != Whose::Radio {
+            return Ok(settings);
+        }
         // Whether each channel is silenced, as meshctl has it, which the
         // radio is set to.
         for channel in &mut settings.channels {
@@ -2581,23 +2591,31 @@ impl Radios {
 
     /// A channel's key, for the one who asks for it, and only then: nothing
     /// else hands it out. Each time is logged.
-    pub fn channel_secret(
+    pub async fn channel_secret(
         &self,
         id: RadioId,
+        whose: Whose,
         index: u32,
     ) -> Result<Option<ChannelSecret>, SettingsFailure> {
-        let (sent, secret) = self.configurable(id)?.read(|state| {
-            (
-                crate::settings::view(&state.settings).is_some(),
-                crate::settings::secret(&state.settings, index),
-            )
-        });
+        let (sent, secret) = self
+            .with_settings(id, whose, &NODE_PARTS, false, |settings| {
+                (
+                    crate::settings::view(settings).is_some(),
+                    crate::settings::secret(settings, index),
+                )
+            })
+            .await?;
         // As for its settings: not before the radio has sent them.
         if !sent {
             return Err(SettingsFailure::NotConnected);
         }
         if secret.is_some() {
-            tracing::info!(radio = id, channel = index, "channel key handed out");
+            tracing::info!(
+                radio = id,
+                ?whose,
+                channel = index,
+                "channel key handed out"
+            );
         }
         Ok(secret)
     }
@@ -2610,30 +2628,39 @@ impl Radios {
     async fn rearrange_channels(
         &self,
         id: RadioId,
+        whose: Whose,
         order: &[u32],
         forget: bool,
     ) -> Result<SettingsApplied, SettingsFailure> {
         use crate::channels::{rearranged, slots};
-        let mesh = self.configurable(id)?;
-        let (sent, before, after) = mesh
-            .read(|state| {
-                let sent = rearranged(&state.settings, order)?;
-                let mut settings = state.settings.clone();
+        let (sent, before, after) = self
+            .with_settings(id, whose, &NODE_PARTS, false, |current| {
+                let sent = rearranged(current, order)?;
+                let mut settings = current.clone();
                 for channel in &sent {
                     settings
                         .channels
                         .insert(channel.index as u32, channel.clone());
                 }
-                Ok((sent, slots(&state.settings), slots(&settings)))
+                Ok((sent, slots(current), slots(&settings)))
             })
+            .await?
             .map_err(|why: crate::settings::Invalid| SettingsFailure::Invalid(why.0.to_owned()))?;
         if !sent.is_empty() {
-            mesh.change_settings(meshctl_core::radio::SettingsChange {
-                channels: sent,
-                ..Default::default()
-            })
-            .await
-            .map_err(admin_failure)?;
+            self.apply(
+                id,
+                whose,
+                meshctl_core::radio::SettingsChange {
+                    channels: sent,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        }
+        // Another node's channels have no conversations here.
+        if whose != Whose::Radio {
+            tracing::info!(radio = id, ?whose, ?order, "channels rearranged");
+            return Ok(SettingsApplied { reboots: false });
         }
         // Should the radio not take it, reading it back puts each
         // conversation back where it was.
@@ -2659,15 +2686,18 @@ impl Radios {
     pub async fn reorder_channels(
         &self,
         id: RadioId,
+        whose: Whose,
         order: &[u32],
     ) -> Result<SettingsApplied, SettingsFailure> {
         let have = self
-            .configurable(id)?
-            .read(|state| crate::channels::slots_of(state).len());
+            .with_settings(id, whose, &NODE_PARTS, false, |settings| {
+                crate::channels::slots(settings).len()
+            })
+            .await?;
         if order.len() != have {
             return Err(SettingsFailure::Invalid("order".to_owned()));
         }
-        self.rearrange_channels(id, order, false).await
+        self.rearrange_channels(id, whose, order, false).await
     }
 
     /// Takes a channel off a radio, but its primary: those after it move up
@@ -2675,35 +2705,47 @@ impl Radios {
     pub async fn remove_channel(
         &self,
         id: RadioId,
+        whose: Whose,
         index: u32,
         forget: bool,
     ) -> Result<SettingsApplied, SettingsFailure> {
         let have: Vec<u32> = self
-            .configurable(id)?
-            .read(crate::channels::slots_of)
-            .iter()
-            .map(|s| s.index)
-            .collect();
+            .with_settings(id, whose, &NODE_PARTS, false, |settings| {
+                crate::channels::slots(settings)
+                    .iter()
+                    .map(|s| s.index)
+                    .collect()
+            })
+            .await?;
         if index == 0 || !have.contains(&index) {
             return Err(SettingsFailure::Invalid("channel".to_owned()));
         }
         let order: Vec<u32> = have.into_iter().filter(|&i| i != index).collect();
-        self.rearrange_channels(id, &order, forget).await
+        self.rearrange_channels(id, whose, &order, forget).await
     }
 
     /// A secret of one of a radio's sections, for the one who asks for it, and
     /// only then. Each time is logged.
-    pub fn section_secret(
+    pub async fn section_secret(
         &self,
         id: RadioId,
+        whose: Whose,
         section: &str,
         field: &str,
     ) -> Result<Option<SectionSecret>, SettingsFailure> {
         let value = self
-            .configurable(id)?
-            .read(|state| crate::sections::secret(&state.settings, section, field));
+            .with_settings(id, whose, &[section], false, |settings| {
+                crate::sections::secret(settings, section, field)
+            })
+            .await?;
         if value.is_some() {
-            tracing::info!(radio = id, section, field, "setting's secret handed out");
+            tracing::info!(
+                radio = id,
+                ?whose,
+                section,
+                field,
+                "setting's secret handed out"
+            );
         }
         Ok(value.map(|value| SectionSecret {
             section: section.to_owned(),
@@ -2723,6 +2765,81 @@ impl Radios {
             return Err(SettingsFailure::NotConnected);
         }
         Ok(mesh)
+    }
+
+    /// Reads whose settings: the radio's own, as it sent them; a node's,
+    /// with those `parts` of them asked of it first, over the mesh as its
+    /// admin, if meshctl has not them yet, or anew if `fresh`.
+    async fn with_settings<R>(
+        &self,
+        id: RadioId,
+        whose: Whose,
+        parts: &[&str],
+        fresh: bool,
+        f: impl FnOnce(&meshctl_core::mesh::Settings) -> R,
+    ) -> Result<R, SettingsFailure> {
+        let mesh = self.configurable(id)?;
+        let Whose::Node(node) = whose else {
+            return Ok(mesh.read(|state| f(&state.settings)));
+        };
+        for part in parts {
+            let had = self
+                .remote
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&(id, node))
+                .is_some_and(|settings| has_part(settings, part));
+            if had && !fresh {
+                continue;
+            }
+            let request = meshctl_core::mesh::settings_request(part)
+                .ok_or_else(|| SettingsFailure::Invalid((*part).to_owned()))?;
+            let answer = mesh
+                .ask_node(node, request)
+                .await
+                .map_err(node_admin_failure)?;
+            self.remote
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry((id, node))
+                .or_default()
+                .keep_answer(&answer);
+        }
+        let remote = self.remote.lock().unwrap_or_else(|e| e.into_inner());
+        let none = meshctl_core::mesh::Settings::default();
+        Ok(f(remote.get(&(id, node)).unwrap_or(&none)))
+    }
+
+    /// Sends a change of whose settings: to the radio, which is read back;
+    /// to a node, over the mesh as its admin, and kept as it then has them.
+    async fn apply(
+        &self,
+        id: RadioId,
+        whose: Whose,
+        change: meshctl_core::radio::SettingsChange,
+    ) -> Result<(), SettingsFailure> {
+        let mesh = self.configurable(id)?;
+        let Whose::Node(node) = whose else {
+            return mesh.change_settings(change).await.map_err(admin_failure);
+        };
+        mesh.change_node(node, change.clone())
+            .await
+            .map_err(node_admin_failure)?;
+        let mut remote = self.remote.lock().unwrap_or_else(|e| e.into_inner());
+        let settings = remote.entry((id, node)).or_default();
+        if let Some(owner) = change.owner {
+            settings.owner = Some(owner);
+        }
+        for config in &change.configs {
+            settings.keep(config);
+        }
+        for module in &change.module_configs {
+            settings.keep_module(module);
+        }
+        for channel in change.channels {
+            settings.channels.insert(channel.index as u32, channel);
+        }
+        Ok(())
     }
 
     /// A connected MeshCore radio.
@@ -3087,13 +3204,20 @@ impl Radios {
 
     /// A channel's link, to share it, as its radio's apps read it: a
     /// Meshtastic one to be added, a MeshCore one with its region.
-    pub async fn channel_link(&self, id: RadioId, index: u32) -> Result<String, SettingsFailure> {
-        if self.protocol(id) == Some(Protocol::Meshcore) {
+    pub async fn channel_link(
+        &self,
+        id: RadioId,
+        whose: Whose,
+        index: u32,
+    ) -> Result<String, SettingsFailure> {
+        if whose == Whose::Radio && self.protocol(id) == Some(Protocol::Meshcore) {
             return self.meshcore_channel_link(id, index).await;
         }
-        let mesh = self.configurable(id)?;
-        mesh.read(|state| crate::links::channel_link(&state.settings, index))
-            .ok_or(SettingsFailure::Invalid("index".into()))
+        self.with_settings(id, whose, &NODE_PARTS, false, |settings| {
+            crate::links::channel_link(settings, index)
+        })
+        .await?
+        .ok_or(SettingsFailure::Invalid("index".into()))
     }
 
     /// A MeshCore channel's link, to share it: with its secret, and its
@@ -3232,7 +3356,7 @@ impl Radios {
                         ..Default::default()
                     },
                 };
-                self.change_settings(id, &wanted)
+                self.change_settings(id, Whose::Radio, &wanted)
                     .await
                     .map(|_| ())
                     .map_err(LinkFailure::Settings)
@@ -3245,22 +3369,27 @@ impl Radios {
     pub async fn change_settings(
         &self,
         id: RadioId,
+        whose: Whose,
         wanted: &NodeSettingsChange,
     ) -> Result<SettingsApplied, SettingsFailure> {
-        let mesh = self.configurable(id)?;
-        let (change, reboots) = mesh
-            .read(|state| {
-                crate::settings::change(&state.settings, wanted, |key| {
+        let (change, reboots) = self
+            .with_settings(id, whose, &NODE_PARTS, false, |settings| {
+                crate::settings::change(settings, wanted, |key| {
                     getrandom::fill(key).expect("the system has randomness to give");
                 })
             })
+            .await?
             .map_err(|why| match why.0 {
                 crate::settings::DUPLICATE => SettingsFailure::Duplicate,
                 crate::settings::PUBLIC_PRECISION => SettingsFailure::PublicPrecision,
                 why => SettingsFailure::Invalid(why.to_owned()),
             })?;
-        mesh.change_settings(change).await.map_err(admin_failure)?;
-        tracing::info!(radio = id, reboots, "settings changed");
+        self.apply(id, whose, change).await?;
+        tracing::info!(radio = id, ?whose, reboots, "settings changed");
+        // Another node's channels have no conversations here to silence.
+        if whose != Whose::Radio {
+            return Ok(SettingsApplied { reboots });
+        }
         // A channel silenced, or no longer, is so in meshctl, which says.
         for channel in &wanted.channels {
             if let Some(muted) = channel.muted {
@@ -3338,12 +3467,15 @@ impl Radios {
     }
 
     /// The keys a radio takes admin requests from over the mesh.
-    pub fn admin_keys(&self, id: RadioId) -> Result<meshctl_api::AdminKeys, SettingsFailure> {
+    pub async fn admin_keys(
+        &self,
+        id: RadioId,
+        whose: Whose,
+    ) -> Result<meshctl_api::AdminKeys, SettingsFailure> {
         use base64::Engine;
         use base64::engine::general_purpose::STANDARD as BASE64;
-        self.configurable(id)?.read(|state| {
-            let security = state
-                .settings
+        self.with_settings(id, whose, &[SECURITY], true, |settings| {
+            let security = settings
                 .config
                 .security
                 .as_ref()
@@ -3357,6 +3489,7 @@ impl Radios {
                 managed: security.is_managed,
             })
         })
+        .await?
     }
 
     /// Sets the keys a radio takes admin requests from: the rest of its
@@ -3366,11 +3499,11 @@ impl Radios {
     pub async fn change_admin_keys(
         &self,
         id: RadioId,
+        whose: Whose,
         keys: &[String],
     ) -> Result<SettingsApplied, SettingsFailure> {
         use base64::Engine;
         use base64::engine::general_purpose::STANDARD as BASE64;
-        let mesh = self.configurable(id)?;
         let mut decoded: Vec<Vec<u8>> = Vec::with_capacity(keys.len());
         for key in keys {
             let bytes = BASE64
@@ -3386,8 +3519,11 @@ impl Radios {
         if decoded.len() > 3 {
             return Err(SettingsFailure::Invalid("admin_key".into()));
         }
-        let security = mesh
-            .read(|state| state.settings.config.security.clone())
+        let security = self
+            .with_settings(id, whose, &[SECURITY], false, |settings| {
+                settings.config.security.clone()
+            })
+            .await?
             .ok_or(SettingsFailure::NotConnected)?;
         if security.is_managed && decoded.is_empty() {
             return Err(SettingsFailure::Invalid("admin_key".into()));
@@ -3404,8 +3540,8 @@ impl Radios {
             }],
             ..Default::default()
         };
-        mesh.change_settings(change).await.map_err(admin_failure)?;
-        tracing::info!(radio = id, keys = keys.len(), "admin keys changed");
+        self.apply(id, whose, change).await?;
+        tracing::info!(radio = id, ?whose, keys = keys.len(), "admin keys changed");
         Ok(SettingsApplied { reboots: true })
     }
 
@@ -3422,28 +3558,28 @@ impl Radios {
     pub async fn change_section(
         &self,
         id: RadioId,
+        whose: Whose,
         section: &str,
         values: &BTreeMap<String, serde_json::Value>,
         at: Option<&FixedPosition>,
     ) -> Result<SettingsApplied, SettingsFailure> {
-        let mesh = self.configurable(id)?;
         if values.is_empty() && at.is_none() {
             return Err(SettingsFailure::Invalid(section.to_owned()));
         }
-        let change = mesh
-            .read(|state| {
+        let change = self
+            .with_settings(id, whose, &[section], false, |settings| {
                 let mut change = if values.is_empty() {
                     meshctl_core::radio::SettingsChange::default()
                 } else {
-                    crate::sections::change(&state.settings, section, values)?
+                    crate::sections::change(settings, section, values)?
                 };
-                change.fixed_position =
-                    crate::sections::fixed(&state.settings, section, values, at)?;
+                change.fixed_position = crate::sections::fixed(settings, section, values, at)?;
                 Ok(change)
             })
+            .await?
             .map_err(|why: crate::sections::Invalid| SettingsFailure::Invalid(why.0))?;
-        mesh.change_settings(change).await.map_err(admin_failure)?;
-        tracing::info!(radio = id, section, "settings changed");
+        self.apply(id, whose, change).await?;
+        tracing::info!(radio = id, ?whose, section, "settings changed");
         Ok(SettingsApplied {
             reboots: !values.is_empty(),
         })
@@ -4218,6 +4354,60 @@ fn meshcore_failure(error: AdminError) -> SettingsFailure {
         AdminError::Refused(why) => SettingsFailure::Invalid(why),
         AdminError::UnknownNode => SettingsFailure::Invalid("node".into()),
         other => admin_failure(other),
+    }
+}
+
+/// Whose settings: the radio's own, or another node's, read and changed
+/// over the mesh as its admin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Whose {
+    Radio,
+    Node(u32),
+}
+
+/// The parts of a node's settings its pages show at once: its owner and
+/// role, its LoRa, and its eight channels.
+const NODE_PARTS: [&str; 11] = [
+    "owner",
+    "config.device",
+    "config.lora",
+    "channel.0",
+    "channel.1",
+    "channel.2",
+    "channel.3",
+    "channel.4",
+    "channel.5",
+    "channel.6",
+    "channel.7",
+];
+
+/// The part of the settings with the admin keys.
+const SECURITY: &str = "config.security";
+
+/// Whether meshctl has a part of a node's settings, by its name.
+fn has_part(settings: &meshctl_core::mesh::Settings, part: &str) -> bool {
+    let config = &settings.config;
+    match part.split_once('.') {
+        Some(("config", name)) => match name {
+            "device" => config.device.is_some(),
+            "position" => config.position.is_some(),
+            "power" => config.power.is_some(),
+            "network" => config.network.is_some(),
+            "display" => config.display.is_some(),
+            "lora" => config.lora.is_some(),
+            "bluetooth" => config.bluetooth.is_some(),
+            "security" => config.security.is_some(),
+            _ => false,
+        },
+        Some(("module", name)) => settings.modules.contains_key(name),
+        Some(("channel", index)) => index
+            .parse::<u32>()
+            .is_ok_and(|i| settings.channels.contains_key(&i)),
+        _ => match part {
+            "owner" => settings.owner.is_some(),
+            "metadata" => settings.metadata.is_some(),
+            _ => false,
+        },
     }
 }
 

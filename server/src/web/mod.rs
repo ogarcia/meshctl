@@ -21,6 +21,7 @@ mod events;
 mod links;
 mod meshcore;
 mod messages;
+mod node_settings;
 mod packets;
 mod preferences;
 mod radios;
@@ -111,6 +112,7 @@ pub fn router(state: AppState) -> Router {
         .merge(links::router())
         .merge(meshcore::router())
         .merge(settings::router())
+        .merge(node_settings::router())
         .merge(secrets::router())
         .merge(preferences::router())
         .merge(auto_replies::router())
