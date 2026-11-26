@@ -164,6 +164,70 @@ pub fn MiniMap(num: u32) -> impl IntoView {
     }
 }
 
+/// A place, small, still: where a position sent in a conversation says,
+/// with the circle of how far off it may be, its pin in the colour given.
+/// A click, or Enter, does what `open` says.
+#[component]
+pub fn PlaceMap(
+    lat: f64,
+    lon: f64,
+    radius: Option<u32>,
+    pin: &'static str,
+    #[prop(into)] label: Signal<String>,
+    #[prop(into)] open: Callback<()>,
+) -> impl IntoView {
+    let element = NodeRef::<html::Div>::new();
+    let drawn = StoredValue::new_local(None::<web_sys::HtmlElement>);
+    Effect::new(move |_| {
+        let Some(div) = element.get() else {
+            return;
+        };
+        let div: web_sys::HtmlElement = div.into();
+        let spot = Spot {
+            lat,
+            lon,
+            radius,
+            pin,
+        };
+        if let Ok(json) = serde_json::to_string(&spot) {
+            map_mini(&div, &json);
+        }
+        drawn.set_value(Some(div));
+    });
+    on_cleanup(move || {
+        if let Some(div) = drawn.get_value() {
+            map_mini_close(&div);
+        }
+    });
+    view! {
+        <div
+            class="mini-map place-map"
+            node_ref=element
+            role="button"
+            tabindex="0"
+            title=label
+            aria-label=label
+            on:click=move |ev| {
+                // OpenStreetMap's credit is a link of its own.
+                let link = ev
+                    .target()
+                    .and_then(|t| wasm_bindgen::JsCast::dyn_into::<web_sys::Element>(t).ok())
+                    .is_some_and(|t| t.closest("a").ok().flatten().is_some());
+                if !link {
+                    ev.stop_propagation();
+                    open.run(());
+                }
+            }
+            on:keydown=move |ev| {
+                if ev.key() == "Enter" || ev.key() == " " {
+                    ev.prevent_default();
+                    open.run(());
+                }
+            }
+        ></div>
+    }
+}
+
 /// What the map is given to draw.
 #[derive(Debug, Serialize)]
 struct Drawing {

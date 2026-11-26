@@ -27,6 +27,7 @@ const RESEND: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/r
 const DOWN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/chevron-down.svg");
 const INFO: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/info-circle.svg");
 const COPY: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/copy.svg");
+const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");
 /// How far a message went.
 const CLOCK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/clock.svg");
 const CHECK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/check.svg");
@@ -1034,9 +1035,10 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
 
     let id = message.id;
     let packet = message.packet_id;
+    let place = message.position;
     // Replies and reactions refer to its packet: one it has, on a radio
-    // that has them.
-    let can_answer = packet != 0 && untrack(move || answerable(live));
+    // that has them; a text's, as a position is answered by none.
+    let can_answer = packet != 0 && place.is_none() && untrack(move || answerable(live));
     let can_react = can_answer && untrack(move || reactable(live, peer));
     // What it answers, quoted: who, and the start of it.
     let quote = message.reply_id.filter(|_| !message.emoji).map(|to| {
@@ -1165,7 +1167,7 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                     })
                         .into_any(),
                 )
-            } else if mine && status == MessageStatus::Failed {
+            } else if mine && status == MessageStatus::Failed && place.is_none() {
                 // Ours that got nowhere: written anew, as a new message.
                 let (again, answered, region) =
                     (message.text.clone(), message.reply_id, message.scope.clone());
@@ -1289,6 +1291,8 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                         </p>
                     }
                     .into_any()
+                } else if let Some(at) = place {
+                    view! { <Place at mine from=message.from /> }.into_any()
                 } else {
                     view! { <p>{said(&message.text, message.reply_id.is_some())}</p> }.into_any()
                 }}
@@ -1305,6 +1309,71 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                 {actions}
             </div>
             {picker}
+        </div>
+    }
+}
+
+/// A position's coordinates, as written.
+fn coordinates(at: &meshctl_api::Position) -> String {
+    format!(
+        "{}, {}",
+        crate::position::written(at.latitude),
+        crate::position::written(at.longitude)
+    )
+}
+
+/// A position sent in a conversation: where, on a small map, with the
+/// circle of how far off it may be as its channel rounds it; whose, its
+/// coordinates and that. The map shows the node on the big one.
+#[component]
+fn Place(at: meshctl_api::Position, mine: bool, from: u32) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let local = live
+        .status
+        .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+    let whose = if mine { local.unwrap_or(from) } else { from };
+    // Its pin as the map draws the node's: the radio's own, or by how far.
+    let pin = if mine {
+        "--mc-pin-local"
+    } else {
+        live.nodes.with_untracked(|nodes| {
+            nodes
+                .get(&from)
+                .map_or("--mc-pin-far", |node| crate::mesh::pin(node, false))
+        })
+    };
+    let label = Signal::derive(move || t_string!(i18n, node_on_map).to_owned());
+    // Whole, on the line or under it.
+    let far = at
+        .radius
+        .map(|metres| crate::mesh::radius(metres).replace(' ', "\u{a0}"));
+    view! {
+        <div class="place">
+            <crate::map::PlaceMap
+                lat=at.latitude
+                lon=at.longitude
+                radius=at.radius
+                pin
+                label
+                open=move |()| live.show_on_map(whose)
+            />
+            <p class="place-words">
+                <span class="icon" inner_html=PIN></span>
+                <span class="what">
+                    {move || {
+                        if mine {
+                            t_string!(i18n, chat_position_mine)
+                        } else {
+                            t_string!(i18n, chat_position_theirs)
+                        }
+                    }}
+                </span>
+                <span class="where mono dim">
+                    {coordinates(&at)}
+                    {far.map(|far| format!(" {far}"))}
+                </span>
+            </p>
         </div>
     }
 }
@@ -1859,9 +1928,11 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
             .thread
             .with_untracked(|t| t.iter().find(|m| m.id == id).cloned())?;
         let packet = message.packet_id;
-        let can_answer = packet != 0 && answerable(live);
+        let place = message.position;
+        let can_answer = packet != 0 && place.is_none() && answerable(live);
         let can_react = can_answer && reactable(live, peer);
-        let text = message.text.clone();
+        // A position's, its coordinates.
+        let text = place.map_or_else(|| message.text.clone(), |at| coordinates(&at));
         // Ours on a MeshCore channel: sent again, the same packet, only once
         // taken as gone nowhere; as the menu opened.
         let carried = untrack(|| carried(live, thread, id));
@@ -1890,7 +1961,10 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
                             }
                             .into_any()
                         })
-                    } else if message.outgoing && message.status == MessageStatus::Failed {
+                    } else if message.outgoing
+                        && message.status == MessageStatus::Failed
+                        && place.is_none()
+                    {
                         let (again, answered, region) =
                             (message.text.clone(), message.reply_id, message.scope.clone());
                         Some(
@@ -2257,6 +2331,88 @@ fn Composer(peer: Peer) -> impl IntoView {
         })
     };
 
+    // Where the radio is, sent to the conversation: only on Meshtastic,
+    // whose positions are a packet of their own. As precisely as the
+    // channel shares it, a direct message's the primary's; asked first, as
+    // it says where the radio is.
+    let meshtastic = move || live.selected_kind() == Some(RadioKind::Meshtastic);
+    let shared_bits = move || {
+        let slot = match peer {
+            Peer::Channel { channel } => channel,
+            Peer::Node { .. } => 0,
+        };
+        live.channels.with(|channels| {
+            channels
+                .iter()
+                .find(|c| c.index == slot)
+                .map_or(0, |c| c.position_precision)
+        })
+    };
+    let knows_where = move || {
+        let local = live
+            .status
+            .with(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+        local.is_some_and(|num| {
+            live.nodes
+                .with(|nodes| nodes.get(&num).is_some_and(|n| n.position.is_some()))
+        })
+    };
+    // Why not, if not.
+    let unplaceable = move || {
+        if !knows_where() {
+            Some(t_string!(i18n, chat_position_nowhere))
+        } else if shared_bits() == 0 {
+            Some(t_string!(i18n, chat_position_unshared))
+        } else {
+            None
+        }
+    };
+    let place_label = move || unplaceable().unwrap_or(t_string!(i18n, chat_position_send));
+    let share = move |_| {
+        let bits = shared_bits();
+        let how = if bits >= 32 {
+            t_string!(i18n, chat_position_exact).to_owned()
+        } else {
+            crate::mesh::precision_radius(bits)
+                .map(crate::mesh::radius)
+                .unwrap_or_default()
+        };
+        let sure = web_sys::window()
+            .and_then(|w| {
+                w.confirm_with_message(
+                    &t_string!(i18n, chat_position_confirm).replace("{how}", &how),
+                )
+                .ok()
+            })
+            .unwrap_or(false);
+        let Some(radio) = live.selected.get_untracked() else {
+            return;
+        };
+        if !sure {
+            return;
+        }
+        let (channel, node) = match peer {
+            Peer::Channel { channel } => (Some(channel), None),
+            Peer::Node { node } => (None, Some(node)),
+        };
+        busy.set(true);
+        spawn_local(async move {
+            let share = meshctl_api::PositionShare { channel, node };
+            match daemon::share_position(radio, &share).await {
+                Ok(sent) => {
+                    error.set(None);
+                    live.thread.update(|thread| {
+                        if !thread.iter().any(|m| m.id == sent.id) {
+                            thread.push(sent);
+                        }
+                    });
+                }
+                Err(failure) => error.set(Some(failure)),
+            }
+            busy.set(false);
+        });
+    };
+
     let problem = move || {
         if !connected() {
             return Some(t!(i18n, chat_not_connected).into_any());
@@ -2266,6 +2422,9 @@ fn Composer(peer: Peer) -> impl IntoView {
                 t!(i18n, chat_not_connected).into_any()
             }
             Failure::Rejected(ErrorCode::InvalidMessage) => t!(i18n, chat_invalid).into_any(),
+            Failure::Rejected(ErrorCode::PositionNotShared) => {
+                t!(i18n, chat_position_unshared).into_any()
+            }
             _ => t!(i18n, error_failed).into_any(),
         })
     };
@@ -2306,6 +2465,7 @@ fn Composer(peer: Peer) -> impl IntoView {
             <div
                 class="field"
                 class:over=over
+                class:with-place=meshtastic
             >
                 <div class="backdrop" node_ref=backdrop aria-hidden="true">
                     {move || {
@@ -2345,6 +2505,24 @@ fn Composer(peer: Peer) -> impl IntoView {
                         picking.update(|p| *p = !*p);
                     }
                 ></button>
+                {move || {
+                    meshtastic()
+                        .then(|| {
+                            view! {
+                                <button
+                                    type="button"
+                                    class="icon-button place-share"
+                                    disabled=move || {
+                                        !connected() || busy.get() || unplaceable().is_some()
+                                    }
+                                    title=place_label
+                                    aria-label=place_label
+                                    inner_html=PIN
+                                    on:click=share
+                                ></button>
+                            }
+                        })
+                }}
             </div>
             <Show when=move || picking.get()>
                 <div class="emoji-popover" on:click=|ev| ev.stop_propagation()>

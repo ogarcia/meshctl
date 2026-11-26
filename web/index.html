@@ -3335,6 +3335,23 @@
       .composer .emoji-toggle { border: 0; background: none; }
       .composer .emoji-toggle:hover { color: var(--mc-text); }
       .composer .emoji-toggle.on { color: var(--mc-primary); }
+      /* Where the radio is, sent: its button beside the emojis', and room
+         for both. */
+      .composer .place-share { position: absolute; right: 40px; bottom: 0; width: 40px; height: 40px; border: 0; background: none; }
+      .composer .place-share svg { width: 22px; height: 22px; }
+      .composer .place-share:hover:not(:disabled) { color: var(--mc-text); }
+      .composer .place-share:disabled { opacity: 0.4; }
+      .composer .field.with-place textarea,
+      .composer .field.with-place .backdrop { padding-right: 82px; }
+      /* A position in a conversation: a small map, and under it whose, its
+         coordinates and how far off they may be. */
+      .bubble .place { width: 280px; max-width: 100%; }
+      .bubble .place-map { height: 150px; margin: 2px 0 6px; }
+      .bubble .place-words { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; margin: 0; }
+      .bubble .place-words .icon { display: flex; color: var(--mc-primary); }
+      .bubble .place-words .icon svg { width: 16px; height: 16px; }
+      .bubble .place-words .what { font-weight: 600; }
+      .bubble .place-words .where { flex-basis: 100%; font-size: 12px; }
       .channel-regions { margin-top: 2px; }
       /* The ways a message or a packet came, in its details: each copy a
          line, its repeaters one after the other, its signal and region
@@ -4760,6 +4777,9 @@
         .composer textarea, .composer button { min-height: 44px; }
         .composer textarea, .composer .backdrop { padding: 11px 46px 11px 12px; }
         .composer .emoji-toggle { width: 44px; height: 44px; }
+        .composer .place-share { right: 44px; width: 44px; height: 44px; }
+        .composer .field.with-place textarea,
+        .composer .field.with-place .backdrop { padding-right: 90px; }
         .emoji-popover { right: 8px; left: 8px; width: auto; max-width: none; }
         /* No count: the field says when it is near, and what goes past. */
         .composer .count { display: none; }

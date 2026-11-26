@@ -171,6 +171,18 @@ pub async fn send_message(radio: RadioId, message: &NewMessage) -> Result<Messag
     response.json().await.map_err(|_| Failure::Unreachable)
 }
 
+/// Sends where the radio is to a channel or a node.
+pub async fn share_position(
+    radio: RadioId,
+    share: &meshctl_api::PositionShare,
+) -> Result<Message, Failure> {
+    let request = with_token(Request::post(&url(&format!("/radios/{radio}/positions"))))
+        .json(share)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
 /// What a link holds, against what the radio has.
 pub async fn read_link(
     radio: RadioId,
