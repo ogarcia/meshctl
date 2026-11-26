@@ -114,11 +114,13 @@
         --mc-node-near: #1971c2;
         --mc-node-mid: #7048e8;
         --mc-node-far: #6c757d;
-        /* Nodes' avatars: each its own hue, all of the same lightness and
-           chroma, for their letters to read alike on any of them. */
-        --mc-avatar-l: 0.55;
-        --mc-avatar-c: 0.13;
-        --mc-avatar-ink: #ffffff;
+        /* Nodes' avatars, each in its own colour: kept within these
+           lightnesses, no more vivid than this, and their letters black
+           over the lightness given, white under it. */
+        --mc-avatar-l-min: 0.45;
+        --mc-avatar-l-max: 0.85;
+        --mc-avatar-c-max: 0.16;
+        --mc-avatar-ink-at: 0.66;
         /*
          * Radios' buttons of the palette, as the rail's own and the accent: at
          * rest, a light tone with dark text here (a deep one with light text
@@ -170,9 +172,10 @@
         --mc-node-near: #4dabf7;
         --mc-node-mid: #b197fc;
         --mc-node-far: #a5aeb8;
-        --mc-avatar-l: 0.76;
-        --mc-avatar-c: 0.11;
-        --mc-avatar-ink: #161b22;
+        --mc-avatar-l-min: 0.38;
+        --mc-avatar-l-max: 0.78;
+        --mc-avatar-c-max: 0.14;
+        --mc-avatar-ink-at: 0.62;
         --mc-badge-ink: #ffffff;
         --mc-badge-ink-on: #161b22;
         --mc-badge-amber: #b35c00;
@@ -217,9 +220,10 @@
           --mc-node-near: #4dabf7;
           --mc-node-mid: #b197fc;
           --mc-node-far: #a5aeb8;
-          --mc-avatar-l: 0.76;
-          --mc-avatar-c: 0.11;
-          --mc-avatar-ink: #161b22;
+          --mc-avatar-l-min: 0.38;
+          --mc-avatar-l-max: 0.78;
+          --mc-avatar-c-max: 0.14;
+          --mc-avatar-ink-at: 0.62;
           --mc-badge-ink: #ffffff;
           --mc-badge-ink-on: #161b22;
           --mc-badge-amber: #b35c00;
@@ -1563,11 +1567,18 @@
         width: 40px;
         height: 40px;
         border-radius: 50%;
-        background: oklch(var(--mc-avatar-l) var(--mc-avatar-c) var(--hue, 0));
-        color: var(--mc-avatar-ink);
+        background: var(--node-bg, var(--mc-node-far));
+        color: var(--node-fg, #ffffff);
         font-size: 11px;
         font-weight: 700;
         overflow: hidden;
+      }
+      @supports (color: oklch(from red l c h)) {
+        .node-avatar {
+          --lightness: clamp(var(--mc-avatar-l-min), l, var(--mc-avatar-l-max));
+          background: oklch(from var(--node-bg, var(--mc-node-far)) var(--lightness) min(c, var(--mc-avatar-c-max)) h);
+          color: oklch(from var(--node-bg, var(--mc-node-far)) clamp(0, (var(--mc-avatar-ink-at) - var(--lightness)) * 1000, 1) 0 0);
+        }
       }
       .node-avatar.emoji { font-size: 20px; }
       .topbar .node-avatar.emoji { font-size: 18px; }

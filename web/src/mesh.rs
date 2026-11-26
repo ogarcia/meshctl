@@ -112,12 +112,12 @@ fn unknown(column: Column, node: &Node, local: Option<u32>) -> bool {
     }
 }
 
-/// The colour of a node's avatar, as the hue the page's own lightness and
-/// chroma are drawn with: Meshtastic's apps colour a node by its number's
-/// lower three bytes, taken as red, green and blue, and here that colour's
-/// hue is kept. A MeshCore contact, known on channels by its name alone, is
-/// coloured by its whole name instead, the same either way: not by its
-/// avatar's letters, which many share (call signs all begin alike).
+/// The colour of a node's avatar, as Meshtastic's apps give it: its number's
+/// lower three bytes as red, green and blue, under black or white letters by
+/// how bright that is. The page keeps it within a lightness and chroma of its
+/// own for each theme, where it can. A MeshCore contact, known on channels by
+/// its name alone, is coloured by its whole name instead, the same either way:
+/// not by its avatar's letters, which many share (call signs all begin alike).
 pub fn avatar_style(live: Live, num: u32, name: &str) -> String {
     // A radio does not change its kind: nothing to follow.
     let seed = if untrack(|| is_meshtastic(live)) {
@@ -128,28 +128,12 @@ pub fn avatar_style(live: Live, num: u32, name: &str) -> String {
             (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
         })
     };
-    format!("--hue: {}", hue(seed))
-}
-
-/// The hue, in OKLCH's degrees, of the colour a number's lower three bytes
-/// make as red, green and blue.
-fn hue(seed: u32) -> u16 {
     let [_, r, g, b] = seed.to_be_bytes();
-    let linear = |c: u8| {
-        let c = f64::from(c) / 255.0;
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    let (r, g, b) = (linear(r), linear(g), linear(b));
-    let l = (0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b).cbrt();
-    let m = (0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b).cbrt();
-    let s = (0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b).cbrt();
-    let a = 1.977_998_495_1 * l - 2.428_592_205 * m + 0.450_593_709_9 * s;
-    let b = 0.025_904_037_1 * l + 0.782_771_766_2 * m - 0.808_675_766 * s;
-    (b.atan2(a).to_degrees().rem_euclid(360.0).round() as u16) % 360
+    let bright = (f64::from(r) * 0.299 + f64::from(g) * 0.587 + f64::from(b) * 0.114) / 255.0 > 0.5;
+    format!(
+        "--node-bg: #{r:02x}{g:02x}{b:02x}; --node-fg: {}",
+        if bright { "#000000" } else { "#ffffff" }
+    )
 }
 
 /// How a node is reached, in words: its own radio, directly, through so many
