@@ -3343,6 +3343,13 @@
       .composer .place-share:disabled { opacity: 0.4; }
       .composer .field.with-place textarea,
       .composer .field.with-place .backdrop { padding-right: 82px; }
+      /* Not connected: the field says so, greyed, with no buttons in it. */
+      .composer .field.offline .emoji-toggle,
+      .composer .field.offline .place-share { display: none; }
+      .composer .field.offline textarea,
+      .composer .field.offline .backdrop { padding-right: 12px; }
+      .composer .field.offline textarea { cursor: not-allowed; }
+      .composer .field.offline textarea::placeholder { color: var(--mc-muted); opacity: 1; }
       /* A position in a conversation: a small map, and under it whose, its
          coordinates and how far off they may be. */
       .bubble .place { width: 280px; max-width: 100%; }
@@ -4780,6 +4787,8 @@
         .composer .place-share { right: 44px; width: 44px; height: 44px; }
         .composer .field.with-place textarea,
         .composer .field.with-place .backdrop { padding-right: 90px; }
+        .composer .field.offline textarea,
+        .composer .field.offline .backdrop { padding-right: 12px; }
         .emoji-popover { right: 8px; left: 8px; width: auto; max-width: none; }
         /* No count: the field says when it is near, and what goes past. */
         .composer .count { display: none; }

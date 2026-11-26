@@ -160,6 +160,7 @@
   "chat_delivered": "Delivered: the node said it got it",
   "chat_failed": "It could not be sent",
   "chat_not_connected": "The radio is not connected: you can read, not send.",
+  "chat_offline": "The radio is not connected",
   "chat_invalid": "That message cannot be sent: it is empty or too long, or the channel is not on the radio.",
   "chat_position_send": "Send where the radio is",
   "chat_position_nowhere": "The radio does not know where it is",

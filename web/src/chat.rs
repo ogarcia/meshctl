@@ -1922,6 +1922,12 @@ fn MessageMenu(peer: Peer) -> impl IntoView {
     let live = expect_context::<Live>();
     let thread = expect_context::<Thread>();
     let close = move || thread.menu.set(None);
+    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            thread.menu.set(None);
+        }
+    });
+    on_cleanup(move || escape.remove());
     move || {
         let id = thread.menu.get()?;
         let message = live
@@ -2413,9 +2419,10 @@ fn Composer(peer: Peer) -> impl IntoView {
         });
     };
 
+    // Not connected, the field itself says so.
     let problem = move || {
         if !connected() {
-            return Some(t!(i18n, chat_not_connected).into_any());
+            return None;
         }
         error.get().map(|failure| match failure {
             Failure::Rejected(ErrorCode::RadioNotConnected) => {
@@ -2466,6 +2473,7 @@ fn Composer(peer: Peer) -> impl IntoView {
                 class="field"
                 class:over=over
                 class:with-place=meshtastic
+                class:offline=move || !connected()
             >
                 <div class="backdrop" node_ref=backdrop aria-hidden="true">
                     {move || {
@@ -2482,7 +2490,14 @@ fn Composer(peer: Peer) -> impl IntoView {
                 <textarea
                     node_ref=field
                     rows="1"
-                    placeholder=move || t_string!(i18n, chat_write)
+                    disabled=move || !connected()
+                    placeholder=move || {
+                        if connected() {
+                            t_string!(i18n, chat_write)
+                        } else {
+                            t_string!(i18n, chat_offline)
+                        }
+                    }
                     prop:value=move || text.get()
                     on:input=move |ev| text.set(event_target_value(&ev))
                     on:keydown=keydown
