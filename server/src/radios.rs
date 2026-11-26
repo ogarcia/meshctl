@@ -3970,15 +3970,27 @@ impl Radios {
                     Ok(mesh::Event::Synced) => {
                         let first = !connected;
                         connected = true;
+                        // Never in sync before: new to meshctl, which has
+                        // nothing of its own to set on it yet.
+                        let new = first
+                            && matches!(store.radio(id).await, Ok(Some(r)) if r.last_connected.is_none());
                         let saved = match save_all(&store, id, &mesh).await {
                             Ok(()) => follow_channels(&store, &changes, id, &mesh).await,
                             other => other,
                         };
                         // Its channels silenced as meshctl has them, once a
-                        // link: not again as it syncs after taking them.
+                        // link: not again as it syncs after taking them. A
+                        // new one's, as it has them, taken by meshctl.
                         if first && saved.is_ok() {
-                            let (store, mesh) = (store.clone(), mesh.clone());
-                            tokio::spawn(async move { push_mutes(&store, id, &mesh).await });
+                            let (store, mesh, changes) =
+                                (store.clone(), mesh.clone(), changes.clone());
+                            tokio::spawn(async move {
+                                if new {
+                                    adopt_mutes(&store, &changes, id, &mesh).await;
+                                } else {
+                                    push_mutes(&store, id, &mesh).await;
+                                }
+                            });
                         }
                         saved
                     }
@@ -4137,6 +4149,46 @@ async fn push_mutes(store: &Store, id: RadioId, mesh: &Mesh) {
     match mesh.change_settings(change).await {
         Ok(()) => tracing::info!(radio = id, ?slots, "channels silenced as meshctl has them"),
         Err(error) => tracing::warn!(radio = id, ?error, "channels not silenced on the radio"),
+    }
+}
+
+/// Takes a radio's channels silenced as it has them, the first time meshctl
+/// has it in sync: what it had before meshctl knew it is kept, not undone.
+/// From then on, meshctl's are set on it.
+async fn adopt_mutes(store: &Store, changes: &broadcast::Sender<Change>, id: RadioId, mesh: &Mesh) {
+    use meshctl_proto::meshtastic::channel::Role;
+    if mesh.read(|state| state.meshcore.is_some()) {
+        return;
+    }
+    let muted: Vec<u32> = mesh.read(|state| {
+        state
+            .settings
+            .channels
+            .values()
+            .filter(|c| c.role != Role::Disabled as i32)
+            .filter(|c| {
+                c.settings
+                    .as_ref()
+                    .and_then(|s| s.module_settings.as_ref())
+                    .is_some_and(|m| m.is_muted)
+            })
+            .filter_map(|c| u32::try_from(c.index).ok())
+            .collect()
+    });
+    for channel in muted {
+        let peer = Peer::Channel { channel };
+        match store.set_muted(id, peer, true).await {
+            Ok(true) => {
+                tracing::info!(radio = id, channel, "channel silenced as the radio has it");
+                let _ = changes.send(Change::ConversationMuted {
+                    radio: id,
+                    peer,
+                    muted: true,
+                });
+            }
+            Ok(false) => {}
+            Err(err) => tracing::warn!(radio = id, error = format_args!("{err:#}"), "cannot store"),
+        }
     }
 }
 
