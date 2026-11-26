@@ -424,6 +424,21 @@ impl Radio {
                         settings.channels.insert(channel.index, channel);
                     }
                     A::BeginEditSettings(_) => println!("neighbour begins an edit"),
+                    A::RebootSeconds(seconds) => println!("neighbour reboots in {seconds} s"),
+                    A::ShutdownSeconds(seconds) => {
+                        println!("neighbour shuts down in {seconds} s");
+                    }
+                    A::NodedbReset(_) => println!("neighbour forgets its nodes"),
+                    A::SetFixedPosition(position) => println!(
+                        "neighbour fixed at {:?}, {:?}, {:?} m",
+                        position.latitude_i, position.longitude_i, position.altitude
+                    ),
+                    A::RemoveFixedPosition(_) => println!("neighbour's fixed position removed"),
+                    A::FactoryResetConfig(_) => {
+                        println!("neighbour goes back to its factory settings");
+                        self.neighbour = None;
+                        return routed(self, pb::routing::Error::None);
+                    }
                     A::CommitEditSettings(_) => {
                         println!("neighbour commits the edit (a real node might reboot now)");
                     }
@@ -837,6 +852,22 @@ impl Radio {
             A::RemoveByNodenum(num) => {
                 println!("forgotten: !{num:08x}");
                 self.removed.insert(num);
+                None
+            }
+            A::RebootSeconds(seconds) => {
+                println!("reboots in {seconds} s (a real radio would)");
+                None
+            }
+            A::ShutdownSeconds(seconds) => {
+                println!("shuts down in {seconds} s (a real radio would)");
+                None
+            }
+            A::NodedbReset(_) => {
+                println!("forgets its nodes (a real radio would)");
+                None
+            }
+            A::FactoryResetConfig(_) => {
+                println!("goes back to its factory settings (a real radio would)");
                 None
             }
             A::RemoveFavoriteNode(num) => {
