@@ -1638,6 +1638,22 @@ pub struct Conversation {
     /// The newest message read in it, if any was.
     #[serde(default)]
     pub read_up_to: Option<MessageId>,
+    /// Whether it is silenced: its messages are not counted as unread
+    /// among the radio's, nor notified of.
+    #[serde(default)]
+    pub muted: bool,
+}
+
+/// A conversation silenced, or no longer: a channel's, by its slot, or a
+/// node's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ConversationMute {
+    #[serde(default)]
+    pub channel: Option<u32>,
+    #[serde(default)]
+    pub node: Option<u32>,
+    pub muted: bool,
 }
 
 /// A node on a route, and how well it heard the hop before it.

@@ -94,6 +94,12 @@ pub enum ServerMessage {
         peer: Peer,
         up_to: MessageId,
     },
+    /// A conversation silenced, or no longer, in any client.
+    ConversationMuted {
+        radio: RadioId,
+        peer: Peer,
+        muted: bool,
+    },
     /// A message to notify of, where notifications are let be shown: the
     /// app meshctl runs within shows it on its own.
     Notification { notification: Notification },

@@ -92,6 +92,9 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
         Change::MessagesForgotten(radio, ids) => ServerMessage::MessagesForgotten { radio, ids },
         Change::Cleaned(cleaned) => ServerMessage::Cleaned { cleaned },
         Change::Retention(retention) => ServerMessage::Retention { retention },
+        Change::ConversationMuted { radio, peer, muted } => {
+            ServerMessage::ConversationMuted { radio, peer, muted }
+        }
         Change::ConversationRead { radio, peer, up_to } => {
             ServerMessage::ConversationRead { radio, peer, up_to }
         }

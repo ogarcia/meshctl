@@ -10,8 +10,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
-    Conversation, ConversationRead, Error, ErrorCode, Message, MessageId, MessageRoute, NewMessage,
-    Packet, Peer, PositionShare, RadioId,
+    Conversation, ConversationMute, ConversationRead, Error, ErrorCode, Message, MessageId,
+    MessageRoute, NewMessage, Packet, Peer, PositionShare, RadioId,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -28,6 +28,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(conversations))
         .routes(routes!(read))
+        .routes(routes!(mute))
         .routes(routes!(messages, send))
         .routes(routes!(forget))
         .routes(routes!(message_packet))
@@ -65,6 +66,43 @@ async fn conversations(State(state): State<AppState>, Path(radio): Path<RadioId>
     match state.radios.conversations(radio).await {
         Ok(Some(conversations)) => Json(conversations).into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
+        Err(err) => failed(&err),
+    }
+}
+
+/// Silence a conversation
+///
+/// Silences a conversation, or no longer, for good: its messages are not
+/// counted among the radio's unread, nor notified of, and the interface
+/// keeps it away while its section is folded. A channel's goes with the
+/// channel wherever it is on the radio. Every client connected hears of it
+/// on the event stream, as `conversation_muted`.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/conversations/mute",
+    tag = "chat",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = ConversationMute,
+    responses(
+        (status = 204, description = "Silenced, or no longer"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio or channel", body = Error),
+        (status = 422, description = "Neither a channel nor a node, or both", body = Error),
+    )
+)]
+async fn mute(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(mute): Json<ConversationMute>,
+) -> Response {
+    let peer = match (mute.channel, mute.node) {
+        (Some(channel), None) => Peer::Channel { channel },
+        (None, Some(node)) => Peer::Node { node },
+        _ => return error(StatusCode::UNPROCESSABLE_ENTITY, ErrorCode::BadRequest),
+    };
+    match state.radios.set_muted(radio, peer, mute.muted).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => error(StatusCode::NOT_FOUND, ErrorCode::NotFound),
         Err(err) => failed(&err),
     }
 }

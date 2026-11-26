@@ -83,6 +83,11 @@ pub enum Change {
     /// A message to notify of.
     Notification(meshctl_api::Notification),
     /// A conversation read further, up to a message.
+    ConversationMuted {
+        radio: RadioId,
+        peer: Peer,
+        muted: bool,
+    },
     ConversationRead {
         radio: RadioId,
         peer: Peer,
@@ -1977,6 +1982,7 @@ impl Radios {
                     last,
                     unread: 0,
                     read_up_to: None,
+                    muted: false,
                 }
             })
             .collect();
@@ -1991,8 +1997,29 @@ impl Radios {
             let (read, unread) = self.store.read_state(id, conversation.peer).await?;
             conversation.read_up_to = read;
             conversation.unread = unread;
+            conversation.muted = self.store.muted(id, conversation.peer).await?;
         }
         Ok(Some(conversations))
+    }
+
+    /// Whether a conversation of a radio is silenced; not, if it cannot be
+    /// told.
+    pub async fn muted(&self, id: RadioId, peer: Peer) -> bool {
+        self.store.muted(id, peer).await.unwrap_or(false)
+    }
+
+    /// Silences a conversation of a radio, or no longer, and tells every
+    /// client: false if there is no such radio, or channel on it.
+    pub async fn set_muted(&self, id: RadioId, peer: Peer, muted: bool) -> Result<bool> {
+        if self.mesh(id).is_none() || !self.store.set_muted(id, peer, muted).await? {
+            return Ok(false);
+        }
+        let _ = self.changes.send(Change::ConversationMuted {
+            radio: id,
+            peer,
+            muted,
+        });
+        Ok(true)
     }
 
     /// Reads a conversation of a radio up to a message, never back, and

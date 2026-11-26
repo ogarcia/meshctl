@@ -715,6 +715,11 @@ impl Store {
             .bind(num)
             .execute(&mut *tx)
             .await?;
+        sqlx::query("DELETE FROM conversation_mute WHERE radio_id = ? AND node = ?")
+            .bind(radio)
+            .bind(num)
+            .execute(&mut *tx)
+            .await?;
         sqlx::query(
             "DELETE FROM message WHERE radio_id = ? AND to_num != ?
                 AND (from_num = ? OR to_num = ?)",
@@ -1133,6 +1138,11 @@ impl Store {
         let (unread,): (i64,) = sqlx::query_as(
             "SELECT count(*) FROM message m
             WHERE m.radio_id = ? AND m.outgoing = 0 AND m.emoji = 0
+            AND NOT EXISTS (SELECT 1 FROM conversation_mute u
+                WHERE CASE WHEN m.to_num = ?
+                    THEN u.channel_id = m.channel_id
+                    ELSE u.radio_id = m.radio_id AND u.node = m.from_num
+                END)
             AND m.id > coalesce(
                 CASE WHEN m.to_num = ?
                     THEN (SELECT r.message_id FROM conversation_read r WHERE r.channel_id = m.channel_id)
@@ -1142,9 +1152,79 @@ impl Store {
         )
         .bind(radio)
         .bind(i64::from(BROADCAST))
+        .bind(i64::from(BROADCAST))
         .fetch_one(&self.pool)
         .await?;
         Ok(u32::try_from(unread).unwrap_or_default())
+    }
+
+    /// Whether a conversation of a radio is silenced.
+    pub async fn muted(&self, radio: RadioId, peer: Peer) -> Result<bool> {
+        let (muted,): (bool,) = match peer {
+            Peer::Channel { channel } => {
+                sqlx::query_as(
+                    "SELECT EXISTS (SELECT 1 FROM conversation_mute u
+                        JOIN channel_slot s ON s.channel_id = u.channel_id
+                        WHERE s.radio_id = ? AND s.slot = ?)",
+                )
+                .bind(radio)
+                .bind(i64::from(channel))
+                .fetch_one(&self.pool)
+                .await?
+            }
+            Peer::Node { node } => sqlx::query_as(
+                "SELECT EXISTS (SELECT 1 FROM conversation_mute WHERE radio_id = ? AND node = ?)",
+            )
+            .bind(radio)
+            .bind(i64::from(node))
+            .fetch_one(&self.pool)
+            .await?,
+        };
+        Ok(muted)
+    }
+
+    /// Silences a conversation of a radio, or no longer: a channel's
+    /// wherever it goes. False for a channel with no slot on the radio.
+    pub async fn set_muted(&self, radio: RadioId, peer: Peer, muted: bool) -> Result<bool> {
+        match peer {
+            Peer::Channel { channel } => {
+                let Some((channel_id,)): Option<(i64,)> = sqlx::query_as(
+                    "SELECT channel_id FROM channel_slot WHERE radio_id = ? AND slot = ?",
+                )
+                .bind(radio)
+                .bind(i64::from(channel))
+                .fetch_optional(&self.pool)
+                .await?
+                else {
+                    return Ok(false);
+                };
+                let query = if muted {
+                    "INSERT INTO conversation_mute (radio_id, channel_id) VALUES (?, ?)
+                    ON CONFLICT (channel_id) WHERE channel_id IS NOT NULL DO NOTHING"
+                } else {
+                    "DELETE FROM conversation_mute WHERE radio_id = ? AND channel_id = ?"
+                };
+                sqlx::query(query)
+                    .bind(radio)
+                    .bind(channel_id)
+                    .execute(&self.pool)
+                    .await?;
+            }
+            Peer::Node { node } => {
+                let query = if muted {
+                    "INSERT INTO conversation_mute (radio_id, node) VALUES (?, ?)
+                    ON CONFLICT (radio_id, node) WHERE node IS NOT NULL DO NOTHING"
+                } else {
+                    "DELETE FROM conversation_mute WHERE radio_id = ? AND node = ?"
+                };
+                sqlx::query(query)
+                    .bind(radio)
+                    .bind(i64::from(node))
+                    .execute(&self.pool)
+                    .await?;
+            }
+        }
+        Ok(true)
     }
 
     /// Reads a conversation of a radio up to a message, never back: the
@@ -1598,6 +1678,7 @@ impl Store {
                 last: Some(last),
                 unread: 0,
                 read_up_to: None,
+                muted: false,
             })
             .collect())
     }
@@ -2269,6 +2350,52 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(plain.position, None);
+    }
+
+    #[tokio::test]
+    async fn a_silenced_conversation_is_not_unread_among_the_radios() {
+        let store = Store::in_memory().await;
+        let radio = store.add_radio(&home()).await.unwrap().id;
+        let channel = Peer::Channel { channel: 0 };
+        let node = Peer::Node { node: 9 };
+        // One on the channel, two from the node.
+        store
+            .add_message(radio, &text(1, 5, BROADCAST, false))
+            .await
+            .unwrap();
+        store
+            .add_message(radio, &text(2, 9, 7, false))
+            .await
+            .unwrap();
+        store
+            .add_message(radio, &text(3, 9, 7, false))
+            .await
+            .unwrap();
+        assert_eq!(store.unread(radio).await.unwrap(), 3);
+
+        assert!(store.set_muted(radio, node, true).await.unwrap());
+        // Twice is once.
+        assert!(store.set_muted(radio, node, true).await.unwrap());
+        assert!(store.muted(radio, node).await.unwrap());
+        assert!(!store.muted(radio, channel).await.unwrap());
+        assert_eq!(store.unread(radio).await.unwrap(), 1);
+        // Its own count stays, for when it is opened.
+        assert_eq!(store.read_state(radio, node).await.unwrap().1, 2);
+
+        assert!(store.set_muted(radio, channel, true).await.unwrap());
+        assert_eq!(store.unread(radio).await.unwrap(), 0);
+        assert!(store.set_muted(radio, channel, false).await.unwrap());
+        assert_eq!(store.unread(radio).await.unwrap(), 1);
+        // A slot with no channel cannot be.
+        assert!(
+            !store
+                .set_muted(radio, Peer::Channel { channel: 5 }, true)
+                .await
+                .unwrap()
+        );
+        // Forgotten with the node.
+        store.forget_node(radio, 9).await.unwrap();
+        assert!(!store.muted(radio, node).await.unwrap());
     }
 
     #[tokio::test]

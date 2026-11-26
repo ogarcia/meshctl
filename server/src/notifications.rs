@@ -94,7 +94,7 @@ async fn heard(radios: &Radios, radio: RadioId, message: &Message) {
         return;
     }
     let peer = peer_of(message);
-    if radios.viewed(radio, peer) {
+    if radios.viewed(radio, peer) || radios.muted(radio, peer).await {
         return;
     }
     let notification = Notification {
