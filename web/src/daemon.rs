@@ -288,6 +288,19 @@ pub async fn forget_message(radio: RadioId, id: meshctl_api::MessageId) -> Resul
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Forgets a conversation's messages, only in meshctl: a channel's,
+/// which stays on the radio, or those exchanged with a node.
+pub async fn forget_conversation(radio: RadioId, peer: meshctl_api::Peer) -> Result<(), Failure> {
+    let which = match peer {
+        meshctl_api::Peer::Channel { channel } => format!("channel={channel}"),
+        meshctl_api::Peer::Node { node } => format!("node={node}"),
+    };
+    let request = with_token(Request::delete(&url(&format!(
+        "/radios/{radio}/messages?{which}"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// The radio's login to a room.
 pub async fn node_login(radio: RadioId, node: u32) -> Result<meshctl_api::NodeLogin, Failure> {
     get(&format!("/radios/{radio}/nodes/{node}/login")).await

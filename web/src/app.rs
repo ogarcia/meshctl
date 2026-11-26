@@ -1183,6 +1183,25 @@ impl Live {
                     self.thread.update(|t| t.retain(|m| !ids.contains(&m.id)));
                     Ok(())
                 }
+                // A channel emptied, or a conversation with a node gone.
+                ServerMessage::ConversationForgotten { radio, peer } if self.is_selected(radio) => {
+                    // A channel or a room is emptied and stays; a
+                    // conversation with a node goes.
+                    let goes = matches!(peer, Peer::Node { node } if !self.is_room(node));
+                    if self.open.get_untracked() == Some(peer) {
+                        self.thread.set(Vec::new());
+                        if goes {
+                            self.open.set(None);
+                            if self.page.get_untracked() == Page::Chat {
+                                self.go(Page::Chats);
+                            }
+                        }
+                    }
+                    if goes {
+                        self.conversations.update(|c| c.retain(|c| c.peer != peer));
+                    }
+                    self.refresh_conversations().await
+                }
                 ServerMessage::NodeForgotten { radio, node } if self.is_selected(radio) => {
                     let peer = Peer::Node { node };
                     self.requests.update(|r| r.retain(|r| r.node != node));
@@ -2485,6 +2504,13 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         meshcore()
                             .then(|| view! { <crate::meshcore_regions::ChannelRegion channel regions /> })
                     }}
+                    <button
+                        class="icon-button spare"
+                        title=move || forget_label(live, i18n, peer)
+                        aria-label=move || forget_label(live, i18n, peer)
+                        inner_html=TRASH
+                        on:click=move |_| forget_conversation(live, i18n, peer)
+                    ></button>
                     <MuteButton peer />
                     <HeadingMore can_history=false can_remove=false mute=peer />
                 </div>
@@ -2706,8 +2732,20 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         ></button>
                     }
                 });
-                // Silencing its conversation, from it.
+                // Silencing its conversation, from it; and forgetting it.
                 let mute = (page == Page::Chat).then(|| view! { <MuteButton peer /> });
+                let forget = (page == Page::Chat).then(|| {
+                    let label = move || forget_label(live, i18n, peer);
+                    view! {
+                        <button
+                            class="icon-button spare"
+                            title=label
+                            aria-label=label
+                            inner_html=TRASH
+                            on:click=move |_| forget_conversation(live, i18n, peer)
+                        ></button>
+                    }
+                });
                 // Where there is no room for them, those in a menu.
                 let can_remove = remove.is_some();
                 let can_history = history.is_some();
@@ -2717,7 +2755,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                     None => view! { <HeadingMore can_history can_remove can_admin /> }.into_any(),
                 });
                 // The three dots last, against the edge, as menus go.
-                view! { {remove} {history} {admin} {mute} {profile} {settings} {chat} {more} }
+                view! { {remove} {history} {admin} {forget} {mute} {profile} {settings} {chat} {more} }
             };
             // Back to where its page was opened from, on its page.
             let back = move || {
@@ -2773,6 +2811,46 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
             }
             .into_any()
         }
+    }
+}
+
+/// Forgetting a conversation, in words: a channel is emptied, staying on
+/// the radio; a conversation with a node goes.
+fn forget_label(
+    live: Live,
+    i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
+    peer: Peer,
+) -> &'static str {
+    match peer {
+        Peer::Channel { .. } => t_string!(i18n, chat_forget_channel),
+        // A room stays among the radio's, emptied.
+        Peer::Node { node } if live.is_room(node) => t_string!(i18n, chat_forget_room),
+        Peer::Node { .. } => t_string!(i18n, chat_forget_node),
+    }
+}
+
+/// Forgets a conversation's messages in meshctl, once confirmed: they are
+/// gone from what meshctl keeps, not from the mesh.
+fn forget_conversation(
+    live: Live,
+    i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
+    peer: Peer,
+) {
+    let Some(radio) = live.selected.get_untracked() else {
+        return;
+    };
+    let asked = match peer {
+        Peer::Channel { .. } => t_string!(i18n, chat_forget_channel_confirm),
+        Peer::Node { node } if live.is_room(node) => t_string!(i18n, chat_forget_room_confirm),
+        Peer::Node { .. } => t_string!(i18n, chat_forget_node_confirm),
+    };
+    let sure = web_sys::window()
+        .and_then(|w| w.confirm_with_message(asked).ok())
+        .unwrap_or(false);
+    if sure {
+        spawn_local(async move {
+            let _ = crate::daemon::forget_conversation(radio, peer).await;
+        });
     }
 }
 
@@ -2847,6 +2925,22 @@ fn HeadingMore(
                                             t_string!(i18n, chat_mute)
                                         }
                                     }}
+                                </button>
+                            }
+                        })}
+                    {mute
+                        .map(|peer| {
+                            view! {
+                                <button
+                                    role="menuitem"
+                                    class="danger-item"
+                                    on:click=move |_| {
+                                        open.set(false);
+                                        forget_conversation(live, i18n, peer);
+                                    }
+                                >
+                                    <span class="icon" inner_html=TRASH></span>
+                                    {move || forget_label(live, i18n, peer)}
                                 </button>
                             }
                         })}
