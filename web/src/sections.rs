@@ -42,6 +42,10 @@ pub type SectionEdits = RwSignal<BTreeMap<String, BTreeMap<String, Json>>>;
 /// The radio's admin keys, as a section among the configuration's.
 const SECURITY: &str = "security";
 
+/// How saving each section went, by its id, kept by the tab.
+#[derive(Debug, Clone, Copy)]
+struct SectionNotices(RwSignal<BTreeMap<String, Result<bool, Failure>>>);
+
 /// The section where the radio's position can be fixed.
 const POSITION: &str = "config.position";
 /// Where the radio is, fixed, among a section's edits: by a name no field
@@ -130,6 +134,8 @@ pub fn SaveBar(
     children: Option<Children>,
 ) -> impl IntoView {
     let i18n = use_i18n();
+    // To the radio, or to the node administered.
+    let to_node = crate::settings::node_of().is_some();
     view! {
         <div class="save-bar">
             {children.map(|start| view! { <div class="start">{start()}</div> })}
@@ -142,7 +148,11 @@ pub fn SaveBar(
                 disabled=move || busy.get() || !dirty.get()
                 on:click=move |_| save()
             >
-                {t!(i18n, settings_save)}
+                {if to_node {
+                    t!(i18n, admin_save).into_any()
+                } else {
+                    t!(i18n, settings_save).into_any()
+                }}
             </button>
         </div>
     }
@@ -183,6 +193,70 @@ pub fn SectionsTab(
         })
     });
     let current_id = move || current.with(|c| c.as_ref().map(|c| c.id.clone()));
+
+    // A node's, each read of it as it is picked, once: until then it has
+    // no fields. Why not, if it could not be.
+    let live = expect_context::<Live>();
+    let node = crate::settings::node_of();
+    let asked = RwSignal::new(std::collections::BTreeSet::<String>::new());
+    // How saving each went, kept here: a section is drawn anew as it is
+    // read again, and says it still.
+    provide_context(SectionNotices(RwSignal::new(BTreeMap::new())));
+    provide_context(sections);
+    let failed = RwSignal::new(None::<(String, Failure)>);
+    let unread =
+        move || node.is_some() && current.with(|c| c.as_ref().is_some_and(|c| c.fields.is_empty()));
+    Effect::new(move |_| {
+        let (Some(node), Some(radio)) = (node, live.selected.get_untracked()) else {
+            return;
+        };
+        let Some(id) = current_id() else { return };
+        failed.track();
+        if !unread() || asked.with_untracked(|a| a.contains(&id)) {
+            return;
+        }
+        asked.update(|a| {
+            a.insert(id.clone());
+        });
+        spawn_local(async move {
+            match daemon::node_section(radio, node, &id).await {
+                Ok(read) => {
+                    asked.update(|a| {
+                        a.remove(&read.id);
+                    });
+                    sections.update(|all| {
+                        if let Some(section) = all.iter_mut().find(|s| s.id == read.id) {
+                            *section = read;
+                        }
+                    });
+                }
+                Err(failure) => {
+                    asked.update(|a| {
+                        a.remove(&id);
+                    });
+                    failed.set(Some((id, failure)));
+                }
+            }
+        });
+    });
+    let waiting = move || {
+        unread().then(|| {
+            let id = current_id().unwrap_or_default();
+            match failed.get().filter(|(at, _)| *at == id) {
+                Some((_, failure)) => view! {
+                    <crate::node_admin::Failed failure retry=Callback::new(move |()| failed.set(None)) />
+                }
+                .into_any(),
+                None => view! {
+                    <p class="dim admin-waiting">
+                        <span class="spinner" aria-hidden="true"></span>
+                        {t!(i18n, admin_section_asking)}
+                    </p>
+                }
+                .into_any(),
+            }
+        })
+    };
 
     view! {
         <div class="sections-tab">
@@ -247,8 +321,9 @@ pub fn SectionsTab(
             // rather than one's elements taken over by the next: a switch on
             // in one and off in the other would be seen to flip.
             <div class="section-panel">
+                {waiting}
                 <For
-                    each=move || current.get().into_iter()
+                    each=move || current.get().into_iter().filter(|s| !s.fields.is_empty())
                     key=|section| (section.id.clone(), serde_json::to_string(section).unwrap_or_default())
                     let:section
                 >
@@ -270,9 +345,30 @@ pub(crate) fn SectionForm(
 ) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    // How it went: whether the radio reboots for it, or why not.
-    let notice = RwSignal::new(None::<Result<bool, Failure>>);
+    let node = crate::settings::node_of();
+    // How it went: whether the radio reboots for it, or why not; kept by
+    // the tab too, as a node's section is drawn anew once read again.
+    let notices = use_context::<SectionNotices>();
+    let notice = RwSignal::new(
+        notices.and_then(|n| n.0.with_untracked(|all| all.get(&section.id).cloned())),
+    );
+    if let Some(SectionNotices(all)) = notices {
+        let id = section.id.clone();
+        Effect::new(move |_| {
+            let now = notice.get();
+            all.update_untracked(|all| match now {
+                Some(now) => {
+                    all.insert(id.clone(), now);
+                }
+                None => {
+                    all.remove(&id);
+                }
+            });
+        });
+    }
     clear_when_synced(live, notice);
+    // A node's sections, to read this one again once changed.
+    let sections = use_context::<RwSignal<Vec<SettingsSection>>>();
     let busy = RwSignal::new(false);
     let id = section.id.clone();
     let on = enabled(&section);
@@ -324,28 +420,34 @@ pub(crate) fn SectionForm(
             if values.is_empty() && fixed.is_none() {
                 return;
             }
-            // Moving where it is alone reboots nothing.
-            let sure = values.is_empty()
-                || web_sys::window()
-                    .and_then(|w| {
-                        w.confirm_with_message(t_string!(i18n, settings_reboot_confirm))
-                            .ok()
-                    })
-                    .unwrap_or(false);
-            if !sure {
+            // Moving where it is alone reboots nothing; anything goes to
+            // another node over the mesh, asked first.
+            if (!values.is_empty() || node.is_some()) && !crate::settings::sure(i18n, node, false) {
                 return;
             }
             let id = id.clone();
             busy.set(true);
             spawn_local(async move {
-                let outcome = daemon::change_section(radio, &id, values, fixed).await;
-                if outcome.is_ok() {
+                let outcome = daemon::change_section(radio, node, &id, values, fixed).await;
+                let done = outcome.is_ok();
+                if done {
                     edits.update(|e| {
                         e.remove(&id);
                     });
                 }
                 notice.set(Some(outcome.map(|applied| applied.reboots)));
                 busy.set(false);
+                // A node's, read from it again, as it has it now.
+                if done
+                    && node.is_some()
+                    && let Some(sections) = sections
+                {
+                    sections.update(|all| {
+                        if let Some(section) = all.iter_mut().find(|s| s.id == id) {
+                            section.fields.clear();
+                        }
+                    });
+                }
             });
         }
     };
@@ -360,6 +462,12 @@ pub(crate) fn SectionForm(
 
     let notice_view = move || {
         notice.get().map(|outcome| match outcome {
+            Ok(true) if node.is_some() => {
+                view! { <p class="note">{t!(i18n, admin_applied_reboot)}</p> }.into_any()
+            }
+            Ok(false) if node.is_some() => {
+                view! { <p class="note">{t!(i18n, admin_applied)}</p> }.into_any()
+            }
             Ok(true) => {
                 view! { <p class="note">{t!(i18n, settings_applied_reboot)}</p> }.into_any()
             }
@@ -384,13 +492,14 @@ pub(crate) fn SectionForm(
             };
             // Where the radio is, under the switch that fixes it.
             let fixed =
-                (!read_only && id == POSITION && field.name == "fixed_position").then(|| {
-                    let value_of = value_of.clone();
-                    let visible = Signal::derive(move || {
-                        visible.get() && value_of("fixed_position") == Some(Json::Bool(true))
+                (!read_only && node.is_none() && id == POSITION && field.name == "fixed_position")
+                    .then(|| {
+                        let value_of = value_of.clone();
+                        let visible = Signal::derive(move || {
+                            visible.get() && value_of("fixed_position") == Some(Json::Bool(true))
+                        });
+                        view! { <FixedRow edits visible /> }
                     });
-                    view! { <FixedRow edits visible /> }
-                });
             view! {
                 <FieldInput section=id.clone() field edits visible />
                 {fixed}
@@ -894,6 +1003,7 @@ fn FieldInput(
         FieldKind::Text if field.secret => {
             let set = field.set;
             let live = expect_context::<Live>();
+            let node = crate::settings::node_of();
             // The secret itself, while shown: asked for then, and nowhere
             // else; gone as it is hidden, or the page goes.
             let shown = RwSignal::new(None::<String>);
@@ -910,7 +1020,9 @@ fn FieldInput(
                     };
                     let (section, name) = (section.clone(), name.clone());
                     spawn_local(async move {
-                        if let Ok(secret) = daemon::section_secret(radio, &section, &name).await {
+                        if let Ok(secret) =
+                            daemon::section_secret(radio, node, &section, &name).await
+                        {
                             shown.set(Some(secret.value));
                         }
                     });

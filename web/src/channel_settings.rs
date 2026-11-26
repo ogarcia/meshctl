@@ -94,7 +94,11 @@ fn private(key: ChannelKey) -> bool {
 pub fn ChannelsTab(loaded: RwSignal<Option<NodeSettings>>, notice: Notice) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    let node = crate::settings::node_of();
     let editing = RwSignal::new(Editing::Closed);
+    let refresh = use_context::<crate::settings::Refresh>();
+    // A new order on its way to a node, over the mesh.
+    let sending = RwSignal::new(false);
     // Those it has, in their slots' order, with how many there are.
     let channels = move || {
         loaded.with(|l| {
@@ -171,9 +175,15 @@ pub fn ChannelsTab(loaded: RwSignal<Option<NodeSettings>>, notice: Notice) -> im
                 }
             }
         });
+        if node.is_some() && !crate::settings::sure(i18n, node, true) {
+            return;
+        }
+        sending.set(node.is_some());
         spawn_local(async move {
-            let applied = daemon::reorder_channels(radio, &order).await;
+            let applied = daemon::reorder_channels(radio, node, &order).await;
             notice.set(Some(applied.map(|a| a.reboots)));
+            sending.set(false);
+            crate::settings::Refresh::run(refresh);
         });
     };
     // The first slot free, for a new one.
@@ -201,9 +211,20 @@ pub fn ChannelsTab(loaded: RwSignal<Option<NodeSettings>>, notice: Notice) -> im
             >
                 <ChannelRow name channel at count sortable editing reorder />
             </For>
+            <p class="dim admin-waiting" class:gone=move || !sending.get()>
+                <span class="spinner" aria-hidden="true"></span>
+                {t!(i18n, admin_sending)}
+            </p>
             <div class="channel-foot">
-                <p class="hint dim">{t!(i18n, channels_hint)}</p>
-                <crate::links::AddChannelsLink />
+                <p class="hint dim">
+                    {if node.is_some() {
+                        t!(i18n, admin_channels_hint).into_any()
+                    } else {
+                        t!(i18n, channels_hint).into_any()
+                    }}
+                </p>
+                // A link's channels go to the radio itself.
+                {node.is_none().then(|| view! { <crate::links::AddChannelsLink /> })}
                 <button
                     type="button"
                     class="primary add"
@@ -397,6 +418,7 @@ fn ChannelEditor(
     let slot = index;
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    let node = crate::settings::node_of();
     let primary = slot == 0;
     let (start, preset) = loaded.with_untracked(|l| {
         let l = l.as_ref();
@@ -512,7 +534,7 @@ fn ChannelEditor(
             return;
         };
         spawn_local(async move {
-            match daemon::channel_secret(radio, slot).await {
+            match daemon::channel_secret(radio, node, slot).await {
                 Ok(read) => secret.set(Some(read)),
                 Err(failure) => error.set(Some(failure)),
             }
@@ -525,11 +547,15 @@ fn ChannelEditor(
         }
     };
 
+    let refresh = use_context::<crate::settings::Refresh>();
     // Sends one channel as it is to be, and closes once the radio has it.
     let send = move |channel: ChannelChange| {
         let Some(radio) = live.selected.get_untracked() else {
             return;
         };
+        if node.is_some() && !crate::settings::sure(i18n, node, true) {
+            return;
+        }
         busy.set(true);
         error.set(None);
         spawn_local(async move {
@@ -537,10 +563,11 @@ fn ChannelEditor(
                 channels: vec![channel],
                 ..Default::default()
             };
-            match daemon::change_settings(radio, &change).await {
+            match daemon::change_settings(radio, node, &change).await {
                 Ok(applied) => {
                     notice.set(Some(Ok(applied.reboots)));
                     editing.set(Editing::Closed);
+                    crate::settings::Refresh::run(refresh);
                 }
                 Err(failure) => error.set(Some(failure)),
             }
@@ -569,13 +596,17 @@ fn ChannelEditor(
         let Some(radio) = live.selected.get_untracked() else {
             return;
         };
+        if node.is_some() && !crate::settings::sure(i18n, node, true) {
+            return;
+        }
         busy.set(true);
         error.set(None);
         spawn_local(async move {
-            match daemon::remove_channel(radio, slot, history).await {
+            match daemon::remove_channel(radio, node, slot, history).await {
                 Ok(applied) => {
                     notice.set(Some(Ok(applied.reboots)));
                     editing.set(Editing::Closed);
+                    crate::settings::Refresh::run(refresh);
                 }
                 Err(failure) => error.set(Some(failure)),
             }
@@ -641,12 +672,15 @@ fn ChannelEditor(
                     <button
                         type="button"
                         class="close"
+                        disabled=move || busy.get()
                         title=move || t_string!(i18n, radio_cancel)
                         aria-label=move || t_string!(i18n, radio_cancel)
                         on:click=move |_| close()
                         inner_html=CLOSE
                     ></button>
                 </header>
+                // Held still while it is on its way.
+                <fieldset class="busy-lock" prop:disabled=move || busy.get()>
                 <div class="modal-body">
                     <div class="fields">
                         <label>
@@ -831,6 +865,17 @@ fn ChannelEditor(
                         </div>
                     </div>
                 </div>
+                </fieldset>
+                <p class="dim admin-waiting" class:gone=move || !busy.get()>
+                    <span class="spinner" aria-hidden="true"></span>
+                    {move || {
+                        if node.is_some() {
+                            t!(i18n, admin_sending).into_any()
+                        } else {
+                            t!(i18n, settings_sending).into_any()
+                        }
+                    }}
+                </p>
                 <p class="error">{message}</p>
                 </div>
                 // Taking it off asks first what becomes of its messages.
@@ -862,18 +907,33 @@ fn ChannelEditor(
                     {(!adding && !primary)
                         .then(|| {
                             view! {
-                                <button type="button" class="danger" on:click=move |_| removing.set(true)>
+                                // A node's has no messages here to ask
+                                // about.
+                                <button
+                                    type="button"
+                                    class="danger"
+                                    disabled=move || busy.get()
+                                    on:click=move |_| {
+                                        if node.is_some() {
+                                            remove(ChannelHistory::Keep);
+                                        } else {
+                                            removing.set(true);
+                                        }
+                                    }
+                                >
                                     {t!(i18n, channel_remove)}
                                 </button>
                             }
                         })}
-                    <button type="button" on:click=move |_| close()>
+                    <button type="button" disabled=move || busy.get() on:click=move |_| close()>
                         {t!(i18n, radio_cancel)}
                     </button>
                     <button type="submit" class="primary" disabled=move || busy.get()>
                         {move || {
                             if adding {
                                 t!(i18n, channel_add).into_any()
+                            } else if node.is_some() {
+                                t!(i18n, admin_save).into_any()
                             } else {
                                 t!(i18n, settings_save).into_any()
                             }

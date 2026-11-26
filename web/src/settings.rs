@@ -41,6 +41,31 @@ fn is_empty(change: &NodeSettingsChange) -> bool {
         && change.channels.is_empty()
 }
 
+/// Whose settings a page shows: the radio's own, or, as its admin over the
+/// mesh, another node's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettingsOf(pub Option<u32>);
+
+/// A turn to read a node's settings again as meshctl has them, after a
+/// change taken by the node: what is shown is then what it has.
+#[derive(Debug, Clone, Copy)]
+pub struct Refresh(pub RwSignal<u32>);
+
+impl Refresh {
+    /// Reads them again, if there is a page of a node's to.
+    pub fn run(refresh: Option<Self>) {
+        if let Some(Self(turn)) = refresh {
+            turn.update(|t| *t += 1);
+        }
+    }
+}
+
+/// Whose settings the page shown is of: another node's, by its number, or
+/// none for the radio's own.
+pub fn node_of() -> Option<u32> {
+    use_context::<SettingsOf>().and_then(|of| of.0)
+}
+
 /// The page's tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -105,10 +130,39 @@ fn merge(before: &NodeSettings, draft: &NodeSettings, read: &NodeSettings) -> No
     merged
 }
 
+/// Asks before a change is sent: to the radio, only if it reboots for it;
+/// to another node, over the mesh, always, and more firmly for what could
+/// leave it out of reach, its LoRa and its channels.
+pub fn sure(
+    i18n: leptos_i18n::I18nContext<crate::i18n::Locale>,
+    node: Option<u32>,
+    risky: bool,
+) -> bool {
+    let words = match (node, risky) {
+        (None, _) => t_string!(i18n, settings_reboot_confirm),
+        (Some(_), false) => t_string!(i18n, admin_reboot_confirm),
+        (Some(_), true) => t_string!(i18n, admin_risky_confirm),
+    };
+    web_sys::window()
+        .and_then(|w| w.confirm_with_message(words).ok())
+        .unwrap_or(false)
+}
+
+/// The settings of the radio, or, as its admin over the mesh, of another
+/// node: the same tabs, each read from the node and changed on it.
 #[component]
-pub fn SettingsView() -> impl IntoView {
+pub fn SettingsView(#[prop(optional)] node: Option<u32>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    provide_context(SettingsOf(node));
+    // A node's: why they could not be read, and a turn to read them anew.
+    let failed = RwSignal::new(None::<Failure>);
+    let reread = RwSignal::new(0_u32);
+    let refresh = RwSignal::new(0_u32);
+    provide_context(Refresh(refresh));
+    // The turn to ask the node anew last read: anything else reads what
+    // meshctl has.
+    let fresh_at = StoredValue::new(None::<u32>);
     let loaded = RwSignal::new(None::<NodeSettings>);
     let sections = RwSignal::new(Vec::<SettingsSection>::new());
     let draft = RwSignal::new(None::<NodeSettings>);
@@ -150,10 +204,27 @@ pub fn SettingsView() -> impl IntoView {
         if !ready() || live.selected_kind() == Some(RadioKind::Meshcore) {
             return radio;
         }
-        live.synced.track();
+        // The radio's, as it syncs anew; a node's, asked of it anew when
+        // said, not as the radio syncs.
+        let fresh = if node.is_some() {
+            refresh.track();
+            let turn = reread.get();
+            let fresh = fresh_at.get_value() != Some(turn);
+            fresh_at.set_value(Some(turn));
+            fresh
+        } else {
+            live.synced.track();
+            false
+        };
         let Some(id) = radio else { return radio };
+        failed.set(None);
+        let have_sections = !sections.with_untracked(Vec::is_empty);
         spawn_local(async move {
-            if let Ok(read) = daemon::settings(id).await
+            let read = daemon::settings(id, node, fresh).await;
+            if let Err(failure) = &read {
+                let _ = failed.try_set(Some(*failure));
+            }
+            if let Ok(read) = read
                 && live.selected.get_untracked() == Some(id)
             {
                 let before = loaded.get_untracked();
@@ -165,7 +236,28 @@ pub fn SettingsView() -> impl IntoView {
                 draft.set(Some(merged));
                 loaded.set(Some(read));
             }
-            if let Ok(read) = daemon::sections(id).await
+            // A node's, by their names: each read of it as it is picked;
+            // asked again only when it is all asked anew.
+            if node.is_some() && have_sections && !fresh {
+                return;
+            }
+            let read = match node {
+                None => daemon::sections(id).await,
+                Some(node) => daemon::node_sections(id, node).await.map(|ids| {
+                    ids.into_iter()
+                        .map(|id| {
+                            let (kind, name) = id.split_once('.').unwrap_or(("config", &id));
+                            SettingsSection {
+                                module: kind == "module",
+                                name: name.to_owned(),
+                                id: id.clone(),
+                                fields: Vec::new(),
+                            }
+                        })
+                        .collect()
+                }),
+            };
+            if let Ok(read) = read
                 && live.selected.get_untracked() == Some(id)
             {
                 sections.set(read);
@@ -207,21 +299,15 @@ pub fn SettingsView() -> impl IntoView {
                 })
             })
         });
-        if change.device.is_some() || change.lora.is_some() || owner_reboots {
-            let sure = web_sys::window()
-                .and_then(|w| {
-                    w.confirm_with_message(t_string!(i18n, settings_reboot_confirm))
-                        .ok()
-                })
-                .unwrap_or(false);
-            if !sure {
-                return;
-            }
+        let reboots = change.device.is_some() || change.lora.is_some() || owner_reboots;
+        let risky = change.lora.is_some() || !change.channels.is_empty();
+        if (reboots || node.is_some()) && !sure(i18n, node, risky) {
+            return;
         }
         busy.set(true);
         notice.set(None);
         spawn_local(async move {
-            let applied = daemon::change_settings(radio, &change).await;
+            let applied = daemon::change_settings(radio, node, &change).await;
             if applied.is_ok() {
                 // Taken as the radio's until it is read back.
                 if let Some(now) = draft.get_untracked() {
@@ -248,6 +334,12 @@ pub fn SettingsView() -> impl IntoView {
 
     let notice_view = move || {
         notice.get().map(|outcome| match outcome {
+            Ok(true) if node.is_some() => {
+                view! { <p class="card note">{t!(i18n, admin_applied_reboot)}</p> }.into_any()
+            }
+            Ok(false) if node.is_some() => {
+                view! { <p class="card note">{t!(i18n, admin_applied)}</p> }.into_any()
+            }
             Ok(true) => {
                 view! { <p class="card note">{t!(i18n, settings_applied_reboot)}</p> }.into_any()
             }
@@ -307,7 +399,21 @@ pub fn SettingsView() -> impl IntoView {
     let body = move || {
         let this = tab.get();
         if !has_draft.get() {
-            return ().into_any();
+            // A node's, while asked of it, or why not.
+            return match (node, failed.get()) {
+                (None, _) => ().into_any(),
+                (Some(_), None) => view! {
+                    <p class="dim admin-waiting">
+                        <span class="spinner" aria-hidden="true"></span>
+                        {t!(i18n, admin_asking)}
+                    </p>
+                }
+                .into_any(),
+                (Some(_), Some(failure)) => view! {
+                    <crate::node_admin::Failed failure retry=Callback::new(move |()| reread.update(|r| *r += 1)) />
+                }
+                .into_any(),
+            };
         }
         let dirty = Signal::derive(move || pending(this).is_some());
         let bar = move || {
@@ -397,6 +503,23 @@ pub fn SettingsView() -> impl IntoView {
             }
         >
             <div class="node-settings">
+                // A node's: from where, and read anew when wanted.
+                {node.map(|_| view! {
+                    <div class="admin-bar">
+                        <span class="dim">{t!(i18n, admin_hint)}</span>
+                        <button
+                            type="button"
+                            class="with-icon retry"
+                            disabled=move || !has_draft.get() && failed.get().is_none()
+                            title=move || t_string!(i18n, admin_reread)
+                            aria-label=move || t_string!(i18n, admin_reread)
+                            on:click=move |_| reread.update(|r| *r += 1)
+                        >
+                            <span class="icon" inner_html=crate::node_admin::REFRESH></span>
+                            <span class="label">{t!(i18n, admin_reread)}</span>
+                        </button>
+                    </div>
+                })}
                 <div
                     class="segmented fitted settings-tabs"
                     role="tablist"

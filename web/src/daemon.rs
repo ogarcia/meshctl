@@ -341,15 +341,31 @@ pub async fn resend_message(radio: RadioId, id: meshctl_api::MessageId) -> Resul
     answer(request.send().await).await.map(|_| ())
 }
 
-pub async fn settings(radio: RadioId) -> Result<NodeSettings, Failure> {
-    get(&format!("/radios/{radio}/settings")).await
+/// Where whose settings are in the API: the radio's own, or another
+/// node's, read and changed over the mesh as its admin.
+fn at(radio: RadioId, node: Option<u32>) -> String {
+    match node {
+        Some(node) => format!("/radios/{radio}/nodes/{node}"),
+        None => format!("/radios/{radio}"),
+    }
+}
+
+/// Whose settings: a node's asked of it anew if `fresh`.
+pub async fn settings(
+    radio: RadioId,
+    node: Option<u32>,
+    fresh: bool,
+) -> Result<NodeSettings, Failure> {
+    let fresh = if fresh { "?fresh=true" } else { "" };
+    get(&format!("{}/settings{fresh}", at(radio, node))).await
 }
 
 pub async fn change_settings(
     radio: RadioId,
+    node: Option<u32>,
     change: &NodeSettingsChange,
 ) -> Result<SettingsApplied, Failure> {
-    let request = with_token(Request::put(&url(&format!("/radios/{radio}/settings"))))
+    let request = with_token(Request::put(&url(&format!("{}/settings", at(radio, node)))))
         .json(change)
         .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
@@ -360,18 +376,24 @@ pub async fn change_settings(
 /// not kept.
 pub async fn section_secret(
     radio: RadioId,
+    node: Option<u32>,
     section: &str,
     field: &str,
 ) -> Result<SectionSecret, Failure> {
     get(&format!(
-        "/radios/{radio}/secrets/sections/{section}/{field}"
+        "{}/secrets/sections/{section}/{field}",
+        at(radio, node)
     ))
     .await
 }
 
 /// A channel's key itself: asked for only to be shown, and not kept.
-pub async fn channel_secret(radio: RadioId, index: u32) -> Result<ChannelSecret, Failure> {
-    get(&format!("/radios/{radio}/secrets/channels/{index}")).await
+pub async fn channel_secret(
+    radio: RadioId,
+    node: Option<u32>,
+    index: u32,
+) -> Result<ChannelSecret, Failure> {
+    get(&format!("{}/secrets/channels/{index}", at(radio, node))).await
 }
 
 pub async fn sections(radio: RadioId) -> Result<Vec<SettingsSection>, Failure> {
@@ -379,18 +401,25 @@ pub async fn sections(radio: RadioId) -> Result<Vec<SettingsSection>, Failure> {
 }
 
 /// The keys the radio takes admin requests from, over the mesh.
-pub async fn admin_keys(radio: RadioId) -> Result<meshctl_api::AdminKeys, Failure> {
-    get(&format!("/radios/{radio}/admin-keys")).await
+pub async fn admin_keys(
+    radio: RadioId,
+    node: Option<u32>,
+) -> Result<meshctl_api::AdminKeys, Failure> {
+    get(&format!("{}/admin-keys", at(radio, node))).await
 }
 
 /// Sets the keys the radio takes admin requests from: all of them.
 pub async fn change_admin_keys(
     radio: RadioId,
+    node: Option<u32>,
     keys: &meshctl_api::AdminKeys,
 ) -> Result<SettingsApplied, Failure> {
-    let request = with_token(Request::put(&url(&format!("/radios/{radio}/admin-keys"))))
-        .json(keys)
-        .map_err(|_| Failure::Unreachable)?;
+    let request = with_token(Request::put(&url(&format!(
+        "{}/admin-keys",
+        at(radio, node)
+    ))))
+    .json(keys)
+    .map_err(|_| Failure::Unreachable)?;
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)
 }
@@ -412,12 +441,14 @@ pub async fn node_section(
 
 pub async fn change_section(
     radio: RadioId,
+    node: Option<u32>,
     section: &str,
     values: std::collections::BTreeMap<String, serde_json::Value>,
     fixed_position: Option<meshctl_api::FixedPosition>,
 ) -> Result<SettingsApplied, Failure> {
     let request = with_token(Request::put(&url(&format!(
-        "/radios/{radio}/sections/{section}"
+        "{}/sections/{section}",
+        at(radio, node)
     ))))
     .json(&SectionChange {
         values,
@@ -712,8 +743,12 @@ pub async fn remove_meshcore_channel(radio: RadioId, index: u32) -> Result<(), F
 
 /// A MeshCore channel's link, its secret in it.
 /// A channel's link, to share it, as its radio's apps read it.
-pub async fn channel_link(radio: RadioId, index: u32) -> Result<meshctl_api::Contact, Failure> {
-    get(&format!("/radios/{radio}/channels/{index}/link")).await
+pub async fn channel_link(
+    radio: RadioId,
+    node: Option<u32>,
+    index: u32,
+) -> Result<meshctl_api::Contact, Failure> {
+    get(&format!("{}/channels/{index}/link", at(radio, node))).await
 }
 
 pub async fn meshcore_channel_link(
@@ -850,12 +885,17 @@ pub async fn remove_radio(radio: RadioId) -> Result<(), Failure> {
 }
 
 /// Puts a radio's channels in another order, by the slots they have now.
-pub async fn reorder_channels(radio: RadioId, order: &[u32]) -> Result<SettingsApplied, Failure> {
+pub async fn reorder_channels(
+    radio: RadioId,
+    node: Option<u32>,
+    order: &[u32],
+) -> Result<SettingsApplied, Failure> {
     let order = ChannelOrder {
         order: order.to_vec(),
     };
     let request = with_token(Request::put(&url(&format!(
-        "/radios/{radio}/channels/order"
+        "{}/channels/order",
+        at(radio, node)
     ))))
     .json(&order)
     .map_err(|_| Failure::Unreachable)?;
@@ -866,6 +906,7 @@ pub async fn reorder_channels(radio: RadioId, order: &[u32]) -> Result<SettingsA
 /// Takes a channel off a radio, its messages kept aside or forgotten.
 pub async fn remove_channel(
     radio: RadioId,
+    node: Option<u32>,
     index: u32,
     history: ChannelHistory,
 ) -> Result<SettingsApplied, Failure> {
@@ -874,7 +915,8 @@ pub async fn remove_channel(
         ChannelHistory::Forget => "forget",
     };
     let request = with_token(Request::delete(&url(&format!(
-        "/radios/{radio}/channels/{index}?history={history}"
+        "{}/channels/{index}?history={history}",
+        at(radio, node)
     ))));
     let response = answer(request.send().await).await?;
     response.json().await.map_err(|_| Failure::Unreachable)

@@ -2099,8 +2099,37 @@
       button.danger-outline { border-color: color-mix(in srgb, var(--mc-danger) 50%, var(--mc-border)); color: var(--mc-danger); }
       button.danger-outline:hover:not(:disabled) { border-color: var(--mc-danger); }
       .removal .problem { margin: 0; color: var(--mc-danger); font-size: 13px; }
-      /* Another node's settings, as its admin: each section a row, read from
-         it as it opens. */
+      /* Another node's settings, as its admin: where they come from, and
+         why not, if they could not be read. */
+      .admin-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        max-width: 640px;
+        margin: 0 auto 16px;
+        padding: 10px 14px;
+        border: 1px solid var(--mc-border);
+        border-radius: 10px;
+        background: var(--mc-surface);
+      }
+      .admin-bar .dim { flex: 1; font-size: 13px; line-height: 1.5; }
+      .admin-bar button { flex: none; }
+      .settings > .admin-waiting, .section-panel > .admin-waiting { max-width: 640px; margin: 16px auto; font-size: 14px; }
+      /* As wide as the tabs: centred, which would shrink it to its text. */
+      .settings > .node-admin { width: 100%; max-width: 640px; margin: 0 auto; padding: 0; }
+      .settings > .admin-waiting { width: 100%; }
+      /* Why not, and trying again, in one box as wide as the tabs. */
+      .admin-failed { display: flex; align-items: center; gap: 12px; }
+      .admin-failed .what { flex: 1; min-width: 0; }
+      .admin-failed .retry, .admin-bar .retry { display: inline-flex; flex: none; align-items: center; gap: 6px; }
+      .admin-failed .retry .icon, .admin-bar .retry .icon { display: flex; }
+      .admin-failed .retry svg, .admin-bar .retry svg { width: 16px; height: 16px; }
+      /* On its way: said, and what it is sent from held still. */
+      .channel-list > .admin-waiting { margin: 4px 0; font-size: 13px; }
+      .channel-editor .admin-waiting { margin: 0 20px; font-size: 13px; }
+      fieldset.busy-lock { margin: 0; padding: 0; border: 0; min-width: 0; }
+      fieldset.busy-lock:disabled { opacity: 0.6; }
+      .section-panel > .node-admin { padding: 0; }
       .node-admin { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; }
       .node-admin > p { margin: 0; font-size: 13px; line-height: 1.5; }
       /* Its notes, as boxes: a tint of their colour behind them. */
@@ -2129,29 +2158,6 @@
       .admin-key .public-key { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
       .admin-key .icon-button { flex: none; }
       .admin-key .icon-button svg { width: 16px; height: 16px; }
-      .admin-sections { display: flex; flex-direction: column; border-top: 1px solid var(--mc-border); }
-      .admin-section { border-bottom: 1px solid var(--mc-border); }
-      .admin-section-head {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        min-height: 44px;
-        padding: 0 4px;
-        border: 0;
-        border-radius: 0;
-        background: none;
-        font-weight: 500;
-        text-align: left;
-      }
-      .admin-section-head:hover { background: var(--mc-raised); }
-      .admin-section-head .label { flex: 1; min-width: 0; }
-      .admin-section-head .chevron { display: flex; color: var(--mc-muted); transform: rotate(-90deg); transition: transform 0.15s; }
-      .admin-section.open .chevron { transform: none; }
-      .admin-section-head .chevron svg { width: 16px; height: 16px; }
-      .admin-section-body { padding: 4px 4px 16px; }
-      .admin-section-body > p { margin: 8px 0; font-size: 13px; }
-      .admin-section-body > button { margin-bottom: 4px; }
       fieldset.read-only { margin: 0; padding: 0; border: 0; min-width: 0; }
       /* The radio's admin keys: each a row, whose and which, and its way
          out. */
@@ -4938,6 +4944,8 @@
         .composer textarea, .composer .backdrop { padding: 11px 46px 11px 12px; }
         .composer .emoji-toggle { width: 44px; height: 44px; }
         .composer .share-toggle { right: 44px; width: 44px; height: 44px; }
+        .admin-bar .retry .label { display: none; }
+        .admin-bar .retry { min-width: 44px; justify-content: center; }
         .composer .field.with-place textarea,
         .composer .field.with-place .backdrop { padding-right: 90px; }
         .composer .field.offline textarea,

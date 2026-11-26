@@ -22,7 +22,7 @@ const DOTS: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/dot
 fn tab_of(page: Page) -> Page {
     match page {
         Page::Map => Page::Map,
-        Page::Nodes | Page::Node => Page::Nodes,
+        Page::Nodes | Page::Node | Page::NodeSettings => Page::Nodes,
         Page::Chats | Page::Chat => Page::Chats,
         Page::Packets => Page::Packets,
         Page::More

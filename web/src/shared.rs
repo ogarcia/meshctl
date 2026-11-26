@@ -756,18 +756,20 @@ fn ChannelPicker(meshtastic: bool, pick: Callback<String>, close: Callback<()>) 
     if let Some(radio) = live.selected.get_untracked() {
         spawn_local(async move {
             let read = if meshtastic {
-                crate::daemon::settings(radio).await.map(|settings| {
-                    settings
-                        .channels
-                        .iter()
-                        .filter(|c| c.role != "DISABLED")
-                        .map(|c| Pickable {
-                            slot: c.index,
-                            name: crate::channel_settings::shown_name(&settings, c),
-                            said: Said::Meshtastic(c.key),
-                        })
-                        .collect()
-                })
+                crate::daemon::settings(radio, None, false)
+                    .await
+                    .map(|settings| {
+                        settings
+                            .channels
+                            .iter()
+                            .filter(|c| c.role != "DISABLED")
+                            .map(|c| Pickable {
+                                slot: c.index,
+                                name: crate::channel_settings::shown_name(&settings, c),
+                                said: Said::Meshtastic(c.key),
+                            })
+                            .collect()
+                    })
             } else {
                 crate::daemon::meshcore_channels(radio).await.map(|read| {
                     read.channels
@@ -796,7 +798,7 @@ fn ChannelPicker(meshtastic: bool, pick: Callback<String>, close: Callback<()>) 
             return;
         };
         spawn_local(async move {
-            match crate::daemon::channel_link(radio, slot).await {
+            match crate::daemon::channel_link(radio, None, slot).await {
                 Ok(link) => pick.run(link.url),
                 Err(_) => {
                     let _ = failed.try_set(true);

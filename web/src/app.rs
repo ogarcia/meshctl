@@ -85,6 +85,9 @@ pub enum Page {
     Node,
     /// The selected radio's own settings.
     RadioSettings,
+    /// The open node's settings, as its admin over the mesh: the same as
+    /// the radio's own.
+    NodeSettings,
     /// meshctl's: how the interface looks.
     Preferences,
     /// meshctl's: the radios it connects to.
@@ -239,9 +242,6 @@ pub struct Live {
     pub newer: RwSignal<bool>,
     /// Whether the open node's requests are shown, in their drawer.
     pub history: RwSignal<bool>,
-    /// Whether the open node's settings are shown, read from it as its
-    /// admin, in their drawer.
-    pub administering: RwSignal<bool>,
     /// Whether the radios are shown to switch the selected one, on a phone.
     pub radio_sheet: RwSignal<bool>,
     /// The node picked on the map, if any.
@@ -323,7 +323,6 @@ impl Live {
             scroll_turn: StoredValue::new(0),
             came_from: RwSignal::new(Page::Map),
             history: RwSignal::new(false),
-            administering: RwSignal::new(false),
             removing: RwSignal::new(false),
             adding_link: RwSignal::new(None),
             offered_link: RwSignal::new(None),
@@ -1676,6 +1675,10 @@ fn Content() -> impl IntoView {
         Shown::Page(Page::Node) => view! { <NodeView /> }.into_any(),
         Shown::Page(Page::Packets) => view! { <PacketsView /> }.into_any(),
         Shown::Page(Page::RadioSettings) => view! { <SettingsView /> }.into_any(),
+        Shown::Page(Page::NodeSettings) => {
+            let live = expect_context::<Live>();
+            (move || live.node.get().map(|node| view! { <SettingsView node /> })).into_any()
+        }
         Shown::Page(Page::Chats) => view! { <crate::phone::ChatsView /> }.into_any(),
         Shown::Page(Page::More) => view! { <crate::phone::MoreView /> }.into_any(),
     }
@@ -2341,6 +2344,31 @@ fn Topbar() -> impl IntoView {
             <h1>{t!(i18n, nav_radio_settings)}</h1>
         }
         .into_any(),
+        // Back to its page, whose node it is, and said by its name.
+        Page::NodeSettings => match live.node.get() {
+            Some(node) => view! {
+                <button
+                    class="icon-button back"
+                    title=move || t_string!(i18n, node_page)
+                    aria-label=move || t_string!(i18n, node_page)
+                    on:click=move |_| live.go(Page::Node)
+                >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M5 12h14M5 12l6 6M5 12l6 -6"></path>
+                    </svg>
+                </button>
+                <div class="heading">
+                    <h1>
+                        <span class="title-text">
+                            {move || crate::chat::title(live, Peer::Node { node })}
+                        </span>
+                    </h1>
+                    <span class="dim">{t!(i18n, admin_title)}</span>
+                </div>
+            }
+            .into_any(),
+            None => ().into_any(),
+        },
         Page::Preferences => view! {
             <div class="heading">
                 <h1>{t!(i18n, prefs_title)}</h1>
@@ -2674,7 +2702,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                             title=move || t_string!(i18n, admin_title)
                             aria-label=move || t_string!(i18n, admin_title)
                             inner_html=GEAR
-                            on:click=move |_| live.administering.set(true)
+                            on:click=move |_| live.go(Page::NodeSettings)
                         ></button>
                     }
                 });
@@ -2825,7 +2853,10 @@ fn HeadingMore(
                     {can_admin
                         .then(|| {
                             view! {
-                                <button role="menuitem" on:click=choose(live.administering)>
+                                <button role="menuitem" on:click=move |_| {
+                                    open.set(false);
+                                    live.go(Page::NodeSettings);
+                                }>
                                     <span class="icon" inner_html=GEAR></span>
                                     {t!(i18n, admin_title)}
                                 </button>

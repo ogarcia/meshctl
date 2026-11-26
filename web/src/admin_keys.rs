@@ -22,6 +22,7 @@ const MAX_KEYS: usize = 3;
 pub fn AdminKeysPanel() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    let node = crate::settings::node_of();
     let keys = RwSignal::new(None::<AdminKeys>);
     let problem = RwSignal::new(None::<Failure>);
     let applied = RwSignal::new(false);
@@ -32,7 +33,7 @@ pub fn AdminKeysPanel() -> impl IntoView {
             return;
         };
         spawn_local(async move {
-            match daemon::admin_keys(radio).await {
+            match daemon::admin_keys(radio, node).await {
                 Ok(read) => {
                     let _ = keys.try_set(Some(read));
                 }
@@ -76,7 +77,7 @@ pub fn AdminKeysPanel() -> impl IntoView {
                 keys: next.clone(),
                 managed,
             };
-            match daemon::change_admin_keys(radio, &change).await {
+            match daemon::change_admin_keys(radio, node, &change).await {
                 Ok(_) => {
                     keys.set(Some(change));
                     applied.set(true);
@@ -106,6 +107,7 @@ pub fn AdminKeysPanel() -> impl IntoView {
         <div class="admin-keys">
             <h3>{t!(i18n, admin_keys_title)}</h3>
             <p class="dim">{t!(i18n, admin_keys_hint)}</p>
+            {node.map(|_| view! { <p class="dim">{t!(i18n, admin_keys_remote_hint)}</p> })}
             {move || {
                 keys.get()
                     .map(|read| {
