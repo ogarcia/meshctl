@@ -4724,6 +4724,10 @@
         white-space: nowrap;
       }
       .heading-menu button:hover:not(:disabled) { background: var(--mc-raised); }
+      /* Not spaced as the heading's own buttons it sits among. */
+      .actions .heading-menu button { margin-left: 0; }
+      /* As wide as its words, whatever few. */
+      .actions .heading-menu { min-width: 0; }
       .heading-menu button:disabled { opacity: 0.5; cursor: default; }
       .heading-menu .icon { display: flex; color: var(--mc-muted); }
       .heading-menu svg { width: 18px; height: 18px; }
