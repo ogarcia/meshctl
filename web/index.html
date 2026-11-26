@@ -121,6 +121,9 @@
         --mc-avatar-l-max: 0.85;
         --mc-avatar-c-max: 0.16;
         --mc-avatar-ink-at: 0.66;
+        /* Names in those colours, as light or dark as text needs. */
+        --mc-name-l-min: 0.38;
+        --mc-name-l-max: 0.52;
         /*
          * Radios' buttons of the palette, as the rail's own and the accent: at
          * rest, a light tone with dark text here (a deep one with light text
@@ -176,6 +179,8 @@
         --mc-avatar-l-max: 0.78;
         --mc-avatar-c-max: 0.14;
         --mc-avatar-ink-at: 0.62;
+        --mc-name-l-min: 0.74;
+        --mc-name-l-max: 0.88;
         --mc-badge-ink: #ffffff;
         --mc-badge-ink-on: #161b22;
         --mc-badge-amber: #b35c00;
@@ -224,6 +229,8 @@
           --mc-avatar-l-max: 0.78;
           --mc-avatar-c-max: 0.14;
           --mc-avatar-ink-at: 0.62;
+          --mc-name-l-min: 0.74;
+          --mc-name-l-max: 0.88;
           --mc-badge-ink: #ffffff;
           --mc-badge-ink-on: #161b22;
           --mc-badge-amber: #b35c00;
@@ -3229,6 +3236,14 @@
       }
       .bubble .quote { margin: 2px 0 4px; }
       .quote .who { font-weight: 600; color: var(--mc-primary); }
+      /* Quoting someone else, in their colour, as their name is. */
+      @supports (color: oklch(from red l c h)) {
+        .quote[style*="--node-bg"] {
+          --who: oklch(from var(--node-bg) clamp(var(--mc-name-l-min), l, var(--mc-name-l-max)) min(c, var(--mc-avatar-c-max)) h);
+          border-left-color: var(--who);
+        }
+        .quote[style*="--node-bg"] .who { color: var(--who); }
+      }
       .quote .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mc-muted); }
       /* The reactions to it, each emoji once, and how many. */
       .bubble .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-right: auto; }
@@ -3345,7 +3360,11 @@
       .message-menu > button svg { width: 20px; height: 20px; }
       .message-menu .danger-item, .message-menu .danger-item .icon { color: var(--mc-danger); }
       .bubble p { margin: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-      /* Who said it: in the accent, apart from what they said. */
+      /*
+       * Who said it: in their avatar's colour, darkened or lightened as far
+       * as it takes to read on the bubble; in the accent where a browser
+       * cannot.
+       */
       .bubble .author {
         display: block;
         overflow: hidden;
@@ -3354,6 +3373,11 @@
         font-weight: 600;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      @supports (color: oklch(from red l c h)) {
+        .bubble .author[style*="--node-bg"] {
+          color: oklch(from var(--node-bg) clamp(var(--mc-name-l-min), l, var(--mc-name-l-max)) min(c, var(--mc-avatar-c-max)) h);
+        }
       }
       /*
        * In a channel, their short name beside it, as the list of nodes has

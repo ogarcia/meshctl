@@ -464,6 +464,18 @@ fn author_of(live: Live, message: &Message) -> String {
     }
 }
 
+/// The colour of who wrote a message, as their avatar's, for a quote of it;
+/// none for the radio's own, quoted in the accent.
+fn author_style(live: Live, message: &Message) -> Option<String> {
+    (!message.outgoing).then(|| {
+        crate::mesh::avatar_style(
+            live,
+            message.author.unwrap_or(message.from),
+            &author_of(live, message),
+        )
+    })
+}
+
 /// What a conversation shows: the day, where it changes; where what was not
 /// read starts; and what is said.
 #[derive(Clone)]
@@ -908,7 +920,14 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
         (Some(name), false) => name.clone(),
         _ => node_name(live, from),
     };
-    let author = (group && first).then(|| view! { <span class="author">{name.clone()}</span> });
+    // Their name in their avatar's colour, made to read on the bubble.
+    let author = (group && first).then(|| {
+        let style = {
+            let name = name.clone();
+            move || crate::mesh::avatar_style(live, from, &name())
+        };
+        view! { <span class="author" style=style>{name.clone()}</span> }
+    });
     // Their short name in an avatar, as the list of nodes draws it, coloured
     // by how far they are: their page, a click away. The rest of a run
     // leaves its room.
@@ -1059,7 +1078,7 @@ fn Bubble(message: Message, peer: Peer, first: bool) -> impl IntoView {
                 .with(|t| t.iter().find(|m| m.packet_id == to).cloned());
             match answered {
                 Some(answered) => view! {
-                    <div class="quote">
+                    <div class="quote" style=author_style(live, &answered)>
                         <span class="who">{author_of(live, &answered)}</span>
                         <span class="what">{answered.text.clone()}</span>
                     </div>
@@ -2368,10 +2387,11 @@ fn Composer(peer: Peer) -> impl IntoView {
             .thread
             .with(|t| t.iter().find(|m| m.packet_id == to).cloned())?;
         let who = author_of(live, &answered);
+        let style = author_style(live, &answered);
         Some(view! {
             <div class="replying">
                 <span class="icon" inner_html=REPLY></span>
-                <div class="quote">
+                <div class="quote" style=style>
                     <span class="who">
                         {move || t_string!(i18n, chat_replying).replace("{name}", &who)}
                     </span>
