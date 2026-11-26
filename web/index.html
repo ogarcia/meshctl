@@ -4640,7 +4640,8 @@
         .nodes-table tr.node-row td.reach,
         .nodes-table tr.node-row td.power-cell { margin-top: 2px; font-size: 12px; color: var(--mc-muted); }
         .nodes-table tr.node-row td.heard { margin-left: 52px; }
-        .nodes-table tr.node-row td.heard:not(:empty) + td.reach::before,
+        .nodes-table tr.node-row td.heard:not(:empty) + td.reach:not(:empty)::before,
+        .nodes-table tr.node-row td.heard:not(:empty) + td.reach:empty + td.power-cell:not(:empty)::before,
         .nodes-table tr.node-row td.reach:not(:empty) + td.power-cell:not(:empty)::before { content: "·"; margin: 0 6px; }
         .nodes-table tr.node-row td.hardware,
         .nodes-table tr.node-row td.actions { display: none; }

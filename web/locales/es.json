@@ -577,6 +577,8 @@
   "mark_routed_one": "Con una ruta conocida de 1 salto: lo que se le envía va por ella",
   "mark_no_route": "Sin ruta conocida: lo próximo que se le envíe inundará la malla para encontrar una",
   "nodes_mesh": "Por la malla",
+  "nodes_repeaters": "Por repetidores",
+  "nodes_no_route": "Sin ruta",
   "nodes_reach": "Alcance",
   "check_shared_title": "Clave pública compartida",
   "check_shared_text": "Su clave pública es la misma que la de otros nodos oídos en la última semana: {nodes}. Cada uno puede leer lo que se envía solo a los otros. Pasa con radios que vienen con la misma clave, o cuya configuración se copió de otra: generar una clave nueva en el nodo lo arregla.",

@@ -48,8 +48,11 @@ enum Reach {
     All,
     /// Heard directly.
     Direct,
-    /// Heard through other nodes.
+    /// Heard through other nodes; on MeshCore, with a route through
+    /// repeaters.
     Mesh,
+    /// MeshCore's with no route known: what is sent to them floods.
+    NoRoute,
     Mqtt,
 }
 
@@ -119,7 +122,8 @@ pub fn avatar_class(node: &Node, local: bool) -> String {
 }
 
 /// How a node is reached, in words: its own radio, directly, through so many
-/// hops, or through MQTT; none when it is not known.
+/// hops, or through MQTT; a MeshCore contact with no route, as having none;
+/// none when it is not known.
 pub fn reach_words(i18n: I18nContext<Locale>, node: &Node, local: bool) -> Option<String> {
     if local {
         return Some(t_string!(i18n, map_local).to_owned());
@@ -127,7 +131,11 @@ pub fn reach_words(i18n: I18nContext<Locale>, node: &Node, local: bool) -> Optio
     if node.via_mqtt {
         return Some("MQTT".to_owned());
     }
-    Some(match node.hops_away? {
+    let Some(hops) = node.hops_away else {
+        let meshcore = use_context::<Live>().is_some_and(|live| !is_meshtastic(live));
+        return meshcore.then(|| t_string!(i18n, nodes_no_route).to_owned());
+    };
+    Some(match hops {
         0 => t_string!(i18n, map_direct).to_owned(),
         1 => t_string!(i18n, map_one_hop).to_owned(),
         hops => t_string!(i18n, map_hops).replace("{n}", &hops.to_string()),
@@ -194,6 +202,7 @@ fn NodeList() -> impl IntoView {
                     Reach::All => true,
                     Reach::Direct => !node.via_mqtt && node.hops_away == Some(0),
                     Reach::Mesh => !node.via_mqtt && node.hops_away.is_some_and(|h| h > 0),
+                    Reach::NoRoute => node.hops_away.is_none(),
                     Reach::Mqtt => node.via_mqtt,
                 })
                 .cloned()
@@ -228,22 +237,31 @@ fn NodeList() -> impl IntoView {
     });
     let drawn = move || shown.with(|all| all.iter().take(limit.get()).copied().collect::<Vec<_>>());
     let more = move || shown.with(Vec::len) > limit.get();
-    // MeshCore radios have no MQTT: no filter for it, and all instead of it.
+    // MeshCore radios have no MQTT, but contacts with no route: each its
+    // own filter, and all instead of the other's.
     let mqtt = Memo::new(move |_| is_meshtastic(live));
     Effect::new(move |_| {
-        if !mqtt.get() && reach.get_untracked() == Reach::Mqtt {
+        let other = if mqtt.get() {
+            Reach::NoRoute
+        } else {
+            Reach::Mqtt
+        };
+        if reach.get_untracked() == other {
             reach.set(Reach::All);
         }
     });
     let reaches = move || {
-        [Reach::All, Reach::Direct, Reach::Mesh, Reach::Mqtt]
+        let mqtt = mqtt.get();
+        let last = if mqtt { Reach::Mqtt } else { Reach::NoRoute };
+        [Reach::All, Reach::Direct, Reach::Mesh, last]
             .into_iter()
-            .filter(|this| *this != Reach::Mqtt || mqtt.get())
-            .map(|this| {
+            .map(move |this| {
                 let label = move || match this {
                     Reach::All => t_string!(i18n, nodes_all).to_string(),
                     Reach::Direct => t_string!(i18n, nodes_direct).to_string(),
-                    Reach::Mesh => t_string!(i18n, nodes_mesh).to_string(),
+                    Reach::Mesh if mqtt => t_string!(i18n, nodes_mesh).to_string(),
+                    Reach::Mesh => t_string!(i18n, nodes_repeaters).to_string(),
+                    Reach::NoRoute => t_string!(i18n, nodes_no_route).to_string(),
                     Reach::Mqtt => "MQTT".to_owned(),
                 };
                 (
