@@ -292,7 +292,7 @@ impl Live {
             daemon: RwSignal::new(Daemon::Connecting),
             page: RwSignal::new(Page::Map),
             menu: RwSignal::new(false),
-            preferences: RwSignal::new(Preferences::default()),
+            preferences: RwSignal::new(shown()),
             radios: RwSignal::new(None),
             selected: RwSignal::new(daemon::last_radio()),
             settings_tab: RwSignal::new(crate::settings::Tab::User),
@@ -1432,6 +1432,37 @@ fn follow(live: Live) {
 pub fn now() -> u32 {
     // Milliseconds as an f64, which holds them exactly for a long while yet.
     (js_sys::Date::now() / 1000.0) as u32
+}
+
+/// The preferences the page came in, as the daemon put them on `<html>`: what
+/// the interface starts from until it has them, so that it does not paint
+/// itself in the defaults' colours in between. The rest, the defaults.
+fn shown() -> Preferences {
+    let root = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.document_element());
+    let get = |name: &str| root.as_ref().and_then(|root| root.get_attribute(name));
+    Preferences {
+        theme: match get("data-theme").as_deref() {
+            Some("light") => Theme::Light,
+            Some("dark") => Theme::Dark,
+            _ => Theme::System,
+        },
+        accent: match get("data-accent").as_deref() {
+            Some("blue") => Accent::Blue,
+            Some("teal") => Accent::Teal,
+            Some("violet") => Accent::Violet,
+            Some("coral") => Accent::Coral,
+            Some("gray") => Accent::Gray,
+            _ => Accent::Amber,
+        },
+        map_theme: match get("data-map-theme").as_deref() {
+            Some("light") => MapTheme::Light,
+            Some("dark") => MapTheme::Dark,
+            _ => MapTheme::Page,
+        },
+        ..Preferences::default()
+    }
 }
 
 /// Puts the preferences on `<html>`, where the style sheet reads them, as the
