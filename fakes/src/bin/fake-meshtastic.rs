@@ -15,7 +15,7 @@
 //! firmware does, the radio drops positions and telemetry sent within 10
 //! seconds of the last, traceroutes within 30 and texts within 2.
 //!
-//!     cargo run -p meshctl-core --example fake_radio -- [port] [control port]
+//!     cargo run -p meshctl-fakes --bin fake-meshtastic -- [port] [control port]
 //!
 //! With a control port, it listens there, on this machine only, for lines
 //! that play what another app or the mesh would do to it:

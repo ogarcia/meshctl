@@ -8,7 +8,7 @@
 //! transmits nothing, anywhere. What it does not know yet it refuses, as the
 //! firmware does a command it lacks.
 //!
-//!     cargo run -p meshctl-core --example fake_meshcore -- [port] [control port]
+//!     cargo run -p meshctl-fakes --bin fake-meshcore -- [port] [control port]
 //!
 //! With a control port, it listens there, on this machine only, for lines
 //! that play what the mesh would do to it:

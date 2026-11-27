@@ -6,14 +6,17 @@
 #   server  the daemon, meshctld, as a library and its binary
 #   web     the Leptos (CSR) interface, built with trunk and embedded in server
 #   desktop the daemon in a window of its own, with Tauri: the desktop app
+#   fakes   pretend radios, Meshtastic and MeshCore, to work on meshctl
+#           without one; never released
 #
 # `web` is left out of the default members: it is built for the browser by
 # trunk, and a plain `cargo build` does not need to compile it for the host.
+# Nor does it need the pretend radios, `fakes`, which are run by name.
 # `--workspace` (clippy, tests) still includes it. `desktop` is left out of
 # both: it needs WebKitGTK on Linux, which a daemon's build host need not
 # have; CI checks it on its own, and the desktop packages build it.
 [workspace]
-members = ["proto", "core", "api", "server", "web", "desktop"]
+members = ["proto", "core", "api", "server", "web", "desktop", "fakes"]
 default-members = ["proto", "core", "api", "server"]
 resolver = "3"
 
@@ -31,6 +34,8 @@ meshctl-api = { path = "api" }
 meshctl-core = { path = "core" }
 meshctl-proto = { path = "proto" }
 prost = "0.14"
+prost-reflect = "0.16"
+sha2 = "0.11"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", default-features = false }
 tracing = "0.1"

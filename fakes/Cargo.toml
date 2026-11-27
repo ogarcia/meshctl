@@ -1,0 +1,18 @@
+[package]
+name = "meshctl-fakes"
+description = "Pretend radios, Meshtastic and MeshCore, to work on meshctl without one"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+# Each a binary of its own, in src/bin: fake-meshtastic and fake-meshcore.
+[dependencies]
+meshctl-core.workspace = true
+meshctl-proto.workspace = true
+prost-reflect.workspace = true
+prost.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
