@@ -59,6 +59,27 @@ extern "C" {
     fn map_mini_close(element: &web_sys::HtmlElement);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = miniRoute)]
     fn map_mini_route(element: &web_sys::HtmlElement, json: &str);
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = vectorWorks)]
+    fn map_vector_works() -> bool;
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = vectorFailed)]
+    fn map_vector_failed() -> bool;
+}
+
+/// Follows whether this browser can draw vector maps, as the maps find out
+/// the first time one is wanted.
+pub fn watch_vector(live: Live) {
+    live.vector_failed.set(map_vector_failed());
+    // For as long as the page lives.
+    std::mem::forget(window_event_listener_untyped(
+        "meshctl-vector-failed",
+        move |_| live.vector_failed.set(true),
+    ));
+}
+
+/// Whether vector maps can be drawn here, tried now if they never were: a
+/// failure is told to [`Live::vector_failed`] too.
+pub fn vector_works() -> bool {
+    map_vector_works()
 }
 
 /// A point of a route on a small map: where, its pin's colour, whether

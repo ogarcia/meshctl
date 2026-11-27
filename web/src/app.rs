@@ -234,6 +234,12 @@ pub struct Live {
     pub map_waypoint: RwSignal<Option<u32>>,
     /// What happened to waypoints, told of over the panel for a while.
     pub notices: RwSignal<Vec<crate::waypoints::Notice>>,
+    /// Whether this browser cannot draw vector maps, found as one is first
+    /// wanted: its maps are then OpenStreetMap's tiles, whatever the
+    /// preference says.
+    pub vector_failed: RwSignal<bool>,
+    /// Whether that was told and put away.
+    pub vector_told: RwSignal<bool>,
     /// Whether the about window is open.
     pub about: RwSignal<bool>,
     /// meshctl's version, and the commit it was built from, once asked.
@@ -322,6 +328,8 @@ impl Live {
             waypoint_form: RwSignal::new(None),
             map_waypoint: RwSignal::new(None),
             notices: RwSignal::new(Vec::new()),
+            vector_failed: RwSignal::new(false),
+            vector_told: RwSignal::new(false),
             packets: RwSignal::new(Vec::new()),
             packet_filter: RwSignal::new(PacketFilter::default()),
             packets_held: RwSignal::new(Vec::new()),
@@ -1696,6 +1704,7 @@ fn Shell() -> impl IntoView {
     let live = Live::new();
     provide_context(live);
     crate::notify::watch(live);
+    crate::map::watch_vector(live);
     crate::phone::wire_back(live);
     follow(live);
 

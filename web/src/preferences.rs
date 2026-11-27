@@ -61,14 +61,30 @@ pub fn PreferencesView() -> impl IntoView {
             Signal::derive(label),
         )
     });
+    // The maps' type as this browser shows them: OpenStreetMap's tiles where
+    // it cannot draw vector maps, whatever is kept.
+    let failed = move || live.vector_failed.get();
+    let engine_shown = move || {
+        if failed() {
+            MapEngine::Png
+        } else {
+            current().map_engine
+        }
+    };
     let map_engines = [MapEngine::Png, MapEngine::Vector].map(|engine| {
         let label = move || match engine {
             MapEngine::Png => t_string!(i18n, map_engine_png).to_string(),
             MapEngine::Vector => t_string!(i18n, map_engine_vector).to_string(),
         };
-        let pick = choose(Box::new(move |p| p.map_engine = engine));
+        let keep = choose(Box::new(move |p| p.map_engine = engine));
+        // Vector maps tried here first: not kept where they cannot be drawn.
+        let pick = move || {
+            if engine == MapEngine::Png || crate::map::vector_works() {
+                keep();
+            }
+        };
         (
-            Signal::derive(move || current().map_engine == engine),
+            Signal::derive(move || engine_shown() == engine),
             Box::new(pick) as Box<dyn Fn() + Send + Sync>,
             Signal::derive(label),
         )
@@ -77,7 +93,7 @@ pub fn PreferencesView() -> impl IntoView {
     // colour or greys; vector maps detailed, vivid or plain. Vivid is in
     // colour on the tiles, which have none of their own.
     let map_colors = move || {
-        let vector = current().map_engine == MapEngine::Vector;
+        let vector = engine_shown() == MapEngine::Vector;
         let offered: &[MapColors] = if vector {
             &[MapColors::Full, MapColors::Vivid, MapColors::Gray]
         } else {
@@ -148,14 +164,24 @@ pub fn PreferencesView() -> impl IntoView {
             </Row>
             <Row
                 title=t!(i18n, prefs_map_engine).into_any()
-                hint=t!(i18n, prefs_map_engine_hint).into_any()
+                hint=(move || {
+                    if failed() {
+                        t!(i18n, prefs_map_engine_unsupported).into_any()
+                    } else {
+                        t!(i18n, prefs_map_engine_hint).into_any()
+                    }
+                })
+                .into_any()
             >
-                {pills(Vec::from(map_engines))}
+                // Not to be changed where vector maps cannot be drawn.
+                <div class="pref-wrap" class:pref-off=failed inert=failed>
+                    {pills(Vec::from(map_engines))}
+                </div>
             </Row>
             <Row
                 title=t!(i18n, prefs_map_colors).into_any()
                 hint=(move || {
-                    if current().map_engine == MapEngine::Vector {
+                    if engine_shown() == MapEngine::Vector {
                         t!(i18n, prefs_map_colors_vector_hint).into_any()
                     } else {
                         t!(i18n, prefs_map_colors_hint).into_any()

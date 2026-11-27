@@ -1195,6 +1195,10 @@
       .pref-what .dim { font-size: 12px; }
       .pref-control { flex: none; width: 450px; max-width: 100%; }
       .pref-control.segmented button { padding: 0 8px; white-space: nowrap; }
+      /* A control that cannot be changed here, as the map's type where vector
+         maps cannot be drawn: in its place, dimmed. */
+      .pref-wrap { display: contents; }
+      .pref-off .segmented { opacity: 0.5; }
       select.pref-control { min-height: 40px; }
       /*
        * What meshctl keeps: how much, each time after which it is cleaned,

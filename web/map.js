@@ -16,9 +16,25 @@
 window.meshctlMap = (() => {
   const engines = { png: window.meshctlLeaflet, vector: window.meshctlMapLibre };
   const smallEngine = window.meshctlLeaflet;
-  // The engine the preferences ask for, as put on the page.
+  // Whether this browser cannot draw vector maps: found the first time one
+  // is wanted, and from then on its maps are OpenStreetMap's tiles. Told
+  // once, as meshctl-vector-failed on the window; the preference stays.
+  let vectorFailed = false;
+  function vectorFails() {
+    if (vectorFailed) return;
+    vectorFailed = true;
+    window.dispatchEvent(new CustomEvent("meshctl-vector-failed"));
+  }
+  // Whether vector maps can be drawn here, tried now if they never were.
+  function vectorWorks() {
+    if (vectorFailed || !engines.vector) return false;
+    if (!engines.vector.supported()) vectorFails();
+    return !vectorFailed;
+  }
+  // The engine the preferences ask for, as put on the page, if this
+  // browser can draw it.
   const engineName = () =>
-    document.documentElement.getAttribute("data-map-engine") === "vector" && engines.vector
+    document.documentElement.getAttribute("data-map-engine") === "vector" && vectorWorks()
       ? "vector"
       : "png";
   // The engine the map was opened with, what it was opened with, to open it
@@ -143,12 +159,25 @@ window.meshctlMap = (() => {
     const name = engineName();
     const engine = engines[name];
     const token = ++opening;
+    // Vector maps failing, MapLibre not loaded or with no WebGL after all:
+    // the map opened again, with the tiles.
+    const fail = (error) => {
+      if (token !== opening) return;
+      console.warn("meshctl: no vector maps here", error);
+      vectorFails();
+      open(target, onPick, onAct, onMoved, onPlace);
+    };
     const build = () => {
       if (token !== opening) return;
       engineOpen = name;
-      create(engine, target, onPick, onAct, onMoved, onPlace);
+      try {
+        create(engine, target, onPick, onAct, onMoved, onPlace);
+      } catch (error) {
+        if (name !== "vector" || map) throw error;
+        fail(error);
+      }
     };
-    if (engine.ready) engine.ready().then(build);
+    if (engine.ready) engine.ready().then(build, fail);
     else build();
   }
 
@@ -1246,8 +1275,22 @@ window.meshctlMap = (() => {
   // lon) told where it went.
   function picker(element, json, moved) {
     const engine = engines[engineName()];
-    if (engine.ready) engine.ready().then(() => pickerOn(engine, element, json, moved));
-    else pickerOn(engine, element, json, moved);
+    // Vector maps failing, as on the big map: the tiles instead.
+    const fail = (error) => {
+      console.warn("meshctl: no vector maps here", error);
+      vectorFails();
+      pickerOn(engines.png, element, json, moved);
+    };
+    const build = () => {
+      try {
+        pickerOn(engine, element, json, moved);
+      } catch (error) {
+        if (engine === engines.png) throw error;
+        fail(error);
+      }
+    };
+    if (engine.ready) engine.ready().then(build, fail);
+    else build();
   }
 
   function pickerOn(engine, element, json, moved) {
@@ -1292,6 +1335,7 @@ window.meshctlMap = (() => {
 
   return {
     open, close, nodes, waypoints, focusWaypoint, bounds, focus, route, stay, reset, resize, view, mini, miniRoute,
-    miniClose, picker, pickerAt, pickerClose, spot,
+    miniClose, picker, pickerAt, pickerClose, spot, vectorWorks,
+    vectorFailed: () => vectorFailed,
   };
 })();

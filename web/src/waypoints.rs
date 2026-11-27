@@ -15,7 +15,7 @@ use leptos::task::spawn_local;
 use meshctl_api::waypoints::{
     DESCRIPTION_BYTES, Fence, FenceArea, NAME_BYTES, NewWaypoint, Waypoint,
 };
-use meshctl_api::{ErrorCode, LinkState, Peer, RadioId, RadioKind, WaypointEvent};
+use meshctl_api::{ErrorCode, LinkState, MapEngine, Peer, RadioId, RadioKind, WaypointEvent};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -401,8 +401,40 @@ pub fn Notices() -> impl IntoView {
                 .unwrap_or_default()
         })
     };
+    // Vector maps that cannot be drawn here: the tiles instead, here only,
+    // or for good.
+    let vector = move || {
+        let wanted = live.preferences.with(|p| p.map_engine == MapEngine::Vector);
+        (wanted && live.vector_failed.get() && !live.vector_told.get()).then(|| {
+            let close_label = move || t_string!(i18n, notice_close);
+            view! {
+                <div class="notice">
+                    <span class="notice-text">{t!(i18n, notice_vector_failed)}</span>
+                    <button
+                        type="button"
+                        on:click=move |_| {
+                            let mut preferences = live.preferences.get_untracked();
+                            preferences.map_engine = MapEngine::Png;
+                            live.prefer(preferences);
+                        }
+                    >
+                        {t!(i18n, notice_vector_keep)}
+                    </button>
+                    <button
+                        type="button"
+                        class="close"
+                        title=close_label
+                        aria-label=close_label
+                        on:click=move |_| live.vector_told.set(true)
+                        inner_html=CLOSE
+                    ></button>
+                </div>
+            }
+        })
+    };
     view! {
         <div class="notices" role="status" aria-live="polite">
+            {vector}
             <For
                 each=move || live.notices.get()
                 key=|notice| notice.key

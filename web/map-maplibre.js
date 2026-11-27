@@ -27,6 +27,23 @@ window.meshctlMapLibre = (() => {
     return loading;
   }
 
+  // Whether this browser can draw it: MapLibre wants WebGL 2. Tried once,
+  // the first time a vector map is wanted, on a canvas of its own, let go
+  // at once.
+  let able;
+  function supported() {
+    if (able === undefined) {
+      try {
+        const gl = document.createElement("canvas").getContext("webgl2");
+        able = !!gl;
+        if (gl) gl.getExtension("WEBGL_lose_context")?.loseContext();
+      } catch (_) {
+        able = false;
+      }
+    }
+    return able;
+  }
+
   // Whether the maps are dark: as asked for, or following the interface's
   // theme, given or the system's.
   function dark() {
@@ -185,17 +202,27 @@ window.meshctlMapLibre = (() => {
 
   function create(element, options = {}) {
     const still = !!options.still;
-    const map = new ml.Map({
-      container: element,
-      center: [0, 20],
-      zoom: 1,
-      attributionControl: false,
-      dragRotate: false,
-      pitchWithRotate: false,
-      touchPitch: false,
-      maxPitch: 0,
-      interactive: !still,
-    });
+    const classes = element.className;
+    let map;
+    try {
+      map = new ml.Map({
+        container: element,
+        center: [0, 20],
+        zoom: 1,
+        attributionControl: false,
+        dragRotate: false,
+        pitchWithRotate: false,
+        touchPitch: false,
+        maxPitch: 0,
+        interactive: !still,
+      });
+    } catch (error) {
+      // No WebGL after all: the element as it was, for the other engine.
+      element.replaceChildren();
+      element.className = classes;
+      able = false;
+      throw error;
+    }
     // Given apart, to be made quiet.
     styled(map, styleUrl());
     if (map.touchZoomRotate) map.touchZoomRotate.disableRotation();
@@ -591,5 +618,5 @@ window.meshctlMapLibre = (() => {
     };
   }
 
-  return { ready, create };
+  return { ready, supported, create };
 })();
