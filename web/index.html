@@ -877,7 +877,8 @@
       .local-foot .settings.active { background: var(--mc-raised); color: var(--mc-text); }
       .local-foot .settings svg { width: 18px; height: 18px; }
 
-      .page { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+      /* Placed, for what goes over it: the notices, centred on it. */
+      .page { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
       .topbar {
         display: flex;
         flex-wrap: nowrap;
@@ -2548,13 +2549,28 @@
       /* The map's own menu: one button, where it was asked for. */
       .mc-place-popup .leaflet-popup-content { margin: 6px; }
       .mc-place-add { white-space: nowrap; }
-      .mc-crossings { display: flex; flex-direction: column; gap: 4px; }
-      .mc-crossings-title { margin: 0; font-size: 11px; color: var(--mc-muted); }
-      .mc-crossings ul { margin: 0; padding-left: 16px; font-size: 12px; }
-      /* What happened to waypoints, over the panel for a while: under the
-         top bar, in the middle. */
+      /* The latest nodes gone in or out of a fence: a row each, marked in
+         green going in and in the muted grey going out, when on the right. */
+      .mc-crossings { display: flex; flex-direction: column; gap: 6px; }
+      .mc-crossings-title { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 11px; color: var(--mc-muted); }
+      .mc-crossings ul { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; border: 1px solid var(--mc-border); border-radius: 8px; overflow: hidden; }
+      .mc-crossings li {
+        display: grid;
+        grid-template-columns: 8px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        font-size: 12px;
+      }
+      .mc-crossings li + li { border-top: 1px solid var(--mc-border); }
+      .mc-crossings li i { width: 8px; height: 8px; border-radius: 50%; background: var(--mc-muted); }
+      .mc-crossings li.in i { background: var(--mc-ok); }
+      .mc-crossing-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .mc-crossing-ago { color: var(--mc-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+      /* What happened to waypoints, over the page for a while: under the
+         top bar, in the middle of the page, the map on its own. */
       .notices {
-        position: fixed;
+        position: absolute;
         top: 64px;
         left: 50%;
         transform: translateX(-50%);
@@ -2562,7 +2578,7 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
-        width: min(560px, calc(100vw - 24px));
+        width: min(560px, calc(100% - 24px));
         pointer-events: none;
       }
       .notice {
@@ -2590,6 +2606,13 @@
         color: var(--mc-muted);
       }
       .notice .close svg { width: 16px; height: 16px; }
+      /* On a phone, under the top bar: on the map, clear of its buttons on
+         the left, and, with a route shown, under the route's notice. */
+      @media (max-width: 835px) {
+        .notices { top: 61px; left: 10px; right: 10px; width: auto; transform: none; }
+        body:has(.map-page) .notices { left: 56px; }
+        body:has(.map-route-notice) .notices { top: 124px; }
+      }
       .map-offline {
         position: absolute;
         top: 12px;
@@ -2943,7 +2966,7 @@
       .mc-picker-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
       .mc-picker-item {
         display: grid;
-        grid-template-columns: 10px minmax(0, 1fr) auto;
+        grid-template-columns: 16px minmax(0, 1fr) auto;
         align-items: center;
         gap: 9px;
         width: 100%;
@@ -2955,6 +2978,8 @@
         text-align: left;
       }
       .mc-picker-item:hover, .mc-picker-item:focus-visible { background: var(--mc-raised); }
+      .mc-picker-item .mc-dot { justify-self: center; }
+      .mc-picker-emoji { justify-self: center; font-size: 14px; line-height: 1; }
       .mc-picker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .mc-picker-name strong { margin-right: 6px; }
       .mc-picker-name span, .mc-picker-seen { font-size: 12px; color: var(--mc-muted); white-space: nowrap; }

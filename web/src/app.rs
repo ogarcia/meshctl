@@ -1466,6 +1466,7 @@ impl Live {
                     radio,
                     waypoint,
                     crossing,
+                    asked,
                     who,
                     icon,
                     name,
@@ -1478,19 +1479,22 @@ impl Live {
                             }
                         });
                     }
-                    crate::waypoints::tell(
-                        self,
-                        radio,
-                        waypoint,
-                        who,
-                        icon,
-                        name,
-                        if crossing.entered {
-                            meshctl_api::WaypointEvent::Entered
-                        } else {
-                            meshctl_api::WaypointEvent::Left
-                        },
-                    );
+                    // Kept all the same; told of as the fence asks.
+                    if asked {
+                        crate::waypoints::tell(
+                            self,
+                            radio,
+                            waypoint,
+                            who,
+                            icon,
+                            name,
+                            if crossing.entered {
+                                meshctl_api::WaypointEvent::Entered
+                            } else {
+                                meshctl_api::WaypointEvent::Left
+                            },
+                        );
+                    }
                     Ok(())
                 }
                 ServerMessage::Radios | ServerMessage::Lagged => self.refresh().await,
@@ -1763,12 +1767,12 @@ fn Frame() -> impl IntoView {
                 <main>
                     <Content />
                 </main>
+                <crate::waypoints::Notices />
             </div>
             <crate::phone::TabBar />
             <crate::phone::RadioSheet />
             <crate::links::LinkAdder />
             <crate::about::AboutDialog />
-            <crate::waypoints::Notices />
             <Newer />
         </div>
     }

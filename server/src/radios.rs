@@ -58,6 +58,7 @@ pub enum Change {
         radio: RadioId,
         waypoint: u32,
         crossing: meshctl_api::waypoints::FenceCrossing,
+        asked: bool,
         who: String,
         icon: String,
         name: String,

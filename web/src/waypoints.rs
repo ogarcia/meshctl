@@ -86,7 +86,18 @@ struct Drawn {
     /// of it; none for one without.
     watched: Option<bool>,
     /// The latest nodes gone in or out of its fence, in words.
-    crossings: Vec<String>,
+    crossings: Vec<Crossed>,
+}
+
+/// A node gone in or out of a fence, as its popup lists it.
+#[derive(Debug, Serialize)]
+struct Crossed {
+    who: String,
+    entered: bool,
+    /// What it did: went in, or out.
+    said: String,
+    /// How long ago.
+    ago: String,
 }
 
 /// A fence as the map draws it: a circle, in metres, a box, or both.
@@ -150,6 +161,10 @@ struct Labels {
     watch: String,
     unwatch: String,
     crossings: String,
+    /// What a waypoint is called in the list of what overlaps.
+    waypoint: String,
+    /// How many there are, nodes and waypoints, where a click fell.
+    here: String,
 }
 
 /// What the map draws of the waypoints, as `map.js` takes it.
@@ -181,6 +196,8 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
         watch: t_string!(i18n, waypoint_watch).to_owned(),
         unwatch: t_string!(i18n, waypoint_unwatch).to_owned(),
         crossings: t_string!(i18n, waypoint_crossings).to_owned(),
+        waypoint: t_string!(i18n, waypoint_kind).to_owned(),
+        here: t_string!(i18n, map_here_any).to_owned(),
     };
     let sharing = can_share(live);
     if !shown(live) {
@@ -262,23 +279,22 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
                     crossings: w
                         .crossings
                         .iter()
-                        .map(|c| {
-                            let said = if c.entered {
+                        .map(|c| Crossed {
+                            who: by(c.node),
+                            entered: c.entered,
+                            said: if c.entered {
                                 t_string!(i18n, waypoint_crossed_in)
                             } else {
                                 t_string!(i18n, waypoint_crossed_out)
-                            };
-                            format!(
-                                "{} {said} · {}",
-                                by(c.node),
-                                t_string!(i18n, waypoint_ago).replace(
-                                    "{t}",
-                                    &ago(
-                                        u32::try_from(now).unwrap_or(0),
-                                        u32::try_from(c.at).unwrap_or(0),
-                                    ),
+                            }
+                            .to_owned(),
+                            ago: t_string!(i18n, waypoint_ago).replace(
+                                "{t}",
+                                &ago(
+                                    u32::try_from(now).unwrap_or(0),
+                                    u32::try_from(c.at).unwrap_or(0),
                                 ),
-                            )
+                            ),
                         })
                         .collect(),
                     watched: w

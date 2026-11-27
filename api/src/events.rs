@@ -102,6 +102,9 @@ pub enum ServerMessage {
         radio: RadioId,
         waypoint: u32,
         crossing: crate::waypoints::FenceCrossing,
+        /// Whether its fence asks to be told of it: going in, or out, of
+        /// the favourites only, maybe. Kept all the same if not.
+        asked: bool,
         /// Who crossed it, by name, and the waypoint's emoji and name: to
         /// tell of it with no more to read.
         who: String,

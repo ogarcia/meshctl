@@ -1303,5 +1303,7 @@
   "notice_entered": "entró en",
   "notice_left": "salió de",
   "notice_see": "Ver",
-  "notice_close": "Quitar"
+  "notice_close": "Quitar",
+  "waypoint_kind": "waypoint",
+  "map_here_any": "{n} aquí"
 }

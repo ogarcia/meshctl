@@ -297,22 +297,28 @@ impl Fences {
                 (was.is_some_and(|was| was != now_inside)).then(|| (fence.clone(), now_inside))
             })
             .collect();
+        // Every one kept; told of as the fence asks.
         for (fence, went_in) in crossed {
             let asked = if went_in {
                 fence.notify_on_enter
             } else {
                 fence.notify_on_exit
-            };
-            if asked && (!fence.notify_favorites_only || node.favorite) {
-                crossing(radios, radio, &fence, node.num, went_in).await;
-            }
+            } && (!fence.notify_favorites_only || node.favorite);
+            crossing(radios, radio, &fence, node.num, went_in, asked).await;
         }
     }
 }
 
-/// Keeps a node gone in or out of a fence, and tells every client; and
-/// notifies of it, wherever notifications are on.
-async fn crossing(radios: &Radios, radio: RadioId, fence: &Shared, node: u32, went_in: bool) {
+/// Keeps a node gone in or out of a fence, and tells every client; and, as
+/// the fence asks, notifies of it wherever notifications are on.
+async fn crossing(
+    radios: &Radios,
+    radio: RadioId,
+    fence: &Shared,
+    node: u32,
+    went_in: bool,
+    asked: bool,
+) {
     let crossed = meshctl_api::waypoints::FenceCrossing {
         node,
         entered: went_in,
@@ -328,10 +334,14 @@ async fn crossing(radios: &Radios, radio: RadioId, fence: &Shared, node: u32, we
         radio,
         waypoint: fence.id,
         crossing: crossed,
+        asked,
         who: mesh.read(|state| node_name(state, node)),
         icon: fence.emoji().to_string(),
         name: fence.name.clone(),
     });
+    if !asked {
+        return;
+    }
     let Ok(settings) = radios.notifications().await else {
         return;
     };

@@ -244,19 +244,41 @@ window.meshctlMap = (() => {
       .map(({ node }) => node);
   }
 
-  // Picks the node under a click, or offers a list when several overlap
-  // there. False when there is none within reach.
+  // The waypoints near a point of the map's, the nearest first.
+  function waypointsNear(point, radius) {
+    return shownWaypoints.waypoints
+      .map((waypoint) => {
+        const at = map.toPoint(waypoint.lat, waypoint.lon);
+        return { waypoint, distance: Math.hypot(at.x - point.x, at.y - point.y) };
+      })
+      .filter(({ distance }) => distance <= radius)
+      .sort((a, b) => a.distance - b.distance)
+      .map(({ waypoint }) => waypoint);
+  }
+
+  // Opens a waypoint's popup, letting whatever was picked go.
+  function openWaypoint(id) {
+    waypointPopupFor = id;
+    showWaypointCard(true);
+  }
+
+  // Picks the node or waypoint under a click, or offers a list when
+  // several overlap there. False when there is none within reach.
   function pickAt(point, event) {
     const touch = event && event.pointerType
       ? event.pointerType !== "mouse"
       : matchMedia("(pointer: coarse)").matches;
-    const found = nodesNear(point, touch ? PICK_RADIUS_TOUCH : PICK_RADIUS);
-    if (found.length === 0) return false;
-    if (found.length === 1) {
+    const radius = touch ? PICK_RADIUS_TOUCH : PICK_RADIUS;
+    const found = nodesNear(point, radius);
+    const waypoints = waypointsNear(point, radius);
+    if (found.length + waypoints.length === 0) return false;
+    if (found.length === 1 && waypoints.length === 0) {
       choose(found[0].num);
+    } else if (found.length === 0 && waypoints.length === 1) {
+      openWaypoint(waypoints[0].id);
     } else {
       const at = map.toLatLon(point.x, point.y);
-      showPicker(found, at.lat, at.lon);
+      showPicker(found, waypoints, at.lat, at.lon);
     }
     return true;
   }
@@ -307,12 +329,14 @@ window.meshctlMap = (() => {
     };
   }
 
-  // The list of the nodes that overlap where a click fell.
-  function showPicker(found, lat, lon) {
+  // The list of the nodes, and waypoints, that overlap where a click fell.
+  function showPicker(found, waypoints, lat, lon) {
     const labels = shown.labels;
     const box = element("div", "mc-picker");
     const head = element("div", "mc-picker-head");
-    head.append(element("p", "", labels.here.replace("{n}", found.length)));
+    // Nodes, or nodes and waypoints: then only how many.
+    const here = waypoints.length ? shownWaypoints.labels.here : labels.here;
+    head.append(element("p", "", here.replace("{n}", found.length + waypoints.length)));
     // Zooming in on the group separates its dots, handier than a long list.
     const zoom = element("button", "mc-picker-zoom");
     zoom.append(element("i"));
@@ -324,7 +348,7 @@ window.meshctlMap = (() => {
       showPreview(null);
       map.closePopup();
       // Quick: the group is near, there is no need to fly far.
-      map.fit(found.map((n) => [n.lat, n.lon]), {
+      map.fit([...found, ...waypoints].map((n) => [n.lat, n.lon]), {
         padding: 60,
         maxZoom: 18,
         fly: true,
@@ -348,6 +372,29 @@ window.meshctlMap = (() => {
         map.stop(event);
         map.closePopup();
         choose(node.num);
+      });
+      item.append(button);
+      list.append(item);
+    }
+    // The waypoints after the nodes, by their emoji.
+    for (const waypoint of waypoints) {
+      const item = element("li");
+      const button = element("button", "mc-picker-item");
+      button.type = "button";
+      const name = element("span", "mc-picker-name");
+      name.append(element("strong", "", waypoint.name));
+      button.append(
+        element("span", "mc-picker-emoji", waypoint.icon),
+        name,
+        element("span", "mc-picker-seen", shownWaypoints.labels.waypoint || ""),
+      );
+      button.addEventListener("mouseenter", () => showPreview(waypoint));
+      button.addEventListener("focus", () => showPreview(waypoint));
+      button.addEventListener("mouseleave", () => showPreview(null));
+      button.addEventListener("click", (event) => {
+        map.stop(event);
+        map.closePopup();
+        openWaypoint(waypoint.id);
       });
       item.append(button);
       list.append(item);
@@ -555,12 +602,9 @@ window.meshctlMap = (() => {
         anchor: [15, 15],
         tooltipAnchor: [0, -15],
         tooltip: waypointTip(waypoint),
-        // Under the nodes, which are what the map is for.
+        // Under the nodes, which are what the map is for; a click on it
+        // reaches the map, which looks for all that is near.
         z: -100,
-        click: () => {
-          waypointPopupFor = waypoint.id;
-          showWaypointCard(true);
-        },
       });
     }
   }
@@ -597,9 +641,20 @@ window.meshctlMap = (() => {
     // The latest nodes gone in or out of its fence.
     if (waypoint.crossings && waypoint.crossings.length) {
       const crossed = element("div", "mc-crossings");
-      crossed.append(element("p", "mc-crossings-title", labels.crossings));
+      const title = element("p", "mc-crossings-title");
+      const icon = element("span", "mc-icon");
+      icon.style.setProperty("--icon", "url(/tabler-icons-3.51.0/icons/outline/history.svg)");
+      icon.setAttribute("aria-hidden", "true");
+      title.append(icon, labels.crossings);
+      crossed.append(title);
       const list = element("ul");
-      for (const line of waypoint.crossings) list.append(element("li", "", line));
+      for (const crossing of waypoint.crossings) {
+        const row = element("li", crossing.entered ? "in" : "out");
+        const who = element("span", "mc-crossing-who");
+        who.append(element("strong", "", crossing.who), " ", crossing.said);
+        row.append(element("i"), who, element("span", "mc-crossing-ago", crossing.ago));
+        list.append(row);
+      }
       crossed.append(list);
       box.append(crossed);
     }

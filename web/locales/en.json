@@ -1303,5 +1303,7 @@
   "notice_entered": "went into",
   "notice_left": "left",
   "notice_see": "See",
-  "notice_close": "Put away"
+  "notice_close": "Put away",
+  "waypoint_kind": "waypoint",
+  "map_here_any": "{n} here"
 }
