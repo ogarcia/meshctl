@@ -731,6 +731,15 @@ impl Radio {
                     is_unmessagable: Some(true),
                     ..Default::default()
                 }),
+                // On a hill near the neighbour, to be on the map.
+                position: Some(pb::Position {
+                    latitude_i: Some(404_310_000),
+                    longitude_i: Some(-37_150_000),
+                    altitude: Some(780),
+                    location_source: pb::position::LocSource::LocManual as i32,
+                    precision_bits: 32,
+                    ..Default::default()
+                }),
                 hops_away: Some(2),
                 last_heard: now_secs() - 600,
                 is_favorite: self.favorites.contains(&REPEATER),
