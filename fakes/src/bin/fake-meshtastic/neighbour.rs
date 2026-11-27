@@ -13,7 +13,9 @@ use std::collections::BTreeMap;
 use std::sync::atomic::AtomicU32;
 use std::time::{Duration, Instant};
 
-use crate::radio::{BROADCAST, ME, NEIGHBOUR, NEIGHBOUR_PASSKEY, Radio, fresh_id, part_name};
+use crate::radio::{
+    BROADCAST, ME, NEIGHBOUR, NEIGHBOUR_PASSKEY, REPEATER, Radio, fresh_id, part_name,
+};
 
 /// The neighbour's settings, which its admin reads and changes.
 pub struct NeighbourSettings {
@@ -21,6 +23,8 @@ pub struct NeighbourSettings {
     pub configs: BTreeMap<String, pb::Config>,
     pub modules: BTreeMap<String, pb::ModuleConfig>,
     pub channels: BTreeMap<i32, pb::Channel>,
+    /// The nodes it knows, by number: whether a favourite, whether ignored.
+    pub nodes: BTreeMap<u32, (bool, bool)>,
 }
 
 /// How the neighbour answers.
@@ -84,6 +88,8 @@ impl Radio {
             configs: self.configs.clone(),
             modules: self.modules.clone(),
             channels: self.channels.clone(),
+            // The radio, and the repeater beyond it.
+            nodes: BTreeMap::from([(ME, (false, false)), (REPEATER, (false, false))]),
         });
         // A part by its request's number, one less than the protobufs'.
         let part = |message: &str, number: i32| {
@@ -186,6 +192,56 @@ impl Radio {
                     }
                     A::CommitEditSettings(_) => {
                         println!("neighbour commits the edit (a real node might reboot now)");
+                    }
+                    // Its own list of nodes, as the firmware keeps it: a
+                    // contact a favourite but on a Client Base; a favourite,
+                    // or any but a block, only of one it knows.
+                    A::AddContact(contact) => {
+                        let client_base = matches!(
+                            settings.configs.get("device").and_then(|c| c.payload_variant.as_ref()),
+                            Some(config::PayloadVariant::Device(d))
+                                if d.role == config::device_config::Role::ClientBase as i32
+                        );
+                        let entry = settings.nodes.entry(contact.node_num).or_default();
+                        if !client_base {
+                            entry.0 = true;
+                        }
+                        println!(
+                            "neighbour keeps !{:08x} as a contact{}",
+                            contact.node_num,
+                            if client_base {
+                                ", a Client Base: no favourite"
+                            } else {
+                                ", a favourite"
+                            }
+                        );
+                    }
+                    A::SetFavoriteNode(num) => match settings.nodes.get_mut(&num) {
+                        Some(entry) => {
+                            entry.0 = true;
+                            println!("neighbour favours !{num:08x}");
+                        }
+                        None => println!("neighbour knows no !{num:08x}: no favourite"),
+                    },
+                    A::RemoveFavoriteNode(num) => {
+                        if let Some(entry) = settings.nodes.get_mut(&num) {
+                            entry.0 = false;
+                        }
+                        println!("neighbour no longer favours !{num:08x}");
+                    }
+                    A::SetIgnoredNode(num) => {
+                        settings.nodes.entry(num).or_default().1 = true;
+                        println!("neighbour ignores !{num:08x}");
+                    }
+                    A::RemoveIgnoredNode(num) => {
+                        if let Some(entry) = settings.nodes.get_mut(&num) {
+                            entry.1 = false;
+                        }
+                        println!("neighbour no longer ignores !{num:08x}");
+                    }
+                    A::RemoveByNodenum(num) => {
+                        settings.nodes.remove(&num);
+                        println!("neighbour forgets !{num:08x}");
                     }
                     other => println!("neighbour admin, ignored: {other:?}"),
                 }

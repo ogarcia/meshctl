@@ -50,6 +50,10 @@ Its mesh:
   position or neighbours once in three.
 - **Fake repeater** (`RPT`, `!0dec0de5`), further away, takes no messages.
 
+Administered over the mesh, the neighbour keeps its own list of nodes as
+the firmware does: a contact sent to it a favourite but on a Client Base;
+a favourite, or anything but a block, only of a node it knows.
+
 As the firmware does, the radio drops positions and telemetry sent within
 10 seconds of the last, waypoints within 10 too, traceroutes within 30 and
 texts within 2. Admin requests to any node but the neighbour go unanswered:
