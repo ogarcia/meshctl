@@ -106,8 +106,9 @@ pub fn crowd(count: u32, at: u32) -> Vec<Contact> {
                 last_advert: heard,
                 lat,
                 lon,
-                // Added now, as the firmware marks it, whenever it was heard.
-                last_modified: at,
+                // Changed when last heard, as the firmware marks it: what
+                // meshctl takes for when it was heard.
+                last_modified: heard,
             }
         })
         .collect()
