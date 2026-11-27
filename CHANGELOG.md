@@ -3,6 +3,71 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.8.0 (2026-11-27)
+
+Meshtastic's waypoints, with their fences, and vector maps.
+
+### Waypoints
+
+- Meshtastic's waypoints, as the official apps and the firmware share them,
+  heard on the mesh and kept for each radio: on its map as their emoji, and
+  in a popup that tells who shared and changed them, when they expire and
+  on which channel.
+- Shared from the map's own menu, a right click or a long touch: an emoji,
+  a name and a description, a date to expire on, the channel to go on, and
+  how many hops, from 1 to as many as the radio's settings say. Locked to
+  the radio, or open for anyone to change. Changed and deleted for everyone
+  where the radio may, as Android's app allows; or forgotten here alone.
+- A waypoint only in meshctl, never sent, on any radio, MeshCore's too: to
+  see on the map, and to share later if wanted.
+- Fences: a circle of 100 m to 5 km around a waypoint, or a box, the area
+  the map shows. Its author says whether a node going in or out is told
+  of, of the favourites only maybe. meshctl watches the radio's own fences,
+  and another's once asked from its popup: the latest crossings are kept
+  and shown there, and told over the panel and as notifications.
+- New waypoints shared by others are told of as notifications too, as each
+  channel's notifications say.
+- A pin shows or hides the waypoints on the map, for each radio.
+- Nodes and waypoints on the same spot open together in one list.
+
+### Maps
+
+- Vector maps, OpenFreeMap's, sharp at any zoom, picked in *Appearance*
+  beside OpenStreetMap's tiles, which are still the default. They come
+  detailed, vivid, or plain in greys, each with a dark version of its own.
+  The small maps on a node's page and in chats stay as tiles.
+- OpenStreetMap's tiles may be black and white, for the nodes to stand out.
+- A browser that cannot draw vector maps, with no WebGL 2, shows the tiles
+  instead and says so, with a way to make it for good; the setting kept for
+  every other browser stays as it is.
+- The clock and the waypoints' pin are behind three dots under the zoom's
+  buttons, in the accent while either leaves something out.
+- A popup opened by the map's buttons, its legend or a notice moves the map
+  to be clear of them.
+- *Appearance* has the map's settings together: its theme, its type and
+  its colours.
+
+### Interface
+
+- meshctl's icon, in the browser's tab and in notifications, is in the
+  panel's accent.
+- The API reference, at `/api/docs`, in meshctl's colours under a bar of
+  its own, with the way back to the panel, the guide, the website and the
+  code, and an icon of its own in a deep red.
+
+### Fixes
+
+- The panel no longer flashes in amber, or in the system's theme, while it
+  loads in another accent or theme.
+- A Meshtastic node that reads no messages has its chat button greyed out
+  on the map's popup too, as on its page.
+- MeshCore repeaters and sensors, which drop any text they are sent, are no
+  longer offered a chat.
+
+### Documentation
+
+- A guide to using meshctl, on the website, in English and Spanish.
+
 ## 0.7.0 (2026-11-26)
 
 Each node in a colour of its own.
