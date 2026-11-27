@@ -115,6 +115,7 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
         Change::Mesh(
             _,
             mesh::Event::Message(_)
+            | mesh::Event::Waypoint(_)
             | mesh::Event::Packet(_)
             | mesh::Event::Ack(_)
             | mesh::Event::Traceroute(_)

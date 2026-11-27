@@ -334,6 +334,34 @@ impl Mesh {
         )
     }
 
+    /// Sends a waypoint to everyone on a channel, as the official apps do:
+    /// new, changed (the same id again) or deleted (see
+    /// [`crate::waypoint::Waypoint::deleted`]). Its name and description are
+    /// cut to what the firmware keeps. Returns the packet's id.
+    ///
+    /// The firmware refuses one sent within ten seconds of the last, from
+    /// whichever client: whoever calls this had better space them.
+    pub fn send_waypoint(
+        &self,
+        channel: u32,
+        waypoint: &crate::waypoint::Waypoint,
+    ) -> Result<u32, SendError> {
+        if self.is_meshcore() {
+            return Err(SendError::Unsupported);
+        }
+        let waypoint = waypoint.clone().fitted();
+        self.send_packet(
+            crate::mesh::BROADCAST,
+            channel,
+            true,
+            Data {
+                portnum: PortNum::WaypointApp as i32,
+                payload: meshctl_proto::meshtastic::Waypoint::from(&waypoint).encode_to_vec(),
+                ..Default::default()
+            },
+        )
+    }
+
     /// Whether the radio is a MeshCore one, as far as its open session says.
     fn is_meshcore(&self) -> bool {
         self.meshcore

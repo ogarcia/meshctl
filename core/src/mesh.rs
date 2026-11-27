@@ -163,6 +163,9 @@ pub enum Event {
     /// A text message heard. Messages are not kept here: whoever wants them,
     /// keeps them.
     Message(TextMessage),
+    /// A waypoint heard: new, changed, or deleted. Kept by whoever wants it,
+    /// as messages.
+    Waypoint(crate::waypoint::HeardWaypoint),
     /// The answer to a packet sent with want_ack: delivered, heard relayed,
     /// or given up on.
     Ack(Ack),
@@ -1011,6 +1014,18 @@ fn said(packet: &pb::MeshPacket, now: u32) -> Option<Event> {
                 request_id: (data.request_id != 0).then_some(data.request_id),
             }))
         }
+        Ok(PortNum::WaypointApp) => {
+            let waypoint = pb::Waypoint::decode(data.payload.as_slice()).ok()?;
+            Some(Event::Waypoint(crate::waypoint::HeardWaypoint {
+                packet_id: packet.id,
+                from: packet.from,
+                to: packet.to,
+                channel: packet.channel,
+                at: packet.rx_time.filter(|t| *t > 0).unwrap_or(now),
+                via_mqtt: packet.via_mqtt,
+                waypoint: waypoint.into(),
+            }))
+        }
         Ok(PortNum::AdminApp) if data.request_id != 0 => {
             let admin = pb::AdminMessage::decode(data.payload.as_slice()).ok()?;
             Some(Event::AdminAnswer {
@@ -1244,6 +1259,29 @@ mod tests {
         assert_eq!(truncated(433_623_000, 16), 433_618_944);
         assert_eq!(truncated(-84_115_000, 32), -84_115_000);
         assert_eq!(truncated(-84_115_000, 0), -84_115_000);
+    }
+
+    #[test]
+    fn a_waypoint_heard_is_told_whole() {
+        let shared = pb::Waypoint {
+            id: 77,
+            latitude_i: Some(433_623_000),
+            longitude_i: Some(-84_115_000),
+            name: "Cumbre".into(),
+            icon: 0x26F0,
+            geofence_radius: 100,
+            ..Default::default()
+        };
+        let mut heard = packet(7, PortNum::WaypointApp, shared.encode_to_vec());
+        heard.channel = 2;
+        let Some(Event::Waypoint(heard)) = said(&heard, 1000) else {
+            panic!("no waypoint told");
+        };
+        assert_eq!((heard.from, heard.channel, heard.at), (7, 2, 1000));
+        assert_eq!(heard.waypoint.id, 77);
+        assert_eq!(heard.waypoint.name, "Cumbre");
+        assert_eq!(heard.waypoint.emoji(), '⛰');
+        assert!(heard.waypoint.is_fenced());
     }
 
     #[test]

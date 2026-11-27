@@ -14,3 +14,4 @@ pub mod link;
 pub mod mesh;
 pub mod meshcore;
 pub mod radio;
+pub mod waypoint;
