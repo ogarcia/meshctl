@@ -1444,6 +1444,47 @@ impl Mesh {
             .ok_or(AdminError::UnknownNode)
     }
 
+    /// Marks a contact a favourite of the radio, or no longer, as the firmware
+    /// keeps it: the lowest bit of its flags, the rest of them (who may ask
+    /// it for telemetry) as they are. A favourite is never the one let go to
+    /// make room. The contact is read from the radio and written back whole,
+    /// as it is there now.
+    pub(crate) async fn meshcore_favorite(
+        &self,
+        num: u32,
+        favorite: bool,
+    ) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        if self.read(|state| state.local.as_ref().map(|l| l.num)) == Some(num) {
+            return Err(AdminError::OwnNode);
+        }
+        let key = self.meshcore_key(&session, num)?;
+        let mut contact = match session
+            .client
+            .ask_one(command::get_contact(&key), |r| {
+                matches!(r, Response::Contact(_))
+            })
+            .await
+        {
+            Ok(Response::Contact(contact)) => contact,
+            Ok(Response::Error(_)) => return Err(AdminError::UnknownNode),
+            Ok(_) => return Err(AdminError::Refused("UNEXPECTED".to_owned())),
+            Err("the radio did not answer") => return Err(AdminError::NoAnswer),
+            Err(_) => return Err(AdminError::NotConnected),
+        };
+        contact.flags = (contact.flags & !1) | u8::from(favorite);
+        contact.last_modified = now();
+        session.client.done(command::add_contact(&contact)).await?;
+        self.update(|state| match state.nodes.get_mut(&num) {
+            Some(node) => {
+                node.favorite = favorite;
+                vec![Event::Node(node.clone())]
+            }
+            None => Vec::new(),
+        });
+        Ok(())
+    }
+
     /// Has the radio forget a contact. Here it stays, as not in the radio's
     /// list.
     pub(crate) async fn meshcore_remove_contact(&self, num: u32) -> Result<(), AdminError> {

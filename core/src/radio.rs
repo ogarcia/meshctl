@@ -636,7 +636,7 @@ impl Mesh {
     /// air; the node changes here at once, as the radio does not tell.
     pub async fn set_favorite(&self, num: u32, favorite: bool) -> Result<(), AdminError> {
         if self.is_meshcore() {
-            return Err(AdminError::Unsupported);
+            return self.meshcore_favorite(num, favorite).await;
         }
         if !self.read(|state| state.nodes.contains_key(&num)) {
             return Err(AdminError::UnknownNode);

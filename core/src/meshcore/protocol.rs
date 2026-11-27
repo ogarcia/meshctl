@@ -95,6 +95,7 @@ pub mod command {
     const REMOVE_CONTACT: u8 = 0x0f;
     const GET_BATT_AND_STORAGE: u8 = 0x14;
     const DEVICE_QUERY: u8 = 0x16;
+    const GET_CONTACT_BY_KEY: u8 = 0x1e;
     const GET_CHANNEL: u8 = 0x1f;
     const SET_CHANNEL: u8 = 0x20;
     const SET_OTHER_PARAMS: u8 = 0x26;
@@ -266,8 +267,9 @@ pub mod command {
         ]
     }
 
-    /// Adds a contact, or updates the one with its key, laid out as the
-    /// radio lists them: no path known (`path_len` -1) unless one is given.
+    /// Adds a contact, or writes back the one with its key whole, laid out
+    /// as the radio lists them: its path as given, none known (`path_len`
+    /// -1) unless one is.
     pub fn add_contact(contact: &super::Contact) -> Vec<u8> {
         let mut payload = vec![ADD_UPDATE_CONTACT];
         payload.extend_from_slice(&contact.public_key);
@@ -276,12 +278,23 @@ pub mod command {
             contact.flags,
             contact.path_len.cast_unsigned(),
         ]);
-        payload.extend_from_slice(&[0; 64]);
+        let mut path = [0; 64];
+        let hops = contact.path.len().min(path.len());
+        path[..hops].copy_from_slice(&contact.path[..hops]);
+        payload.extend_from_slice(&path);
         payload.extend_from_slice(&fixed(&contact.name, 32));
         payload.extend_from_slice(&contact.last_advert.to_le_bytes());
         payload.extend_from_slice(&contact.lat.to_le_bytes());
         payload.extend_from_slice(&contact.lon.to_le_bytes());
         payload.extend_from_slice(&contact.last_modified.to_le_bytes());
+        payload
+    }
+
+    /// One contact as the radio has it now, by its whole key: answered with
+    /// `Contact`, or `Error` if it has none such.
+    pub fn get_contact(key: &[u8; 32]) -> Vec<u8> {
+        let mut payload = vec![GET_CONTACT_BY_KEY];
+        payload.extend_from_slice(key);
         payload
     }
 
@@ -1507,7 +1520,21 @@ mod tests {
         assert_eq!(added[0], 0x09);
         let mut listed = vec![0x03];
         listed.extend_from_slice(&added[1..]);
-        assert_eq!(Response::parse(&listed), Some(Response::Contact(contact)));
+        assert_eq!(
+            Response::parse(&listed),
+            Some(Response::Contact(contact.clone()))
+        );
+        // One with a path written back keeps it, every hash of it.
+        let routed = Contact {
+            flags: 0x03,
+            path_len: 2,
+            path: vec![0x52, 0x55],
+            ..contact.clone()
+        };
+        let mut listed = vec![0x03];
+        listed.extend_from_slice(&command::add_contact(&routed)[1..]);
+        assert_eq!(Response::parse(&listed), Some(Response::Contact(routed)));
+        assert_eq!(command::get_contact(&[1; 32])[..2], [0x1e, 1]);
         assert_eq!(command::remove_contact(&[1; 32])[..2], [0x0f, 1]);
         assert_eq!(command::reset_path(&[1; 32]).len(), 33);
         assert_eq!(command::send_advert(true), [0x07, 1]);

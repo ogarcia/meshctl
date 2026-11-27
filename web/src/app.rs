@@ -2780,10 +2780,18 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
             let avatar_style = move || avatar_style(live, node, &node_name(live, node));
             let favorite = move || known().is_some_and(|n| n.favorite);
             let unmessagable = move || known().is_some_and(|n| n.unmessagable);
-            // A favourite of the radio's, or not: marked here, on a Meshtastic
-            // radio, for any node but its own.
+            // A favourite of the radio's, or not: marked here, for any node
+            // but its own; on a MeshCore radio, a contact it has, as the
+            // mark is kept with the contact.
             let can_favor = move || {
-                live.selected_kind() == Some(RadioKind::Meshtastic) && !local() && known().is_some()
+                !local()
+                    && match live.selected_kind() {
+                        Some(RadioKind::Meshtastic) => known().is_some(),
+                        Some(RadioKind::Meshcore) => {
+                            known().is_some_and(|n| n.on_radio == Some(true))
+                        }
+                        _ => false,
+                    }
             };
             let toggle_favorite = move |_| {
                 let Some(radio) = live.selected.get_untracked() else {

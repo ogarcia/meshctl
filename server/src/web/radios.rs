@@ -623,9 +623,11 @@ async fn telemetry(
 
 /// Favourite node
 ///
-/// Marks a node a favourite of the radio, or no longer: the radio keeps it
-/// in its node list however long it goes unheard, and the apps show it
-/// first. Nothing goes on the air. Every client hears of it as `node`.
+/// Marks a node a favourite of the radio, or no longer, and the apps show it
+/// first: a Meshtastic radio keeps it in its node list however long it goes
+/// unheard; a MeshCore radio, one of its contacts, never lets it go to make
+/// room for another. Nothing goes on the air. Every client hears of it as
+/// `node`.
 #[utoipa::path(
     put,
     path = "/radios/{radio}/nodes/{node}/favorite",
