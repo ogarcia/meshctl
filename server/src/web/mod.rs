@@ -267,10 +267,25 @@ pub(crate) mod tests {
         for path in [
             "/api/v1/version",
             "/api/v1/radios",
+            "/api/v1/radios/{radio}/status",
+            "/api/v1/radios/{radio}/channels",
             "/api/v1/radios/{radio}/nodes",
+            "/api/v1/radios/{radio}/nodes/{node}",
             "/api/v1/events",
         ] {
             assert!(spec["paths"][path]["get"].is_object(), "{path}");
+        }
+        for path in [
+            "/api/v1/radios/{radio}/packets",
+            "/api/v1/radios/{radio}/packets/{id}/routes",
+        ] {
+            assert!(spec["paths"][path]["get"].is_object(), "{path}");
+        }
+        for path in [
+            "/api/v1/radios/{radio}/messages",
+            "/api/v1/radios/{radio}/requests",
+        ] {
+            assert!(spec["paths"][path]["post"].is_object(), "{path}");
         }
     }
 
