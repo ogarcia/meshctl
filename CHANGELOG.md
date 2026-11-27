@@ -3,6 +3,12 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.9.1 (2026-11-27)
+
+- Leaving a page before what it asked for came, as a node's settings read
+  over the mesh, which takes a while, no longer hangs the interface until
+  it is reloaded.
+
 ## 0.9.0 (2026-11-27)
 
 Nodes removed many at once, MeshCore radios full and their favourites, and
