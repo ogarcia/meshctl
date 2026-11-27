@@ -467,7 +467,9 @@ impl Radio {
     fn too_soon(&mut self, port: i32) -> bool {
         let interval = match PortNum::try_from(port) {
             Ok(PortNum::TracerouteApp) => Duration::from_secs(30),
-            Ok(PortNum::PositionApp | PortNum::TelemetryApp) => Duration::from_secs(10),
+            Ok(PortNum::PositionApp | PortNum::TelemetryApp | PortNum::WaypointApp) => {
+                Duration::from_secs(10)
+            }
             Ok(PortNum::TextMessageApp) => Duration::from_secs(2),
             _ => return false,
         };
@@ -488,6 +490,21 @@ impl Radio {
     fn ask(&mut self, packet: &MeshPacket, data: &pb::Data) -> Option<(Duration, MeshPacket)> {
         use pb::telemetry::Variant as T;
         if self.too_soon(data.portnum) {
+            // A waypoint is refused out loud, as the firmware does: a
+            // routing error for it, at once.
+            if data.portnum == PortNum::WaypointApp as i32 {
+                println!("waypoint sent too soon: refused");
+                let routing = pb::Routing {
+                    variant: Some(pb::routing::Variant::ErrorReason(
+                        pb::routing::Error::RateLimitExceeded as i32,
+                    )),
+                    ..Default::default()
+                };
+                let mut refused =
+                    self.reply(packet, PortNum::RoutingApp, routing.encode_to_vec(), 0.0);
+                refused.from = ME;
+                return Some((Duration::from_millis(50), refused));
+            }
             println!("port {} sent too soon: dropped", data.portnum);
             return None;
         }
@@ -501,7 +518,17 @@ impl Radio {
             self.last_text = Some(packet.id);
         }
         let acked = data.portnum == PortNum::TextMessageApp as i32
-            || (data.portnum == PortNum::PositionApp as i32 && packet.to == u32::MAX);
+            || ((data.portnum == PortNum::PositionApp as i32
+                || data.portnum == PortNum::WaypointApp as i32)
+                && packet.to == u32::MAX);
+        if data.portnum == PortNum::WaypointApp as i32
+            && let Ok(waypoint) = pb::Waypoint::decode(data.payload.as_slice())
+        {
+            println!(
+                "waypoint {:08x} \"{}\" sent, expire {}",
+                waypoint.id, waypoint.name, waypoint.expire
+            );
+        }
         if acked && packet.want_ack {
             let (error, delay) = if packet.to == NEIGHBOUR || packet.to == u32::MAX {
                 (
@@ -1146,6 +1173,113 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             };
             let _ = events.send(Event::Heard(packet));
             format!("heard on slot {channel}")
+        }
+        // Waypoints shared by the neighbour and the repeater, as the apps
+        // share them: one open to all, fenced by a circle; one locked to the
+        // repeater, fenced by a box; one that expires in an hour.
+        Some("waypoints") => {
+            let Some(channel) = slot(words.next()) else {
+                return "usage: waypoints <slot>".into();
+            };
+            let shared = [
+                (
+                    NEIGHBOUR,
+                    pb::Waypoint {
+                        id: 0x0000_cafe,
+                        latitude_i: Some(404_200_000),
+                        longitude_i: Some(-37_080_000),
+                        name: "Punto de encuentro".into(),
+                        description: "Junto a la fuente, a las diez".into(),
+                        icon: 0x1F91D,
+                        geofence_radius: 250,
+                        notify_on_enter: true,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    REPEATER,
+                    pb::Waypoint {
+                        id: 0x0000_0de5,
+                        latitude_i: Some(404_330_000),
+                        longitude_i: Some(-37_120_000),
+                        name: "Caseta del repetidor".into(),
+                        description: "Llave en el bar de abajo".into(),
+                        icon: 0x1F4E1,
+                        locked_to: REPEATER,
+                        bounding_box: Some(pb::BoundingBox {
+                            longitude_west_i: -37_160_000,
+                            latitude_south_i: 404_300_000,
+                            longitude_east_i: -37_080_000,
+                            latitude_north_i: 404_360_000,
+                        }),
+                        notify_on_exit: true,
+                        ..Default::default()
+                    },
+                ),
+                (
+                    NEIGHBOUR,
+                    pb::Waypoint {
+                        id: 0x0000_beef,
+                        latitude_i: Some(404_150_000),
+                        longitude_i: Some(-37_000_000),
+                        expire: now_secs() + 3_600,
+                        name: "Mercadillo".into(),
+                        description: "Solo esta mañana".into(),
+                        icon: 0x1F6D2,
+                        ..Default::default()
+                    },
+                ),
+            ];
+            for (from, waypoint) in &shared {
+                let packet = MeshPacket {
+                    from: *from,
+                    to: BROADCAST,
+                    channel: channel as u32,
+                    id: fresh_id(&NEXT_ID),
+                    rx_time: Some(now_secs()),
+                    rx_snr: 6.0,
+                    hop_limit: 3,
+                    hop_start: 3,
+                    payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                        portnum: PortNum::WaypointApp as i32,
+                        payload: waypoint.encode_to_vec(),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                };
+                let _ = events.send(Event::Heard(packet));
+            }
+            format!("{} waypoints on slot {channel}", shared.len())
+        }
+        // A waypoint deleted for everyone by whoever shared it, by its id in
+        // hex: sent again, expired.
+        Some("unwaypoint") => {
+            let Some(id) = words.next().and_then(|w| u32::from_str_radix(w, 16).ok()) else {
+                return "usage: unwaypoint <id in hex>".into();
+            };
+            let from = if id == 0x0de5 { REPEATER } else { NEIGHBOUR };
+            let packet = MeshPacket {
+                from,
+                to: BROADCAST,
+                id: fresh_id(&NEXT_ID),
+                rx_time: Some(now_secs()),
+                hop_limit: 3,
+                hop_start: 3,
+                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                    portnum: PortNum::WaypointApp as i32,
+                    payload: pb::Waypoint {
+                        id,
+                        expire: 1,
+                        locked_to: if from == REPEATER { REPEATER } else { 0 },
+                        ..Default::default()
+                    }
+                    .encode_to_vec(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            let _ = events.send(Event::Heard(packet));
+            format!("waypoint {id:08x} deleted by !{from:08x}")
         }
         Some("past") => {
             let Some(channel) = slot(words.next()) else {
