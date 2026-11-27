@@ -43,6 +43,7 @@ mod shared;
 mod sortable;
 mod stepper;
 mod storage;
+mod sweep;
 mod traces;
 mod waypoints;
 mod welcome;

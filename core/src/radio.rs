@@ -123,6 +123,11 @@ pub struct Sent {
     pub sent_at: Option<u32>,
 }
 
+/// How long after the last node asked to be read again a Meshtastic radio's
+/// node list is: long enough for those removed one after another to be read
+/// together.
+const REREAD_AFTER: Duration = Duration::from_millis(1_500);
+
 /// The mesh as meshctl knows it, shared between the radio task, which writes
 /// it, and whoever reads it. Cheap to clone.
 #[derive(Clone)]
@@ -142,6 +147,9 @@ pub struct Mesh {
     /// When the last sync started, which the radio has [`SYNC_TIMEOUT`] to
     /// answer from.
     sync_started: Arc<Mutex<Instant>>,
+    /// How many times nodes were asked to be read again: the node list read
+    /// once for all of those asked for together.
+    rereads: Arc<AtomicU32>,
 }
 
 /// A change to the radio's own settings, as the protobufs carry them, each
@@ -262,6 +270,7 @@ impl Mesh {
             nonce: Arc::new(AtomicU32::new(0)),
             waiting: Arc::default(),
             sync_started: Arc::new(Mutex::new(Instant::now())),
+            rereads: Arc::default(),
         }
     }
 
@@ -661,12 +670,29 @@ impl Mesh {
     /// Reads a node again from the radio, as it has it now: whatever was
     /// known of it here gone first, by whoever asks. A Meshtastic radio sends
     /// no node alone: its whole node list is asked for again, as on
-    /// connecting. Nothing goes on the air.
+    /// connecting, a while after the last node asked for, once for all of
+    /// those asked for one after another. Nothing goes on the air.
     pub async fn reread_node(&self, num: u32) -> Result<(), AdminError> {
         if self.is_meshcore() {
             return self.meshcore_reread(num).await;
         }
-        self.resync()
+        if self
+            .outbox
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none()
+        {
+            return Err(AdminError::NotConnected);
+        }
+        let asked = self.rereads.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+        let mesh = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(REREAD_AFTER).await;
+            if mesh.rereads.load(Ordering::Relaxed) == asked {
+                let _ = mesh.resync();
+            }
+        });
+        Ok(())
     }
 
     /// Has the radio forget a node: out of its node list, until it is heard

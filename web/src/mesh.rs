@@ -330,6 +330,9 @@ fn NodeList() -> impl IntoView {
         }
     };
 
+    // Many of them removed at once, of those shown.
+    let sweeping = RwSignal::new(false);
+    let sweep_label = move || t_string!(i18n, sweep_open);
     view! {
         <section class="node-list">
             <div class="node-tools">
@@ -342,8 +345,17 @@ fn NodeList() -> impl IntoView {
                         on:input=move |ev| filter.set(event_target_value(&ev))
                     />
                     <SortMenu sort />
+                    <button
+                        type="button"
+                        class="icon-button sweep-open"
+                        title=sweep_label
+                        aria-label=sweep_label
+                        inner_html=TRASH
+                        on:click=move |_| sweeping.set(true)
+                    ></button>
                 </div>
             </div>
+            <crate::sweep::Sweep open=sweeping shown />
             <table class="nodes-table">
                 <thead>
                     <tr>
@@ -491,6 +503,7 @@ const MESSAGE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/
 pub const STAR: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/star.svg");
 pub const MESSAGE_OFF: &str =
     include_str!("../vendor/tabler-icons-3.51.0/icons/outline/message-off.svg");
+const TRASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/trash.svg");
 pub const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");
 const DATABASE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/database.svg");
 pub const PLUG: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/plug.svg");
