@@ -64,6 +64,7 @@ the radio gives up on them after two seconds.
 | `fill` | Every slot a channel, and the link dropped to have them read. |
 | `twin <from> <to>` | The channel in one slot copied into another: the very same channel twice, as another app may leave it. |
 | `off <slot>` | The channel in a slot switched off. |
+| `crowd <nodes>` | Many nodes heard, up to 1,000, about Madrid: at every distance up to 40 km, one in ten nowhere and one in twelve on the same spot as the one before; of every role and many models; directly, up to seven hops away, not known how far, or through MQTT; heard minutes, days, weeks or more than a month ago. The same for the same number. The link drops to have them read; `crowd 0`, none. |
 | `own` | The radio tells its clients its own device telemetry and how it hears the mesh, as it does now and then. |
 | `place` | The neighbour says where it is, as when asked. |
 | `move <lat> <lon>` | The neighbour somewhere else, as its position says: to see what follows it, as fences that watch it. |
@@ -113,7 +114,8 @@ Its contacts, around A Coruña:
 | `post <text>` | Someone posts in Sala Coruña: Ana, or someone the radio does not know, by turns; sent to the radio once logged in. |
 | `room missing` | The room is listed but not found to log in to, as a splitter in between may list a contact the radio no longer has. |
 | `room strict\|open` | The room says nothing to a wrong password, as one that lets nobody in to read; or lets them in to read again. |
-| `advert` | A node not known before advertises: the radio adds it, or, with contacts added by hand, only tells it was heard, as the firmware does. |
+| `advert [chat\|repeater\|room\|sensor]` | A node not known before advertises, a companion if no kind is given, flooded through Monte. The radio takes it as the firmware does: only told of, not added, if its kind is not added by itself or it is further than the hops allowed; added if there is room; in place of the contact changed longest ago if full and allowed to overwrite one, saying that one is gone; and if not, told of, and the radio says it is full. |
+| `crowd <contacts>` | Many contacts, about A Coruña, as many as asked for and the radio has room for, up to its 350 in all: six in ten companions, a quarter repeaters, the rest sensors and rooms; one in ten nowhere; a path known to most; heard minutes, days, weeks or more than a month ago, and added now. The same for the same number. The link drops to have them read; `crowd 0`, none. |
 | `trace` | Someone else's trace heard going by, raw, along Monte, Torre and Monte again. |
 | `answers on\|off` | Whether pings come back and requests are answered. |
 | `busy <percent>` | The channel that much busier than it was, as the radio's airtime says, up to 95%; `busy 0`, as it was. |
@@ -127,18 +129,22 @@ control port served, the time and chance. Each radio is a binary in
 `src/bin`, in modules:
 
 - **fake-meshtastic**: `radio` (what it is set to, and what it hands its
-  clients), `neighbour` (who it is and how it answers), `link` (its
-  clients), `control` (the control port).
+  clients), `neighbour` (who it is and how it answers), `crowd` (many
+  nodes), `link` (its clients), `control` (the control port).
 - **fake-meshcore**: `radio` (what it has and is set to), `commands` (what
   it answers each command), `frames` (the frames it sends, made, and what is
   read from those it gets), `nodes` (Ana, the room, the repeaters and the
-  sensor), `link` (its clients), `control` (the control port).
+  sensor), `crowd` (many contacts), `link` (its clients), `control` (the
+  control port).
 
 ## What to know
 
 - **One queue for every client.** The MeshCore radio hands each message it
   queued to whichever client pulls it first, as the firmware does: a second
   meshctl connected to it takes them from the first.
+- **No favourites on the MeshCore radio.** It keeps none: full, and
+  allowed to overwrite, it takes the place of the contact changed longest
+  ago, of any.
 - **The MeshCore radio seals with meshctl's own code.** Its packets are made
   and read with `meshctl_core::meshcore::raw`, the code it tests: a mistake
   there would be made on both sides and go unseen. That code was checked
