@@ -17,9 +17,12 @@ pub fn id(radio: RadioId, peer: Peer) -> String {
     }
 }
 
-/// A notification's own id: its conversation's, but a waypoint's own, so
-/// that it does not take the place of a message's.
+/// A notification's own id: its conversation's, but a waypoint's own, and
+/// a full radio's, so that they do not take the place of a message's.
 pub fn notice_id(notification: &Notification) -> String {
+    if notification.contacts_full {
+        return format!("meshctl-{}-full", notification.radio);
+    }
     match &notification.waypoint {
         Some(waypoint) => format!("meshctl-{}-w{}", notification.radio, waypoint.id),
         None => id(notification.radio, notification.peer),
@@ -27,18 +30,23 @@ pub fn notice_id(notification: &Notification) -> String {
 }
 
 /// A notification's conversation, as the panel takes it to open it: for a
-/// waypoint, the waypoint, which opens on the map.
+/// waypoint, the waypoint, which opens on the map; for a full radio, its
+/// settings.
 pub fn chat(notification: &Notification) -> String {
     serde_json::json!({
         "radio": notification.radio,
         "peer": notification.peer,
         "waypoint": notification.waypoint.as_ref().map(|w| w.id),
+        "full": notification.contacts_full,
     })
     .to_string()
 }
 
-/// Who wrote, where, and through which radio.
+/// Who wrote, where, and through which radio; a full radio, its name.
 pub fn title(notification: &Notification) -> String {
+    if notification.contacts_full {
+        return notification.radio_name.clone();
+    }
     let mut title = notification.sender.clone();
     if let Some(channel) = &notification.channel {
         title.push_str(&format!(" · #{channel}"));
@@ -51,6 +59,14 @@ pub fn title(notification: &Notification) -> String {
 /// waypoint, what happened to it: in the system's language.
 pub fn body(notification: &Notification) -> String {
     let spanish = sys_locale::get_locale().is_some_and(|locale| locale.starts_with("es"));
+    if notification.contacts_full {
+        return if spanish {
+            "Su lista de contactos está llena: los nodos nuevos que oye no se guardan."
+        } else {
+            "Its list of contacts is full: the new nodes it hears are not kept."
+        }
+        .to_owned();
+    }
     if let Some(waypoint) = &notification.waypoint {
         let said = match (waypoint.event, spanish) {
             (WaypointEvent::Shared, false) => "Shared a waypoint",

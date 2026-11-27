@@ -7,4 +7,5 @@
     <string name="waypoint_entered">Entró en</string>
     <string name="waypoint_left">Salió de</string>
     <string name="back_again">Pulsa atrás otra vez para salir</string>
+    <string name="contacts_full">Su lista de contactos está llena: los nodos nuevos que oye no se guardan.</string>
 </resources>

@@ -1294,6 +1294,7 @@
   "notify_waypoint_shared": "Compartió un waypoint",
   "notify_waypoint_entered": "Entró en",
   "notify_waypoint_left": "Salió de",
+  "notify_contacts_full": "Su lista de contactos está llena: los nodos nuevos que oye no se guardan.",
   "waypoint_watch": "Avisarme de su geovalla",
   "waypoint_unwatch": "Dejar de avisarme de su geovalla",
   "waypoint_crossings": "Últimamente",

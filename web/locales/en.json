@@ -1294,6 +1294,7 @@
   "notify_waypoint_shared": "Shared a waypoint",
   "notify_waypoint_entered": "Went into",
   "notify_waypoint_left": "Left",
+  "notify_contacts_full": "Its list of contacts is full: the new nodes it hears are not kept.",
   "waypoint_watch": "Tell me of its fence",
   "waypoint_unwatch": "Stop telling me of its fence",
   "waypoint_crossings": "Lately",

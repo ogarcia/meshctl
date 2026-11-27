@@ -9,4 +9,5 @@
     <string name="waypoint_entered">Went into</string>
     <string name="waypoint_left">Left</string>
     <string name="back_again">Press back again to leave</string>
+    <string name="contacts_full">Its list of contacts is full: the new nodes it hears are not kept.</string>
 </resources>

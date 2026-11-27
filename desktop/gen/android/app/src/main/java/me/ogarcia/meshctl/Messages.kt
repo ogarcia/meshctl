@@ -30,6 +30,10 @@ class Messages(private val context: Context) {
       return
     }
     val radio = notification.optInt("radio")
+    if (notification.optBoolean("contacts_full")) {
+      full(radio, notification.optString("radio_name"))
+      return
+    }
     val peer = notification.optJSONObject("peer") ?: return
     val key = key(radio, peer)
     val channel = notification.optString("channel").takeIf { it.isNotEmpty() }
@@ -86,6 +90,44 @@ class Messages(private val context: Context) {
       .setContentIntent(open)
       .setAutoCancel(true)
       .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .build()
+    try {
+      NotificationManagerCompat.from(context).notify(key, ID, built)
+    } catch (_: SecurityException) {
+      // Not let show notifications: nothing shown.
+    }
+  }
+
+  /**
+   * A MeshCore radio with no room for the nodes it hears: one notification
+   * of its own, by its name; on it, the app opens on the radio's settings.
+   */
+  private fun full(radio: Int, radioName: String) {
+    val key = "$radio-full"
+    val chat = JSONObject().put("radio", radio)
+      .put("peer", JSONObject().put("kind", "channel").put("channel", 0))
+      .put("full", true)
+      .toString()
+    val open = PendingIntent.getActivity(
+      context,
+      key.hashCode(),
+      Intent(context, MainActivity::class.java)
+        .setAction(MainActivity.OPEN_CHAT)
+        .putExtra(MainActivity.CHAT, chat)
+        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    )
+    channel()
+    val said = context.getString(R.string.contacts_full)
+    val built = NotificationCompat.Builder(context, CHANNEL)
+      .setSmallIcon(R.drawable.ic_listening)
+      .setContentTitle(radioName.ifEmpty { context.getString(R.string.app_name) })
+      .setContentText(said)
+      .setStyle(NotificationCompat.BigTextStyle().bigText(said))
+      .setContentIntent(open)
+      .setAutoCancel(true)
+      .setCategory(NotificationCompat.CATEGORY_STATUS)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       .build()
     try {

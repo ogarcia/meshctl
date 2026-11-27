@@ -399,6 +399,18 @@ pub fn tell_full(live: Live, radio: RadioId) {
     live.full.update(|full| full.push(radio));
 }
 
+/// Opens a full radio's settings where the oldest contacts can be let go,
+/// its notice put away.
+pub fn open_full(live: Live, radio: RadioId) {
+    put_away_full(live, radio);
+    if live.selected.get_untracked() != Some(radio) {
+        live.select(radio);
+    }
+    live.meshcore_tab
+        .set(crate::meshcore_settings::MeshcoreTab::Advanced);
+    live.go(crate::app::Page::RadioSettings);
+}
+
 /// Puts away the notice of a full radio, for a while.
 fn put_away_full(live: Live, radio: RadioId) {
     live.full.update(|full| full.retain(|r| *r != radio));
@@ -472,15 +484,7 @@ pub fn Notices() -> impl IntoView {
                         </span>
                         <button
                             type="button"
-                            on:click=move |_| {
-                                put_away_full(live, radio);
-                                if live.selected.get_untracked() != Some(radio) {
-                                    live.select(radio);
-                                }
-                                live.meshcore_tab
-                                    .set(crate::meshcore_settings::MeshcoreTab::Advanced);
-                                live.go(crate::app::Page::RadioSettings);
-                            }
+                            on:click=move |_| open_full(live, radio)
                         >
                             {t!(i18n, notice_contacts_full_settings)}
                         </button>

@@ -88,13 +88,15 @@ pub fn ready(live: Live) {
 }
 
 /// A conversation to open, as the app gives it, in JSON; or a waypoint, to
-/// show on the map.
+/// show on the map; or, the radio full, its settings.
 #[derive(serde::Deserialize)]
 struct Chat {
     radio: RadioId,
     peer: Peer,
     #[serde(default)]
     waypoint: Option<u32>,
+    #[serde(default)]
+    full: bool,
 }
 
 fn open_chat(live: Live, chat: &str) {
@@ -103,6 +105,10 @@ fn open_chat(live: Live, chat: &str) {
     };
     if live.selected.get_untracked() != Some(chat.radio) {
         live.select(chat.radio);
+    }
+    if chat.full {
+        crate::waypoints::open_full(live, chat.radio);
+        return;
     }
     match chat.waypoint {
         Some(id) => live.show_waypoint(id),
@@ -193,27 +199,37 @@ pub fn show(live: Live, notification: Notification) {
     if let Some(channel) = &notification.channel {
         title.push_str(&format!(" · #{channel}"));
     }
-    if many_radios {
+    if many_radios && !notification.contacts_full {
         title.push_str(&format!(" · {}", notification.radio_name));
     }
     let options = web_sys::NotificationOptions::new();
-    let body = notification.waypoint.as_ref().map_or_else(
-        || notification.text.clone().unwrap_or_default(),
-        |waypoint| waypoint_body(live, waypoint.event, notification.text.as_deref()),
-    );
+    let body = if notification.contacts_full {
+        use crate::i18n::td_string;
+        let locale: crate::i18n::Locale = untrack(|| live.locale());
+        td_string!(locale, notify_contacts_full).to_owned()
+    } else {
+        notification.waypoint.as_ref().map_or_else(
+            || notification.text.clone().unwrap_or_default(),
+            |waypoint| waypoint_body(live, waypoint.event, notification.text.as_deref()),
+        )
+    };
     options.set_body(&body);
     // One for each conversation, the newest in place of the one before; a
-    // waypoint's, one of its own.
-    options.set_tag(&notification.waypoint.as_ref().map_or_else(
-        || {
-            format!(
-                "meshctl-{}-{}",
-                notification.radio,
-                peer_key(notification.peer)
-            )
-        },
-        |waypoint| format!("meshctl-{}-w{}", notification.radio, waypoint.id),
-    ));
+    // waypoint's, and a full radio's, one of their own.
+    options.set_tag(&if notification.contacts_full {
+        format!("meshctl-{}-full", notification.radio)
+    } else {
+        notification.waypoint.as_ref().map_or_else(
+            || {
+                format!(
+                    "meshctl-{}-{}",
+                    notification.radio,
+                    peer_key(notification.peer)
+                )
+            },
+            |waypoint| format!("meshctl-{}-w{}", notification.radio, waypoint.id),
+        )
+    });
     options.set_icon("/favicon.svg");
     let Ok(shown) = web_sys::Notification::new_with_options(&title, &options) else {
         return;
@@ -222,6 +238,7 @@ pub fn show(live: Live, notification: Notification) {
         "radio": notification.radio,
         "peer": notification.peer,
         "waypoint": notification.waypoint.as_ref().map(|w| w.id),
+        "full": notification.contacts_full,
     })
     .to_string();
     let closing = shown.clone();

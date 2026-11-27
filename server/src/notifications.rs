@@ -13,7 +13,8 @@
 //! Waypoints too: one shared new by another node, on a channel notified of
 //! whole (not only its mentions); and a node going in or out of a fence the
 //! radio watches, as its author asked, told of wherever notifications are
-//! on.
+//! on. And a MeshCore radio full, which keeps no more nodes: once an hour at
+//! most, wherever notifications are on.
 
 use crate::radios::{Change, Radios};
 use crate::store::now;
@@ -27,6 +28,10 @@ use meshctl_core::waypoint::Waypoint as Shared;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
+
+/// How long a full radio is not notified of again: it says so with every
+/// node it would add.
+const FULL_QUIET: Duration = Duration::from_secs(3_600);
 
 /// How long a radio is taken to be catching up, after it is ready: what it
 /// kept while nobody was there comes then, and is not notified of.
@@ -42,6 +47,8 @@ pub fn spawn(radios: Radios) {
         let mut changes = radios.subscribe();
         let mut ready: HashMap<RadioId, Instant> = HashMap::new();
         let mut fences = Fences::default();
+        // When each full radio was last notified of.
+        let mut full: HashMap<RadioId, Instant> = HashMap::new();
         // The waypoints told of as shared: once each, however often they
         // change after.
         let mut told: std::collections::HashSet<(RadioId, u32)> = std::collections::HashSet::new();
@@ -67,6 +74,13 @@ pub fn spawn(radios: Radios) {
                 Ok(Change::WaypointGone(radio, id)) => {
                     fences.forget(radio);
                     told.remove(&(radio, id));
+                }
+                Ok(Change::Mesh(radio, mesh::Event::ContactsFull)) => {
+                    if full.get(&radio).is_none_or(|at| at.elapsed() >= FULL_QUIET)
+                        && contacts_full(&radios, radio).await
+                    {
+                        full.insert(radio, Instant::now());
+                    }
                 }
                 Ok(Change::Mesh(radio, mesh::Event::Node(node))) => {
                     fences.moved(&radios, radio, &node).await;
@@ -135,11 +149,41 @@ async fn heard(radios: &Radios, radio: RadioId, message: &Message) {
         channel,
         text: settings.show_text.then(|| message.text.clone()),
         waypoint: None,
+        contacts_full: false,
     };
     if let Some(host) = radios.host() {
         host.notify(&notification);
     }
     radios.notify(notification);
+}
+
+/// Notifies of a MeshCore radio with no room for a node it would add, where
+/// notifications are on at all; whether it did.
+async fn contacts_full(radios: &Radios, radio: RadioId) -> bool {
+    match radios.notifications().await {
+        Ok(settings) if settings.enabled => {}
+        Ok(_) => return false,
+        Err(err) => {
+            tracing::warn!(error = format_args!("{err:#}"), "notifications");
+            return false;
+        }
+    }
+    let name = radios.radio_name(radio).await.unwrap_or_default();
+    notify_news(
+        radios,
+        Notification {
+            radio,
+            peer: Peer::Channel { channel: 0 },
+            message: 0,
+            sender: name.clone(),
+            radio_name: name,
+            channel: None,
+            text: None,
+            waypoint: None,
+            contacts_full: true,
+        },
+    );
+    true
 }
 
 /// Notifies of a waypoint shared new by another node, on a channel whose
@@ -181,7 +225,7 @@ async fn shared(radios: &Radios, radio: RadioId, waypoint: &Waypoint) {
             slot_name(state, waypoint.channel),
         )
     });
-    notify_waypoint(
+    notify_news(
         radios,
         Notification {
             radio,
@@ -197,11 +241,12 @@ async fn shared(radios: &Radios, radio: RadioId, waypoint: &Waypoint) {
                 id: waypoint.id,
                 event: WaypointEvent::Shared,
             }),
+            contacts_full: false,
         },
     );
 }
 
-fn notify_waypoint(radios: &Radios, notification: Notification) {
+fn notify_news(radios: &Radios, notification: Notification) {
     if let Some(host) = radios.host() {
         host.notify(&notification);
     }
@@ -352,7 +397,7 @@ async fn crossing(
     let channel = kept.as_ref().map_or(0, |(w, _)| w.channel);
     let (sender, channel_name) =
         mesh.read(|state| (node_name(state, node), slot_name(state, channel)));
-    notify_waypoint(
+    notify_news(
         radios,
         Notification {
             radio,
@@ -372,6 +417,7 @@ async fn crossing(
                     WaypointEvent::Left
                 },
             }),
+            contacts_full: false,
         },
     );
 }

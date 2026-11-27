@@ -559,6 +559,11 @@ pub struct Notification {
     /// client says it in its own words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waypoint: Option<WaypointNotice>,
+    /// What it is about when it is no message nor waypoint, `message` then 0:
+    /// a MeshCore radio heard a node it would add, and had no room for it.
+    /// Its `peer` means nothing then: it opens on the radio's settings.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub contacts_full: bool,
 }
 
 /// A waypoint notified of, and what happened.
