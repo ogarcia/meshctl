@@ -17,7 +17,7 @@
 [![Desktop app](https://img.shields.io/badge/desktop-Windows%20%C2%B7%20Flatpak-4a5568?style=for-the-badge)](#installing)
 [![Container image](https://img.shields.io/badge/container-ghcr.io-2496ed?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/ogarcia/meshctl/pkgs/container/meshctl)
 
-[Website](https://meshctl.ogarcia.me/) · [Installing](#installing) · [Running](#running) · [Access](#access) · [Message marks](#message-marks) · [Administering a node](#administering-a-node) · [Changelog](CHANGELOG.md)
+[Website](https://meshctl.ogarcia.me/) · [Installing](#installing) · [Running](#running) · [Access](#access) · [Guide](https://meshctl.ogarcia.me/guide.html) · [Changelog](CHANGELOG.md)
 
 <img src="https://meshctl.ogarcia.me/shots/en-map.webp" alt="meshctl's map: the mesh around A Coruña, its nodes coloured by how many hops away they are, beside the radio's pages and channels" width="860">
 
@@ -233,41 +233,13 @@ location / {
 
 meshctl warns at startup when it listens beyond this machine without a token.
 
-## Message marks
+## Using it
 
-Each message you send carries a mark that says how far it went, the same on
-Meshtastic and MeshCore; holding the pointer over it says it in words.
-
-| Mark | What it means |
-|------|---------------|
-| A clock | Not in the radio yet. Only on MeshCore: a Meshtastic radio has it at once. |
-| One grey tick | Sent, with nobody known to have heard it. On a Meshtastic direct message, it may also be on its way: a node passed it on, and the one it was sent to has not confirmed it yet. If that confirmation never comes, it stays so for good: it went out and was passed on, but nobody said it arrived. |
-| Two blue ticks | Got. On a channel, another node was heard passing it on, as far as anyone can tell; to a node, that node said it received it. |
-| A crossed antenna | Nobody heard it, after the radio's tries: it can be sent again. |
-| A red alert | It failed otherwise; the mark says why. |
-
-## Administering a node
-
-meshctl can read and change another Meshtastic node's settings over the
-mesh, through your radio, as the official apps do: its owner and role, its
-LoRa, its channels, every section of its configuration and modules, its
-admin keys and its fixed position; and have it reboot, shut down, forget the
-nodes it knows or go back to its factory settings.
-
-The node has to take your radio as its admin first. Whoever has it at hand
-adds your radio's public key to its admin keys, up to three: in meshctl,
-under its radio's settings, *Device*, *Security*. Your radio's key is on its
-own node's page, and meshctl shows it too when a node does not take it.
-
-Then, on the node's page, *Administer* opens the same settings page as your
-radio's, for the node. Every read and every change goes over the air, sealed
-to the node's key: a few seconds each, up to a minute when it is far. Each
-change asks first. Those to its LoRa and its channels ask more firmly, and
-with reason: if they no longer match your radio's, the node stops hearing
-it, and nothing over the mesh can undo it; only whoever has it at hand can.
-So can removing your key from its admin keys, or a factory reset.
-
-The firmware's old admin channel, a channel named `admin`, is not used.
+The [guide](https://meshctl.ogarcia.me/guide.html) tells what the panel does
+that is not plain at a glance: several radios, nodes and the map, the chat and
+its message marks, links and QR codes, notifications, automatic replies, a
+radio's settings and its secrets, and administering another node over the
+mesh.
 
 ## Building
 

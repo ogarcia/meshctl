@@ -48,6 +48,8 @@
   --mc-primary: #9a5b00;
   --mc-primary-strong: #7a4800;
   --mc-on-primary: #ffffff;
+  --mc-second: #1f6fd1;
+  --mc-danger: #b42318;
   --mc-soft: color-mix(in srgb, var(--mc-primary) 14%, var(--mc-surface));
 }
 
@@ -64,6 +66,8 @@
     --mc-primary: #f0a63a;
     --mc-primary-strong: #f6c06e;
     --mc-on-primary: #1a1205;
+    --mc-second: #5aa9ff;
+    --mc-danger: #f0a0a0;
   }
 }
 
@@ -117,6 +121,19 @@ p, figure, h1, h2, h3 { margin: 0; }
 .ti-brand-github { --icon: url(icons/brand-github.svg); }
 .ti-download { --icon: url(icons/download.svg); }
 .ti-box { --icon: url(icons/box.svg); }
+.ti-plug { --icon: url(icons/plug.svg); }
+.ti-radio { --icon: url(icons/radio.svg); }
+.ti-checks { --icon: url(icons/checks.svg); }
+.ti-check { --icon: url(icons/check.svg); }
+.ti-clock { --icon: url(icons/clock.svg); }
+.ti-antenna-off { --icon: url(icons/antenna-off.svg); }
+.ti-alert-triangle { --icon: url(icons/alert-triangle.svg); }
+.ti-bell-ringing { --icon: url(icons/bell-ringing.svg); }
+.ti-lock { --icon: url(icons/lock.svg); }
+.ti-database { --icon: url(icons/database.svg); }
+.ti-sun { --icon: url(icons/sun.svg); }
+.ti-send { --icon: url(icons/send.svg); }
+.ti-settings { --icon: url(icons/settings.svg); }
 
 /* --- the bar on top, as the interface's headings ------------------------- */
 
@@ -170,6 +187,7 @@ p, figure, h1, h2, h3 { margin: 0; }
 }
 
 .mc-nav a:hover { background: var(--mc-raised); color: var(--mc-text); text-decoration: none; }
+.mc-nav a[aria-current="page"] { background: var(--mc-soft); color: var(--mc-primary); font-weight: 600; }
 .mc-nav-external { margin-left: 4px; font-size: 12px; color: var(--mc-muted); }
 
 /* The other language. */
@@ -400,6 +418,114 @@ pre {
 
 pre code { font-size: inherit; }
 
+/* --- the guide: its contents beside it, as the settings' list ------------ */
+
+.mc-guide {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.mc-toc {
+  position: sticky;
+  top: 69px;
+  max-height: calc(100dvh - 85px);
+  overflow-y: auto;
+  padding: 24px 0 16px;
+}
+
+.mc-toc-title {
+  padding: 0 12px 6px;
+  color: var(--mc-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mc-toc ol { margin: 0; padding: 0; list-style: none; }
+
+.mc-toc a {
+  display: block;
+  padding: 5px 12px;
+  border-radius: var(--mc-radius-sm);
+  color: var(--mc-muted);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.mc-toc a:hover { background: var(--mc-raised); color: var(--mc-text); text-decoration: none; }
+
+.mc-guide-body { max-width: 860px; }
+
+.mc-guide-intro { padding: 32px 0 4px; }
+.mc-guide-intro h1 { font-size: 32px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; }
+.mc-guide-intro .lead { margin-top: 10px; font-size: 17px; line-height: 1.55; color: var(--mc-muted); }
+
+.mc-guide .mc-heading { margin-top: 36px; }
+.mc-guide .mc-heading h2 { display: flex; align-items: center; gap: 10px; }
+.mc-guide .mc-heading h2 .ti { color: var(--mc-primary); font-size: 22px; }
+
+/* Text to read, in the card: the text's own colour, not the captions'. */
+.mc-prose { gap: 10px; padding-top: 18px; font-size: 15px; }
+.mc-prose > p { color: var(--mc-text); font-size: 15px; }
+.mc-prose ul { font-size: 15px; }
+.mc-prose li + li { margin-top: 6px; }
+.mc-prose em { font-style: normal; font-weight: 600; }
+.mc-prose > p > .ti { color: var(--mc-primary); margin-right: 2px; }
+.mc-prose code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--mc-raised);
+  white-space: nowrap;
+}
+
+.mc-table {
+  overflow-x: auto;
+  border: 1px solid var(--mc-border);
+  border-radius: var(--mc-radius-sm);
+}
+
+.mc-table table { width: 100%; border-collapse: collapse; font-size: 14px; }
+
+.mc-table th, .mc-table td {
+  padding: 9px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--mc-border);
+}
+
+.mc-table thead th {
+  border-top: 0;
+  background: var(--mc-surface-2);
+  color: var(--mc-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mc-table td:first-child { white-space: nowrap; }
+
+/* A message's mark, in the colours the chat gives it. */
+.mc-mark { display: inline-flex; align-items: center; gap: 6px; color: var(--mc-muted); }
+.mc-mark .ti { font-size: 17px; }
+.mc-mark.is-got .ti { color: var(--mc-second); }
+.mc-mark.is-failed .ti { color: var(--mc-danger); }
+
+/* What to mind before doing it. */
+.mc-warning {
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--mc-primary) 45%, var(--mc-border));
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-soft);
+}
+
+.mc-warning .ti { margin-top: 4px; color: var(--mc-primary); }
+
 /* --- the foot: who makes it, as the about window says ------------------- */
 
 .mc-footer {
@@ -435,6 +561,9 @@ pre code { font-size: inherit; }
   .mc-nav .wide { display: none; }
   .mc-hero { grid-template-columns: minmax(0, 1fr); }
   .mc-hero-mark { display: none; }
+  /* The contents go away: each section is a scroll away, and the bar stays. */
+  .mc-guide { grid-template-columns: minmax(0, 1fr); }
+  .mc-toc { display: none; }
 }
 
 @media (max-width: 700px) {
@@ -446,5 +575,8 @@ pre code { font-size: inherit; }
   .mc-actions .mc-button { flex: 1 1 auto; }
   .mc-features { grid-template-columns: minmax(0, 1fr); }
   .mc-card { padding: 12px 14px 14px; }
+  .mc-guide-intro { padding-top: 20px; }
+  .mc-guide-intro h1 { font-size: 26px; }
+  .mc-table td:first-child { white-space: normal; }
   .mc-footer-inner { padding: 16px 14px; }
 }

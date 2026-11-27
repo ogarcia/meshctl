@@ -1,0 +1,467 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
+
+  How to use meshctl, once it runs: what the panel does that is not plain at a
+  glance. Installing and running it is in the README. The Spanish one is
+  es/guide.html, and the two are kept saying the same.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guide — meshctl</title>
+
+    <meta name="description" content="How to use meshctl: adding radios, nodes and the map, chat and its marks, links and QR codes, notifications, automatic replies, settings and administering a node." />
+    <link rel="canonical" href="https://meshctl.ogarcia.me/guide.html" />
+    <link rel="alternate" hreflang="en" href="https://meshctl.ogarcia.me/guide.html" />
+    <link rel="alternate" hreflang="es" href="https://meshctl.ogarcia.me/es/guide.html" />
+    <link rel="alternate" hreflang="x-default" href="https://meshctl.ogarcia.me/guide.html" />
+
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="meshctl" />
+    <meta property="og:title" content="meshctl's guide" />
+    <meta property="og:description" content="How to use meshctl, from the first radio to administering a node over the mesh." />
+    <meta property="og:url" content="https://meshctl.ogarcia.me/guide.html" />
+    <meta property="og:image" content="https://meshctl.ogarcia.me/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="meshctl's mark, a mesh whose main node is a gear, beside its name and one line: a lean control panel for your mesh radios" />
+    <meta property="og:locale" content="en_GB" />
+    <meta property="og:locale:alternate" content="es_ES" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#12161c" media="(prefers-color-scheme: dark)" />
+
+    <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="meshctl.css" />
+  </head>
+
+  <body>
+    <header class="mc-header">
+      <div class="mc-header-inner">
+        <a class="mc-brand" href="./">
+          <svg class="mc-logo" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-linecap="round" aria-hidden="true"><path stroke-width="2.2" d="M9.31 18.25L6 26M17.9 15.37L26 20M6 26L26 20M18.17 9.15L25 6"/><g fill="currentColor" stroke="none"><circle cx="6" cy="26" r="4.1"/><circle cx="26" cy="20" r="4.1"/><circle cx="25" cy="6" r="4.1"/><path fill-rule="evenodd" d="M11.07 8.01L11.11 6.67L12.89 6.67L12.93 8.01L14.17 8.52L15.14 7.61L16.39 8.86L15.48 9.83L15.99 11.07L17.33 11.11L17.33 12.89L15.99 12.93L15.48 14.17L16.39 15.14L15.14 16.39L14.17 15.48L12.93 15.99L12.89 17.33L11.11 17.33L11.07 15.99L9.83 15.48L8.86 16.39L7.61 15.14L8.52 14.17L8.01 12.93L6.67 12.89L6.67 11.11L8.01 11.07L8.52 9.83L7.61 8.86L8.86 7.61L9.83 8.52ZM13.6 12A1.6 1.6 0 1 0 10.4 12A1.6 1.6 0 1 0 13.6 12Z"/></g></svg>
+          meshctl
+        </a>
+        <nav class="mc-nav" aria-label="Sections">
+          <a class="wide" href="./#features">Features</a>
+          <a class="wide" href="./#install">Install</a>
+          <a href="guide.html" aria-current="page">Guide</a>
+          <a href="https://github.com/ogarcia/meshctl">GitHub<span class="mc-nav-external" aria-hidden="true">↗</span></a>
+        </nav>
+        <a class="mc-lang" href="es/guide.html" hreflang="es" lang="es" title="Español">ES</a>
+      </div>
+    </header>
+
+    <main class="mc-content mc-guide">
+      <nav class="mc-toc" aria-label="Contents">
+        <p class="mc-toc-title">Contents</p>
+        <ol>
+          <li><a href="#first-radio">The first radio</a></li>
+          <li><a href="#radios">Several radios</a></li>
+          <li><a href="#nodes">Nodes</a></li>
+          <li><a href="#map">The map</a></li>
+          <li><a href="#chat">Chat</a></li>
+          <li><a href="#marks">Message marks</a></li>
+          <li><a href="#sharing">Sharing in a chat</a></li>
+          <li><a href="#links">Links and QR codes</a></li>
+          <li><a href="#notifications">Notifications</a></li>
+          <li><a href="#replies">Automatic replies</a></li>
+          <li><a href="#live">Live</a></li>
+          <li><a href="#settings">A radio's settings</a></li>
+          <li><a href="#admin">Administering a node</a></li>
+          <li><a href="#data">What meshctl keeps</a></li>
+          <li><a href="#appearance">Appearance</a></li>
+        </ol>
+      </nav>
+
+      <div class="mc-guide-body">
+        <div class="mc-guide-intro">
+          <h1>Guide</h1>
+          <p class="lead">
+            What meshctl does that is not plain at a glance, once it runs. How to
+            install it, run it and reach it from elsewhere is in the
+            <a href="https://github.com/ogarcia/meshctl#installing">README</a>.
+          </p>
+        </div>
+
+        <section id="first-radio">
+          <div class="mc-heading"><h2><span class="ti ti-plug" aria-hidden="true"></span> The first radio</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              With no radio yet, meshctl greets you and asks for one: its firmware,
+              Meshtastic or MeshCore (as a companion), and how to reach it.
+            </p>
+            <ul>
+              <li><strong>On the network</strong>: its IP or its name. Meshtastic listens on port 4403 and MeshCore on 5000; another port goes at the end, as <code>radio.lan:4404</code>.</li>
+              <li><strong>Over USB</strong>: the device, as <code>/dev/ttyACM0</code>, with <code>@921600</code> at the end if it does not run at 115200. In the apps, it is picked from those plugged in.</li>
+              <li><strong>By Bluetooth</strong>, in the desktop and Android apps only: picked from the radios heard nearby. On the desktop, pair it with the system first.</li>
+            </ul>
+            <p>
+              meshctl connects, receives its settings and its nodes, and is ready. If
+              the radio does not answer, it keeps trying on its own: you can go in
+              anyway and wait.
+            </p>
+            <p>
+              A radio serves one client at a time. If the phone app, say, needs it
+              too, put <a href="https://github.com/ogarcia/tasticsplitter">tasticsplitter</a>
+              in front and give each the splitter's address.
+            </p>
+            <p>
+              If meshctl was started with a token, each browser asks for it once and
+              remembers it.
+            </p>
+          </div>
+        </section>
+
+        <section id="radios">
+          <div class="mc-heading"><h2><span class="ti ti-radio" aria-hidden="true"></span> Several radios</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              Each radio is a button on the rail at the left (on a phone, in the list
+              behind the radio at the top), and everything else in the panel is that
+              radio's. Meshtastic and MeshCore radios mix as you like.
+            </p>
+            <p>
+              The gear at the foot of the rail opens meshctl's settings, starting at
+              <em>Radios</em>, where you add more and set them up:
+            </p>
+            <ul>
+              <li><strong>Order</strong>: drag a row by its handle, or use its arrows.</li>
+              <li><strong>The eye</strong> hides a radio from the rail without forgetting it.</li>
+              <li><strong>The switch</strong> is <em>Connect automatically</em>: off, meshctl disconnects from it at once and leaves it alone.</li>
+              <li><strong>Its button</strong>: up to four letters or an emoji, as Meshtastic's short names, or an icon, and a colour of its own.</li>
+            </ul>
+            <p>
+              A radio that is not connected still shows what it knew when it last
+              was, marked so; you can read, not send or ask.
+            </p>
+          </div>
+        </section>
+
+        <section id="nodes">
+          <div class="mc-heading"><h2><span class="ti ti-broadcast" aria-hidden="true"></span> Nodes</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              <em>Nodes</em> lists every node the radio has heard: when, how far
+              away, its power, its hardware and role. Search it, or filter it by
+              how it is reached: <em>Direct</em>, <em>Through the mesh</em>,
+              <em>No route</em>, and on MeshCore <em>Not added</em>, those heard
+              but not among the radio's contacts. Favourites go first.
+            </p>
+            <p>
+              Each avatar has a colour of its own, the same everywhere: on
+              Meshtastic the one its official apps give it, on MeshCore one drawn
+              from its name.
+            </p>
+            <p>
+              A node's page shows what it says about itself, and what it can be
+              asked for, each with its last answer:
+            </p>
+            <ul>
+              <li><strong>Meshtastic</strong>: node info, position, device, environment and power telemetry, mesh stats, neighbours and a traceroute. Telemetry and neighbours need its public key, which comes with its node info.</li>
+              <li><strong>MeshCore</strong>: status, telemetry, owner, a ping, a route search, a sensor's history, the access list and regions. A repeater or a room may ask for a login first: <em>Access</em>, on its page, logs in, as a guest with no password.</li>
+            </ul>
+            <p>
+              Its page also has its contact as a QR code, to add it from another
+              app, and its traceroutes, every hop on a small map. On MeshCore,
+              repeaters with a dashed border are guessed by how near they are, not
+              known for sure.
+            </p>
+            <p>
+              Removing a node offers two things: <em>Remove from the radio</em>,
+              which keeps it in meshctl with its history (heard again, it is back
+              on the radio); or <em>Delete everything</em>, which also deletes all
+              meshctl keeps of it but its messages in channels.
+            </p>
+          </div>
+        </section>
+
+        <section id="map">
+          <div class="mc-heading"><h2><span class="ti ti-map-2" aria-hidden="true"></span> The map</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              Every node that has said where it is, coloured by how far: the radio
+              in the accent, then direct, 1–2 hops, 3–4 hops and further. Routers,
+              repeaters and base stations have a mark of their own. Nodes on the
+              same spot gather into one that opens on a click.
+            </p>
+            <p>
+              The clock under the zoom buttons leaves out those not heard for a
+              while: 8 hours, 24 hours, 3 days, a week or a month. It is kept for
+              each radio, and in the accent while it leaves some out.
+            </p>
+            <p>
+              A node's popup traces the route to it, or shows the last one, there
+              and back, on the map.
+            </p>
+          </div>
+        </section>
+
+        <section id="chat">
+          <div class="mc-heading"><h2><span class="ti ti-message" aria-hidden="true"></span> Chat</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              Channels, direct messages and, on MeshCore, rooms. meshctl keeps them
+              while you are away, and each who writes in their colour.
+            </p>
+            <ul>
+              <li><strong>A message's menu</strong> replies, reacts, copies, deletes it from meshctl (what went out on the mesh cannot be taken back) and shows its details: hops, signal, and which way each copy came.</li>
+              <li><strong>@ and a name</strong> mentions someone, as the official apps do.</li>
+              <li><strong>Silence</strong>, in the chat's menu, takes a conversation off the unread count and the notifications. On a Meshtastic channel it is the radio's own mute, so the official apps follow it.</li>
+              <li><strong>Empty the channel</strong>, or delete a conversation, forgets its messages in meshctl; the channel stays on the radio.</li>
+            </ul>
+            <p>
+              On MeshCore, the radio writes privately only to its contacts: add a
+              node first. A room sends its messages only to those logged in, with
+              its password or as a guest.
+            </p>
+          </div>
+        </section>
+
+        <section id="marks">
+          <div class="mc-heading"><h2><span class="ti ti-checks" aria-hidden="true"></span> Message marks</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              Each message you send carries a mark that says how far it went, the
+              same on Meshtastic and MeshCore; holding the pointer over it says it
+              in words.
+            </p>
+            <div class="mc-table">
+              <table>
+                <thead><tr><th>Mark</th><th>What it means</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="mc-mark"><span class="ti ti-clock" aria-hidden="true"></span> A clock</span></td><td>Not in the radio yet. Only on MeshCore: a Meshtastic radio has it at once.</td></tr>
+                  <tr><td><span class="mc-mark"><span class="ti ti-check" aria-hidden="true"></span> One grey tick</span></td><td>Sent, with nobody known to have heard it. On a Meshtastic direct message it may also be on its way: a node passed it on, and the one it was sent to has not confirmed it yet. If that never comes, it stays so for good.</td></tr>
+                  <tr><td><span class="mc-mark is-got"><span class="ti ti-checks" aria-hidden="true"></span> Two blue ticks</span></td><td>Got. On a channel, another node was heard passing it on; to a node, that node said it received it.</td></tr>
+                  <tr><td><span class="mc-mark is-failed"><span class="ti ti-antenna-off" aria-hidden="true"></span> A crossed antenna</span></td><td>Nobody heard it, after the radio's tries: it can be sent again.</td></tr>
+                  <tr><td><span class="mc-mark is-failed"><span class="ti ti-alert-triangle" aria-hidden="true"></span> A red alert</span></td><td>It failed otherwise; the mark says why.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="sharing">
+          <div class="mc-heading"><h2><span class="ti ti-send" aria-hidden="true"></span> Sharing in a chat</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              The <em>+</em> beside the message box sends a contact, a channel or
+              where the radio is, as the official apps write them, so they read
+              them too:
+            </p>
+            <ul>
+              <li><strong>A contact</strong>, the radio's or any node's with its key, to be added with a tap.</li>
+              <li><strong>A channel</strong> of the radio's, with its key: whoever gets it can listen to it.</li>
+              <li><strong>Where the radio is</strong>: on Meshtastic, as its position packet, as precise as the channel shares it; on MeshCore, as coordinates.</li>
+            </ul>
+            <p>
+              What others share shows as a card, to see the node or add the
+              channel; a place, on a small map. Coordinates written by hand
+              (<code>43.3623,-8.4115</code>) show as a place too.
+            </p>
+          </div>
+        </section>
+
+        <section id="links">
+          <div class="mc-heading"><h2><span class="ti ti-qrcode" aria-hidden="true"></span> Links and QR codes</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              The links the Meshtastic and MeshCore apps share, pasted or read from
+              a QR code, with the camera or from a photo. Nothing changes until you
+              confirm, and what each brings is shown first.
+            </p>
+            <ul>
+              <li><strong>A contact</strong>, from the list of nodes.</li>
+              <li><strong>Channels</strong>, from the radio's settings, <em>Channels</em>: added to the free slots or, if the link is a whole configuration, replacing yours, its LoRa too if you tick it.</li>
+              <li><strong>A LoRa</strong>, from the radio's LoRa settings: taken into the form, for you to look over and save.</li>
+            </ul>
+            <p>
+              The browser allows the live camera only over HTTPS or on the very
+              machine meshctl runs on; a photo works anywhere. In the apps,
+              <code>meshcore://</code> links open meshctl, and on Android so do
+              links shared to it.
+            </p>
+            <p>
+              The radio's own contact, as a QR code and a link, is on its own node's
+              page.
+            </p>
+          </div>
+        </section>
+
+        <section id="notifications">
+          <div class="mc-heading"><h2><span class="ti ti-bell-ringing" aria-hidden="true"></span> Notifications</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              meshctl's settings, <em>Notifications</em>. Off out of the box in a
+              browser, on in the desktop and Android apps, which show them with
+              their window closed too. A browser shows them while meshctl is open
+              in some tab, once it lets it.
+            </p>
+            <ul>
+              <li><strong>Where</strong>, for each radio, and in it each channel and its direct messages: <em>Everything</em>, <em>Mentions</em> (only when someone writes @ and its name) or <em>Never</em>.</li>
+              <li><strong>How they look</strong>: with the text, or only who wrote it and where.</li>
+            </ul>
+            <p>
+              Never of the conversation in front of you, nor of a silenced one.
+            </p>
+          </div>
+        </section>
+
+        <section id="replies">
+          <div class="mc-heading"><h2><span class="ti ti-robot" aria-hidden="true"></span> Automatic replies</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              meshctl's settings, <em>Automatic replies</em>: if someone writes
+              this, answer with that, even with the panel closed. <em>Start with a
+              ping</em> leaves one ready to try.
+            </p>
+            <ul>
+              <li><strong>When someone writes</strong> one of some words, separated by commas: <em>Just that</em>, the whole message, or <em>In a sentence</em>, among its words. Case, accents and punctuation do not count.</li>
+              <li><strong>Answer with</strong> a reaction with the hops it took (🎯 if direct, then 1️⃣, 2️⃣…, 🦘 beyond ten), a text, or both; and another text if it came direct, where the signal is the sender's own.</li>
+              <li><strong>Where</strong>: for each radio, its direct messages, one node's, or each channel.</li>
+            </ul>
+            <p>The text takes variables, filled in from the message answered:</p>
+            <div class="mc-table">
+              <table>
+                <thead><tr><th>Variable</th><th>What it says</th></tr></thead>
+                <tbody>
+                  <tr><td><code>{LONG_NAME}</code></td><td>Who wrote it, by their long name</td></tr>
+                  <tr><td><code>{SHORT_NAME}</code></td><td>Who wrote it, by their short name (not on MeshCore)</td></tr>
+                  <tr><td><code>{NODE_ID}</code></td><td>Who wrote it, by their node's id</td></tr>
+                  <tr><td><code>{HOPS}</code></td><td>The hops it took, as a number</td></tr>
+                  <tr><td><code>{KANGAROO_HOPS}</code></td><td>The hops it took, as kangaroos</td></tr>
+                  <tr><td><code>{SNR}</code>, <code>{RSSI}</code></td><td>The signal it came with (no RSSI on MeshCore)</td></tr>
+                  <tr><td><code>{CHANNEL}</code></td><td>The channel it came on</td></tr>
+                  <tr><td><code>{DATE}</code>, <code>{TIME}</code></td><td>When it is answered, in meshctl's time zone</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              A message is answered by the first reply that fits, in the order of the
+              list. Each is signed with 🤖, unless you say not to, so other bots do
+              not answer it. And none answers on a radio that hears its channel busy
+              more of the time than you set: on a busy mesh, quiet is better.
+            </p>
+          </div>
+        </section>
+
+        <section id="live">
+          <div class="mc-heading"><h2><span class="ti ti-activity" aria-hidden="true"></span> Live</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              Every packet the radio hears, as it hears it: its kind, who sent it, on
+              which channel, what it carries, its hops and signal, and on MeshCore
+              the repeaters it came through. Filter it by kind, channel or node, and
+              pause it to read.
+            </p>
+          </div>
+        </section>
+
+        <section id="settings">
+          <div class="mc-heading"><h2><span class="ti ti-adjustments" aria-hidden="true"></span> A radio's settings</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              The radio's user, LoRa, channels, device and modules, each field
+              explained; what only matters with something on shows only then. They
+              are read from the radio and saved to it when you say so, only while it
+              is connected.
+            </p>
+            <p>
+              <span class="ti ti-lock" aria-hidden="true"></span>
+              What a radio keeps secret, its channels' keys and passwords such as
+              its Wi-Fi's or its MQTT server's, does not come with the rest: it
+              shows only whether it is set, and is asked for when you show it, one
+              at a time. A browser that never shows it never has it, and meshctl
+              logs each time it hands one out.
+            </p>
+            <p>
+              Its admin keys are in <em>Device</em>, <em>Security</em>: up to three
+              radios that may <a href="#admin">administer it</a> over the mesh.
+            </p>
+          </div>
+        </section>
+
+        <section id="admin">
+          <div class="mc-heading"><h2><span class="ti ti-settings" aria-hidden="true"></span> Administering a node</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              meshctl can read and change another Meshtastic node's settings over
+              the mesh, through your radio, as the official apps do: its owner and
+              role, its LoRa, its channels, every section of its configuration and
+              modules, its admin keys and its fixed position; and have it reboot,
+              shut down, forget the nodes it knows or go back to its factory
+              settings.
+            </p>
+            <p>
+              The node has to take your radio as its admin first. Whoever has it at
+              hand adds your radio's public key to its admin keys, up to three: in
+              meshctl, under its radio's settings, <em>Device</em>,
+              <em>Security</em>. Your radio's key is on its own node's page, and
+              meshctl shows it too when a node does not take it.
+            </p>
+            <p>
+              Then, on the node's page, <em>Administer</em> opens the same settings
+              page as your radio's, for the node. Every read and every change goes
+              over the air, sealed to the node's key: a few seconds each, up to a
+              minute when it is far.
+            </p>
+            <p class="mc-warning">
+              <span class="ti ti-alert-triangle" aria-hidden="true"></span>
+              <span>
+                Each change asks first, and those to its LoRa and its channels ask
+                more firmly: if they no longer match your radio's, the node stops
+                hearing it, and nothing over the mesh can undo it; only whoever has
+                it at hand can. So can removing your key from its admin keys, or a
+                factory reset.
+              </span>
+            </p>
+            <p>The firmware's old admin channel, a channel named <code>admin</code>, is not used.</p>
+          </div>
+        </section>
+
+        <section id="data">
+          <div class="mc-heading"><h2><span class="ti ti-database" aria-hidden="true"></span> What meshctl keeps</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              meshctl's settings, <em>Data</em>: how much it takes, and for how many
+              days it keeps packets, nodes the radio no longer has, and messages.
+              Messages are kept for ever unless you say otherwise; each node's
+              latest packet of each kind is kept however old, and a favourite is
+              never forgotten.
+            </p>
+            <p>
+              It cleans on its own when it starts and once a day, or now if you ask.
+              The same page lists what was left behind, conversations of channels
+              and nodes that are gone, to forget them for good.
+            </p>
+          </div>
+        </section>
+
+        <section id="appearance">
+          <div class="mc-heading"><h2><span class="ti ti-sun" aria-hidden="true"></span> Appearance</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              The theme, light, dark or as the system is; the accent colour; the
+              map's own theme; and the language. They are kept in meshctl, not in
+              the browser, so every browser and app shows it the same.
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="mc-footer">
+      <div class="mc-footer-inner">
+        <p>Made with <span class="heart" aria-label="love">♥</span> in Galicia, Spain, Europe <img class="flag" src="flags/eu.svg" width="21" height="14" alt=""> by Óscar García Amor</p>
+      </div>
+    </footer>
+  </body>
+</html>

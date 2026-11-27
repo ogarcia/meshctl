@@ -11,6 +11,9 @@ amber; with the Inter typeface (`fonts/`, SIL Open Font License) and Tabler's
 icons (`icons/`, MIT). The flag in the foot is an SVG in `flags/`, as emoji
 flags do not show on Windows. The English page is `index.html` and the Spanish
 one `es/index.html`; they say the same, and a change to one goes to the other.
+So do the guide, `guide.html` and `es/guide.html`, which tells how to use
+meshctl once it runs, with the interface's own words for what it names: when
+the interface changes what the guide tells, the guide changes with it.
 
 The screenshots in `shots/` are WebP, from the panel in its dark theme: the
 desktop ones 1600×900, the phone ones twice a 393-pixel-wide screen. The mesh
