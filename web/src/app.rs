@@ -2848,10 +2848,27 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
             };
             // Where else there is to go with the node: from the chat, its page;
             // from its page, the chat. On the map its card has both already.
+            // What says which actions there are, and no more: drawn again only
+            // as one of them changes, not as the node is heard anew, which it
+            // is all the while, and would close its menu under the finger.
+            let shape = Memo::new(move |_| {
+                let kind = live.selected_kind();
+                // Written to only once a MeshCore radio keeps it.
+                let unkept = kind == Some(RadioKind::Meshcore)
+                    && known().is_some_and(|n| n.on_radio == Some(false));
+                (
+                    live.page.get(),
+                    local(),
+                    unkept,
+                    unmessagable(),
+                    live.talks(node),
+                    kind,
+                )
+            });
             let action = move || {
-                let page = live.page.get();
+                let (page, local, unkept, unmessagable, talks, kind) = shape.get();
                 // Its own node takes no messages from it: its settings instead.
-                let settings = (page == Page::Node && local()).then(|| {
+                let settings = (page == Page::Node && local).then(|| {
                     view! {
                         <button
                             class="with-icon"
@@ -2863,37 +2880,33 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         </button>
                     }
                 });
-                // Written to only once a MeshCore radio keeps it.
-                let unkept = live.selected_kind() == Some(RadioKind::Meshcore)
-                    && known().is_some_and(|n| n.on_radio == Some(false));
-                let chat =
-                    (page == Page::Node && !local() && !unkept && live.talks(node)).then(|| {
-                        if unmessagable() {
-                            view! {
-                                <button
-                                    class="with-icon"
-                                    title=move || t_string!(i18n, node_unmessagable)
-                                    on:click=move |_| live.open_chat(peer)
-                                >
-                                    <span class="icon" inner_html=MESSAGE_OFF></span>
-                                    <span class="label">{t!(i18n, node_message)}</span>
-                                </button>
-                            }
-                            .into_any()
-                        } else {
-                            view! {
-                                <button
-                                    class="primary with-icon"
-                                    title=move || t_string!(i18n, node_message)
-                                    on:click=move |_| live.open_chat(peer)
-                                >
-                                    <span class="icon" inner_html=MESSAGE></span>
-                                    <span class="label">{t!(i18n, node_message)}</span>
-                                </button>
-                            }
-                            .into_any()
+                let chat = (page == Page::Node && !local && !unkept && talks).then(|| {
+                    if unmessagable {
+                        view! {
+                            <button
+                                class="with-icon"
+                                title=move || t_string!(i18n, node_unmessagable)
+                                on:click=move |_| live.open_chat(peer)
+                            >
+                                <span class="icon" inner_html=MESSAGE_OFF></span>
+                                <span class="label">{t!(i18n, node_message)}</span>
+                            </button>
                         }
-                    });
+                        .into_any()
+                    } else {
+                        view! {
+                            <button
+                                class="primary with-icon"
+                                title=move || t_string!(i18n, node_message)
+                                on:click=move |_| live.open_chat(peer)
+                            >
+                                <span class="icon" inner_html=MESSAGE></span>
+                                <span class="label">{t!(i18n, node_message)}</span>
+                            </button>
+                        }
+                        .into_any()
+                    }
+                });
                 let profile = (page == Page::Chat).then(|| {
                     view! {
                         <button on:click=move |_| live.open_node(node)>{t!(i18n, node_page)}</button>
@@ -2901,7 +2914,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 });
                 // What it was asked for, on its page: in a drawer.
                 // Forgetting it: in a drawer, which says how much.
-                let remove = (page == Page::Node && !local()).then(|| {
+                let remove = (page == Page::Node && !local).then(|| {
                     view! {
                         <button
                             class="icon-button spare"
@@ -2912,7 +2925,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                         ></button>
                     }
                 });
-                let history = (page == Page::Node && !local()).then(|| {
+                let history = (page == Page::Node && !local).then(|| {
                     view! {
                         <button
                             class="icon-button spare"
@@ -2928,9 +2941,7 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                     }
                 });
                 // Another Meshtastic node's settings, as its admin.
-                let can_admin = page == Page::Node
-                    && !local()
-                    && live.selected_kind() == Some(RadioKind::Meshtastic);
+                let can_admin = page == Page::Node && !local && kind == Some(RadioKind::Meshtastic);
                 let admin = can_admin.then(|| {
                     view! {
                         <button
