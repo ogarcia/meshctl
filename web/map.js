@@ -8,10 +8,27 @@
 // here it is only drawn.
 //
 // What is shown is made here, of the page's own elements: pins, popups,
-// lists. Where it is drawn is the engine's, map-leaflet.js, which is the
-// only one that knows the library underneath.
+// lists. Where it is drawn is an engine's, which alone knows the library
+// underneath: map-leaflet.js, with OpenStreetMap's tiles, or
+// map-maplibre.js, with vector maps, as the preferences say. The small maps
+// of the pages and the chats are always the first's: a page holds only a
+// few of the second's drawings at once.
 window.meshctlMap = (() => {
-  const engine = window.meshctlLeaflet;
+  const engines = { png: window.meshctlLeaflet, vector: window.meshctlMapLibre };
+  const smallEngine = window.meshctlLeaflet;
+  // The engine the preferences ask for, as put on the page.
+  const engineName = () =>
+    document.documentElement.getAttribute("data-map-engine") === "vector" && engines.vector
+      ? "vector"
+      : "png";
+  // The engine the map was opened with, what it was opened with, to open it
+  // again with another, and which opening is the latest: one whose engine
+  // came late gives way.
+  let engineOpen = null;
+  let opened = null;
+  let opening = 0;
+  // A route given before the map was there, to draw once it is.
+  let pendingRoute;
 
   // Nodes this close (in pixels) to a click count as clicked: the smallest
   // pins are 20px wide, so those that touch or overlap the one under the
@@ -112,14 +129,34 @@ window.meshctlMap = (() => {
     anchor: [18, 34],
   });
 
+  // Opens the map on an element, with the engine the preferences ask for:
+  // at once, or once it is loaded. What comes meanwhile is kept, and drawn
+  // then.
   function open(target, onPick, onAct, onMoved, onPlace) {
     close();
+    opened = { target, onPick, onAct, onMoved, onPlace };
+    // A first view to come, read now: what comes while the engine loads is
+    // kept for it.
+    savedView = undefined;
+    touched = false;
+    placed = false;
+    const name = engineName();
+    const engine = engines[name];
+    const token = ++opening;
+    const build = () => {
+      if (token !== opening) return;
+      engineOpen = name;
+      create(engine, target, onPick, onAct, onMoved, onPlace);
+    };
+    if (engine.ready) engine.ready().then(build);
+    else build();
+  }
+
+  function create(engine, target, onPick, onAct, onMoved, onPlace) {
     map = engine.create(target);
     onPlaceAt = onPlace;
     map.control(allControl());
     moved = onMoved;
-    savedView = undefined;
-    touched = false;
     // The person moving the map, not the map moving itself: from then on,
     // where it is left is kept, and a view read late does not move it.
     for (const kind of ["pointerdown", "wheel", "keydown"]) {
@@ -137,7 +174,6 @@ window.meshctlMap = (() => {
     preview = map.layer();
     pick = onPick;
     act = onAct;
-    placed = false;
     map.setView(20, 0, 2);
     showSpot();
     // A click off every node lets the picked one go.
@@ -190,7 +226,45 @@ window.meshctlMap = (() => {
       }
       showPreview(null);
     });
+    // What came while it was being opened, and what it had before, drawn.
+    drawMarkers();
+    drawWaypoints();
+    labelAll();
+    centre();
+    centreWaypoint();
+    place();
+    showCard();
+    if (pendingRoute !== undefined) {
+      const kept = pendingRoute;
+      pendingRoute = undefined;
+      route(kept);
+    }
   }
+
+  // The look the preferences ask for, as they or the system's theme change:
+  // another engine, the map opened again where it is; another theme or
+  // colours, the style again.
+  function restyle() {
+    if (!opened) return;
+    if (map && engineName() !== engineOpen) {
+      const was = map.bounds();
+      const { target, onPick, onAct, onMoved, onPlace } = opened;
+      const keptRoute = shownRoute;
+      open(target, onPick, onAct, onMoved, onPlace);
+      savedView = was;
+      if (keptRoute) pendingRoute = JSON.stringify(keptRoute);
+      return;
+    }
+    if (map && map.restyle) map.restyle();
+    for (const picking of pickers.values()) {
+      if (picking.map.restyle) picking.map.restyle();
+    }
+  }
+  new MutationObserver(restyle).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme", "data-map-theme", "data-map-colors", "data-map-engine"],
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", restyle);
 
   // A place shown on the map rather than a node, as one shared in a
   // conversation: the map centred there, with a pin, once it is there.
@@ -213,6 +287,9 @@ window.meshctlMap = (() => {
   }
 
   function close() {
+    opening++;
+    opened = null;
+    engineOpen = null;
     if (map) map.remove();
     map = null;
     spotLayer = null;
@@ -535,8 +612,8 @@ window.meshctlMap = (() => {
   }
 
   function nodes(json) {
-    if (!map) return;
     shown = JSON.parse(json);
+    if (!map) return;
     drawMarkers();
     labelAll();
     centre();
@@ -552,8 +629,8 @@ window.meshctlMap = (() => {
   // deleted for everyone, fence the circle, in metres, or the box around
   // it, if any.
   function waypoints(json) {
-    if (!map) return;
     shownWaypoints = JSON.parse(json);
+    if (!map) return;
     drawWaypoints();
     showWaypointCard();
     centreWaypoint();
@@ -883,7 +960,10 @@ window.meshctlMap = (() => {
   // gap}, gap when nodes between its ends could not be placed. Or null, to
   // take the route off the map.
   function route(json) {
-    if (!map) return;
+    if (!map) {
+      pendingRoute = json;
+      return;
+    }
     if (routeLayer) routeLayer.remove();
     routeLayer = null;
     const drawn = json ? JSON.parse(json) : null;
@@ -1054,7 +1134,7 @@ window.meshctlMap = (() => {
     let small = minis.get(element);
     if (!small) {
       // In quarters, so that the circle fills it, whatever its size.
-      small = engine.create(element, { still: true, zoomSnap: 0.25 });
+      small = smallEngine.create(element, { still: true, zoomSnap: 0.25 });
       small.drawn = small.layer();
       minis.set(element, small);
     }
@@ -1165,6 +1245,12 @@ window.meshctlMap = (() => {
   // The pin is dragged, or put where the map is clicked, and moved(lat,
   // lon) told where it went.
   function picker(element, json, moved) {
+    const engine = engines[engineName()];
+    if (engine.ready) engine.ready().then(() => pickerOn(engine, element, json, moved));
+    else pickerOn(engine, element, json, moved);
+  }
+
+  function pickerOn(engine, element, json, moved) {
     const at = JSON.parse(json);
     const picking = engine.create(element, { zoomSnap: 0.5 });
     const layer = picking.layer();

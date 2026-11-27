@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Accent, Error, ErrorCode, MapColors, MapTheme, Preferences, Theme};
+use meshctl_api::{Accent, Error, ErrorCode, MapColors, MapEngine, MapTheme, Preferences, Theme};
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
@@ -151,6 +151,9 @@ fn themed(html: &str, preferences: &Preferences) -> String {
     }
     if preferences.map_colors == MapColors::Gray {
         attributes.push_str(r#" data-map-colors="gray""#);
+    }
+    if preferences.map_engine == MapEngine::Vector {
+        attributes.push_str(r#" data-map-engine="vector""#);
     }
     match html.find("<html") {
         Some(at) => {

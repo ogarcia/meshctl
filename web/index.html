@@ -12,6 +12,7 @@
       data-wasm-opt="z"
     />
     <link data-trunk rel="copy-dir" href="vendor/leaflet-1.9.4" />
+    <link data-trunk rel="copy-dir" href="vendor/maplibre-gl-6.18.0" />
     <link data-trunk rel="copy-dir" href="vendor/tabler-icons-3.51.0" />
     <link data-trunk rel="copy-dir" href="vendor/emojibase-data-18.0.0" />
     <link data-trunk rel="copy-file" href="favicon.svg" />
@@ -79,8 +80,10 @@
          hash from trunk: all can be kept by browsers for good, as the server
          says. The engine first, Leaflet's, which map.js draws with. -->
     <link rel="stylesheet" href="/leaflet-1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/maplibre-gl-6.18.0/dist/maplibre-gl.css" />
     <script src="/leaflet-1.9.4/dist/leaflet.js"></script>
     <script data-trunk src="map-leaflet.js"></script>
+    <script data-trunk src="map-maplibre.js"></script>
     <script data-trunk src="map.js"></script>
     <style>
       /*
@@ -2800,6 +2803,73 @@
       }
       .leaflet-container a.leaflet-popup-close-button:hover { color: var(--mc-text); }
       .leaflet-popup-content { margin: 12px 14px; font-size: 13px; line-height: 1.4; }
+      /* MapLibre's, the vector maps', drawn as Leaflet's: popups as cards,
+         what hovering says, the credits at the foot. Its zoom's buttons are
+         Leaflet's own, which the engine makes. */
+      /* Its pins and popups, over each other, under what is over the map. */
+      .maplibregl-map { font: inherit; isolation: isolate; }
+      .maplibregl-popup { z-index: 10; }
+      /* Under the popups, as Leaflet has them. */
+      .maplibregl-popup.mc-tip { z-index: 9; pointer-events: none; }
+      .maplibregl-popup-content {
+        padding: 12px 14px;
+        border: 1px solid var(--mc-border);
+        border-radius: 12px;
+        background: var(--mc-surface);
+        color: var(--mc-text);
+        box-shadow: var(--mc-shadow);
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+      .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+      .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--mc-surface); }
+      .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+      .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+      .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--mc-surface); }
+      .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--mc-surface); }
+      .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--mc-surface); }
+      .maplibregl-popup-close-button {
+        top: 6px;
+        right: 6px;
+        width: 24px;
+        height: 24px;
+        min-height: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        color: var(--mc-muted);
+        font-size: 0;
+      }
+      .maplibregl-popup-close-button::after {
+        content: "";
+        position: absolute;
+        inset: 4px;
+        background: currentColor;
+        -webkit-mask: url(/tabler-icons-3.51.0/icons/outline/x.svg) center / contain no-repeat;
+        mask: url(/tabler-icons-3.51.0/icons/outline/x.svg) center / contain no-repeat;
+      }
+      .maplibregl-popup-close-button:hover { background: var(--mc-raised); color: var(--mc-text); }
+      .mc-tip .maplibregl-popup-content {
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-size: 13px;
+        line-height: 1.35;
+        white-space: nowrap;
+      }
+      .mc-tip .maplibregl-popup-tip { display: none; }
+      .mc-node-popup .maplibregl-popup-content { padding: 0; overflow-x: hidden; overscroll-behavior: contain; }
+      .mc-picker-popup .maplibregl-popup-content { padding: 6px; width: 260px; max-width: calc(100vw - 64px); }
+      .mc-place-popup .maplibregl-popup-content { padding: 6px; }
+      .maplibregl-ctrl-attrib {
+        background: color-mix(in srgb, var(--mc-surface) 85%, transparent) !important;
+        color: var(--mc-muted);
+        font-size: 11px;
+      }
+      .maplibregl-ctrl-attrib a { color: inherit; }
+      .maplibregl-ctrl-attrib a:hover { text-decoration: none; }
+      .maplibregl-ctrl-top-left .leaflet-bar { margin: 10px 0 0 10px; }
       .mc-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--mc-pin-far); }
       .mc-dot.local, .mc-pin.local { background: var(--mc-pin-local); }
       .mc-dot.direct, .mc-pin.direct { background: var(--mc-pin-direct); }

@@ -2717,6 +2717,8 @@ impl PacketFilter {
 pub struct Preferences {
     pub theme: Theme,
     pub accent: Accent,
+    /// How the maps are drawn: OpenStreetMap's tiles, or vector maps.
+    pub map_engine: MapEngine,
     /// The maps' own theme, which may differ from the rest.
     pub map_theme: MapTheme,
     /// The maps' colours: OpenStreetMap's, or none but greys, for the nodes
@@ -2803,6 +2805,19 @@ pub enum MapTheme {
     Page,
     Light,
     Dark,
+}
+
+/// How the maps are drawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MapEngine {
+    /// OpenStreetMap's own tiles, as pictures.
+    #[default]
+    Png,
+    /// Vector maps, sharp at any zoom: OpenFreeMap's styles, made from
+    /// OpenStreetMap's data.
+    Vector,
 }
 
 /// The colours of the maps' tiles.
@@ -2893,7 +2908,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_colors":"full","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0,"packets_with_own":false,"sections_folded":0}"#
+            r#"{"theme":"system","accent":"amber","map_engine":"png","map_theme":"page","map_colors":"full","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0,"packets_with_own":false,"sections_folded":0}"#
         );
     }
 

@@ -28,9 +28,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
 use meshctl_api::{
-    Accent, Channel, Conversation, Language, LinkState, MapColors, MapTheme, Message, NewRequest,
-    Node, NodeCheck, NodeLatest, Pace, Packet, PacketFilter, Peer, Preferences, Radio, RadioId,
-    RadioKind, Request, RequestKind, RequestStatus, SightingId, Status, Theme,
+    Accent, Channel, Conversation, Language, LinkState, MapColors, MapEngine, MapTheme, Message,
+    NewRequest, Node, NodeCheck, NodeLatest, Pace, Packet, PacketFilter, Peer, Preferences, Radio,
+    RadioId, RadioKind, Request, RequestKind, RequestStatus, SightingId, Status, Theme,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
@@ -1576,6 +1576,10 @@ fn shown() -> Preferences {
             Some("dark") => MapTheme::Dark,
             _ => MapTheme::Page,
         },
+        map_engine: match get("data-map-engine").as_deref() {
+            Some("vector") => MapEngine::Vector,
+            _ => MapEngine::Png,
+        },
         map_colors: match get("data-map-colors").as_deref() {
             Some("gray") => MapColors::Gray,
             _ => MapColors::Full,
@@ -1624,6 +1628,13 @@ fn show(preferences: Preferences) {
             MapTheme::Page => None,
             MapTheme::Light => Some("light"),
             MapTheme::Dark => Some("dark"),
+        },
+    );
+    set(
+        "data-map-engine",
+        match preferences.map_engine {
+            MapEngine::Png => None,
+            MapEngine::Vector => Some("vector"),
         },
     );
     set(

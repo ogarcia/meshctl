@@ -8,7 +8,7 @@
 use crate::app::Live;
 use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
-use meshctl_api::{Accent, Language, MapColors, MapTheme, Preferences, Theme};
+use meshctl_api::{Accent, Language, MapColors, MapEngine, MapTheme, Preferences, Theme};
 
 /// The accents, each as its swatch shows it: as it looks on the dark theme,
 /// the brightest; gray, between its light and its dark, to be seen on both.
@@ -61,6 +61,18 @@ pub fn PreferencesView() -> impl IntoView {
             Signal::derive(label),
         )
     });
+    let map_engines = [MapEngine::Png, MapEngine::Vector].map(|engine| {
+        let label = move || match engine {
+            MapEngine::Png => t_string!(i18n, map_engine_png).to_string(),
+            MapEngine::Vector => t_string!(i18n, map_engine_vector).to_string(),
+        };
+        let pick = choose(Box::new(move |p| p.map_engine = engine));
+        (
+            Signal::derive(move || current().map_engine == engine),
+            Box::new(pick) as Box<dyn Fn() + Send + Sync>,
+            Signal::derive(label),
+        )
+    });
     let map_colors = [MapColors::Full, MapColors::Gray].map(|colors| {
         let label = move || match colors {
             MapColors::Full => t_string!(i18n, map_colors_full).to_string(),
@@ -108,6 +120,12 @@ pub fn PreferencesView() -> impl IntoView {
         <section class="preferences">
             <Row title=t!(i18n, prefs_theme).into_any() hint=t!(i18n, prefs_theme_hint).into_any()>
                 {pills(Vec::from(themes))}
+            </Row>
+            <Row
+                title=t!(i18n, prefs_map_engine).into_any()
+                hint=t!(i18n, prefs_map_engine_hint).into_any()
+            >
+                {pills(Vec::from(map_engines))}
             </Row>
             <Row title=t!(i18n, prefs_map).into_any() hint=t!(i18n, prefs_map_hint).into_any()>
                 {pills(Vec::from(maps))}

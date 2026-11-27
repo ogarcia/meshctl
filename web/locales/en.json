@@ -1316,5 +1316,9 @@
   "waypoint_hops": "Hops",
   "waypoint_hops_radio": "as the radio: {n}",
   "waypoint_hops_of": "{n} of {of}",
-  "waypoint_hops_hint": "How far it goes, and is deleted later: fewer, the nearer nodes only."
+  "waypoint_hops_hint": "How far it goes, and is deleted later: fewer, the nearer nodes only.",
+  "prefs_map_engine": "Map type",
+  "prefs_map_engine_hint": "OpenStreetMap's own, or vector maps, sharp at any zoom.",
+  "map_engine_png": "PNG",
+  "map_engine_vector": "Vector"
 }

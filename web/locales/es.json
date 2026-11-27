@@ -1316,5 +1316,9 @@
   "waypoint_hops": "Saltos",
   "waypoint_hops_radio": "como la radio: {n}",
   "waypoint_hops_of": "{n} de {of}",
-  "waypoint_hops_hint": "Hasta dónde llega, y llegará su borrado: con menos, solo los nodos más cercanos."
+  "waypoint_hops_hint": "Hasta dónde llega, y llegará su borrado: con menos, solo los nodos más cercanos.",
+  "prefs_map_engine": "Tipo de mapa",
+  "prefs_map_engine_hint": "Los de OpenStreetMap, o vectoriales, nítidos a cualquier zoom.",
+  "map_engine_png": "PNG",
+  "map_engine_vector": "Vectorial"
 }
