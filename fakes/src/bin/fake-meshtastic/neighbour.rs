@@ -121,12 +121,16 @@ impl Radio {
                     .get(&part("meshtastic.Config", number)?)?
                     .clone(),
             ),
-            A::GetModuleConfigRequest(number) => A::GetModuleConfigResponse(
-                settings
-                    .modules
-                    .get(&part("meshtastic.ModuleConfig", number)?)?
-                    .clone(),
-            ),
+            A::GetModuleConfigRequest(number) => {
+                let name = part("meshtastic.ModuleConfig", number)?;
+                // A firmware from before status messages knows not what it
+                // is asked for: nothing comes back.
+                if self.old_firmware && name == "statusmessage" {
+                    println!("neighbour, an old firmware, says nothing of a status message");
+                    return None;
+                }
+                A::GetModuleConfigResponse(settings.modules.get(&name)?.clone())
+            }
             A::GetChannelRequest(asked) => {
                 let index = asked as i32 - 1;
                 A::GetChannelResponse(settings.channels.get(&index).cloned().unwrap_or(

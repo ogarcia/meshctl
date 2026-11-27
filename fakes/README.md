@@ -75,6 +75,7 @@ the radio gives up on them after two seconds.
 | `answers always\|sometimes\|never` | How the neighbour answers. Always is within one to six seconds; sometimes, four times in ten not at all and otherwise within up to 26 seconds. |
 | `limits on\|off` | Whether the neighbour keeps from answering too often. |
 | `admin allow\|deny` | Whether the neighbour takes the radio's key as an admin key. Allowed, it answers admin requests sealed to it with its settings, the radio's own as they were but for who it is, after a few seconds, and takes changes to them, with the passkey it gave out; denied, it says the key is not one of its own, as the firmware does. |
+| `firmware old\|new` | Whether the neighbour's firmware is one from before status messages: old, asked for its own as its admin, it answers nothing, as such a firmware does. |
 | `drop` | The link to every client drops, which reads it all anew. |
 
 ## fake-meshcore

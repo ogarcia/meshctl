@@ -62,6 +62,9 @@ pub struct Radio {
     pub contacts: BTreeMap<u32, pb::User>,
     /// Whether the neighbour takes the radio's key as an admin key.
     pub admin_key: bool,
+    /// Whether the neighbour's firmware is one from before status messages:
+    /// asked for its own, it answers nothing.
+    pub old_firmware: bool,
     /// The neighbour's own settings, once asked as its admin.
     pub neighbour: Option<NeighbourSettings>,
     /// Many other nodes heard, as `crowd` has them.
@@ -198,6 +201,7 @@ impl Radio {
             fixed: None,
             contacts: BTreeMap::new(),
             admin_key: true,
+            old_firmware: false,
             neighbour: None,
             crowd: Vec::new(),
         }

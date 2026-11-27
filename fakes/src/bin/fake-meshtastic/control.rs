@@ -649,6 +649,15 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             radio.answered.clear();
             format!("the neighbour keeps from answering too often: {limits}")
         }
+        Some("firmware") => {
+            let old = match words.next() {
+                Some("old") => true,
+                Some("new") => false,
+                _ => return "usage: firmware old|new".into(),
+            };
+            radio.lock().unwrap().old_firmware = old;
+            format!("the neighbour's firmware has status messages: {}", !old)
+        }
         Some("admin") => {
             let allowed = match words.next() {
                 Some("allow") => true,
@@ -661,7 +670,7 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
         _ => "commands: hear <slot> <text>, past <slot>, chat <slot>, dms, fill, \
              twin <from> <to>, off <slot>, crowd <nodes>, own, place, move <lat> <lon>, status [<text>], \
              waypoints <slot>, unwaypoint <id>, history <hours>, \
-             answers always|sometimes|never, limits on|off, admin allow|deny, drop"
+             answers always|sometimes|never, limits on|off, admin allow|deny, firmware old|new, drop"
             .into(),
     }
 }
