@@ -3,6 +3,78 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.9.0 (2026-11-27)
+
+Nodes removed many at once, MeshCore radios full and their favourites, and
+more of a node administered over the mesh.
+
+### Nodes
+
+- A third way to remove a node, beside out of the radio and everything:
+  *Only from meshctl*, which deletes all meshctl kept of it, as everything
+  does, but asks the radio to forget nothing, and reads it again from it as
+  it has it. For whatever meshctl kept of a node that is wrong or no longer
+  wanted.
+- A bin in the list of nodes' heading removes many at once, rather than
+  waiting for meshctl to clean up on its own: of those the list shows, as
+  searched and filtered, the ones not heard for more than 8 hours, a day,
+  3 days, a week or a month, never a favourite; each of the three ways, with
+  how many it takes. It goes one node after another, as far as it got
+  shown, and stops at will.
+
+### MeshCore
+
+- A full radio, which keeps no more of the nodes it hears, is told of over
+  the panel and as a notification, by the app meshctl runs within or the
+  browser: once an hour at most, with the way to the settings that let the
+  oldest go. A contact it let go to make room for another is no longer on
+  the radio here, still known.
+- Favourites: the star on a contact's page marks it on the radio, as the
+  firmware keeps it, the rest of its flags as they are. A full radio
+  allowed to overwrite one never lets a favourite go.
+- A contact with no route says how far its latest advert came from, the
+  fewest hops of its copies: "No route · advert 2 hops away" on the list of
+  nodes and in chats, on the map's hover and popup, and in its pin's colour.
+  Never used as a way to it, which the radio learns otherwise.
+
+### Administering a node
+
+- A node's status message, asked of it apart from the rest of its settings
+  and changed as the radio's own: one whose firmware has none, which may not
+  answer at all, holds the rest up no longer.
+- *Nodes*, under *Device*: what the node does with the nodes of its own
+  list, not the radio's. One the radio knows, or a contact's link, sent as a
+  contact and a favourite (on a Client Base, made one apart once it has the
+  contact); or no longer a favourite, ignored or no longer, forgotten. The
+  node does not let its list be read: what it has is not shown, only
+  whether it acknowledges each change. Never a contact with no key to trust.
+
+### Fixes
+
+- The zoom's buttons on a dark map stay dark once pressed, and dimmed, not
+  light grey, as far in or out as the map goes.
+- A trace or a request with no answer no longer says none came in two
+  minutes: one to a MeshCore node is given up on in seconds.
+- Menus no longer close by themselves: a node's, as the node is heard; a
+  chat's share menu and a MeshCore channel's region menu, as messages come
+  to another radio.
+- A MeshCore room's, repeater's or sensor's page no longer crashes a debug
+  build of the interface.
+
+### Documentation
+
+- coresplitter named beside tasticsplitter, for MeshCore, wherever sharing
+  a radio between clients is told.
+- The guide tells each of the above.
+
+### Development
+
+- The fake radios are a crate of their own, `meshctl-fakes`, with a README:
+  `fake-meshtastic` and `fake-meshcore`, each in modules. New scenarios: a
+  crowd of nodes on either, a MeshCore radio full with adverts of every
+  kind, MeshCore favourites, and a Meshtastic neighbour with an old firmware
+  or a list of nodes of its own.
+
 ## 0.8.0 (2026-11-27)
 
 Meshtastic's waypoints, with their fences, and vector maps.
