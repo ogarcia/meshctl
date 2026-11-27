@@ -486,9 +486,57 @@ fn max_age_short(
     }
 }
 
-/// How long ago nodes heard are on the map, under the zoom's buttons: a
-/// clock, in the accent while some are left out, that opens to the right
-/// to pick another, and closes again once picked.
+/// The map's own settings, under the zoom's buttons: three dots that let
+/// down the clock and the waypoints' button, and take them away again: in
+/// the accent while either leaves something out, the map not showing all
+/// it could.
+#[component]
+fn MapMenu() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let open = RwSignal::new(false);
+    let closing = window_event_listener(leptos::ev::click, move |_| open.set(false));
+    let escaping = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" && open.get_untracked() {
+            open.set(false);
+        }
+    });
+    on_cleanup(move || {
+        closing.remove();
+        escaping.remove();
+    });
+    let any = move || live.selected.get().is_some();
+    let marked = move || max_age_of(live).is_some() || !crate::waypoints::shown(live);
+    let said = move || t_string!(i18n, map_options);
+    view! {
+        <Show when=any>
+            // What is clicked within keeps it open.
+            <div class="map-menu" on:click=|ev| ev.stop_propagation()>
+                <button
+                    type="button"
+                    class="map-menu-toggle"
+                    class:marked=marked
+                    aria-expanded=move || open.get().to_string()
+                    title=said
+                    aria-label=said
+                    inner_html=DOTS_VERTICAL
+                    on:click=move |_| open.update(|o| *o = !*o)
+                ></button>
+                <Show when=move || open.get()>
+                    <AgeButton />
+                    <crate::waypoints::WaypointsButton />
+                </Show>
+            </div>
+        </Show>
+    }
+}
+
+const DOTS_VERTICAL: &str =
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/dots-vertical.svg");
+
+/// How long ago nodes heard are on the map, in the map's menu: a clock, in
+/// the accent while some are left out, that opens to the right to pick
+/// another, and closes again once picked.
 #[component]
 fn AgeButton() -> impl IntoView {
     let i18n = use_i18n();
@@ -946,8 +994,7 @@ pub fn MapView() -> impl IntoView {
             <div class="map-offline">
                 <crate::offline::OfflineBanner />
             </div>
-            <AgeButton />
-            <crate::waypoints::WaypointsButton />
+            <MapMenu />
             <Show when=move || placed(live) == 0 && crate::offline::offline(live).is_none()>
                 <p class="map-empty card dim">{t!(i18n, map_empty)}</p>
             </Show>

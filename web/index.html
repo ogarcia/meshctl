@@ -2486,11 +2486,36 @@
        * there is room, and on a narrow map out to its right edge, with no
        * room wasted there.
        */
-      /* How long ago nodes heard are on the map: a clock under the zoom's
-         buttons, raised as they are, opening to the right. */
-      .map-age {
+      /* Only to keep clicks within it from closing it. */
+      .map-menu { display: contents; }
+      /* The map's own settings: three dots under the zoom's buttons, raised
+         as they are, letting down the clock and the waypoints' button. */
+      .map-menu-toggle {
         position: absolute;
         top: 138px;
+        left: 10px;
+        z-index: 500;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: 1px solid var(--mc-border);
+        border-radius: 10px;
+        background: var(--mc-surface);
+        color: var(--mc-text);
+        box-shadow: var(--mc-shadow);
+      }
+      .map-menu-toggle svg { width: 18px; height: 18px; }
+      /* Something left out, nodes heard long ago or the waypoints: said by
+         the dots' colour, as the clock and the waypoints' button say it. */
+      .map-menu-toggle.marked { color: var(--mc-primary); }
+      /* How long ago nodes heard are on the map: a clock under the three
+         dots, opening to the right. */
+      .map-age {
+        position: absolute;
+        top: 182px;
         left: 10px;
         z-index: 500;
         display: flex;
@@ -2518,7 +2543,7 @@
       /* Shows or hides the waypoints: under the clock, as alike. */
       .map-waypoints-toggle {
         position: absolute;
-        top: 182px;
+        top: 226px;
         left: 10px;
         z-index: 500;
         display: flex;
@@ -2533,7 +2558,14 @@
         color: var(--mc-muted);
         box-shadow: var(--mc-shadow);
       }
-      .map-waypoints-toggle:hover { background: var(--mc-raised); color: var(--mc-text); }
+      /* As the zoom's buttons: raised on hover, their edge and colour kept;
+         as high as they are under a finger too. */
+      .map-menu-toggle:hover, .map-menu-toggle[aria-expanded="true"],
+      .map-waypoints-toggle:hover {
+        border-color: var(--mc-border);
+        background: var(--mc-raised);
+      }
+      .map-menu-toggle, .map-waypoints-toggle { min-height: 0; }
       .map-waypoints-toggle svg { width: 18px; height: 18px; }
       .map-waypoints-toggle.on { color: var(--mc-primary); }
       /* A waypoint: its emoji on a disc, edged to stand out on any map. */

@@ -519,6 +519,7 @@
   "color_lime": "Lime",
   "color_gray": "Grey",
   "map_all": "Show every node",
+  "map_options": "Map options",
   "settings_tab_user": "User",
   "settings_tab_lora": "LoRa",
   "settings_tab_channels": "Channels",

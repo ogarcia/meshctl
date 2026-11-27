@@ -63,7 +63,7 @@ fn can_share(live: Live) -> bool {
 
 /// Whether the selected radio's map shows its waypoints: any radio's, as
 /// one of meshctl's alone may be on any.
-fn shown(live: Live) -> bool {
+pub fn shown(live: Live) -> bool {
     live.selected_radio().is_some_and(|r| r.map_waypoints)
 }
 
@@ -580,8 +580,8 @@ pub fn delete(
     });
 }
 
-/// Shows or hides the selected radio's waypoints on its map: under the
-/// clock, on a Meshtastic radio.
+/// Shows or hides the selected radio's waypoints on its map: in the map's
+/// menu, under the clock.
 #[component]
 pub fn WaypointsButton() -> impl IntoView {
     let i18n = use_i18n();

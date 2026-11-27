@@ -519,6 +519,7 @@
   "color_lime": "Lima",
   "color_gray": "Gris",
   "map_all": "Ver todos los nodos",
+  "map_options": "Opciones del mapa",
   "settings_tab_user": "Usuario",
   "settings_tab_lora": "LoRa",
   "settings_tab_channels": "Canales",
