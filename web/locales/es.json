@@ -1272,5 +1272,22 @@
   "waypoint_locked_error": "Está bloqueado a otro nodo: solo ese nodo puede cambiarlo o borrarlo para todos.",
   "waypoint_not_connected": "La radio no está conectada.",
   "waypoint_delete_all_confirm": "¿Borrar «{name}» para todos? Desaparece del mapa de todos los nodos que lo tengan.",
-  "waypoint_delete_here_confirm": "¿Borrar «{name}» solo en meshctl? Sigue en la malla, y vuelve si alguien lo comparte de nuevo."
+  "waypoint_delete_here_confirm": "¿Borrar «{name}» solo en meshctl? Sigue en la malla, y vuelve si alguien lo comparte de nuevo.",
+  "waypoint_fence": "Geovalla",
+  "waypoint_fence_none": "Ninguna",
+  "waypoint_fence_circle": "Un círculo alrededor",
+  "waypoint_fence_area": "Un rectángulo: lo que muestra el mapa",
+  "waypoint_fence_both": "Un círculo y un rectángulo, como está",
+  "waypoint_fence_radius": "Radio",
+  "waypoint_fence_area_now": "Tomar lo que muestra el mapa ahora",
+  "waypoint_fence_area_none": "Aún sin rectángulo",
+  "waypoint_fence_area_hint": "El rectángulo es el mapa tal como está detrás de este formulario: déjalo como lo quieras antes de abrirlo, o vuelve a tomarlo ahora.",
+  "waypoint_fence_circle_of": "círculo de {r}",
+  "waypoint_fence_box": "rectángulo",
+  "waypoint_fence_in": "avisa al entrar",
+  "waypoint_fence_out": "avisa al salir",
+  "waypoint_notify_enter": "Avisar cuando un nodo entre",
+  "waypoint_notify_exit": "Avisar cuando un nodo salga",
+  "waypoint_notify_favorites": "Solo de los favoritos",
+  "waypoint_notify_hint": "Cada cual decide si hacerles caso: meshctl avisa de las de esta radio, y de las de otros si se lo pides."
 }

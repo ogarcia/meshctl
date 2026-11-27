@@ -1272,5 +1272,22 @@
   "waypoint_locked_error": "It is locked to another node: only that node may change or delete it for everyone.",
   "waypoint_not_connected": "The radio is not connected.",
   "waypoint_delete_all_confirm": "Delete “{name}” for everyone? It goes from the map of every node that has it.",
-  "waypoint_delete_here_confirm": "Delete “{name}” in meshctl alone? It stays on the mesh, and comes back if it is shared again."
+  "waypoint_delete_here_confirm": "Delete “{name}” in meshctl alone? It stays on the mesh, and comes back if it is shared again.",
+  "waypoint_fence": "Fence",
+  "waypoint_fence_none": "None",
+  "waypoint_fence_circle": "A circle around it",
+  "waypoint_fence_area": "A box: what the map shows",
+  "waypoint_fence_both": "A circle and a box, as it is",
+  "waypoint_fence_radius": "Radius",
+  "waypoint_fence_area_now": "Take what the map shows now",
+  "waypoint_fence_area_none": "No box yet",
+  "waypoint_fence_area_hint": "The box is the map as it is behind this form: placed as you want it before opening the form, or taken again now.",
+  "waypoint_fence_circle_of": "circle of {r}",
+  "waypoint_fence_box": "box",
+  "waypoint_fence_in": "tells going in",
+  "waypoint_fence_out": "tells going out",
+  "waypoint_notify_enter": "Tell when a node goes in",
+  "waypoint_notify_exit": "Tell when a node goes out",
+  "waypoint_notify_favorites": "Only of the favourites",
+  "waypoint_notify_hint": "Whoever has it decides whether to heed them: meshctl tells of this radio's own, and of another's if asked to."
 }

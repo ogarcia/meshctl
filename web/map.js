@@ -78,6 +78,7 @@ window.meshctlMap = (() => {
   // popup on one, while open, and which one.
   let shownWaypoints = { labels: {}, waypoints: [], add: false };
   let waypointLayer = null;
+  let fenceLayer = null;
   let waypointPopup = null;
   let waypointPopupFor = null;
 
@@ -129,6 +130,7 @@ window.meshctlMap = (() => {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(save, SAVE_AFTER);
     });
+    fenceLayer = map.layer();
     waypointLayer = map.layer();
     markers = map.layer();
     spotLayer = map.layer();
@@ -216,6 +218,7 @@ window.meshctlMap = (() => {
     spotLayer = null;
     markers = null;
     waypointLayer = null;
+    fenceLayer = null;
     waypointPopup = null;
     waypointPopupFor = null;
     onPlaceAt = null;
@@ -496,9 +499,11 @@ window.meshctlMap = (() => {
 
   // The waypoints to show, as JSON: {labels: {add, edit, deleteAll,
   // deleteHere, locked}, add, waypoints: [{id, lat, lon, icon, name,
-  // description, facts: [{icon, label, value}], locked, editable}]}: add
-  // whether the map's menu offers to share one, editable whether this one
-  // can be changed and deleted for everyone.
+  // description, facts: [{icon, label, value}], locked, editable, fence:
+  // {radius, area: [[south, west], [north, east]]}}]}: add whether the map's
+  // menu offers to share one, editable whether this one can be changed and
+  // deleted for everyone, fence the circle, in metres, or the box around
+  // it, if any.
   function waypoints(json) {
     if (!map) return;
     shownWaypoints = JSON.parse(json);
@@ -524,6 +529,24 @@ window.meshctlMap = (() => {
 
   function drawWaypoints() {
     waypointLayer.clear();
+    fenceLayer.clear();
+    // Fences in the accent, dashed and faintly filled: an area, not a road.
+    const fence = {
+      color: color("--mc-primary"),
+      weight: 2,
+      opacity: 0.8,
+      dash: "6 5",
+      fill: color("--mc-primary"),
+      fillOpacity: 0.07,
+    };
+    for (const waypoint of shownWaypoints.waypoints) {
+      if (waypoint.fence && waypoint.fence.radius) {
+        fenceLayer.circle(waypoint.lat, waypoint.lon, waypoint.fence.radius, fence);
+      }
+      if (waypoint.fence && waypoint.fence.area) {
+        fenceLayer.rect(waypoint.fence.area, fence);
+      }
+    }
     for (const waypoint of shownWaypoints.waypoints) {
       waypointLayer.marker(waypoint.lat, waypoint.lon, {
         html: waypointPin(waypoint),
@@ -622,6 +645,19 @@ window.meshctlMap = (() => {
       maxHeight: Math.max(160, map.size().y - 150),
       offset: [0, -12],
       autoPanPadding: [24, 24],
+    });
+  }
+
+  // The area the map shows now, as JSON {south, west, north, east}, within
+  // the world; null with no map.
+  function bounds() {
+    if (!map) return null;
+    const b = map.bounds();
+    return JSON.stringify({
+      south: Math.max(b.south, -90),
+      west: Math.max(b.west, -180),
+      north: Math.min(b.north, 90),
+      east: Math.min(b.east, 180),
     });
   }
 
@@ -1064,7 +1100,7 @@ window.meshctlMap = (() => {
   }
 
   return {
-    open, close, nodes, waypoints, focus, route, stay, reset, resize, view, mini, miniRoute,
+    open, close, nodes, waypoints, bounds, focus, route, stay, reset, resize, view, mini, miniRoute,
     miniClose, picker, pickerAt, pickerClose, spot,
   };
 })();

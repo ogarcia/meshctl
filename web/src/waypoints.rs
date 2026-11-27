@@ -12,9 +12,18 @@ use crate::i18n::{t, t_string, use_i18n};
 use crate::mesh::ago;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use meshctl_api::waypoints::{DESCRIPTION_BYTES, NAME_BYTES, NewWaypoint, Waypoint};
+use meshctl_api::waypoints::{
+    DESCRIPTION_BYTES, Fence, FenceArea, NAME_BYTES, NewWaypoint, Waypoint,
+};
 use meshctl_api::{ErrorCode, LinkState, Peer, RadioKind};
 use serde::Serialize;
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = bounds)]
+    fn map_bounds() -> Option<String>;
+}
 
 const PIN: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/map-pin.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
@@ -72,6 +81,49 @@ struct Drawn {
     /// Whether it can be changed and deleted for everyone, by this radio,
     /// now.
     editable: bool,
+    fence: Option<DrawnFence>,
+}
+
+/// A fence as the map draws it: a circle, in metres, a box, or both.
+#[derive(Debug, Serialize)]
+struct DrawnFence {
+    radius: Option<u32>,
+    area: Option<[[f64; 2]; 2]>,
+}
+
+/// A distance, in short: metres, or kilometres from one.
+fn distance(metres: u32) -> String {
+    if metres < 1_000 {
+        format!("{metres} m")
+    } else if metres.is_multiple_of(1_000) {
+        format!("{} km", metres / 1_000)
+    } else {
+        format!("{:.1} km", f64::from(metres) / 1_000.0)
+    }
+}
+
+/// What a fence is, in words, and what is told of it.
+fn fence_words(i18n: leptos_i18n::I18nContext<crate::i18n::Locale>, fence: &Fence) -> String {
+    let mut shapes = Vec::new();
+    if let Some(radius) = fence.radius.filter(|r| *r > 0) {
+        shapes.push(t_string!(i18n, waypoint_fence_circle_of).replace("{r}", &distance(radius)));
+    }
+    if fence.area.is_some() {
+        shapes.push(t_string!(i18n, waypoint_fence_box).to_owned());
+    }
+    let mut told = Vec::new();
+    if fence.notify_on_enter {
+        told.push(t_string!(i18n, waypoint_fence_in));
+    }
+    if fence.notify_on_exit {
+        told.push(t_string!(i18n, waypoint_fence_out));
+    }
+    let shapes = shapes.join(" + ");
+    if told.is_empty() {
+        shapes
+    } else {
+        format!("{shapes} · {}", told.join(", "))
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -169,6 +221,13 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
                         value: title(live, Peer::Channel { channel: w.channel }),
                     },
                 ];
+                if let Some(fence) = w.fence.filter(Fence::is_some) {
+                    facts.push(Fact {
+                        icon: "current-location",
+                        label: t_string!(i18n, waypoint_fence).to_owned(),
+                        value: fence_words(i18n, &fence),
+                    });
+                }
                 if w.updated_by != w.created_by {
                     facts.insert(
                         1,
@@ -189,6 +248,10 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
                     facts,
                     locked: w.locked_to.is_some(),
                     editable: sharing && w.locked_to.is_none_or(|to| Some(to) == local),
+                    fence: w.fence.filter(Fence::is_some).map(|f| DrawnFence {
+                        radius: f.radius.filter(|r| *r > 0),
+                        area: f.area.map(|a| [[a.south, a.west], [a.north, a.east]]),
+                    }),
                 }
             })
             .collect()
@@ -328,6 +391,19 @@ enum Expiry {
 
 const EXPIRIES: [i64; 5] = [3_600, 28_800, 86_400, 259_200, 604_800];
 
+/// The radii a fence's circle is offered with, in metres, as Android's.
+const RADII: [u32; 6] = [100, 250, 500, 1_000, 2_000, 5_000];
+
+/// What shape a fence takes in the form.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Shape {
+    None,
+    Circle,
+    Area,
+    /// Both, as one heard may be: kept so.
+    Both,
+}
+
 /// What the form holds as it is filled in.
 #[derive(Debug, Clone, PartialEq)]
 struct Draft {
@@ -337,10 +413,43 @@ struct Draft {
     expiry: Expiry,
     locked: bool,
     channel: u32,
+    shape: Shape,
+    radius: u32,
+    area: Option<FenceArea>,
+    notify_on_enter: bool,
+    notify_on_exit: bool,
+    notify_favorites_only: bool,
+}
+
+/// The area the map shows now, if it is there.
+fn shown_area() -> Option<FenceArea> {
+    let json = map_bounds()?;
+    let area: FenceArea = serde_json::from_str(&json).ok()?;
+    area.is_valid().then_some(area)
 }
 
 impl Draft {
+    fn blank() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            icon: None,
+            expiry: Expiry::Never,
+            locked: false,
+            channel: 0,
+            shape: Shape::None,
+            radius: 250,
+            area: None,
+            notify_on_enter: true,
+            notify_on_exit: false,
+            notify_favorites_only: false,
+        }
+    }
+
     fn of(waypoint: &Waypoint) -> Self {
+        let fence = waypoint.fence.filter(Fence::is_some);
+        let radius = fence.and_then(|f| f.radius).filter(|r| *r > 0);
+        let area = fence.and_then(|f| f.area);
         Self {
             name: waypoint.name.clone(),
             description: waypoint.description.clone(),
@@ -348,7 +457,35 @@ impl Draft {
             expiry: waypoint.expire.map_or(Expiry::Never, Expiry::Kept),
             locked: waypoint.locked_to.is_some(),
             channel: waypoint.channel,
+            shape: match (radius, area) {
+                (Some(_), Some(_)) => Shape::Both,
+                (Some(_), None) => Shape::Circle,
+                (None, Some(_)) => Shape::Area,
+                (None, None) => Shape::None,
+            },
+            radius: radius.unwrap_or(250),
+            area,
+            notify_on_enter: fence.is_some_and(|f| f.notify_on_enter),
+            notify_on_exit: fence.is_some_and(|f| f.notify_on_exit),
+            notify_favorites_only: fence.is_some_and(|f| f.notify_favorites_only),
         }
+    }
+
+    fn fence(&self) -> Option<Fence> {
+        let (radius, area) = match self.shape {
+            Shape::None => return None,
+            Shape::Circle => (Some(self.radius), None),
+            Shape::Area => (None, self.area),
+            Shape::Both => (Some(self.radius), self.area),
+        };
+        let fence = Fence {
+            radius,
+            area,
+            notify_on_enter: self.notify_on_enter,
+            notify_on_exit: self.notify_on_exit,
+            notify_favorites_only: self.notify_favorites_only,
+        };
+        fence.is_some().then_some(fence)
     }
 
     fn waypoint(&self, form: Form, now: i64) -> NewWaypoint {
@@ -364,7 +501,7 @@ impl Draft {
                 Expiry::Kept(at) => Some(at),
             },
             locked: self.locked,
-            fence: None,
+            fence: self.fence(),
             channel: self.channel,
         }
     }
@@ -390,17 +527,8 @@ fn FormDialog(form: Form) -> impl IntoView {
         live.waypoints
             .with_untracked(|waypoints| waypoints.iter().find(|w| w.id == id).cloned())
     });
-    let draft = RwSignal::new(kept.as_ref().map_or_else(
-        || Draft {
-            name: String::new(),
-            description: String::new(),
-            icon: None,
-            expiry: Expiry::Never,
-            locked: false,
-            channel: 0,
-        },
-        Draft::of,
-    ));
+    let draft = RwSignal::new(kept.as_ref().map_or_else(Draft::blank, Draft::of));
+    let was_both = draft.with_untracked(|d| d.shape == Shape::Both);
     let kept_expiry = kept.as_ref().and_then(|w| w.expire);
     let busy = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
@@ -455,6 +583,68 @@ fn FormDialog(form: Form) -> impl IntoView {
         draft.update(|d| d.expiry = expiry);
     };
 
+    let shape_value = move || match draft.with(|d| d.shape) {
+        Shape::None => "none",
+        Shape::Circle => "circle",
+        Shape::Area => "area",
+        Shape::Both => "both",
+    };
+    let pick_shape = move |ev: leptos::ev::Event| {
+        let shape = match event_target_value(&ev).as_str() {
+            "circle" => Shape::Circle,
+            "area" => Shape::Area,
+            "both" => Shape::Both,
+            _ => Shape::None,
+        };
+        draft.update(|d| {
+            d.shape = shape;
+            // A box is what the map shows, the first time one is asked for.
+            if matches!(shape, Shape::Area | Shape::Both) && d.area.is_none() {
+                d.area = shown_area();
+            }
+        });
+    };
+    let radii = move || {
+        let current = draft.with(|d| d.radius);
+        let mut radii = RADII.to_vec();
+        if !radii.contains(&current) {
+            radii.push(current);
+            radii.sort_unstable();
+        }
+        radii
+    };
+    let circled = move || draft.with(|d| matches!(d.shape, Shape::Circle | Shape::Both));
+    let boxed = move || draft.with(|d| matches!(d.shape, Shape::Area | Shape::Both));
+    let fenced = move || draft.with(|d| d.shape != Shape::None);
+    let area_words = move || {
+        draft.with(|d| {
+            d.area.map_or_else(
+                || t_string!(i18n, waypoint_fence_area_none).to_owned(),
+                |a| {
+                    format!(
+                        "{:.4}, {:.4} → {:.4}, {:.4}",
+                        a.south, a.west, a.north, a.east
+                    )
+                },
+            )
+        })
+    };
+    let check = move |label: &'static str, get: fn(&Draft) -> bool, set: fn(&mut Draft, bool)| {
+        view! {
+            <label class="toggle">
+                <input
+                    type="checkbox"
+                    prop:checked=move || draft.with(get)
+                    on:change=move |ev| {
+                        let on = event_target_checked(&ev);
+                        draft.update(|d| set(d, on));
+                    }
+                />
+                <span>{label}</span>
+            </label>
+        }
+    };
+
     let name_bytes = move || draft.with(|d| d.name.trim().len());
     let description_bytes = move || draft.with(|d| d.description.trim().len());
     let name_over = move || name_bytes() > NAME_BYTES;
@@ -464,6 +654,7 @@ fn FormDialog(form: Form) -> impl IntoView {
             !d.name.trim().is_empty()
                 && d.name.trim().len() <= NAME_BYTES
                 && d.description.trim().len() <= DESCRIPTION_BYTES
+                && (!matches!(d.shape, Shape::Area | Shape::Both) || d.area.is_some())
         })
     };
 
@@ -623,6 +814,90 @@ fn FormDialog(form: Form) -> impl IntoView {
                         </label>
                     </div>
                     <p class="hint dim">{t!(i18n, waypoint_channel_hint)}</p>
+                    <div class="waypoint-fence">
+                        <div class="waypoint-pair">
+                            <label class="field">
+                                <span>{t!(i18n, waypoint_fence)}</span>
+                                <select prop:value=shape_value on:change=pick_shape>
+                                    <option value="none" selected=move || shape_value() == "none">
+                                        {t!(i18n, waypoint_fence_none)}
+                                    </option>
+                                    <option value="circle" selected=move || shape_value() == "circle">
+                                        {t!(i18n, waypoint_fence_circle)}
+                                    </option>
+                                    <option value="area" selected=move || shape_value() == "area">
+                                        {t!(i18n, waypoint_fence_area)}
+                                    </option>
+                                    {was_both
+                                        .then(|| {
+                                            view! {
+                                                <option value="both" selected=move || shape_value() == "both">
+                                                    {t!(i18n, waypoint_fence_both)}
+                                                </option>
+                                            }
+                                        })}
+                                </select>
+                            </label>
+                            <Show when=circled>
+                                <label class="field">
+                                    <span>{t!(i18n, waypoint_fence_radius)}</span>
+                                    <select
+                                        prop:value=move || draft.with(|d| d.radius.to_string())
+                                        on:change=move |ev| {
+                                            let radius = event_target_value(&ev).parse().unwrap_or(250);
+                                            draft.update(|d| d.radius = radius);
+                                        }
+                                    >
+                                        {move || {
+                                            radii()
+                                                .into_iter()
+                                                .map(|radius| {
+                                                    let chosen = draft.with(|d| d.radius == radius);
+                                                    view! {
+                                                        <option value=radius.to_string() selected=chosen>
+                                                            {distance(radius)}
+                                                        </option>
+                                                    }
+                                                })
+                                                .collect_view()
+                                        }}
+                                    </select>
+                                </label>
+                            </Show>
+                        </div>
+                        <Show when=boxed>
+                            <div class="waypoint-area">
+                                <span class="mono dim">{area_words}</span>
+                                <button
+                                    type="button"
+                                    on:click=move |_| draft.update(|d| d.area = shown_area())
+                                >
+                                    {t!(i18n, waypoint_fence_area_now)}
+                                </button>
+                            </div>
+                            <p class="hint dim">{t!(i18n, waypoint_fence_area_hint)}</p>
+                        </Show>
+                        <Show when=fenced>
+                            <div class="waypoint-notify">
+                                {check(
+                                    t_string!(i18n, waypoint_notify_enter),
+                                    |d| d.notify_on_enter,
+                                    |d, on| d.notify_on_enter = on,
+                                )}
+                                {check(
+                                    t_string!(i18n, waypoint_notify_exit),
+                                    |d| d.notify_on_exit,
+                                    |d, on| d.notify_on_exit = on,
+                                )}
+                                {check(
+                                    t_string!(i18n, waypoint_notify_favorites),
+                                    |d| d.notify_favorites_only,
+                                    |d, on| d.notify_favorites_only = on,
+                                )}
+                            </div>
+                            <p class="hint dim">{t!(i18n, waypoint_notify_hint)}</p>
+                        </Show>
+                    </div>
                     <label class="toggle">
                         <input
                             type="checkbox"
