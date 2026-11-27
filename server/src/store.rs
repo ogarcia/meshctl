@@ -564,6 +564,8 @@ impl Store {
                 role: row.local_role,
                 region: row.local_region,
                 modem_preset: row.local_modem_preset,
+                // Not kept: only of use while it is connected.
+                hop_limit: None,
             })
         }))
     }
@@ -2139,6 +2141,7 @@ mod tests {
             role: Some("CLIENT_BASE".into()),
             region: Some("EU_868".into()),
             modem_preset: Some("LONG_FAST".into()),
+            hop_limit: None,
         }
     }
 

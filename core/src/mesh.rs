@@ -37,6 +37,9 @@ pub struct LocalNode {
     pub role: Option<String>,
     pub region: Option<String>,
     pub modem_preset: Option<String>,
+    /// How many hops what it sends goes at most, as its settings say: the
+    /// firmware's 3 for none set.
+    pub hop_limit: Option<u32>,
 }
 
 /// A channel configured on the radio. Its key is deliberately not here.
@@ -784,6 +787,11 @@ impl MeshState {
                         local.role = Some(role_name(device.role));
                     }
                     Some(config::PayloadVariant::Lora(lora)) => {
+                        local.hop_limit = Some(if lora.hop_limit == 0 {
+                            3
+                        } else {
+                            lora.hop_limit
+                        });
                         local.region = Some(enum_name(lora.region, |v| {
                             config::lo_ra_config::RegionCode::try_from(v)
                                 .ok()

@@ -50,6 +50,10 @@ pub struct Waypoint {
     /// Whether it is meshctl's alone, never sent: one to see on the map.
     #[serde(default)]
     pub local: bool,
+    /// For one the radio shared, how many hops it went at most; none, as
+    /// many as the radio's settings say.
+    #[serde(default)]
+    pub hops: Option<u32>,
     /// The channel's slot it was last heard or sent on.
     pub channel: u32,
     /// Who shared it first, and who last changed it, by their node numbers.
@@ -138,6 +142,10 @@ pub struct NewWaypoint {
     /// be shared, changed with this off.
     #[serde(default)]
     pub local: bool,
+    /// How many hops it goes at most, 1 to 7, and is deleted with; none for
+    /// as many as the radio's settings say.
+    #[serde(default)]
+    pub hops: Option<u32>,
 }
 
 /// Whether a radio's map shows its waypoints.
@@ -188,6 +196,7 @@ impl NewWaypoint {
                 && fence.area.is_none_or(|area| area.is_valid())
         });
         placed
+            && self.hops.is_none_or(|hops| (1..=7).contains(&hops))
             && named
             && self.description.len() <= DESCRIPTION_BYTES
             && icon
@@ -212,6 +221,7 @@ mod tests {
             fence: None,
             channel: 0,
             local: false,
+            hops: None,
         }
     }
 
@@ -238,6 +248,9 @@ mod tests {
         assert!(check(|w| w.icon = None), "none is a pin");
         assert!(!check(|w| w.expire = Some(999)), "expired already");
         assert!(check(|w| w.expire = Some(2000)));
+        assert!(check(|w| w.hops = Some(2)));
+        assert!(!check(|w| w.hops = Some(8)), "more than the firmware takes");
+        assert!(!check(|w| w.hops = Some(0)));
         assert!(!check(|w| w.fence = Some(Fence {
             radius: Some(FENCE_RADIUS_MAX + 1),
             ..Default::default()

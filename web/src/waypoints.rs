@@ -260,6 +260,13 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
                         value: title(live, Peer::Channel { channel: w.channel }),
                     });
                 }
+                if let Some(hops) = w.hops {
+                    facts.push(Fact {
+                        icon: "route",
+                        label: t_string!(i18n, waypoint_hops).to_owned(),
+                        value: hops.to_string(),
+                    });
+                }
                 if let Some(fence) = w.fence.filter(Fence::is_some) {
                     facts.push(Fact {
                         icon: "current-location",
@@ -625,6 +632,9 @@ struct Draft {
     area: Option<FenceArea>,
     /// meshctl's alone, never sent.
     local: bool,
+    /// How many hops it goes at most; none, as many as the radio's
+    /// settings say.
+    hops: Option<u32>,
     notify_on_enter: bool,
     notify_on_exit: bool,
     notify_favorites_only: bool,
@@ -650,6 +660,7 @@ impl Draft {
             radius: 250,
             area: None,
             local: false,
+            hops: None,
             notify_on_enter: true,
             notify_on_exit: false,
             notify_favorites_only: false,
@@ -668,6 +679,7 @@ impl Draft {
             locked: waypoint.locked_to.is_some(),
             channel: waypoint.channel,
             local: waypoint.local,
+            hops: waypoint.hops,
             shape: match (radius, area) {
                 (Some(_), Some(_)) => Shape::Both,
                 (Some(_), None) => Shape::Circle,
@@ -715,6 +727,7 @@ impl Draft {
             fence: self.fence(),
             channel: if self.local { 0 } else { self.channel },
             local: self.local,
+            hops: if self.local { None } else { self.hops },
         }
     }
 }
@@ -751,6 +764,12 @@ fn FormDialog(form: Form) -> impl IntoView {
     // One on the mesh stays there: no way to make it meshctl's alone.
     let shared_already = kept.as_ref().is_some_and(|w| !w.local);
     let local = move || draft.with(|d| d.local);
+    // As far as the radio's settings send, which the slider goes up to.
+    let most_hops = move || {
+        live.status
+            .with(|s| s.as_ref()?.local.as_ref()?.hop_limit)
+            .filter(|most| *most >= 1)
+    };
     let was_both = draft.with_untracked(|d| d.shape == Shape::Both);
     let kept_expiry = kept.as_ref().and_then(|w| w.expire);
     let busy = RwSignal::new(false);
@@ -1151,6 +1170,48 @@ fn FormDialog(form: Form) -> impl IntoView {
                             <p class="hint dim">{t!(i18n, waypoint_notify_hint)}</p>
                         </Show>
                     </div>
+                    {move || {
+                        most_hops()
+                            .map(|most| {
+                                let at = move || draft.with(|d| d.hops.unwrap_or(most).min(most));
+                                let said = move || {
+                                    if draft.with(|d| d.hops.is_none_or(|h| h >= most)) {
+                                        t_string!(i18n, waypoint_hops_radio)
+                                            .replace("{n}", &most.to_string())
+                                    } else {
+                                        t_string!(i18n, waypoint_hops_of)
+                                            .replace("{n}", &at().to_string())
+                                            .replace("{of}", &most.to_string())
+                                    }
+                                };
+                                view! {
+                                    <label class="field waypoint-hops" class:gone=local>
+                                        <span>
+                                            {t!(i18n, waypoint_hops)}
+                                            <span class="dim">{said}</span>
+                                        </span>
+                                        <input
+                                            type="range"
+                                            min="1"
+                                            max=most.to_string()
+                                            step="1"
+                                            prop:value=move || at().to_string()
+                                            on:input=move |ev| {
+                                                let hops: u32 = event_target_value(&ev)
+                                                    .parse()
+                                                    .unwrap_or(most);
+                                                // All the radio's is as the radio says.
+                                                draft
+                                                    .update(|d| {
+                                                        d.hops = (hops < most).then_some(hops);
+                                                    });
+                                            }
+                                        />
+                                        <span class="hint dim">{t!(i18n, waypoint_hops_hint)}</span>
+                                    </label>
+                                }
+                            })
+                    }}
                     <label class="toggle" class:gone=local>
                         <input
                             type="checkbox"

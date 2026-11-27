@@ -1312,5 +1312,9 @@
   "waypoint_local_tag": "only in meshctl",
   "waypoint_delete": "Delete",
   "waypoint_delete_local_confirm": "Delete “{name}”?",
-  "waypoint_local_meshcore": "MeshCore has no waypoints: it is meshctl's alone, to see on this map."
+  "waypoint_local_meshcore": "MeshCore has no waypoints: it is meshctl's alone, to see on this map.",
+  "waypoint_hops": "Hops",
+  "waypoint_hops_radio": "as the radio: {n}",
+  "waypoint_hops_of": "{n} of {of}",
+  "waypoint_hops_hint": "How far it goes, and is deleted later: fewer, the nearer nodes only."
 }

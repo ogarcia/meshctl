@@ -2014,6 +2014,8 @@ async fn session(
         role: Some(role_name(me.kind)),
         region: None,
         modem_preset: None,
+        // MeshCore counts no hops as Meshtastic does.
+        hop_limit: None,
     };
     describe(&mut local, &settings);
     let slots = device

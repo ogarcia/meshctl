@@ -5367,6 +5367,7 @@ mod tests {
             role: None,
             region: None,
             modem_preset: None,
+            hop_limit: None,
         };
         for (radio, num) in [(car.id, 7), (core.id, 8)] {
             store

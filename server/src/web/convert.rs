@@ -28,6 +28,7 @@ pub fn local(local: &mesh::LocalNode) -> api::LocalNode {
         role: local.role.clone(),
         region: local.region.clone(),
         modem_preset: local.modem_preset.clone(),
+        hop_limit: local.hop_limit,
     }
 }
 

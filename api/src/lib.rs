@@ -1230,6 +1230,11 @@ pub struct LocalNode {
     /// LoRa settings.
     #[cfg_attr(feature = "openapi", schema(example = "LONG_FAST"))]
     pub modem_preset: Option<String>,
+    /// How many hops what it sends goes at most, as its LoRa settings say;
+    /// none while they are not known, as with it not connected.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(example = 3))]
+    pub hop_limit: Option<u32>,
 }
 
 /// A channel configured on the radio. Its key is never sent.

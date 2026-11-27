@@ -43,6 +43,7 @@ struct Row {
     notify_favorites_only: bool,
     watched: bool,
     local: bool,
+    hops: Option<i64>,
     channel: i64,
     created_by: i64,
     updated_by: i64,
@@ -57,7 +58,7 @@ macro_rules! select {
         concat!(
             "SELECT id, latitude, longitude, name, description, icon, expire, locked_to,
                 fence_radius, fence_south, fence_west, fence_north, fence_east,
-                notify_on_enter, notify_on_exit, notify_favorites_only, watched, local, channel,
+                notify_on_enter, notify_on_exit, notify_favorites_only, watched, local, hops, channel,
                 created_by, updated_by, created_at, updated_at ",
             $rest
         )
@@ -126,6 +127,7 @@ impl Row {
             watched: self.watched,
             crossings: Vec::new(),
             local: self.local,
+            hops: self.hops.and_then(|h| u32::try_from(h).ok()),
             channel: num(self.channel),
             created_by: num(self.created_by),
             updated_by: num(self.updated_by),
@@ -149,6 +151,9 @@ pub struct WaypointSource {
     pub own: bool,
     /// Whether it is meshctl's alone, never sent.
     pub local: bool,
+    /// For the radio's own, how many hops it went at most; none, as many
+    /// as its settings say.
+    pub hops: Option<u32>,
 }
 
 impl Store {
@@ -293,8 +298,9 @@ impl Store {
             "INSERT INTO waypoint (radio_id, id, latitude, longitude, name, description, icon,
                 expire, locked_to, fence_radius, fence_south, fence_west, fence_north,
                 fence_east, notify_on_enter, notify_on_exit, notify_favorites_only, watched,
-                local, channel, created_by, updated_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?)
+                local, hops, channel, created_by, updated_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?,
+                ?)
             ON CONFLICT (radio_id, id) DO UPDATE SET
                 latitude = excluded.latitude, longitude = excluded.longitude,
                 name = excluded.name, description = excluded.description, icon = excluded.icon,
@@ -305,6 +311,7 @@ impl Store {
                 notify_on_exit = excluded.notify_on_exit,
                 notify_favorites_only = excluded.notify_favorites_only,
                 watched = COALESCE(?, watched), local = excluded.local,
+                hops = CASE WHEN ? THEN excluded.hops ELSE hops END,
                 channel = excluded.channel,
                 updated_by = excluded.updated_by, updated_at = excluded.updated_at",
         )
@@ -327,12 +334,14 @@ impl Store {
         .bind(waypoint.notify_favorites_only)
         .bind(watched)
         .bind(source.local)
+        .bind(source.hops.map(i64::from))
         .bind(i64::from(source.channel))
         .bind(i64::from(source.from))
         .bind(i64::from(source.from))
         .bind(source.at)
         .bind(source.at)
         .bind(watched)
+        .bind(source.own)
         .execute(&self.pool)
         .await?;
         let (kept, _) = self
@@ -436,7 +445,36 @@ mod tests {
             at: 1000,
             own,
             local: false,
+            hops: None,
         }
+    }
+
+    #[tokio::test]
+    async fn how_far_the_radio_sent_it_stays_with_it() {
+        let (store, radio) = store_with_radio().await;
+        let near = WaypointSource {
+            hops: Some(2),
+            ..from(1, true)
+        };
+        store.keep_waypoint(radio, &summit(), near).await.unwrap();
+        // Changed by another node: still the radio's two hops.
+        store
+            .keep_waypoint(radio, &summit(), from(5, false))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.waypoint(radio, 77).await.unwrap().unwrap().0.hops,
+            Some(2)
+        );
+        // Shared again by the radio, as far as its settings say.
+        store
+            .keep_waypoint(radio, &summit(), from(1, true))
+            .await
+            .unwrap();
+        assert_eq!(
+            store.waypoint(radio, 77).await.unwrap().unwrap().0.hops,
+            None
+        );
     }
 
     #[tokio::test]

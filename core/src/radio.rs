@@ -340,17 +340,19 @@ impl Mesh {
     /// cut to what the firmware keeps. Returns the packet's id.
     ///
     /// The firmware refuses one sent within ten seconds of the last, from
-    /// whichever client: whoever calls this had better space them.
+    /// whichever client: whoever calls this had better space them. It goes
+    /// so many hops at most, 1 to 7, or as many as the radio's settings say.
     pub fn send_waypoint(
         &self,
         channel: u32,
         waypoint: &crate::waypoint::Waypoint,
+        hops: Option<u32>,
     ) -> Result<u32, SendError> {
         if self.is_meshcore() {
             return Err(SendError::Unsupported);
         }
         let waypoint = waypoint.clone().fitted();
-        self.send_packet(
+        self.send_packet_hops(
             crate::mesh::BROADCAST,
             channel,
             true,
@@ -359,6 +361,7 @@ impl Mesh {
                 payload: meshctl_proto::meshtastic::Waypoint::from(&waypoint).encode_to_vec(),
                 ..Default::default()
             },
+            hops.map_or(0, |hops| hops.clamp(1, 7)),
         )
     }
 
@@ -464,6 +467,19 @@ impl Mesh {
         want_ack: bool,
         data: Data,
     ) -> Result<u32, SendError> {
+        self.send_packet_hops(to, channel, want_ack, data, 0)
+    }
+
+    /// As [`Self::send_packet`], with so many hops at most: 0 for as many as
+    /// the radio's settings say, which the firmware puts in itself.
+    fn send_packet_hops(
+        &self,
+        to: u32,
+        channel: u32,
+        want_ack: bool,
+        data: Data,
+        hop_limit: u32,
+    ) -> Result<u32, SendError> {
         if self.read(|state| state.link) != LinkState::Ready {
             return Err(SendError::NotConnected);
         }
@@ -480,6 +496,7 @@ impl Mesh {
             channel,
             id,
             want_ack,
+            hop_limit,
             payload_variant: Some(mesh_packet::PayloadVariant::Decoded(data)),
             ..Default::default()
         };

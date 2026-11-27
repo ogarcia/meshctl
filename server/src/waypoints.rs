@@ -83,6 +83,7 @@ pub(crate) async fn keep_heard(
         at: i64::from(heard.at),
         own: false,
         local: false,
+        hops: None,
     };
     let kept = store.keep_waypoint(radio, &heard.waypoint, source).await?;
     tell(changes, radio, kept);
@@ -232,7 +233,7 @@ impl Radios {
         let channel = if new.local { 0 } else { new.channel };
         if !new.local {
             self.spaced(radio)?;
-            mesh.send_waypoint(channel, &shared)?;
+            mesh.send_waypoint(channel, &shared, new.hops)?;
         }
         let source = WaypointSource {
             from: local,
@@ -240,6 +241,7 @@ impl Radios {
             at: now(),
             own: true,
             local: new.local,
+            hops: if new.local { None } else { new.hops },
         };
         match self.store.keep_waypoint(radio, &shared, source).await? {
             WaypointTaken::Kept(waypoint) => {
@@ -286,7 +288,8 @@ impl Radios {
                 0
             };
             self.spaced(radio)?;
-            mesh.send_waypoint(channel, &shared.deleted())?;
+            // As far as it went.
+            mesh.send_waypoint(channel, &shared.deleted(), kept.hops)?;
         }
         if self.store.forget_waypoint(radio, id).await? {
             self.tell(Change::WaypointGone(radio, id));

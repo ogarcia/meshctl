@@ -1312,5 +1312,9 @@
   "waypoint_local_tag": "solo en meshctl",
   "waypoint_delete": "Borrar",
   "waypoint_delete_local_confirm": "¿Borrar «{name}»?",
-  "waypoint_local_meshcore": "MeshCore no tiene waypoints: es solo de meshctl, para verlo en este mapa."
+  "waypoint_local_meshcore": "MeshCore no tiene waypoints: es solo de meshctl, para verlo en este mapa.",
+  "waypoint_hops": "Saltos",
+  "waypoint_hops_radio": "como la radio: {n}",
+  "waypoint_hops_of": "{n} de {of}",
+  "waypoint_hops_hint": "Hasta dónde llega, y llegará su borrado: con menos, solo los nodos más cercanos."
 }
