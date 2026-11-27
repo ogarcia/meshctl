@@ -2596,6 +2596,9 @@
       .notice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .notice button { flex: none; min-height: 30px; padding: 0 12px; font-size: 13px; }
       .notice .close {
+        min-width: 0;
+        min-height: 0;
+        height: 30px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -2606,12 +2609,21 @@
         color: var(--mc-muted);
       }
       .notice .close svg { width: 16px; height: 16px; }
-      /* On a phone, under the top bar: on the map, clear of its buttons on
-         the left, and, with a route shown, under the route's notice. */
+      /* On a phone, under the top bar; on the map, in the middle of what its
+         buttons on the left leave, as far from them as from the right edge,
+         as the route's notice; and, with a route shown, under its notice. */
       @media (max-width: 835px) {
         .notices { top: 61px; left: 10px; right: 10px; width: auto; transform: none; }
         body:has(.map-page) .notices { left: 56px; }
-        body:has(.map-route-notice) .notices { top: 124px; }
+        body:has(.map-route-notice) .notices { top: 117px; }
+        .map-page .map-route-notice {
+          left: 56px;
+          right: 10px;
+          width: fit-content;
+          max-width: calc(100% - 66px);
+          margin-inline: auto;
+          transform: none;
+        }
       }
       .map-offline {
         position: absolute;
@@ -2936,6 +2948,9 @@
         justify-content: center;
         width: 28px;
         height: 28px;
+        /* Round, whatever size a touch screen gives buttons. */
+        min-width: 0;
+        min-height: 0;
         padding: 0;
         border-radius: 50%;
       }
