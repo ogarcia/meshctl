@@ -2808,9 +2808,13 @@
          Leaflet's own, which the engine makes. */
       /* Its pins and popups, over each other, under what is over the map. */
       .maplibregl-map { font: inherit; isolation: isolate; }
-      .maplibregl-popup { z-index: 10; }
+      /* Over every pin, whose z-index is 1000 and its rank (up to 2000). */
+      .maplibregl-popup { z-index: 3100; }
       /* Under the popups, as Leaflet has them. */
-      .maplibregl-popup.mc-tip { z-index: 9; pointer-events: none; }
+      .maplibregl-popup.mc-tip { z-index: 3000; pointer-events: none; }
+      /* Its controls over all of it, as Leaflet has them. */
+      .maplibregl-ctrl-top-left, .maplibregl-ctrl-top-right,
+      .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { z-index: 3200; }
       .maplibregl-popup-content {
         padding: 12px 14px;
         border: 1px solid var(--mc-border);
