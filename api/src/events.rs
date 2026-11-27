@@ -145,6 +145,10 @@ pub enum ServerMessage {
         status: MessageStatus,
         error: Option<String>,
     },
+    /// A MeshCore radio heard a node it would add, and had no room for it:
+    /// its list of contacts is full, and it may not overwrite the oldest. Said
+    /// again with each such node.
+    ContactsFull { radio: RadioId },
     /// What the console of a MeshCore node answered a radio logged in to it as
     /// its admin, as each comes: when, by the radio's clock in seconds.
     Console {

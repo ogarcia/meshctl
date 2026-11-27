@@ -1307,6 +1307,8 @@
   "notice_close": "Put away",
   "notice_vector_failed": "This browser can't draw vector maps, so OpenStreetMap's PNG ones show here instead. The saved setting stays as it is.",
   "notice_vector_keep": "Make it permanent",
+  "notice_contacts_full": "{{ radio }}'s list of contacts is full: the new nodes it hears are not kept.",
+  "notice_contacts_full_settings": "Settings",
   "waypoint_kind": "waypoint",
   "map_here_any": "{n} here",
   "waypoint_local": "Only in meshctl",

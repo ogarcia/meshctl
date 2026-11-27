@@ -2112,6 +2112,19 @@ async fn session(
                         vec![Event::Node(node)]
                     });
                 }
+                // The radio full, and a new one in the place of another:
+                // that one no longer on it, still known here.
+                Some(Response::ContactDeleted(key)) => {
+                    let num = num_of(&key);
+                    mesh.update(|state| match state.nodes.get_mut(&num) {
+                        Some(node) => {
+                            node.on_radio = Some(false);
+                            vec![Event::Node(node.clone())]
+                        }
+                        None => Vec::new(),
+                    });
+                }
+                Some(Response::ContactsFull) => mesh.update(|_| vec![Event::ContactsFull]),
                 Some(Response::Ack(tag)) => acknowledged(mesh, &session, tag),
                 Some(Response::LoggedIn(LoggedIn { prefix, access, .. })) => {
                     logged_in(&session, prefix, Some(access));

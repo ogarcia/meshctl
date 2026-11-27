@@ -383,8 +383,32 @@ pub fn tell(
     });
 }
 
+/// How long a full radio put away is not told of again, in milliseconds.
+const FULL_QUIET_MS: f64 = 3_600_000.0;
+
+/// Tells of a MeshCore radio whose list of contacts is full, over the panel:
+/// once, until put away, and not again for an hour after.
+pub fn tell_full(live: Live, radio: RadioId) {
+    let now = js_sys::Date::now();
+    let quiet = live
+        .full_told
+        .with_untracked(|told| told.get(&radio).is_some_and(|at| now - at < FULL_QUIET_MS));
+    if quiet || live.full.with_untracked(|full| full.contains(&radio)) {
+        return;
+    }
+    live.full.update(|full| full.push(radio));
+}
+
+/// Puts away the notice of a full radio, for a while.
+fn put_away_full(live: Live, radio: RadioId) {
+    live.full.update(|full| full.retain(|r| *r != radio));
+    live.full_told
+        .update(|told| _ = told.insert(radio, js_sys::Date::now()));
+}
+
 /// What happened to waypoints, over the panel: each with the way to see it
-/// on the map, and to put it away.
+/// on the map, and to put it away. Before them, what concerns the panel or a
+/// radio as a whole.
 #[component]
 pub fn Notices() -> impl IntoView {
     let i18n = use_i18n();
@@ -432,9 +456,51 @@ pub fn Notices() -> impl IntoView {
             }
         })
     };
+    // Radios with no room for more contacts: the way to their settings,
+    // where the oldest can be let go to make room.
+    let full = move || {
+        live.full
+            .get()
+            .into_iter()
+            .map(|radio| {
+                let close_label = move || t_string!(i18n, notice_close);
+                let name = radio_name(radio);
+                view! {
+                    <div class="notice">
+                        <span class="notice-text">
+                            {t!(i18n, notice_contacts_full, radio = name.clone())}
+                        </span>
+                        <button
+                            type="button"
+                            on:click=move |_| {
+                                put_away_full(live, radio);
+                                if live.selected.get_untracked() != Some(radio) {
+                                    live.select(radio);
+                                }
+                                live.meshcore_tab
+                                    .set(crate::meshcore_settings::MeshcoreTab::Advanced);
+                                live.go(crate::app::Page::RadioSettings);
+                            }
+                        >
+                            {t!(i18n, notice_contacts_full_settings)}
+                        </button>
+                        <button
+                            type="button"
+                            class="close"
+                            title=close_label
+                            aria-label=close_label
+                            on:click=move |_| put_away_full(live, radio)
+                            inner_html=CLOSE
+                        ></button>
+                    </div>
+                }
+            })
+            .collect_view()
+    };
     view! {
         <div class="notices" role="status" aria-live="polite">
             {vector}
+            {full}
             <For
                 each=move || live.notices.get()
                 key=|notice| notice.key

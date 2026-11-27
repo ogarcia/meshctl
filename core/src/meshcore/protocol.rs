@@ -705,6 +705,11 @@ pub enum Response {
     MessagesWaiting,
     /// Pushed: a contact the radio had not heard of before.
     NewContact(Contact),
+    /// Pushed: a contact gone from the radio, by its key, as when the radio
+    /// is full and a new one takes the place of the one changed longest ago.
+    ContactDeleted([u8; 32]),
+    /// Pushed: a new contact heard, and no room on the radio for it.
+    ContactsFull,
     /// Pushed: a trace sent came back, by its tag: the hashes of the path
     /// it went, the SNR each hop heard it at, and the SNR the radio heard
     /// it back at.
@@ -740,6 +745,8 @@ impl Response {
                 | Self::Ack(_)
                 | Self::MessagesWaiting
                 | Self::NewContact(_)
+                | Self::ContactDeleted(_)
+                | Self::ContactsFull
                 | Self::BinaryResponse { .. }
                 | Self::RxLog { .. }
                 | Self::LoggedIn(_)
@@ -822,6 +829,8 @@ impl Response {
             0x82 => Self::Ack(bytes_at(data, 0)?),
             0x83 => Self::MessagesWaiting,
             0x8a => Self::NewContact(contact(data)?),
+            0x8f => Self::ContactDeleted(bytes_at(data, 0)?),
+            0x90 => Self::ContactsFull,
             0x85 => Self::LoggedIn(logged_in(data)?),
             0x89 => trace_data(data)?,
             0x8d => path_discovery(data)?,
@@ -1175,6 +1184,23 @@ mod tests {
             Response::parse(&contact_payload(0x8a, "Mar")),
             Some(Response::NewContact(c)) if c.name == "Mar"
         ));
+    }
+
+    #[test]
+    fn a_full_radio_says_so() {
+        // One gone to make room, by its whole key; and no room at all.
+        let mut deleted = vec![0x8f];
+        deleted.extend([0x41; 32]);
+        assert_eq!(
+            Response::parse(&deleted),
+            Some(Response::ContactDeleted([0x41; 32]))
+        );
+        assert_eq!(Response::parse(&[0x90]), Some(Response::ContactsFull));
+        // Both pushed, whatever is being asked meanwhile.
+        assert!(Response::parse(&deleted).is_some_and(|r| r.is_push()));
+        assert!(Response::ContactsFull.is_push());
+        // A key cut short is no key.
+        assert_eq!(Response::parse(&deleted[..20]), None);
     }
 
     #[test]

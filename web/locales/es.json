@@ -1307,6 +1307,8 @@
   "notice_close": "Quitar",
   "notice_vector_failed": "Este navegador no puede mostrar mapas vectoriales, así que aquí se ven los PNG de OpenStreetMap. El ajuste guardado no cambia.",
   "notice_vector_keep": "Hacer permanente",
+  "notice_contacts_full": "La lista de contactos de {{ radio }} está llena: los nodos nuevos que oye no se guardan.",
+  "notice_contacts_full_settings": "Ajustes",
   "waypoint_kind": "waypoint",
   "map_here_any": "{n} aquí",
   "waypoint_local": "Solo en meshctl",

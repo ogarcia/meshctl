@@ -213,6 +213,9 @@ pub enum Event {
         snrs: Vec<f32>,
         last_snr: f32,
     },
+    /// A MeshCore radio heard a node it would add, and had no room for it:
+    /// its list of contacts is full, and it may not overwrite one.
+    ContactsFull,
 }
 
 /// A copy of a packet a MeshCore radio heard, raw: what names it whatever
