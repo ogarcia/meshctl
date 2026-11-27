@@ -525,8 +525,8 @@ impl Radio {
             && let Ok(waypoint) = pb::Waypoint::decode(data.payload.as_slice())
         {
             println!(
-                "waypoint {:08x} \"{}\" sent, expire {}",
-                waypoint.id, waypoint.name, waypoint.expire
+                "waypoint {:08x} \"{}\" sent, expire {}, hop limit {}",
+                waypoint.id, waypoint.name, waypoint.expire, packet.hop_limit
             );
         }
         if acked && packet.want_ack {
