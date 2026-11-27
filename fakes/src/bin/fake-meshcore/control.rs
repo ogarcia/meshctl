@@ -8,14 +8,13 @@ use crate::frames::{
     reaction_hash, region_key, rx_log,
 };
 use crate::nodes::room_sync;
-use crate::radio::{Contact, Event, ME, Radio, key};
+use crate::radio::{Contact, Event, MAX_CONTACTS, ME, Radio, key};
 use meshctl_core::meshcore::raw;
 use meshctl_fakes::{now, random};
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::broadcast;
 
-/// Does what a line of the control port says; what to answer it.
 /// The seconds received on a channel made busy with `busy`, so far.
 pub fn busy_secs(radio: &mut Radio) -> u32 {
     let at = now();
@@ -25,6 +24,62 @@ pub fn busy_secs(radio: &mut Radio) -> u32 {
     banked
 }
 
+/// A node not known before heard advertising, as the firmware takes one:
+/// left out if its kind is not added by itself, or it is further than the
+/// hops allowed, and only told of; added if there is room, or in place of
+/// the contact changed longest ago if the radio may overwrite one; and if
+/// not, told of, and the radio full. What happened, in words.
+fn advertised(
+    radio: &mut Radio,
+    new: Contact,
+    hops: u8,
+    events: &broadcast::Sender<Event>,
+) -> String {
+    let name = new.name.clone();
+    // Its kind's bit, as the auto-add settings have them.
+    let bit = 1u8 << new.kind.min(4);
+    let (config, most_hops) = radio.autoadd;
+    let taken = !radio.manual_add || config & bit != 0;
+    if !taken {
+        let _ = events.send(Event::Push(contact(0x8a, &new)));
+        return format!("{name} advertises, not added: its kind is not added by itself");
+    }
+    if most_hops > 0 && hops >= most_hops {
+        let _ = events.send(Event::Push(contact(0x8a, &new)));
+        return format!("{name} advertises, not added: {hops} hops away");
+    }
+    let mut told = format!("{name} advertises, added");
+    if radio.contacts.len() >= usize::from(MAX_CONTACTS) {
+        // None is a favourite here: the one changed longest ago goes.
+        let oldest = radio
+            .contacts
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, c)| c.last_modified)
+            .map(|(i, _)| i);
+        match oldest {
+            Some(i) if config & 0x01 != 0 => {
+                let gone = radio.contacts.remove(i);
+                let mut deleted = vec![0x8f];
+                deleted.extend(gone.key);
+                let _ = events.send(Event::Push(deleted));
+                told = format!("{name} advertises, added in place of {}", gone.name);
+            }
+            _ => {
+                let _ = events.send(Event::Push(contact(0x8a, &new)));
+                let _ = events.send(Event::Push(vec![0x90]));
+                return format!("{name} advertises, not added: the radio is full");
+            }
+        }
+    }
+    let mut advert = vec![0x80];
+    advert.extend(new.key);
+    let _ = events.send(Event::Push(advert));
+    radio.contacts.push(new);
+    told
+}
+
+/// Does what a line of the control port says; what to answer it.
 pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) -> String {
     let mut words = line.trim().splitn(3, ' ');
     let mut radio = radio.lock().unwrap_or_else(|e| e.into_inner());
@@ -184,30 +239,33 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             let _ = events.send(Event::Push(vec![0x83]));
             "Ana writes".into()
         }
+        // A node not known before advertises, of the kind asked for, a
+        // companion if none, its advert flooded through Monte.
         Some("advert") => {
+            let (kind, called) = match words.next() {
+                None | Some("chat") => (1, "Nodo nuevo"),
+                Some("repeater") => (2, "Repetidor nuevo"),
+                Some("room") => (3, "Sala nueva"),
+                Some("sensor") => (4, "Sensor nuevo"),
+                Some(_) => return "usage: advert [chat|repeater|room|sensor]".into(),
+            };
             let at = now();
-            let n = u8::try_from(radio.contacts.len()).unwrap_or(0);
+            radio.adverts = radio.adverts.wrapping_add(1);
+            let n = radio.adverts;
+            let mut new_key = key(0x60);
+            new_key[0] = 0xad;
+            new_key[1..3].copy_from_slice(&n.to_be_bytes());
             let new = Contact {
-                key: key(0x60 + n),
-                kind: 1,
+                key: new_key,
+                kind,
                 path_len: i8::try_from(random(3)).unwrap_or(0),
-                name: format!("Nodo nuevo {n}"),
+                name: format!("{called} {n}"),
                 last_advert: at,
                 lat: 43_350_000 + i32::try_from(random(40_000)).unwrap_or(0),
                 lon: -8_420_000 + i32::try_from(random(40_000)).unwrap_or(0),
                 last_modified: at,
             };
-            let name = new.name.clone();
-            // Added, it says so by its key; by hand, the whole of it, to
-            // be added by the client if it will.
-            if radio.manual_add {
-                let _ = events.send(Event::Push(contact(0x8a, &new)));
-            } else {
-                let mut advert = vec![0x80];
-                advert.extend(new.key);
-                let _ = events.send(Event::Push(advert));
-            }
-            // Heard raw too, its advert flooded through Monte.
+            // Heard raw, its advert flooded through Monte.
             let mut payload = new.key.to_vec();
             payload.extend(at.to_le_bytes());
             payload.extend([0; 64]);
@@ -217,11 +275,25 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             payload.extend(new.name.as_bytes());
             let packet = flooded(raw::PAYLOAD_ADVERT, &[key(0x52)], None, &payload);
             let _ = events.send(Event::Push(rx_log(5, -95, &packet)));
-            if radio.manual_add {
-                return format!("{name} advertises, not added");
-            }
-            radio.contacts.push(new);
-            format!("{name} advertises, added")
+            advertised(&mut radio, new, 1, events)
+        }
+        // Many contacts, about A Coruña, of every kind and heard at every
+        // age, as many as asked for and the radio has room for; the link
+        // dropped to have them read. 0, none.
+        Some("crowd") => {
+            let Some(count) = words.next().and_then(|w| w.parse::<u32>().ok()) else {
+                return format!("usage: crowd <contacts, up to {MAX_CONTACTS} in all>");
+            };
+            radio.contacts.retain(|c| c.key[0] != 0xcc);
+            let room = u32::from(MAX_CONTACTS).saturating_sub(u32::try_from(radio.contacts.len()).unwrap_or(u32::MAX));
+            let clock = radio.clock();
+            let crowd = crate::crowd::crowd(count.min(room), clock);
+            let told = crowd.len();
+            radio.contacts.extend(crowd);
+            let all = radio.contacts.len();
+            drop(radio);
+            let _ = events.send(Event::Drop);
+            format!("a crowd of {told}, {all} contacts of {MAX_CONTACTS}; dropped to have them read")
         }
         // Someone else's trace heard, raw: along Monte, Torre and Monte
         // again, by two bytes of each, two of its hops gone; then the last.
@@ -254,7 +326,7 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             "dropped".into()
         }
         _ => "commands: hear <slot> [<name>|]<text>, dm <text>, react <slot> <emoji>, \
-             dmreact <emoji>, post <text>, room missing|strict|open, advert, trace, \
+             dmreact <emoji>, post <text>, room missing|strict|open, advert [chat|repeater|room|sensor], crowd <contacts>, trace, \
              answers on|off, busy <percent>, echoes on|off, drop"
             .into(),
     }

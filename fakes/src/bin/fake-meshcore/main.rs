@@ -14,6 +14,7 @@
 
 mod commands;
 mod control;
+mod crowd;
 mod frames;
 mod link;
 mod nodes;

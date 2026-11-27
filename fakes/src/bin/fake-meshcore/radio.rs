@@ -111,6 +111,9 @@ pub struct Radio {
     pub channels: Vec<(String, [u8; 16])>,
     /// Messages heard, waiting to be pulled, as the frames that carry them.
     pub queued: VecDeque<Vec<u8>>,
+    /// How many nodes not known before have advertised, each with a key of
+    /// its own.
+    pub adverts: u16,
 }
 
 /// A key told apart by its first byte, the rest made up from it.
@@ -232,6 +235,7 @@ impl Radio {
             ],
             channels,
             queued: VecDeque::new(),
+            adverts: 0,
         }
     }
 
