@@ -81,7 +81,11 @@ pub fn i32_in(data: &[u8], at: usize) -> Option<i32> {
 pub fn contact(code: u8, contact: &Contact) -> Vec<u8> {
     let mut frame = vec![code];
     frame.extend(contact.key);
-    frame.extend([contact.kind, 0, contact.path_len.cast_unsigned()]);
+    frame.extend([
+        contact.kind,
+        contact.flags,
+        contact.path_len.cast_unsigned(),
+    ]);
     // Its path out, one byte a hop: through Torre last, Monte before it.
     let mut path = [0u8; 64];
     let hops = usize::try_from(contact.path_len).unwrap_or(0).min(64);

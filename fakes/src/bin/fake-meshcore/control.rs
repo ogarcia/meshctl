@@ -50,11 +50,12 @@ fn advertised(
     }
     let mut told = format!("{name} advertises, added");
     if radio.contacts.len() >= usize::from(MAX_CONTACTS) {
-        // None is a favourite here: the one changed longest ago goes.
+        // The one changed longest ago goes, never a favourite.
         let oldest = radio
             .contacts
             .iter()
             .enumerate()
+            .filter(|(_, c)| c.flags & 1 == 0)
             .min_by_key(|(_, c)| c.last_modified)
             .map(|(i, _)| i);
         match oldest {
@@ -258,6 +259,7 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             let new = Contact {
                 key: new_key,
                 kind,
+                flags: 0,
                 path_len: i8::try_from(random(3)).unwrap_or(0),
                 name: format!("{called} {n}"),
                 last_advert: at,

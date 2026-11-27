@@ -99,6 +99,7 @@ pub fn crowd(count: u32, at: u32) -> Vec<Contact> {
             Contact {
                 key: key_of(i),
                 kind,
+                flags: 0,
                 // No path known to one in five; up to three hops to the rest.
                 path_len: i8::try_from(mix(i, 7) % 5).unwrap_or(0) - 1,
                 name,

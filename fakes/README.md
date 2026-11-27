@@ -85,7 +85,8 @@ to be pulled, and acknowledges direct messages sent to it. What it does not
 know yet it refuses, as the firmware does a command it lacks.
 
 Its own settings change as the firmware's do, each checked as it checks
-them. Its clock starts an hour behind, as a radio's does after a power cut,
+them. Its contacts keep their flags, a favourite among them, as written
+back to it whole, and each can be read alone by its key. Its clock starts an hour behind, as a radio's does after a power cut,
 and goes only forward. Contacts are added, removed and their paths reset;
 channels set and emptied, each with its secret, Galicia's #names at first;
 its adverts only printed. Its tuning, auto-add, path hash size and default
@@ -114,7 +115,7 @@ Its contacts, around A Coruña:
 | `post <text>` | Someone posts in Sala Coruña: Ana, or someone the radio does not know, by turns; sent to the radio once logged in. |
 | `room missing` | The room is listed but not found to log in to, as a splitter in between may list a contact the radio no longer has. |
 | `room strict\|open` | The room says nothing to a wrong password, as one that lets nobody in to read; or lets them in to read again. |
-| `advert [chat\|repeater\|room\|sensor]` | A node not known before advertises, a companion if no kind is given, flooded through Monte. The radio takes it as the firmware does: only told of, not added, if its kind is not added by itself or it is further than the hops allowed; added if there is room; in place of the contact changed longest ago if full and allowed to overwrite one, saying that one is gone; and if not, told of, and the radio says it is full. |
+| `advert [chat\|repeater\|room\|sensor]` | A node not known before advertises, a companion if no kind is given, flooded through Monte. The radio takes it as the firmware does: only told of, not added, if its kind is not added by itself or it is further than the hops allowed; added if there is room; in place of the contact changed longest ago, never a favourite, if full and allowed to overwrite one, saying that one is gone; and if not, told of, and the radio says it is full. |
 | `crowd <contacts>` | Many contacts, about A Coruña, as many as asked for and the radio has room for, up to its 350 in all: six in ten companions, a quarter repeaters, the rest sensors and rooms; one in ten nowhere; a path known to most; heard minutes, days, weeks or more than a month ago, and added now. The same for the same number. The link drops to have them read; `crowd 0`, none. |
 | `trace` | Someone else's trace heard going by, raw, along Monte, Torre and Monte again. |
 | `answers on\|off` | Whether pings come back and requests are answered. |
@@ -142,9 +143,6 @@ control port served, the time and chance. Each radio is a binary in
 - **One queue for every client.** The MeshCore radio hands each message it
   queued to whichever client pulls it first, as the firmware does: a second
   meshctl connected to it takes them from the first.
-- **No favourites on the MeshCore radio.** It keeps none: full, and
-  allowed to overwrite, it takes the place of the contact changed longest
-  ago, of any.
 - **The MeshCore radio seals with meshctl's own code.** Its packets are made
   and read with `meshctl_core::meshcore::raw`, the code it tests: a mistake
   there would be made on both sides and go unseen. That code was checked

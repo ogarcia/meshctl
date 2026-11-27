@@ -779,6 +779,11 @@ pub fn answer(
             ok()
         }
         // ADD_UPDATE_CONTACT: added, or the one with its key updated.
+        // GET_CONTACT_BY_KEY: one contact as it is now, or not found.
+        0x1e => match key_in(data).and_then(|k| radio.contacts.iter().find(|c| c.key == k)) {
+            Some(found) => vec![contact(0x03, found)],
+            None => error(2),
+        },
         0x09 if data.len() >= 32 + 3 + 64 + 32 + 4 => {
             let Some(key) = key_in(data) else {
                 return error(6);
@@ -786,17 +791,27 @@ pub fn answer(
             let name_field = &data[99..131];
             let end = name_field.iter().position(|&b| b == 0).unwrap_or(32);
             let at = radio.clock();
+            // When it changed, as given, or now.
             let contact = Contact {
                 key,
                 kind: data[32],
+                flags: data[33],
                 path_len: data[34].cast_signed(),
                 name: String::from_utf8_lossy(&name_field[..end]).into_owned(),
                 last_advert: u32_in(data, 131).unwrap_or(at),
                 lat: i32_in(data, 135).unwrap_or(0),
                 lon: i32_in(data, 139).unwrap_or(0),
-                last_modified: at,
+                last_modified: u32_in(data, 143).unwrap_or(at),
             };
-            println!("contact {:?} kept", contact.name);
+            println!(
+                "contact {:?} kept{}",
+                contact.name,
+                if contact.flags & 1 == 0 {
+                    ""
+                } else {
+                    ", a favourite"
+                }
+            );
             if let Some(known) = radio.contacts.iter_mut().find(|c| c.key == key) {
                 *known = contact;
             } else if radio.contacts.len() < usize::from(MAX_CONTACTS) {

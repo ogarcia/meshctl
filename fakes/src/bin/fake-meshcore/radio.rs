@@ -35,6 +35,9 @@ pub struct Contact {
     pub key: [u8; 32],
     /// 1 chat, 2 repeater, 3 room, 4 sensor.
     pub kind: u8,
+    /// Its lowest bit, a favourite; the rest, what it may ask for of the
+    /// radio's telemetry.
+    pub flags: u8,
     /// Hops on the path known to it; -1 when none is.
     pub path_len: i8,
     pub name: String,
@@ -148,6 +151,7 @@ impl Radio {
         let contact = |first, kind, path_len, name: &str, lat, lon| Contact {
             key: key(first),
             kind,
+            flags: 0,
             path_len,
             name: name.into(),
             last_advert: at - 600,
