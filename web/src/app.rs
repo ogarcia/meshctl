@@ -1507,6 +1507,12 @@ fn show(preferences: Preferences) {
             MapTheme::Dark => Some("dark"),
         },
     );
+    // The tab's icon in the accent, drawn here: the daemon's `/favicon.svg`
+    // is too, but the service worker may hand out the one it kept before.
+    if let Ok(Some(icon)) = root.query_selector(r#"link[rel="icon"]"#) {
+        let svg = meshctl_api::mark::accent_icon(preferences.accent);
+        let _ = icon.set_attribute("href", &meshctl_api::mark::data_url(&svg));
+    }
 }
 
 #[component]

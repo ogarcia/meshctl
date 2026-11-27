@@ -21,6 +21,9 @@ struct Interface;
 /// The page every address the interface routes itself leads to.
 const INDEX: &str = "index.html";
 
+/// The icon, drawn in the panel's accent.
+const FAVICON: &str = "favicon.svg";
+
 /// Which interface this daemon serves: its page's hash, which names the
 /// scripts and styles of that build by their own hashes. `None` without
 /// one.
@@ -61,6 +64,10 @@ pub async fn serve(State(state): State<AppState>, uri: Uri) -> Response {
         return page(&state, &index.data).await;
     }
 
+    if path == FAVICON {
+        return favicon(&state).await;
+    }
+
     if let Some(response) = file(path) {
         return response;
     }
@@ -77,16 +84,37 @@ pub async fn serve(State(state): State<AppState>, uri: Uri) -> Response {
     StatusCode::NOT_FOUND.into_response()
 }
 
-/// The page, already in the colours it is to be shown in, so that it does not
-/// flash in others while the interface loads and asks for them.
-async fn page(state: &AppState, html: &[u8]) -> Response {
-    let preferences = state.radios.preferences().await.unwrap_or_else(|err| {
+/// The preferences kept, or the defaults if they cannot be read.
+async fn preferences(state: &AppState) -> Preferences {
+    state.radios.preferences().await.unwrap_or_else(|err| {
         tracing::warn!(
             error = format_args!("{err:#}"),
             "cannot read the preferences"
         );
         Preferences::default()
-    });
+    })
+}
+
+/// The icon, in the accent the panel is in: the one of the tab and of
+/// notifications. The interface's own file is that in amber, for whatever
+/// serves it but the daemon.
+async fn favicon(state: &AppState) -> Response {
+    let accent = preferences(state).await.accent;
+    (
+        [
+            (header::CONTENT_TYPE, "image/svg+xml"),
+            // The accent changes, and the icon with it.
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        meshctl_api::mark::accent_icon(accent),
+    )
+        .into_response()
+}
+
+/// The page, already in the colours it is to be shown in, so that it does not
+/// flash in others while the interface loads and asks for them.
+async fn page(state: &AppState, html: &[u8]) -> Response {
+    let preferences = preferences(state).await;
     let html = themed(&String::from_utf8_lossy(html), &preferences);
     (
         [

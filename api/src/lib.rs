@@ -10,6 +10,7 @@
 
 pub mod auto_replies;
 pub mod events;
+pub mod mark;
 
 use serde::{Deserialize, Serialize};
 
