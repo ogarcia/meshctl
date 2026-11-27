@@ -30,6 +30,11 @@ struct Cli {
     /// authentication in front, or give it one.
     #[arg(long, env = "MESHCTL_TOKEN", hide_env_values = true)]
     token: Option<String>,
+
+    /// Refuse API operations other than GET and HEAD. The read-only API and
+    /// event stream remain available to observation clients.
+    #[arg(long, env = "MESHCTL_READ_ONLY", default_value_t = false)]
+    read_only: bool,
 }
 
 #[tokio::main]
@@ -43,6 +48,7 @@ async fn main() -> Result<()> {
         data: cli.data,
         listen: cli.listen,
         token: cli.token,
+        read_only: cli.read_only,
         host: None,
     };
     meshctld::run_until(config, shutdown()).await

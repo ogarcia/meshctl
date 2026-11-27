@@ -609,6 +609,7 @@ pub extern "system" fn Java_me_ogarcia_meshctl_ListeningService_runDaemon<'local
         data,
         listen: SocketAddr::from((Ipv4Addr::LOCALHOST, port())),
         token: None,
+        read_only: false,
         host,
     };
     let (stop, stopped) = oneshot::channel::<()>();

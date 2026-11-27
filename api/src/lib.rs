@@ -46,6 +46,9 @@ pub struct Version {
 pub enum ErrorCode {
     /// The access token is missing or wrong.
     Unauthorized,
+    /// The daemon is running in read-only mode and the operation would change
+    /// state or send anything over the air.
+    ReadOnly,
     /// There is nothing at that address.
     NotFound,
     /// The request does not say what it should.

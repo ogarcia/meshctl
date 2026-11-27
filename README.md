@@ -59,6 +59,9 @@ server, in a container, as a desktop app, or as an app on your phone.
   app, with the same inside.
 - **An API** that every client uses, the web interface included, documented at
   `/api/docs`.
+For observation-only deployments, start the daemon with `--read-only` or set
+`MESHCTL_READ_ONLY=true`. GET and HEAD requests, including the event stream,
+remain available; mutating API requests return a structured `403` response.
 
 ## Non-goals
 

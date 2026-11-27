@@ -246,6 +246,7 @@ pub fn run() {
                     data: data_dir(),
                     listen: SocketAddr::from((HOST, port)),
                     token: None,
+                    read_only: false,
                     host,
                 };
                 let (stopping, stopped) = oneshot::channel::<()>();

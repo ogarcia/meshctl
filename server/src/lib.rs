@@ -54,6 +54,9 @@ pub struct Config {
     /// An access token the API asks for in the X-Meshctl-Token header; none,
     /// or an empty one, leaves the API open to whoever reaches it.
     pub token: Option<String>,
+    /// Refuses all API operations other than GET and HEAD. Useful for safely
+    /// exposing meshctl to observation-only clients.
+    pub read_only: bool,
     /// The app it runs within, if one asks to be told what it lets be set.
     pub host: Option<std::sync::Arc<dyn Host>>,
 }
@@ -64,6 +67,7 @@ impl std::fmt::Debug for Config {
             .field("data", &self.data)
             .field("listen", &self.listen)
             .field("token", &self.token.as_ref().map(|_| "…"))
+            .field("read_only", &self.read_only)
             .field("host", &self.host.is_some())
             .finish()
     }
@@ -108,7 +112,7 @@ pub async fn run_until(
     info!("serving on http://{}", config.listen);
 
     let state = web::AppState {
-        auth: web::Auth::new(token),
+        auth: web::Auth::new(token).read_only(config.read_only),
         radios: radios.clone(),
     };
     let stopping = radios.clone();

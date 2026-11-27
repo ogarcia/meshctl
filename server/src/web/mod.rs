@@ -243,6 +243,13 @@ pub(crate) mod tests {
         })
     }
 
+    pub async fn app_read_only() -> Router {
+        router(AppState {
+            auth: Auth::new(None).read_only(true),
+            radios: radios().await,
+        })
+    }
+
     pub fn json<T: DeserializeOwned>(body: &[u8]) -> T {
         serde_json::from_slice(body).unwrap()
     }
