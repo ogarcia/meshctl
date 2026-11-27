@@ -212,7 +212,10 @@ window.meshctlMap = (() => {
       }
     });
     // A route keeps its sides a few pixels apart, whatever the zoom.
-    map.on("zoomend", drawRoute);
+    // Not with an engine that moves it aside itself, at any zoom.
+    map.on("zoomend", () => {
+      if (!offsetting()) drawRoute();
+    });
     // The ring of a node in the overlap list goes as the map zooms: the list
     // is gone by then, and the ring would grow with the zoom's animation.
     map.on("zoomstart", () => showPreview(null));
@@ -926,18 +929,24 @@ window.meshctlMap = (() => {
     const a = on.toPoint(from[0], from[1]);
     const b = on.toPoint(to[0], to[1]);
     const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-    // The right of the way from a to b, on a screen whose y goes down.
+    // The right of the way from a to b, on a screen whose y goes down: the
+    // same at any zoom, as the way's angle on the screen is.
     const side = { x: (-(b.y - a.y) / length) * ROUTE_SIDE, y: ((b.x - a.x) / length) * ROUTE_SIDE };
+    const angle = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+    // An engine that moves a line aside itself: the way as it is, moved as
+    // it is drawn, at any zoom, all through the zoom's animation too.
+    if (offsetting()) {
+      return { from, to, angle, side, offset: ROUTE_SIDE };
+    }
     const moved = (p) => {
       const at = on.toLatLon(p.x + side.x, p.y + side.y);
       return [at.lat, at.lon];
     };
-    return {
-      from: moved(a),
-      to: moved(b),
-      angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI,
-    };
+    return { from: moved(a), to: moved(b), angle, side: { x: 0, y: 0 }, offset: 0 };
   }
+
+  // Whether the map's engine moves a line aside itself, in pixels.
+  const offsetting = () => !!(engineOpen && engines[engineOpen] && engines[engineOpen].offsets);
 
   // An arrowhead halfway along a stretch, pointing the way it went.
   function arrow(layer, stretch, fill, casing) {
@@ -948,7 +957,8 @@ window.meshctlMap = (() => {
         `<path d="M4 4 L19 11 L4 18 L8.5 11 Z" fill="${fill}" stroke="${casing}" stroke-width="2.5" stroke-linejoin="round" paint-order="stroke"/>` +
         `</svg>`,
       size: [22, 22],
-      anchor: [11, 11],
+      // Aside with its line, when the engine moves the line, not its way.
+      anchor: [11 - (stretch.side?.x ?? 0), 11 - (stretch.side?.y ?? 0)],
       interactive: false,
     });
   }
@@ -967,8 +977,14 @@ window.meshctlMap = (() => {
     const draw = (segment, back) => {
       const stretch = keepRight(map, segment.from, segment.to);
       const fill = color(QUALITY_COLOR[segment.quality] || "--mc-route-unknown");
-      routeLayer.line([stretch.from, stretch.to], { color: casing, weight: 7, opacity: 0.85 });
       routeLayer.line([stretch.from, stretch.to], {
+        color: casing,
+        weight: 7,
+        opacity: 0.85,
+        offset: stretch.offset,
+      });
+      routeLayer.line([stretch.from, stretch.to], {
+        offset: stretch.offset,
         // The colour says how the hop was heard: grey across nodes that
         // could not be placed, as then it cannot be told.
         color: fill,

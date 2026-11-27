@@ -445,6 +445,8 @@ window.meshctlMapLibre = (() => {
       };
       const dash = dashOf(style.dash, style.weight);
       if (dash) paint["line-dasharray"] = dash;
+      // So many pixels to the right of its way, at any zoom.
+      if (style.offset) paint["line-offset"] = style.offset;
       const layer = {
         id: layerId,
         type: "line",
@@ -603,5 +605,7 @@ window.meshctlMapLibre = (() => {
     };
   }
 
-  return { ready, supported, create };
+  // offsets: a line's style may say how many pixels to the right of its
+  // way it goes, which holds at any zoom, as it changes too.
+  return { ready, supported, create, offsets: true };
 })();
