@@ -29,6 +29,7 @@ mod requests;
 mod secrets;
 mod settings;
 mod storage;
+mod waypoints;
 
 pub use auth::Auth;
 
@@ -173,6 +174,7 @@ const SCALAR_HTML: &str = r##"<!doctype html>
         (name = "preferences", description = "How the interface looks, for every browser"),
         (name = "auto-replies", description = "What meshctl answers on its own, and where"),
         (name = "storage", description = "What meshctl keeps, and for how long"),
+        (name = "waypoints", description = "Points on the map shared with the mesh"),
         (name = "events", description = "What changes, as it changes"),
     ),
     components(schemas(
@@ -210,6 +212,7 @@ pub fn router(state: AppState) -> Router {
         .merge(storage::router())
         .merge(packets::router())
         .merge(requests::router())
+        .merge(waypoints::router())
         .layer(axum::middleware::from_fn_with_state(
             state.auth.clone(),
             auth::check,

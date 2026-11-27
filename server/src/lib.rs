@@ -19,6 +19,7 @@ mod routes;
 mod sections;
 mod settings;
 mod store;
+mod waypoints;
 mod web;
 
 use anyhow::{Context, Result};

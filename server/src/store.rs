@@ -28,6 +28,8 @@ pub use meshcore_packets::NewMeshcoreCopy;
 mod notifications;
 mod requests;
 mod retention;
+mod waypoints;
+pub use waypoints::{Taken as WaypointTaken, WaypointSource};
 
 /// A radio's button as stored: NULL for the one every radio has by default.
 fn badge_json(badge: &Badge) -> Result<Option<String>> {
@@ -49,6 +51,8 @@ pub struct RadioRecord {
     pub last_connected: Option<i64>,
     /// How long ago its nodes have to have been heard to be on its map.
     pub map_max_age: Option<u32>,
+    /// Whether its map shows its waypoints.
+    pub map_waypoints: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -62,6 +66,7 @@ struct RadioRow {
     badge: Option<String>,
     last_connected: Option<i64>,
     map_max_age: Option<i64>,
+    map_waypoints: bool,
 }
 
 impl RadioRow {
@@ -84,6 +89,7 @@ impl RadioRow {
             },
             last_connected: self.last_connected,
             map_max_age: self.map_max_age.and_then(|age| u32::try_from(age).ok()),
+            map_waypoints: self.map_waypoints,
         })
     }
 }
@@ -417,7 +423,8 @@ impl Store {
 
     pub async fn radios(&self) -> Result<Vec<RadioRecord>> {
         let rows: Vec<RadioRow> = sqlx::query_as(
-            "SELECT id, name, kind, address, enabled, shown, badge, last_connected, map_max_age
+            "SELECT id, name, kind, address, enabled, shown, badge, last_connected, map_max_age,
+                map_waypoints
             FROM radio ORDER BY position, id",
         )
         .fetch_all(&self.pool)
@@ -427,7 +434,8 @@ impl Store {
 
     pub async fn radio(&self, id: RadioId) -> Result<Option<RadioRecord>> {
         let row: Option<RadioRow> = sqlx::query_as(
-            "SELECT id, name, kind, address, enabled, shown, badge, last_connected, map_max_age
+            "SELECT id, name, kind, address, enabled, shown, badge, last_connected, map_max_age,
+                map_waypoints
             FROM radio WHERE id = ?",
         )
         .bind(id)
@@ -456,6 +464,7 @@ impl Store {
             settings: settings.clone(),
             last_connected: None,
             map_max_age: None,
+            map_waypoints: true,
         })
     }
 

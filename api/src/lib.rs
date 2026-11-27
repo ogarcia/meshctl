@@ -11,6 +11,7 @@
 pub mod auto_replies;
 pub mod events;
 pub mod mark;
+pub mod waypoints;
 
 use serde::{Deserialize, Serialize};
 
@@ -120,6 +121,13 @@ pub enum ErrorCode {
     /// The radio does not know where it is, or the channel it would go on
     /// shares no position.
     PositionNotShared,
+    /// Not a waypoint that can be shared: nowhere, no name or one of more
+    /// than 29 bytes, a description of more than 99, more than one emoji, an
+    /// expiry gone by, or a fence that fences nothing sensible.
+    InvalidWaypoint,
+    /// A waypoint locked to another node: only that node may change or
+    /// delete it for everyone.
+    WaypointLocked,
 }
 
 /// The body of every error the API answers with.
@@ -174,6 +182,9 @@ pub struct Radio {
     /// there.
     #[serde(default)]
     pub map_max_age: Option<u32>,
+    /// Whether its map shows the waypoints it heard and shared.
+    #[serde(default = "shown")]
+    pub map_waypoints: bool,
     /// How many messages others wrote in its conversations that were not
     /// read yet, all of them.
     #[serde(default)]
@@ -333,6 +344,11 @@ pub struct MapView {
     pub north: f64,
     #[cfg_attr(feature = "openapi", schema(example = -8.1))]
     pub east: f64,
+}
+
+/// What serde takes for a flag missing that is on unless said otherwise.
+fn shown() -> bool {
+    true
 }
 
 /// How long ago a radio's nodes have to have been heard to be on its map.

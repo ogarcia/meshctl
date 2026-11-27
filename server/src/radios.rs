@@ -48,6 +48,10 @@ pub enum Change {
     Mesh(RadioId, mesh::Event),
     /// A message heard or sent, as kept.
     Message(RadioId, Message),
+    /// A waypoint heard or shared, new or changed, as kept.
+    Waypoint(RadioId, meshctl_api::waypoints::Waypoint),
+    /// A waypoint gone: deleted, expired, or forgotten in meshctl.
+    WaypointGone(RadioId, u32),
     /// A login to a room sent, and how long its answer is waited for.
     LoginWaiting {
         radio: RadioId,
@@ -966,7 +970,7 @@ async fn expire(store: &Store, changes: &broadcast::Sender<Change>, radio: Radio
     {
         let _ = changes.send(Change::Request(radio, request));
     }
-    Ok(())
+    crate::waypoints::expire(store, changes, radio).await
 }
 
 /// Who wrote a message on a MeshCore radio, as named on a channel or in a
@@ -987,7 +991,7 @@ fn author(mesh: &Mesh, message: &Message) -> Option<String> {
 }
 
 /// Whether a radio has a channel in that slot that it uses.
-fn has_channel(mesh: &Mesh, channel: u32) -> bool {
+pub(crate) fn has_channel(mesh: &Mesh, channel: u32) -> bool {
     mesh.read(|state| {
         state
             .channels
@@ -1100,7 +1104,7 @@ impl Drop for Running {
 
 #[derive(Clone)]
 pub struct Radios {
-    store: Store,
+    pub(crate) store: Store,
     running: Arc<Mutex<HashMap<RadioId, Running>>>,
     /// The radios searching for regions, and how many repeaters each has
     /// still to ask.
@@ -1126,6 +1130,9 @@ pub struct Radios {
     /// The conversation each client of the event stream shows, and is seen,
     /// by the number it was given.
     viewing: Arc<Mutex<HashMap<u64, meshctl_api::events::Viewing>>>,
+    /// When each radio last sent a waypoint: the firmware refuses another
+    /// too soon after.
+    pub(crate) waypoint_sent: Arc<Mutex<HashMap<RadioId, std::time::Instant>>>,
     changes: broadcast::Sender<Change>,
     stopped: watch::Sender<bool>,
 }
@@ -1144,6 +1151,7 @@ impl Radios {
             remote: Arc::default(),
             host: Arc::default(),
             viewing: Arc::default(),
+            waypoint_sent: Arc::default(),
             changes: broadcast::channel(EVENT_BACKLOG).0,
             stopped: watch::channel(false).0,
         };
@@ -4053,6 +4061,11 @@ impl Radios {
         let _ = self.changes.send(Change::Radios);
     }
 
+    /// Tells every client of a change.
+    pub(crate) fn tell(&self, change: Change) {
+        let _ = self.changes.send(change);
+    }
+
     fn radio(&self, record: RadioRecord) -> Radio {
         Radio {
             id: record.id,
@@ -4068,6 +4081,7 @@ impl Radios {
             badge: record.settings.badge,
             last_connected: record.last_connected,
             map_max_age: record.map_max_age,
+            map_waypoints: record.map_waypoints,
             // Read from the store where it is asked for.
             unread: 0,
         }
@@ -4138,6 +4152,7 @@ impl Radios {
                     // These go out once kept, from `persist`.
                     Ok(
                         mesh::Event::Message(_)
+                        | mesh::Event::Waypoint(_)
                         | mesh::Event::Packet(_)
                         | mesh::Event::Ack(_)
                         | mesh::Event::Traceroute(_)
@@ -4186,6 +4201,9 @@ impl Radios {
                     }
                     Ok(mesh::Event::Traceroute(answer)) => {
                         answer_traceroute(&store, &changes, id, &mesh, &answer).await
+                    }
+                    Ok(mesh::Event::Waypoint(heard)) => {
+                        crate::waypoints::keep_heard(&store, &changes, id, &heard).await
                     }
                     Ok(mesh::Event::Message(heard))
                         if heard.position.is_some()

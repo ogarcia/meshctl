@@ -88,6 +88,14 @@ pub enum ServerMessage {
     NodeForgotten { radio: RadioId, node: u32 },
     /// A message heard or sent through a radio.
     Message { radio: RadioId, message: Message },
+    /// A waypoint heard or shared through a radio, new or changed.
+    Waypoint {
+        radio: RadioId,
+        waypoint: crate::waypoints::Waypoint,
+    },
+    /// A waypoint gone from a radio: deleted by whoever may, expired, or
+    /// forgotten in meshctl.
+    WaypointGone { radio: RadioId, id: u32 },
     /// A conversation read further, in any client: up to which message.
     ConversationRead {
         radio: RadioId,
