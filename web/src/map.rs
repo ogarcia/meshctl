@@ -927,7 +927,6 @@ pub fn MapView() -> impl IntoView {
             </div>
             <AgeButton />
             <crate::waypoints::WaypointsButton />
-            <crate::waypoints::WaypointForm />
             <Show when=move || placed(live) == 0 && crate::offline::offline(live).is_none()>
                 <p class="map-empty card dim">{t!(i18n, map_empty)}</p>
             </Show>

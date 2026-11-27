@@ -1772,6 +1772,9 @@ fn Frame() -> impl IntoView {
             <crate::phone::TabBar />
             <crate::phone::RadioSheet />
             <crate::links::LinkAdder />
+            // At the root, as every dialog, over all the rest: within the
+            // map, the phone's tab bar went over it.
+            <crate::waypoints::WaypointForm />
             <crate::about::AboutDialog />
             <Newer />
         </div>
