@@ -2788,7 +2788,9 @@
         overflow: hidden;
         background-clip: padding-box;
       }
-      .leaflet-bar a, .leaflet-bar a:hover,
+      /* Focused too, as one is once pressed: Leaflet's own grey, light on
+         any theme, would stay on it. */
+      .leaflet-bar a, .leaflet-bar a:hover, .leaflet-bar a:focus,
       .leaflet-touch .leaflet-bar a {
         width: 34px;
         height: 34px;
@@ -2799,6 +2801,13 @@
         font-size: 18px;
       }
       .leaflet-bar a:hover { background: var(--mc-raised); }
+      /* As far in or out as it goes: dimmed, on the theme's own surface. */
+      .leaflet-bar a.leaflet-disabled,
+      .leaflet-bar a.leaflet-disabled:hover {
+        background: var(--mc-surface);
+        color: var(--mc-muted);
+        opacity: 0.6;
+      }
       /* Every node in sight, under the zoom's buttons. */
       .mc-zoom-all a { display: flex; align-items: center; justify-content: center; }
       .mc-zoom-all a::after {
