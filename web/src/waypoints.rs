@@ -61,10 +61,10 @@ fn can_share(live: Live) -> bool {
         .is_some_and(|r| r.kind == RadioKind::Meshtastic && r.link == LinkState::Ready)
 }
 
-/// Whether the selected radio's map shows its waypoints.
+/// Whether the selected radio's map shows its waypoints: any radio's, as
+/// one of meshctl's alone may be on any.
 fn shown(live: Live) -> bool {
-    live.selected_radio()
-        .is_some_and(|r| r.kind == RadioKind::Meshtastic && r.map_waypoints)
+    live.selected_radio().is_some_and(|r| r.map_waypoints)
 }
 
 /// What the map shows of a waypoint, in the interface's language.
@@ -78,8 +78,10 @@ struct Drawn {
     description: String,
     facts: Vec<Fact>,
     locked: bool,
-    /// Whether it can be changed and deleted for everyone, by this radio,
-    /// now.
+    /// Whether it is meshctl's alone.
+    local: bool,
+    /// Whether it can be changed, and deleted for everyone, by this radio,
+    /// now: one of meshctl's alone, always.
     editable: bool,
     fence: Option<DrawnFence>,
     /// For one with a fence that tells of anything: whether meshctl tells
@@ -165,6 +167,9 @@ struct Labels {
     waypoint: String,
     /// How many there are, nodes and waypoints, where a click fell.
     here: String,
+    #[serde(rename = "localTag")]
+    local_tag: String,
+    delete: String,
 }
 
 /// What the map draws of the waypoints, as `map.js` takes it.
@@ -198,19 +203,23 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
         crossings: t_string!(i18n, waypoint_crossings).to_owned(),
         waypoint: t_string!(i18n, waypoint_kind).to_owned(),
         here: t_string!(i18n, map_here_any).to_owned(),
+        local_tag: t_string!(i18n, waypoint_local_tag).to_owned(),
+        delete: t_string!(i18n, waypoint_delete).to_owned(),
     };
     let sharing = can_share(live);
+    // Any radio's map may have one of meshctl's alone.
+    let adding = live.selected_radio().is_some();
     if !shown(live) {
         return Drawing {
             labels,
-            add: sharing,
+            add: adding,
             waypoints: Vec::new(),
         };
     }
     let now = i64::from(live.now.get());
     let local = local(live);
     let by = |num: u32| {
-        if Some(num) == local {
+        if num == 0 || Some(num) == local {
             t_string!(i18n, chat_this_radio).to_owned()
         } else {
             node_name(live, num)
@@ -243,12 +252,14 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
                             |at| t_string!(i18n, waypoint_in).replace("{t}", &until(now, at)),
                         ),
                     },
-                    Fact {
+                ];
+                if !w.local {
+                    facts.push(Fact {
                         icon: "hash",
                         label: t_string!(i18n, waypoint_channel).to_owned(),
                         value: title(live, Peer::Channel { channel: w.channel }),
-                    },
-                ];
+                    });
+                }
                 if let Some(fence) = w.fence.filter(Fence::is_some) {
                     facts.push(Fact {
                         icon: "current-location",
@@ -275,7 +286,8 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
                     description: w.description.clone(),
                     facts,
                     locked: w.locked_to.is_some(),
-                    editable: sharing && w.locked_to.is_none_or(|to| Some(to) == local),
+                    local: w.local,
+                    editable: w.local || sharing && w.locked_to.is_none_or(|to| Some(to) == local),
                     crossings: w
                         .crossings
                         .iter()
@@ -311,7 +323,7 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
     });
     Drawing {
         labels,
-        add: sharing,
+        add: adding,
         waypoints,
     }
 }
@@ -496,16 +508,18 @@ pub fn delete(
     let Some(radio) = live.selected.get_untracked() else {
         return;
     };
-    let name = live.waypoints.with_untracked(|waypoints| {
+    let found = live.waypoints.with_untracked(|waypoints| {
         waypoints
             .iter()
             .find(|w| w.id == id)
-            .map(|w| w.name.clone())
+            .map(|w| (w.name.clone(), w.local))
     });
-    let Some(name) = name else {
+    let Some((name, local)) = found else {
         return;
     };
-    let asked = if everyone {
+    let asked = if local {
+        t_string!(i18n, waypoint_delete_local_confirm)
+    } else if everyone {
         t_string!(i18n, waypoint_delete_all_confirm)
     } else {
         t_string!(i18n, waypoint_delete_here_confirm)
@@ -533,7 +547,7 @@ pub fn delete(
 pub fn WaypointsButton() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let meshtastic = move || live.selected_kind() == Some(RadioKind::Meshtastic);
+    let any = move || live.selected.get().is_some();
     let on = move || shown(live);
     let said = move || {
         if on() {
@@ -557,7 +571,7 @@ pub fn WaypointsButton() -> impl IntoView {
         });
     };
     view! {
-        <Show when=meshtastic>
+        <Show when=any>
             <button
                 type="button"
                 class="map-waypoints-toggle"
@@ -609,6 +623,8 @@ struct Draft {
     shape: Shape,
     radius: u32,
     area: Option<FenceArea>,
+    /// meshctl's alone, never sent.
+    local: bool,
     notify_on_enter: bool,
     notify_on_exit: bool,
     notify_favorites_only: bool,
@@ -633,6 +649,7 @@ impl Draft {
             shape: Shape::None,
             radius: 250,
             area: None,
+            local: false,
             notify_on_enter: true,
             notify_on_exit: false,
             notify_favorites_only: false,
@@ -650,6 +667,7 @@ impl Draft {
             expiry: waypoint.expire.map_or(Expiry::Never, Expiry::Kept),
             locked: waypoint.locked_to.is_some(),
             channel: waypoint.channel,
+            local: waypoint.local,
             shape: match (radius, area) {
                 (Some(_), Some(_)) => Shape::Both,
                 (Some(_), None) => Shape::Circle,
@@ -693,9 +711,10 @@ impl Draft {
                 Expiry::In(seconds) => Some(now + seconds),
                 Expiry::Kept(at) => Some(at),
             },
-            locked: self.locked,
+            locked: self.locked && !self.local,
             fence: self.fence(),
-            channel: self.channel,
+            channel: if self.local { 0 } else { self.channel },
+            local: self.local,
         }
     }
 }
@@ -720,7 +739,18 @@ fn FormDialog(form: Form) -> impl IntoView {
         live.waypoints
             .with_untracked(|waypoints| waypoints.iter().find(|w| w.id == id).cloned())
     });
-    let draft = RwSignal::new(kept.as_ref().map_or_else(Draft::blank, Draft::of));
+    // One the radio cannot share now is meshctl's alone, as one already so.
+    let sharing = untrack(|| can_share(live));
+    let draft = RwSignal::new(kept.as_ref().map_or_else(
+        || Draft {
+            local: !sharing,
+            ..Draft::blank()
+        },
+        Draft::of,
+    ));
+    // One on the mesh stays there: no way to make it meshctl's alone.
+    let shared_already = kept.as_ref().is_some_and(|w| !w.local);
+    let local = move || draft.with(|d| d.local);
     let was_both = draft.with_untracked(|d| d.shape == Shape::Both);
     let kept_expiry = kept.as_ref().and_then(|w| w.expire);
     let busy = RwSignal::new(false);
@@ -962,6 +992,36 @@ fn FormDialog(form: Form) -> impl IntoView {
                             }
                         ></textarea>
                     </label>
+                    {(!shared_already)
+                        .then(|| {
+                            view! {
+                                <label class="toggle">
+                                    <input
+                                        type="checkbox"
+                                        disabled=!sharing
+                                        prop:checked=local
+                                        on:change=move |ev| {
+                                            let on = event_target_checked(&ev);
+                                            draft.update(|d| d.local = on);
+                                        }
+                                    />
+                                    <span>
+                                        {t!(i18n, waypoint_local)}
+                                        <span class="dim">
+                                            {if sharing {
+                                                t!(i18n, waypoint_local_hint).into_any()
+                                            } else if untrack(|| live.selected_kind())
+                                                == Some(RadioKind::Meshcore)
+                                            {
+                                                t!(i18n, waypoint_local_meshcore).into_any()
+                                            } else {
+                                                t!(i18n, waypoint_local_only).into_any()
+                                            }}
+                                        </span>
+                                    </span>
+                                </label>
+                            }
+                        })}
                     <div class="waypoint-pair">
                         <label class="field">
                             <span>{t!(i18n, waypoint_expires)}</span>
@@ -981,7 +1041,7 @@ fn FormDialog(form: Form) -> impl IntoView {
                                 }}
                             </select>
                         </label>
-                        <label class="field">
+                        <label class="field" class:gone=local>
                             <span>{t!(i18n, waypoint_channel)}</span>
                             <select
                                 prop:value=move || draft.with(|d| d.channel.to_string())
@@ -1006,7 +1066,7 @@ fn FormDialog(form: Form) -> impl IntoView {
                             </select>
                         </label>
                     </div>
-                    <p class="hint dim">{t!(i18n, waypoint_channel_hint)}</p>
+                    <p class="hint dim" class:gone=local>{t!(i18n, waypoint_channel_hint)}</p>
                     <div class="waypoint-fence">
                         <div class="waypoint-pair">
                             <label class="field">
@@ -1091,7 +1151,7 @@ fn FormDialog(form: Form) -> impl IntoView {
                             <p class="hint dim">{t!(i18n, waypoint_notify_hint)}</p>
                         </Show>
                     </div>
-                    <label class="toggle">
+                    <label class="toggle" class:gone=local>
                         <input
                             type="checkbox"
                             prop:checked=move || draft.with(|d| d.locked)
@@ -1117,7 +1177,7 @@ fn FormDialog(form: Form) -> impl IntoView {
                         disabled=move || busy.get() || !valid()
                     >
                         {move || {
-                            if form.id.is_some() {
+                            if form.id.is_some() || local() {
                                 t_string!(i18n, waypoint_save)
                             } else {
                                 t_string!(i18n, waypoint_share)

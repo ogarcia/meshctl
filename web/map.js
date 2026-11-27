@@ -618,6 +618,7 @@ window.meshctlMap = (() => {
     const title = element("div", "mc-card-title");
     title.append(element("strong", "", waypoint.name));
     if (waypoint.locked) title.append(element("span", "mc-card-id", labels.locked));
+    if (waypoint.local) title.append(element("span", "mc-card-id", labels.localTag));
     head.append(title);
     box.append(head);
     if (waypoint.description) {
@@ -659,10 +660,14 @@ window.meshctlMap = (() => {
       box.append(crossed);
     }
     const buttons = element("div", "mc-card-buttons");
-    const actions = waypoint.editable
-      ? [["waypoint-edit", labels.edit, true], ["waypoint-delete", labels.deleteAll, false]]
-      : [];
-    actions.push(["waypoint-forget", labels.deleteHere, false]);
+    // One of meshctl's alone is edited and deleted, no more; one on the
+    // mesh, deleted for everyone where the radio may, or here.
+    const actions = waypoint.local
+      ? [["waypoint-edit", labels.edit, true], ["waypoint-forget", labels.delete, false]]
+      : waypoint.editable
+        ? [["waypoint-edit", labels.edit, true], ["waypoint-delete", labels.deleteAll, false]]
+        : [];
+    if (!waypoint.local) actions.push(["waypoint-forget", labels.deleteHere, false]);
     for (const [what, label, primary] of actions) {
       const button = element("button", primary ? "primary" : "", label);
       button.type = "button";

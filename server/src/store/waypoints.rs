@@ -42,6 +42,7 @@ struct Row {
     notify_on_exit: bool,
     notify_favorites_only: bool,
     watched: bool,
+    local: bool,
     channel: i64,
     created_by: i64,
     updated_by: i64,
@@ -56,7 +57,7 @@ macro_rules! select {
         concat!(
             "SELECT id, latitude, longitude, name, description, icon, expire, locked_to,
                 fence_radius, fence_south, fence_west, fence_north, fence_east,
-                notify_on_enter, notify_on_exit, notify_favorites_only, watched, channel,
+                notify_on_enter, notify_on_exit, notify_favorites_only, watched, local, channel,
                 created_by, updated_by, created_at, updated_at ",
             $rest
         )
@@ -124,6 +125,7 @@ impl Row {
             }),
             watched: self.watched,
             crossings: Vec::new(),
+            local: self.local,
             channel: num(self.channel),
             created_by: num(self.created_by),
             updated_by: num(self.updated_by),
@@ -145,6 +147,8 @@ pub struct WaypointSource {
     /// Whether the radio itself shared it: its fence is then watched as its
     /// author, the radio, asks.
     pub own: bool,
+    /// Whether it is meshctl's alone, never sent.
+    pub local: bool,
 }
 
 impl Store {
@@ -262,6 +266,10 @@ impl Store {
         source: WaypointSource,
     ) -> Result<Taken> {
         let stored = self.waypoint(radio, waypoint.id).await?;
+        // One of meshctl's alone is not the mesh's to change, but the radio's.
+        if !source.own && stored.as_ref().is_some_and(|(kept, _)| kept.local) {
+            return Ok(Taken::Ignored);
+        }
         // Locked, as kept or as sent, to a node that is not who sends it.
         let locked = stored
             .as_ref()
@@ -285,8 +293,8 @@ impl Store {
             "INSERT INTO waypoint (radio_id, id, latitude, longitude, name, description, icon,
                 expire, locked_to, fence_radius, fence_south, fence_west, fence_north,
                 fence_east, notify_on_enter, notify_on_exit, notify_favorites_only, watched,
-                channel, created_by, updated_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?)
+                local, channel, created_by, updated_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?)
             ON CONFLICT (radio_id, id) DO UPDATE SET
                 latitude = excluded.latitude, longitude = excluded.longitude,
                 name = excluded.name, description = excluded.description, icon = excluded.icon,
@@ -296,7 +304,8 @@ impl Store {
                 fence_east = excluded.fence_east, notify_on_enter = excluded.notify_on_enter,
                 notify_on_exit = excluded.notify_on_exit,
                 notify_favorites_only = excluded.notify_favorites_only,
-                watched = COALESCE(?, watched), channel = excluded.channel,
+                watched = COALESCE(?, watched), local = excluded.local,
+                channel = excluded.channel,
                 updated_by = excluded.updated_by, updated_at = excluded.updated_at",
         )
         .bind(radio)
@@ -317,6 +326,7 @@ impl Store {
         .bind(waypoint.notify_on_exit)
         .bind(waypoint.notify_favorites_only)
         .bind(watched)
+        .bind(source.local)
         .bind(i64::from(source.channel))
         .bind(i64::from(source.from))
         .bind(i64::from(source.from))
@@ -425,7 +435,42 @@ mod tests {
             channel: 0,
             at: 1000,
             own,
+            local: false,
         }
+    }
+
+    #[tokio::test]
+    async fn one_of_meshctls_alone_is_not_the_meshs() {
+        let (store, radio) = store_with_radio().await;
+        let mine = WaypointSource {
+            local: true,
+            ..from(1, true)
+        };
+        let Taken::Kept(kept) = store.keep_waypoint(radio, &summit(), mine).await.unwrap() else {
+            panic!("not kept");
+        };
+        assert!(kept.local);
+        // Heard with its id, from the mesh: not taken.
+        let heard = Shared {
+            name: "Another".into(),
+            ..summit()
+        };
+        assert_eq!(
+            store
+                .keep_waypoint(radio, &heard, from(5, false))
+                .await
+                .unwrap(),
+            Taken::Ignored
+        );
+        // Shared after, by the radio: the mesh's now.
+        let Taken::Kept(kept) = store
+            .keep_waypoint(radio, &summit(), from(1, true))
+            .await
+            .unwrap()
+        else {
+            panic!("not kept");
+        };
+        assert!(!kept.local);
     }
 
     #[tokio::test]

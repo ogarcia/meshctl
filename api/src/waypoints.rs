@@ -47,6 +47,9 @@ pub struct Waypoint {
     /// the newest first: up to five.
     #[serde(default)]
     pub crossings: Vec<FenceCrossing>,
+    /// Whether it is meshctl's alone, never sent: one to see on the map.
+    #[serde(default)]
+    pub local: bool,
     /// The channel's slot it was last heard or sent on.
     pub channel: u32,
     /// Who shared it first, and who last changed it, by their node numbers.
@@ -130,6 +133,11 @@ pub struct NewWaypoint {
     /// The channel's slot it goes on: whoever has that channel hears it.
     #[serde(default)]
     pub channel: u32,
+    /// Whether it is meshctl's alone, never sent, on any radio: then its
+    /// channel and lock are none. One shared cannot be made so; one so can
+    /// be shared, changed with this off.
+    #[serde(default)]
+    pub local: bool,
 }
 
 /// Whether a radio's map shows its waypoints.
@@ -203,6 +211,7 @@ mod tests {
             locked: false,
             fence: None,
             channel: 0,
+            local: false,
         }
     }
 

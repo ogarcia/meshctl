@@ -79,6 +79,10 @@ async fn list(State(state): State<AppState>, Path(radio): Path<RadioId>) -> Resp
 /// or delete it. It is kept as it went, and every client hears of it. The
 /// firmware takes no more than one every ten seconds, from any client:
 /// meshctl says so before sending one too soon.
+///
+/// With `local`, it is meshctl's alone, never sent: on any radio, MeshCore's
+/// and one not connected too, with no channel nor lock. Changed with
+/// `local` off, it is shared then; one shared cannot be made local.
 #[utoipa::path(
     post,
     path = "/radios/{radio}/waypoints",

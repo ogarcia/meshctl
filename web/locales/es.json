@@ -1305,5 +1305,12 @@
   "notice_see": "Ver",
   "notice_close": "Quitar",
   "waypoint_kind": "waypoint",
-  "map_here_any": "{n} aquí"
+  "map_here_any": "{n} aquí",
+  "waypoint_local": "Solo en meshctl",
+  "waypoint_local_hint": "No se envía: es tuyo para verlo en este mapa, y de nadie más. Se puede compartir después.",
+  "waypoint_local_only": "Esta radio no puede compartirlo ahora, así que se queda en meshctl: se puede compartir después, con la radio conectada.",
+  "waypoint_local_tag": "solo en meshctl",
+  "waypoint_delete": "Borrar",
+  "waypoint_delete_local_confirm": "¿Borrar «{name}»?",
+  "waypoint_local_meshcore": "MeshCore no tiene waypoints: es solo de meshctl, para verlo en este mapa."
 }

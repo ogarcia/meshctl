@@ -1305,5 +1305,12 @@
   "notice_see": "See",
   "notice_close": "Put away",
   "waypoint_kind": "waypoint",
-  "map_here_any": "{n} here"
+  "map_here_any": "{n} here",
+  "waypoint_local": "Only in meshctl",
+  "waypoint_local_hint": "It is not sent: it is yours to see on this map, and nobody else's. It can be shared later.",
+  "waypoint_local_only": "This radio cannot share it now, so it stays in meshctl: it can be shared later, with the radio connected.",
+  "waypoint_local_tag": "only in meshctl",
+  "waypoint_delete": "Delete",
+  "waypoint_delete_local_confirm": "Delete “{name}”?",
+  "waypoint_local_meshcore": "MeshCore has no waypoints: it is meshctl's alone, to see on this map."
 }

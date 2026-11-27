@@ -82,6 +82,7 @@ pub(crate) async fn keep_heard(
         channel: heard.channel,
         at: i64::from(heard.at),
         own: false,
+        local: false,
     };
     let kept = store.keep_waypoint(radio, &heard.waypoint, source).await?;
     tell(changes, radio, kept);
@@ -159,30 +160,49 @@ impl Radios {
         new: NewWaypoint,
     ) -> Result<Waypoint, WaypointFailure> {
         let mesh = self.mesh(radio).ok_or(WaypointFailure::NoSuchRadio)?;
-        if mesh.read(|state| state.meshcore.is_some()) || !new.is_valid(now()) {
+        if !new.is_valid(now()) {
             return Err(WaypointFailure::Invalid);
         }
-        if self.link(radio) != LinkState::Ready {
-            return Err(WaypointFailure::NotConnected);
-        }
-        if !has_channel(&mesh, new.channel) {
-            return Err(WaypointFailure::Invalid);
-        }
-        let local = mesh
-            .read(|state| state.local.as_ref().map(|l| l.num))
-            .ok_or(WaypointFailure::NotConnected)?;
-        let id = match id {
-            Some(id) => {
-                let (_, kept) = self
-                    .store
+        let kept = match id {
+            Some(id) => Some(
+                self.store
                     .waypoint(radio, id)
                     .await?
-                    .ok_or(WaypointFailure::NoSuchWaypoint)?;
-                if !kept.changeable_by(local) {
-                    return Err(WaypointFailure::Locked);
-                }
-                id
+                    .ok_or(WaypointFailure::NoSuchWaypoint)?,
+            ),
+            None => None,
+        };
+        let was_local = kept.as_ref().is_some_and(|(w, _)| w.local);
+        // One on the mesh stays there: it cannot be made meshctl's alone.
+        if kept.is_some() && !was_local && new.local {
+            return Err(WaypointFailure::Invalid);
+        }
+        // Sent only through a Meshtastic radio, connected, on a channel it has.
+        if !new.local {
+            if mesh.read(|state| state.meshcore.is_some()) {
+                return Err(WaypointFailure::Invalid);
             }
+            if self.link(radio) != LinkState::Ready {
+                return Err(WaypointFailure::NotConnected);
+            }
+            if !has_channel(&mesh, new.channel) {
+                return Err(WaypointFailure::Invalid);
+            }
+        }
+        let local_num = mesh.read(|state| state.local.as_ref().map(|l| l.num));
+        let local = if new.local {
+            local_num.unwrap_or(0)
+        } else {
+            local_num.ok_or(WaypointFailure::NotConnected)?
+        };
+        if let Some((_, shared)) = &kept
+            && !was_local
+            && !shared.changeable_by(local)
+        {
+            return Err(WaypointFailure::Locked);
+        }
+        let id = match id {
+            Some(id) => id,
             None => fresh_id(&self.store, radio).await?,
         };
         let fence = new.fence.filter(meshctl_api::waypoints::Fence::is_some);
@@ -193,7 +213,7 @@ impl Radios {
             expire: new
                 .expire
                 .map_or(0, |at| u32::try_from(at).unwrap_or(u32::MAX)),
-            locked_to: if new.locked { local } else { 0 },
+            locked_to: if new.locked && !new.local { local } else { 0 },
             name: new.name.trim().to_owned(),
             description: new.description.trim().to_owned(),
             icon: icon(new.icon.as_deref()),
@@ -209,13 +229,17 @@ impl Radios {
             notify_favorites_only: fence.is_some_and(|f| f.notify_favorites_only),
         }
         .fitted();
-        self.spaced(radio)?;
-        mesh.send_waypoint(new.channel, &shared)?;
+        let channel = if new.local { 0 } else { new.channel };
+        if !new.local {
+            self.spaced(radio)?;
+            mesh.send_waypoint(channel, &shared)?;
+        }
         let source = WaypointSource {
             from: local,
-            channel: new.channel,
+            channel,
             at: now(),
             own: true,
+            local: new.local,
         };
         match self.store.keep_waypoint(radio, &shared, source).await? {
             WaypointTaken::Kept(waypoint) => {
@@ -243,7 +267,8 @@ impl Radios {
             .waypoint(radio, id)
             .await?
             .ok_or(WaypointFailure::NoSuchWaypoint)?;
-        if everyone {
+        // One of meshctl's alone is nobody else's to delete it for.
+        if everyone && !kept.local {
             if self.link(radio) != LinkState::Ready {
                 return Err(WaypointFailure::NotConnected);
             }
