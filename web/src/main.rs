@@ -36,6 +36,7 @@ mod position;
 mod preferences;
 mod qr;
 mod radios;
+mod remote_nodes;
 mod rooms;
 mod sections;
 mod settings;

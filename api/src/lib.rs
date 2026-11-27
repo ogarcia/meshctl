@@ -2410,6 +2410,40 @@ pub struct ChannelSecret {
     pub key: String,
 }
 
+/// What a node administered over the mesh is told to do with another node of
+/// its own list, which it does not let be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum NodeDbAction {
+    /// Keep it as a contact, key and all, and as a favourite.
+    Contact,
+    /// No longer a favourite.
+    Unfavorite,
+    /// Ignore it: drop what it sends. Kept so even if it never heard it.
+    Ignore,
+    /// No longer ignore it.
+    Unignore,
+    /// Forget it, until heard again.
+    Remove,
+}
+
+/// A change to a node's own list of nodes: of a node the radio knows, by its
+/// number, or, to send as a contact, one shared as a link.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeDbChange {
+    pub action: NodeDbAction,
+    /// The node, by its number, among those the radio knows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<u32>,
+    /// A contact's link, as the apps share them, in place of `node`: only
+    /// to send as a contact.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "openapi", schema(example = "https://meshtastic.org/v/#..."))]
+    pub link: Option<String>,
+}
+
 /// A node's status message, asked of it apart from the rest of its
 /// settings: none if its firmware has none, or it did not say.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

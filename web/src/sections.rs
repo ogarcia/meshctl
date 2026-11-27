@@ -44,6 +44,9 @@ const SECURITY: &str = "security";
 /// What the radio can be told to do, as a section among the
 /// configuration's.
 const ACTIONS: &str = "actions";
+/// A node's own list of nodes, administered over the mesh: not the radio's,
+/// which its nodes' pages have.
+const NODES: &str = "nodes";
 
 /// How saving each section went, by its id, kept by the tab.
 #[derive(Debug, Clone, Copy)]
@@ -184,10 +187,14 @@ pub fn SectionsTab(
     let security = move || !module && picked.get().as_deref() == Some(SECURITY);
     // And what it can be told to do.
     let actions = move || !module && picked.get().as_deref() == Some(ACTIONS);
+    // And, of a node administered over the mesh, its own list of nodes.
+    let nodes = move || {
+        !module && crate::settings::node_of().is_some() && picked.get().as_deref() == Some(NODES)
+    };
     // The one picked, or else the first.
     let current = Memo::new(move |_| {
         let picked = picked.get();
-        if matches!(picked.as_deref(), Some(SECURITY | ACTIONS)) {
+        if matches!(picked.as_deref(), Some(SECURITY | ACTIONS | NODES)) {
             return None;
         }
         list.with(|l| {
@@ -320,6 +327,19 @@ pub fn SectionsTab(
                         </span>
                         <span class="edited gone">"✎"</span>
                     </button>
+                    {crate::settings::node_of().is_some().then(|| view! {
+                        <button
+                            type="button"
+                            class:on=nodes
+                            on:click=move |_| picked.set(Some(NODES.to_owned()))
+                        >
+                            <span class="state none"></span>
+                            <span class="label">
+                                {move || names::section(i18n.get_locale(), "nodes")}
+                            </span>
+                            <span class="edited gone">"✎"</span>
+                        </button>
+                    })}
                     <button
                         type="button"
                         class:on=actions
@@ -346,6 +366,7 @@ pub fn SectionsTab(
                     <SectionForm section edits />
                 </For>
                 {move || security().then(|| view! { <crate::admin_keys::AdminKeysPanel /> })}
+                {move || nodes().then(|| view! { <crate::remote_nodes::RemoteNodesPanel /> })}
                 {move || actions().then(|| view! { <crate::node_actions::ActionsPanel /> })}
             </div>
         </div>

@@ -17,8 +17,8 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
     ActionRequest, AdminKeys, ChannelHistory, ChannelOrder, ChannelSecret, Contact, Error,
-    NodeSettings, NodeSettingsChange, NodeStatusMessage, RadioId, SectionChange, SectionSecret,
-    SettingsApplied,
+    NodeDbChange, NodeSettings, NodeSettingsChange, NodeStatusMessage, RadioId, SectionChange,
+    SectionSecret, SettingsApplied,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -29,6 +29,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(show, change))
         .routes(routes!(status))
+        .routes(routes!(change_node_db))
         .routes(routes!(change_section))
         .routes(routes!(admin_keys, change_admin_keys))
         .routes(routes!(act))
@@ -118,6 +119,47 @@ async fn status(
 ) -> Response {
     match state.radios.node_status(radio, node).await {
         Ok(status) => Json(NodeStatusMessage { status }).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// Change a node's list of nodes
+///
+/// Tells another node, over the mesh as its admin, what to do with a node of
+/// its own list, which it does not let be read: keep one as a contact, key
+/// and all, and as a favourite; no longer have one as a favourite; ignore
+/// one, or no longer; forget one. A contact is a node the radio knows, by
+/// its number, or one shared as a link, never one with no key the radio
+/// trusts. Done once the node acknowledges it, which says it has it, not
+/// what it made of it: a missing acknowledgement may still have landed, and
+/// sending it again does no harm.
+#[utoipa::path(
+    post,
+    path = "/radios/{radio}/nodes/{node}/settings/nodes",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = u32, Path, description = "The node's number"),
+    ),
+    request_body = NodeDbChange,
+    responses(
+        (status = 204, description = "Acknowledged by the node"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 403, description = "The node does not take the radio's key as an admin key: `not_admin`", body = Error),
+        (status = 404, description = "There is no such radio, or node: `invalid_node`", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+        (status = 422, description = "No node, a bad link, the node itself, or no key the radio trusts: `invalid_settings`", body = Error),
+        (status = 502, description = "The node, or the radio, would not: `radio_refused`", body = Error),
+        (status = 504, description = "The node did not acknowledge it: `radio_did_not_answer`", body = Error),
+    )
+)]
+async fn change_node_db(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, u32)>,
+    Json(wanted): Json<NodeDbChange>,
+) -> Response {
+    match state.radios.change_node_db(radio, node, &wanted).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(failure) => refused(failure),
     }
 }

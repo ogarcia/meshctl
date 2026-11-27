@@ -119,6 +119,7 @@ const SECTIONS: &[(&str, &str, &str)] = &[
     ("device", "Dispositivo", "Device"),
     ("security", "Seguridad", "Security"),
     ("actions", "Acciones", "Actions"),
+    ("nodes", "Nodos", "Nodes"),
     ("position", "Posición", "Position"),
     ("power", "Energía", "Power"),
     ("network", "Red", "Network"),

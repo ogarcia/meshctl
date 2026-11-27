@@ -381,6 +381,21 @@ pub async fn node_status(radio: RadioId, node: u32) -> Result<Option<String>, Fa
         .map(|answer| answer.status)
 }
 
+/// Tells a node administered over the mesh what to do with a node of its
+/// own list: done once it acknowledges it.
+pub async fn change_node_db(
+    radio: RadioId,
+    node: u32,
+    change: &meshctl_api::NodeDbChange,
+) -> Result<(), Failure> {
+    let request = with_token(Request::post(&url(&format!(
+        "/radios/{radio}/nodes/{node}/settings/nodes"
+    ))))
+    .json(change)
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 pub async fn change_settings(
     radio: RadioId,
     node: Option<u32>,

@@ -179,6 +179,27 @@ pub enum NodeAction {
     FactoryReset,
 }
 
+/// What a node administered over the mesh is told to do with another of
+/// its own list of nodes, which it does not let be read.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NodeDbChange {
+    /// A contact it keeps, key and all, and makes a favourite, as the
+    /// firmware does with one for every role but Client Base; on that one,
+    /// with `favorite_after`, a favourite once it has the contact.
+    Contact {
+        contact: SharedContact,
+        favorite_after: bool,
+    },
+    /// No longer a favourite.
+    Unfavorite(u32),
+    /// Ignored: what it sends, dropped. Kept so even if it never heard it.
+    Ignore(u32),
+    /// No longer ignored.
+    Unignore(u32),
+    /// Out of its list, until heard again.
+    Remove(u32),
+}
+
 impl NodeAction {
     fn request(self) -> admin_message::PayloadVariant {
         use admin_message::PayloadVariant as A;
@@ -609,6 +630,42 @@ impl Mesh {
             self.delivered(to, step, passkey.clone()).await?;
         }
         Ok(())
+    }
+
+    /// Changes another node's own list of nodes over the mesh, as its admin:
+    /// sealed to it, with the passkey it gives out when asked who it is,
+    /// each step waited for until the node says it has it. What it does
+    /// with it, it does not say: of a node it does not know, the firmware
+    /// takes no favourite, nor any but a block.
+    pub async fn change_node_db(&self, to: u32, change: NodeDbChange) -> Result<(), AdminError> {
+        use admin_message::PayloadVariant as A;
+        let passkey = self
+            .ask_node(to, A::GetOwnerRequest(true))
+            .await?
+            .session_passkey;
+        match change {
+            NodeDbChange::Contact {
+                contact,
+                favorite_after,
+            } => {
+                let num = contact.node_num;
+                self.delivered(to, A::AddContact(contact), passkey.clone())
+                    .await?;
+                if favorite_after {
+                    self.delivered(to, A::SetFavoriteNode(num), passkey).await?;
+                }
+                Ok(())
+            }
+            NodeDbChange::Unfavorite(num) => {
+                self.delivered(to, A::RemoveFavoriteNode(num), passkey)
+                    .await
+            }
+            NodeDbChange::Ignore(num) => self.delivered(to, A::SetIgnoredNode(num), passkey).await,
+            NodeDbChange::Unignore(num) => {
+                self.delivered(to, A::RemoveIgnoredNode(num), passkey).await
+            }
+            NodeDbChange::Remove(num) => self.delivered(to, A::RemoveByNodenum(num), passkey).await,
+        }
     }
 
     /// Sends an admin message to another node, sealed to it, and waits until

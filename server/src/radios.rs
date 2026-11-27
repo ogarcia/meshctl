@@ -2885,6 +2885,83 @@ impl Radios {
         Ok(f(remote.get(&(id, node)).unwrap_or(&none)))
     }
 
+    /// Changes another node's own list of nodes, over the mesh as its admin.
+    /// A contact is the node the radio knows, by its number, or one shared as
+    /// a link; never one with no key it trusts, which would take the place of
+    /// the one the node has. On a Client Base, whose favourites mean more,
+    /// made a favourite apart, once it has the contact.
+    pub async fn change_node_db(
+        &self,
+        id: RadioId,
+        node: u32,
+        wanted: &meshctl_api::NodeDbChange,
+    ) -> Result<(), SettingsFailure> {
+        use meshctl_api::NodeDbAction as A;
+        use meshctl_core::radio::NodeDbChange as C;
+        let mesh = self.configurable(id)?;
+        let target = || {
+            wanted
+                .node
+                .ok_or_else(|| SettingsFailure::Invalid("node".to_owned()))
+        };
+        let change = match wanted.action {
+            A::Contact => {
+                let contact = match (&wanted.link, wanted.node) {
+                    (Some(link), _) => match crate::links::parse(link) {
+                        Some(crate::links::Parsed::Contact(contact)) => contact,
+                        _ => return Err(SettingsFailure::Invalid("link".to_owned())),
+                    },
+                    (None, Some(num)) => {
+                        let (own, user) = mesh.read(|state| {
+                            (
+                                state.local.as_ref().map(|l| l.num) == Some(num),
+                                state.nodes.get(&num).and_then(|n| n.user.clone()),
+                            )
+                        });
+                        let user = user.ok_or(SettingsFailure::UnknownNode)?;
+                        meshctl_proto::meshtastic::SharedContact {
+                            node_num: num,
+                            user: Some(meshtastic_user(num, &user)),
+                            should_ignore: false,
+                            // The radio's own, as it knows its key for sure.
+                            manually_verified: own,
+                        }
+                    }
+                    (None, None) => return Err(SettingsFailure::Invalid("node".to_owned())),
+                };
+                let key = contact.user.as_ref().map(|u| u.public_key.as_slice());
+                let trusted = key.is_some_and(|k| k.len() == 32 && k.iter().any(|b| *b != 0));
+                if !trusted {
+                    return Err(SettingsFailure::Invalid("public_key".to_owned()));
+                }
+                if contact.node_num == node {
+                    return Err(SettingsFailure::Invalid("node".to_owned()));
+                }
+                // A Client Base's role, as read of it with the rest.
+                let client_base = self
+                    .remote
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&(id, node))
+                    .and_then(|settings| settings.config.device.as_ref().map(|d| d.role))
+                    == Some(
+                        meshctl_proto::meshtastic::config::device_config::Role::ClientBase as i32,
+                    );
+                C::Contact {
+                    contact,
+                    favorite_after: client_base,
+                }
+            }
+            A::Unfavorite => C::Unfavorite(target()?),
+            A::Ignore => C::Ignore(target()?),
+            A::Unignore => C::Unignore(target()?),
+            A::Remove => C::Remove(target()?),
+        };
+        mesh.change_node_db(node, change)
+            .await
+            .map_err(node_admin_failure)
+    }
+
     /// A node's status message, asked of it apart from the rest of its
     /// settings, and kept with them, for a change to it to know it: a node
     /// whose firmware has none may not answer at all, which would hold up

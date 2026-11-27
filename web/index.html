@@ -2133,6 +2133,30 @@
       button.danger-outline { border-color: color-mix(in srgb, var(--mc-danger) 50%, var(--mc-border)); color: var(--mc-danger); }
       button.danger-outline:hover:not(:disabled) { border-color: var(--mc-danger); }
       .removal .problem { margin: 0; color: var(--mc-danger); font-size: 13px; }
+      /* A node's own list of nodes, administered over the mesh: each node a
+         row that opens on what can be done with it there. */
+      .remote-nodes { display: flex; flex-direction: column; gap: 12px; }
+      .remote-intro { margin: 0; font-size: 13px; line-height: 1.5; }
+      .remote-link { display: flex; gap: 8px; }
+      .remote-link input { flex: 1; min-width: 0; }
+      .remote-node-list { margin: 0; padding: 0; list-style: none; border: 1px solid var(--mc-border); border-radius: 10px; overflow: hidden; }
+      .remote-node + .remote-node { border-top: 1px solid var(--mc-border); }
+      .remote-node-head {
+        display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 10px 14px;
+        border: 0; border-radius: 0; background: none; color: var(--mc-text); text-align: left;
+      }
+      .remote-node-head:hover, .remote-node.open .remote-node-head { background: var(--mc-raised); }
+      .remote-node-head .name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .remote-node-head .id { font-family: var(--mc-mono); font-size: 12px; color: var(--mc-muted); }
+      .remote-node-head .tag { margin-left: auto; font-size: 12px; color: var(--mc-primary); }
+      .remote-node-head .tag + .tag { margin-left: 0; }
+      .remote-node-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 14px 12px; }
+      .remote-no-key { margin: 0; padding: 0 14px 12px; font-size: 12px; }
+      .remote-outcome { margin: 0; padding: 0 14px 10px; font-size: 13px; }
+      .remote-nodes > .remote-outcome { padding: 0; }
+      .remote-outcome.good { color: var(--mc-ok); }
+      .remote-outcome.warn { color: var(--mc-warn); }
+      .remote-outcome.bad { color: var(--mc-danger); }
       /* Many nodes at once: which, then each way, and how far it got. */
       .sweep-pick h3 { margin: 0 0 10px; font-size: 15px; }
       .sweep-pick p { margin: 10px 0 0; font-size: 13px; }
