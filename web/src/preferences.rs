@@ -73,18 +73,40 @@ pub fn PreferencesView() -> impl IntoView {
             Signal::derive(label),
         )
     });
-    let map_colors = [MapColors::Full, MapColors::Gray].map(|colors| {
-        let label = move || match colors {
-            MapColors::Full => t_string!(i18n, map_colors_full).to_string(),
-            MapColors::Gray => t_string!(i18n, map_colors_gray).to_string(),
+    // The map's colours, as its type offers them: OpenStreetMap's tiles in
+    // colour or greys; vector maps detailed, vivid or plain. Vivid is in
+    // colour on the tiles, which have none of their own.
+    let map_colors = move || {
+        let vector = current().map_engine == MapEngine::Vector;
+        let offered: &[MapColors] = if vector {
+            &[MapColors::Full, MapColors::Vivid, MapColors::Gray]
+        } else {
+            &[MapColors::Full, MapColors::Gray]
         };
-        let pick = choose(Box::new(move |p| p.map_colors = colors));
-        (
-            Signal::derive(move || current().map_colors == colors),
-            Box::new(pick) as Box<dyn Fn() + Send + Sync>,
-            Signal::derive(label),
-        )
-    });
+        offered
+            .iter()
+            .map(|&colors| {
+                let label = move || match (colors, vector) {
+                    (MapColors::Full, false) => t_string!(i18n, map_colors_full).to_string(),
+                    (MapColors::Gray, false) => t_string!(i18n, map_colors_gray).to_string(),
+                    (MapColors::Full, true) => t_string!(i18n, map_colors_detailed).to_string(),
+                    (MapColors::Vivid, _) => t_string!(i18n, map_colors_vivid).to_string(),
+                    (MapColors::Gray, true) => t_string!(i18n, map_colors_plain).to_string(),
+                };
+                let on = move || {
+                    let now = current().map_colors;
+                    now == colors
+                        || (!vector && colors == MapColors::Full && now == MapColors::Vivid)
+                };
+                let pick = choose(Box::new(move |p| p.map_colors = colors));
+                (
+                    Signal::derive(on),
+                    Box::new(pick) as Box<dyn Fn() + Send + Sync>,
+                    Signal::derive(label),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
     let accents = ACCENTS.map(|(accent, color)| {
         let on = move || current().accent == accent;
         let name = move || match accent {
@@ -132,9 +154,16 @@ pub fn PreferencesView() -> impl IntoView {
             </Row>
             <Row
                 title=t!(i18n, prefs_map_colors).into_any()
-                hint=t!(i18n, prefs_map_colors_hint).into_any()
+                hint=(move || {
+                    if current().map_engine == MapEngine::Vector {
+                        t!(i18n, prefs_map_colors_vector_hint).into_any()
+                    } else {
+                        t!(i18n, prefs_map_colors_hint).into_any()
+                    }
+                })
+                .into_any()
             >
-                {pills(Vec::from(map_colors))}
+                {move || pills(map_colors())}
             </Row>
             <Row title=t!(i18n, prefs_accent).into_any() hint=t!(i18n, prefs_accent_hint).into_any()>
                 <div class="pref-control accents" role="radiogroup">

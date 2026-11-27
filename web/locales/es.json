@@ -1320,5 +1320,9 @@
   "prefs_map_engine": "Tipo de mapa",
   "prefs_map_engine_hint": "Los de OpenStreetMap, o vectoriales, nítidos a cualquier zoom.",
   "map_engine_png": "PNG",
-  "map_engine_vector": "Vectorial"
+  "map_engine_vector": "Vectorial",
+  "map_colors_detailed": "Detallado",
+  "map_colors_vivid": "Vivo",
+  "map_colors_plain": "Sobrio",
+  "prefs_map_colors_vector_hint": "Detallado y suave, el de OpenStreetMap y vivo, o en grises para que resalten los nodos."
 }

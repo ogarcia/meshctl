@@ -149,8 +149,10 @@ fn themed(html: &str, preferences: &Preferences) -> String {
         MapTheme::Light => attributes.push_str(r#" data-map-theme="light""#),
         MapTheme::Dark => attributes.push_str(r#" data-map-theme="dark""#),
     }
-    if preferences.map_colors == MapColors::Gray {
-        attributes.push_str(r#" data-map-colors="gray""#);
+    match preferences.map_colors {
+        MapColors::Full => {}
+        MapColors::Gray => attributes.push_str(r#" data-map-colors="gray""#),
+        MapColors::Vivid => attributes.push_str(r#" data-map-colors="vivid""#),
     }
     if preferences.map_engine == MapEngine::Vector {
         attributes.push_str(r#" data-map-engine="vector""#);

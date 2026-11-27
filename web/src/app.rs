@@ -1582,6 +1582,7 @@ fn shown() -> Preferences {
         },
         map_colors: match get("data-map-colors").as_deref() {
             Some("gray") => MapColors::Gray,
+            Some("vivid") => MapColors::Vivid,
             _ => MapColors::Full,
         },
         ..Preferences::default()
@@ -1642,6 +1643,7 @@ fn show(preferences: Preferences) {
         match preferences.map_colors {
             MapColors::Full => None,
             MapColors::Gray => Some("gray"),
+            MapColors::Vivid => Some("vivid"),
         },
     );
     // The tab's icon in the accent, drawn here: the daemon's `/favicon.svg`

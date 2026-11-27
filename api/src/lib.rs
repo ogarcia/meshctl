@@ -2830,6 +2830,9 @@ pub enum MapColors {
     Full,
     /// Greys only, light or dark as the map's theme is.
     Gray,
+    /// Vector maps' brightest, OpenStreetMap's own look, made dark for a
+    /// dark map; OpenStreetMap's tiles, as in colour.
+    Vivid,
 }
 
 /// A language the interface speaks.

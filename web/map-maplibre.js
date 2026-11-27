@@ -38,13 +38,67 @@ window.meshctlMapLibre = (() => {
     return matchMedia("(prefers-color-scheme: dark)").matches;
   }
 
-  // The style, as the preferences say: in colour, Liberty, or Fiord on a
-  // dark map; in greys, Positron, or Dark.
+  // The style, as the preferences say: detailed, Liberty, or Fiord on a
+  // dark map; vivid, Bright, made dark on a dark map, as it has no dark of
+  // its own; plain, Positron, or Dark. As a key, its address and whether it
+  // is made dark.
   function styleUrl() {
-    const grey = document.documentElement.getAttribute("data-map-colors") === "gray";
+    const colors = document.documentElement.getAttribute("data-map-colors");
     const night = dark();
-    const name = grey ? (night ? "dark" : "positron") : night ? "fiord" : "liberty";
-    return OPENFREEMAP + name;
+    if (colors === "vivid") return OPENFREEMAP + (night ? "bright#dark" : "bright");
+    if (colors === "gray") return OPENFREEMAP + (night ? "dark" : "positron");
+    return OPENFREEMAP + (night ? "fiord" : "liberty");
+  }
+
+  // A style to load: its address, and whether its colours are made dark.
+  function loaded(key) {
+    const [url, how] = key.split("#");
+    return { url, darkened: how === "dark" };
+  }
+
+  // A colour made dark as OpenStreetMap's tiles are, by the very filter
+  // they go through: invert(1) hue-rotate(180deg) brightness(0.85)
+  // saturate(0.75). Any colour CSS reads; none, anything else.
+  const painter = document.createElement("canvas").getContext("2d");
+  function darkened(css) {
+    if (typeof css !== "string" || !/^(#|rgb|hsl)/.test(css)) return null;
+    painter.fillStyle = "#010203";
+    painter.fillStyle = css;
+    const read = painter.fillStyle;
+    if (read === "#010203" && css.toLowerCase() !== "#010203") return null;
+    let r;
+    let g;
+    let b;
+    let a = 1;
+    if (read.startsWith("#")) {
+      [r, g, b] = [1, 3, 5].map((i) => parseInt(read.slice(i, i + 2), 16));
+    } else {
+      const parts = read.match(/[\d.]+/g).map(Number);
+      [r, g, b] = parts;
+      if (parts.length > 3) a = parts[3];
+    }
+    // Inverted, and its hue turned half round.
+    [r, g, b] = [255 - r, 255 - g, 255 - b];
+    [r, g, b] = [
+      -0.574 * r + 1.43 * g + 0.144 * b,
+      0.426 * r + 0.43 * g + 0.144 * b,
+      0.426 * r + 1.43 * g - 0.856 * b,
+    ].map((v) => Math.min(255, Math.max(0, v)));
+    // Dimmed, and less saturated.
+    [r, g, b] = [r, g, b].map((v) => v * 0.85);
+    const s = 0.75;
+    [r, g, b] = [
+      (0.213 + 0.787 * s) * r + (0.715 - 0.715 * s) * g + (0.072 - 0.072 * s) * b,
+      (0.213 - 0.213 * s) * r + (0.715 + 0.285 * s) * g + (0.072 - 0.072 * s) * b,
+      (0.213 - 0.213 * s) * r + (0.715 - 0.715 * s) * g + (0.072 + 0.928 * s) * b,
+    ].map((v) => Math.round(Math.min(255, Math.max(0, v))));
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+
+  // Every colour of a paint's value made dark, within expressions too.
+  function darkenAll(value) {
+    if (Array.isArray(value)) return value.map(darkenAll);
+    return darkened(value) ?? value;
   }
 
   // A style's filters, made quiet: OpenFreeMap's shields ask whether a
@@ -64,6 +118,23 @@ window.meshctlMapLibre = (() => {
       if (layer.filter) layer.filter = quiet(layer.filter);
     }
     return style;
+  }
+
+  // The same, and its colours made dark.
+  function tidyDark(before, style) {
+    tidy(before, style);
+    for (const layer of style.layers || []) {
+      for (const [name, value] of Object.entries(layer.paint || {})) {
+        if (name.endsWith("color")) layer.paint[name] = darkenAll(value);
+      }
+    }
+    return style;
+  }
+
+  // Gives a map a style, by its key, made quiet, and dark if it is to be.
+  function styled(map, key) {
+    const { url, darkened: dim } = loaded(key);
+    map.setStyle(url, { transformStyle: dim ? tidyDark : tidy });
   }
 
   // An image a style asks for that its sprite has not: given as nothing,
@@ -126,7 +197,7 @@ window.meshctlMapLibre = (() => {
       interactive: !still,
     });
     // Given apart, to be made quiet.
-    map.setStyle(styleUrl(), { transformStyle: tidy });
+    styled(map, styleUrl());
     if (map.touchZoomRotate) map.touchZoomRotate.disableRotation();
     if (map.keyboard) map.keyboard.disableRotation();
     map.setMissingStyleImageResolver((id) => {
@@ -207,7 +278,7 @@ window.meshctlMapLibre = (() => {
         if (now === url) return;
         url = now;
         styleReady = false;
-        map.setStyle(now, { transformStyle: tidy });
+        styled(map, now);
       },
       remove: () => map.remove(),
       resize: () => map.resize(),

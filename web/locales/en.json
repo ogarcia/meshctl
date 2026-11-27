@@ -1320,5 +1320,9 @@
   "prefs_map_engine": "Map type",
   "prefs_map_engine_hint": "OpenStreetMap's own, or vector maps, sharp at any zoom.",
   "map_engine_png": "PNG",
-  "map_engine_vector": "Vector"
+  "map_engine_vector": "Vector",
+  "map_colors_detailed": "Detailed",
+  "map_colors_vivid": "Vivid",
+  "map_colors_plain": "Plain",
+  "prefs_map_colors_vector_hint": "Detailed and soft, OpenStreetMap's own and vivid, or in greys for the nodes to stand out."
 }
