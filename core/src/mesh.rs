@@ -104,6 +104,10 @@ pub struct Node {
     pub snr: Option<f32>,
     pub rssi: Option<i32>,
     pub hops_away: Option<u32>,
+    /// On MeshCore, how many hops its latest advert came through, the fewest
+    /// of its copies: how far it is heard from, not a way to it, which
+    /// `hops_away` is. Kept by meshctl, as the radio keeps none of it.
+    pub advert_hops: Option<u32>,
     pub via_mqtt: bool,
     pub favorite: bool,
     pub battery_level: Option<u32>,
@@ -132,6 +136,7 @@ impl Node {
             snr: None,
             rssi: None,
             hops_away: None,
+            advert_hops: None,
             via_mqtt: false,
             favorite: false,
             battery_level: None,

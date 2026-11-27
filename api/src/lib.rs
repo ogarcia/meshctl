@@ -1334,8 +1334,14 @@ pub struct Node {
     pub snr: Option<f32>,
     /// Received signal strength of the last packet heard from it, in dBm.
     pub rssi: Option<i32>,
-    /// How many hops away it was last heard.
+    /// How many hops away it was last heard. On MeshCore, the hops of the
+    /// path the radio knows to it, its route.
     pub hops_away: Option<u32>,
+    /// On MeshCore, how many hops its latest advert came through, the fewest
+    /// of its copies: how far it is heard from, which is no route to it. Of
+    /// one with no route known, the most there is to say how far it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advert_hops: Option<u32>,
     /// Whether it was last heard through MQTT rather than over the air.
     pub via_mqtt: bool,
     /// Whether it is a favorite on the radio.

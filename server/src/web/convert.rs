@@ -64,6 +64,7 @@ pub fn node(node: &mesh::Node) -> api::Node {
         snr: node.snr,
         rssi: node.rssi,
         hops_away: node.hops_away,
+        advert_hops: node.advert_hops,
         via_mqtt: node.via_mqtt,
         favorite: node.favorite,
         battery_level: node.battery_level,

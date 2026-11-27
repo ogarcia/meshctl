@@ -68,14 +68,19 @@ fn order(column: Column, a: &Node, b: &Node, local: Option<u32>) -> std::cmp::Or
             .to_lowercase()
     };
     // Nearest first: its own radio, the directly heard by signal, then by
-    // hops, MQTT and the unknown last.
+    // hops, MQTT, those with no route by their adverts' hops, and the
+    // unknown last.
     let reach = |n: &Node| {
         let rank = if Some(n.num) == local {
             0
         } else if n.via_mqtt {
             100
         } else {
-            n.hops_away.map_or(200, |h| h + 1)
+            match (n.hops_away, n.advert_hops) {
+                (Some(hops), _) => hops + 1,
+                (None, Some(hops)) => 150 + hops,
+                (None, None) => 200,
+            }
         };
         let signal = if rank == 1 {
             n.snr.unwrap_or(f32::MIN)
@@ -106,7 +111,12 @@ fn unknown(column: Column, node: &Node, local: Option<u32>) -> bool {
     match column {
         Column::Name => false,
         Column::Heard => node.last_heard.is_none(),
-        Column::Reach => Some(node.num) != local && !node.via_mqtt && node.hops_away.is_none(),
+        Column::Reach => {
+            Some(node.num) != local
+                && !node.via_mqtt
+                && node.hops_away.is_none()
+                && node.advert_hops.is_none()
+        }
         Column::Power => node.battery_level.is_none(),
         Column::Hardware => node.hw_model.is_none(),
     }
@@ -137,8 +147,9 @@ pub fn avatar_style(live: Live, num: u32, name: &str) -> String {
 }
 
 /// How a node is reached, in words: its own radio, directly, through so many
-/// hops, or through MQTT; a MeshCore contact with no route, as having none;
-/// none when it is not known.
+/// hops, or through MQTT; a MeshCore contact with no route, as having none,
+/// and how far its latest advert came from, if one was heard; none when it
+/// is not known.
 pub fn reach_words(i18n: I18nContext<Locale>, node: &Node, local: bool) -> Option<String> {
     if local {
         return Some(t_string!(i18n, map_local).to_owned());
@@ -148,7 +159,12 @@ pub fn reach_words(i18n: I18nContext<Locale>, node: &Node, local: bool) -> Optio
     }
     let Some(hops) = node.hops_away else {
         let meshcore = use_context::<Live>().is_some_and(|live| !is_meshtastic(live));
-        return meshcore.then(|| t_string!(i18n, nodes_no_route).to_owned());
+        return meshcore.then(|| match node.advert_hops {
+            Some(0) => t_string!(i18n, nodes_advert_direct).to_owned(),
+            Some(1) => t_string!(i18n, nodes_advert_hop).to_owned(),
+            Some(hops) => t_string!(i18n, nodes_advert_hops).replace("{n}", &hops.to_string()),
+            None => t_string!(i18n, nodes_no_route).to_owned(),
+        });
     };
     Some(match hops {
         0 => t_string!(i18n, map_direct).to_owned(),
@@ -176,7 +192,8 @@ fn distance(node: &Node) -> &'static str {
     if node.via_mqtt {
         return "mqtt";
     }
-    match node.hops_away {
+    // With no route, as far as its adverts come from.
+    match node.hops_away.or(node.advert_hops) {
         Some(0) => "direct",
         Some(1..=2) => "near",
         Some(3..=4) => "mid",

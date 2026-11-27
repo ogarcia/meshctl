@@ -123,6 +123,7 @@ struct NodeRow {
     snr: Option<f32>,
     rssi: Option<i32>,
     hops_away: Option<i64>,
+    advert_hops: Option<i64>,
     via_mqtt: bool,
     favorite: bool,
     battery_level: Option<i64>,
@@ -161,6 +162,7 @@ impl NodeRow {
             snr: self.snr,
             rssi: self.rssi,
             hops_away: self.hops_away.map(u32_from),
+            advert_hops: self.advert_hops.map(u32_from),
             via_mqtt: self.via_mqtt,
             favorite: self.favorite,
             battery_level: self.battery_level.map(u32_from),
@@ -199,10 +201,10 @@ fn u32_from(value: i64) -> u32 {
 const NODE_UPSERT: &str = "INSERT INTO node (radio_id, num, long_name, short_name, hw_model, role,
         public_key, licensed, unmessagable,
         latitude, longitude, altitude, position_radius, position_source, last_heard, snr, rssi,
-        hops_away,
+        hops_away, advert_hops,
         via_mqtt, favorite,
         battery_level, voltage, channel_utilization)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (radio_id, num) DO UPDATE SET
         long_name = excluded.long_name, short_name = excluded.short_name,
         hw_model = excluded.hw_model, role = excluded.role,
@@ -213,6 +215,7 @@ const NODE_UPSERT: &str = "INSERT INTO node (radio_id, num, long_name, short_nam
         position_source = excluded.position_source,
         last_heard = excluded.last_heard,
         snr = excluded.snr, rssi = excluded.rssi, hops_away = excluded.hops_away,
+        advert_hops = excluded.advert_hops,
         via_mqtt = excluded.via_mqtt, favorite = excluded.favorite,
         battery_level = excluded.battery_level, voltage = excluded.voltage,
         channel_utilization = excluded.channel_utilization";
@@ -241,6 +244,7 @@ where
         .bind(node.snr)
         .bind(node.rssi)
         .bind(node.hops_away.map(i64::from))
+        .bind(node.advert_hops.map(i64::from))
         .bind(node.via_mqtt)
         .bind(node.favorite)
         .bind(node.battery_level.map(i64::from))
@@ -575,7 +579,8 @@ impl Store {
         let rows: Vec<NodeRow> = sqlx::query_as(
             "SELECT num, long_name, short_name, hw_model, role, public_key, licensed, unmessagable,
                 latitude, longitude, altitude, position_radius, position_source,
-                last_heard, snr, rssi, hops_away, via_mqtt, favorite, battery_level, voltage,
+                last_heard, snr, rssi, hops_away, advert_hops, via_mqtt, favorite, battery_level,
+                voltage,
                 channel_utilization
             FROM node WHERE radio_id = ?",
         )
@@ -2122,6 +2127,7 @@ mod tests {
             snr: Some(6.5),
             rssi: Some(-90),
             hops_away: Some(2),
+            advert_hops: None,
             via_mqtt: false,
             favorite: true,
             battery_level: Some(101),

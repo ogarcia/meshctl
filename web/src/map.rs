@@ -758,6 +758,9 @@ pub fn MapView() -> impl IntoView {
             direct: t_string!(i18n, map_direct).to_owned(),
             one: t_string!(i18n, map_one_hop).to_owned(),
             many: t_string!(i18n, map_hops).to_owned(),
+            advert_direct: t_string!(i18n, map_advert_direct).to_owned(),
+            advert_one: t_string!(i18n, map_advert_hop).to_owned(),
+            advert_many: t_string!(i18n, map_advert_hops).to_owned(),
         };
         let fact_labels = FactLabels {
             heard: t_string!(i18n, nodes_heard).to_owned(),
@@ -777,6 +780,8 @@ pub fn MapView() -> impl IntoView {
             hardware: t_string!(i18n, local_hardware).to_owned(),
             status: t_string!(i18n, node_status).to_owned(),
             ago: t_string!(i18n, node_ago).to_owned(),
+            advert: t_string!(i18n, map_advert_fact).to_owned(),
+            advert_direct: t_string!(i18n, map_advert_fact_direct).to_owned(),
         };
         let mut markers: Vec<Marker> = live.nodes.with(|nodes| {
             nodes
@@ -794,7 +799,8 @@ pub fn MapView() -> impl IntoView {
                         facts: facts(n, now, &fact_labels),
                         lat: position.latitude,
                         lon: position.longitude,
-                        kind: kind(local, n.num, n.hops_away, n.via_mqtt),
+                        // With no route, as far as its adverts come from.
+                        kind: kind(local, n.num, n.hops_away.or(n.advert_hops), n.via_mqtt),
                         role: role(n.role.as_deref()),
                         selected: picked == Some(n.num),
                         route: route_button(n.num),
@@ -1053,6 +1059,10 @@ struct HopWords {
     one: String,
     /// With `{n}` where the number of hops goes.
     many: String,
+    /// With no route, how far its latest advert came from, the same three.
+    advert_direct: String,
+    advert_one: String,
+    advert_many: String,
 }
 
 /// How a node is heard, in a line: the signal it was heard at when directly,
@@ -1069,7 +1079,12 @@ fn heard(node: &Node, words: &HopWords) -> String {
         },
         Some(1) => words.one.clone(),
         Some(hops) => words.many.replace("{n}", &hops.to_string()),
-        None => String::new(),
+        None => match node.advert_hops {
+            Some(0) => words.advert_direct.clone(),
+            Some(1) => words.advert_one.clone(),
+            Some(hops) => words.advert_many.replace("{n}", &hops.to_string()),
+            None => String::new(),
+        },
     }
 }
 
@@ -1083,6 +1098,10 @@ struct FactLabels {
     external: String,
     /// The hops, for a node heard directly.
     direct: String,
+    /// The hops of its latest advert, for one with no route: as `{n}`, and
+    /// heard directly.
+    advert: String,
+    advert_direct: String,
     altitude: String,
     precision: String,
     /// How a node came by its position, and the three ways it can.
@@ -1142,7 +1161,13 @@ fn facts(node: &Node, now: u32, labels: &FactLabels) -> Vec<Fact> {
             } else if direct {
                 Some(labels.direct.clone())
             } else {
-                node.hops_away.map(|h| h.to_string())
+                // With no route, how far its latest advert came from.
+                node.hops_away.map(|h| h.to_string()).or_else(|| {
+                    node.advert_hops.map(|h| match h {
+                        0 => labels.advert_direct.clone(),
+                        h => labels.advert.replace("{n}", &h.to_string()),
+                    })
+                })
             };
             if let Some(hops) = hops {
                 tell("route", &labels.hops, hops);
@@ -1229,6 +1254,9 @@ mod tests {
             direct: "direct".into(),
             one: "1 hop".into(),
             many: "{n} hops".into(),
+            advert_direct: "advert direct".into(),
+            advert_one: "advert 1 hop".into(),
+            advert_many: "advert {n} hops".into(),
         };
         let mut node = Node {
             num: 1,
@@ -1245,6 +1273,7 @@ mod tests {
             snr: Some(11.5),
             rssi: Some(-30),
             hops_away: Some(0),
+            advert_hops: None,
             via_mqtt: false,
             favorite: false,
             battery_level: None,
@@ -1259,6 +1288,14 @@ mod tests {
         assert_eq!(heard(&node, &words), "3 hops");
         node.hops_away = Some(1);
         assert_eq!(heard(&node, &words), "1 hop");
+        // A MeshCore node with no route: as far as its latest advert came.
+        node.hops_away = None;
+        node.advert_hops = Some(2);
+        assert_eq!(heard(&node, &words), "advert 2 hops");
+        node.advert_hops = Some(0);
+        assert_eq!(heard(&node, &words), "advert direct");
+        node.advert_hops = None;
+        assert_eq!(heard(&node, &words), "");
         node.via_mqtt = true;
         assert_eq!(heard(&node, &words), "MQTT");
     }
@@ -1286,6 +1323,7 @@ mod tests {
             snr: None,
             rssi: None,
             hops_away: None,
+            advert_hops: None,
             via_mqtt: false,
             favorite: false,
             battery_level: None,
@@ -1372,6 +1410,7 @@ mod tests {
             snr: Some(6.5),
             rssi: Some(-90),
             hops_away: Some(2),
+            advert_hops: None,
             via_mqtt: false,
             favorite: false,
             battery_level: Some(80),
@@ -1388,6 +1427,8 @@ mod tests {
             battery: "battery".into(),
             external: "external".into(),
             direct: "direct".into(),
+            advert: "{n} (advert)".into(),
+            advert_direct: "direct (advert)".into(),
             altitude: "altitude".into(),
             precision: "precision".into(),
             position: "position".into(),

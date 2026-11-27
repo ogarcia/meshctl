@@ -613,6 +613,38 @@ fn last_heard(contact: &Contact) -> Option<u32> {
     (heard > 0).then(|| heard.min(now()))
 }
 
+/// A contact taken for its node, in place of what was known of it, but for
+/// what meshctl alone knows: how far its adverts are heard from. As kept.
+fn put_contact(state: &mut MeshState, mut node: Node) -> Node {
+    if let Some(known) = state.nodes.get(&node.num) {
+        node.advert_hops = node.advert_hops.or(known.advert_hops);
+    }
+    state.nodes.insert(node.num, node.clone());
+    node
+}
+
+/// An advert heard through so many hops: its sender heard that far, the
+/// fewest of the copies of the same advert, told as its node changes. Not
+/// a way to it, which the radio learns otherwise.
+fn advert_heard(mesh: &Mesh, session: &Session, num: u32, timestamp: u32, hops: u32) {
+    let fewest = {
+        let mut adverts = session.adverts.lock().unwrap_or_else(|e| e.into_inner());
+        let fewest = match adverts.get(&num) {
+            Some(&(at, before)) if at == timestamp => before.min(hops),
+            _ => hops,
+        };
+        adverts.insert(num, (timestamp, fewest));
+        fewest
+    };
+    mesh.update(|state| match state.nodes.get_mut(&num) {
+        Some(node) if node.advert_hops != Some(fewest) => {
+            node.advert_hops = Some(fewest);
+            vec![Event::Node(node.clone())]
+        }
+        _ => Vec::new(),
+    });
+}
+
 fn node_from(contact: &Contact) -> Node {
     Node {
         num: num_of(&contact.public_key),
@@ -630,6 +662,7 @@ fn node_from(contact: &Contact) -> Node {
         snr: None,
         rssi: None,
         hops_away: hops(contact.path_len.cast_unsigned()),
+        advert_hops: None,
         via_mqtt: false,
         favorite: contact.flags & 1 != 0,
         battery_level: None,
@@ -724,6 +757,9 @@ pub(crate) struct Session {
     sending: Arc<tokio::sync::Mutex<()>>,
     /// The packets heard lately, to tell which message each copy is.
     heard: Arc<Mutex<Heard>>,
+    /// Each node's latest advert heard, by the time in it, and the fewest
+    /// hops a copy of it came through.
+    adverts: Arc<Mutex<HashMap<u32, (u32, u32)>>>,
     /// Logins waiting for their answer, by the first six bytes of the key of
     /// the node they went to: what it let in as, or none if it refused.
     logins: Arc<Mutex<HashMap<[u8; 6], LoginWait>>>,
@@ -890,6 +926,13 @@ fn heard_raw(mesh: &Mesh, session: &Session, snr: f32, rssi: i8, bytes: &[u8]) {
         at: crate::meshcore::now(),
         heard: now,
     };
+    // An advert: how far its sender is heard from.
+    if copy.packet.payload_type == raw::PAYLOAD_ADVERT
+        && let Some(advert) = raw::advert(&copy.packet.payload)
+        && let Some(hops) = hops(copy.packet.path_len)
+    {
+        advert_heard(mesh, session, num_of(&advert.key), advert.timestamp, hops);
+    }
     let key = copy.packet.key();
     let mut heard = session.heard.lock().unwrap_or_else(|e| e.into_inner());
     heard
@@ -1489,10 +1532,7 @@ impl Mesh {
             on_radio: Some(true),
             ..node_from(&contact)
         };
-        self.update(|state| {
-            state.nodes.insert(node.num, node.clone());
-            vec![Event::Node(node)]
-        });
+        self.update(|state| vec![Event::Node(put_contact(state, node))]);
         Ok(())
     }
 
@@ -2090,6 +2130,7 @@ async fn session(
         pinged: Arc::default(),
         sending: Arc::default(),
         heard: Arc::default(),
+        adverts: Arc::default(),
         logins: Arc::default(),
     };
     let me_node = Node {
@@ -2116,7 +2157,7 @@ async fn session(
         // Nodes heard so far are kept, as with Meshtastic; these join them.
         for node in contacts.iter().map(node_from).chain([me_node]) {
             state.named.insert(node.num);
-            state.nodes.insert(node.num, node);
+            put_contact(state, node);
         }
         Vec::new()
     });
@@ -2159,10 +2200,7 @@ async fn session(
                         on_radio: Some(false),
                         ..node_from(&contact)
                     };
-                    mesh.update(|state| {
-                        state.nodes.insert(node.num, node.clone());
-                        vec![Event::Node(node)]
-                    });
+                    mesh.update(|state| vec![Event::Node(put_contact(state, node))]);
                 }
                 // The radio full, and a new one in the place of another:
                 // that one no longer on it, still known here.
@@ -2213,7 +2251,7 @@ async fn session(
                                 .chain(me)
                                 .collect();
                             for node in all.iter().map(node_from) {
-                                state.nodes.insert(node.num, node);
+                                put_contact(state, node);
                             }
                             state.read_through();
                             vec![Event::Synced]
@@ -2232,10 +2270,7 @@ async fn session(
                             changed
                                 .iter()
                                 .map(node_from)
-                                .map(|node| {
-                                    state.nodes.insert(node.num, node.clone());
-                                    Event::Node(node)
-                                })
+                                .map(|node| Event::Node(put_contact(state, node)))
                                 .collect()
                         });
                     }
@@ -2610,6 +2645,30 @@ mod tests {
             lon: -8_463_732,
             last_modified: 1,
         }
+    }
+
+    #[test]
+    fn a_contact_read_again_keeps_how_far_its_adverts_come_from() {
+        let mut state = MeshState::default();
+        let contact = Contact {
+            public_key: [0x41; 32],
+            kind: 1,
+            flags: 0,
+            path_len: -1,
+            path: Vec::new(),
+            name: "Ana".into(),
+            last_advert: 10,
+            lat: 0,
+            lon: 0,
+            last_modified: 10,
+        };
+        let mut heard = node_from(&contact);
+        heard.advert_hops = Some(2);
+        put_contact(&mut state, heard);
+        // Read again from the radio, which keeps nothing of it: still known.
+        let again = put_contact(&mut state, node_from(&contact));
+        assert_eq!(again.advert_hops, Some(2));
+        assert_eq!(state.nodes[&again.num].advert_hops, Some(2));
     }
 
     #[test]

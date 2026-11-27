@@ -282,6 +282,7 @@ pub(crate) mod tests {
                     snr: None,
                     rssi: None,
                     hops_away: Some(0),
+                    advert_hops: None,
                     via_mqtt: false,
                     favorite: false,
                     battery_level: None,
