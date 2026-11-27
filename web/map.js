@@ -235,11 +235,13 @@ window.meshctlMap = (() => {
         map.closePopup();
         onPlaceAt(at.lat, at.lon);
       });
-      map.popup(click.lat, click.lon, button, {
-        className: "mc-place-popup",
-        closeButton: false,
-        offset: [0, -2],
-      });
+      keepClear(
+        map.popup(click.lat, click.lon, button, {
+          className: "mc-place-popup",
+          closeButton: false,
+          offset: [0, -2],
+        }),
+      );
     });
     // The node's popup closed by the person, not by another opening in its
     // place: the node is let go.
@@ -507,12 +509,13 @@ window.meshctlMap = (() => {
     }
     box.append(head, list);
     // No cross: a click anywhere else closes it, as picking a node does.
-    map.popup(lat, lon, box, {
-      className: "mc-picker-popup",
-      maxWidth: 300,
-      autoPanPadding: [24, 24],
-      closeButton: false,
-    });
+    keepClear(
+      map.popup(lat, lon, box, {
+        className: "mc-picker-popup",
+        maxWidth: 300,
+        closeButton: false,
+      }),
+    );
   }
 
   // What the popup of a node says, and its buttons.
@@ -622,8 +625,8 @@ window.meshctlMap = (() => {
       // does not fit scrolls within it, the legend under it left clear.
       maxHeight: Math.max(160, map.size().y - 150),
       offset: [0, -6],
-      autoPanPadding: [24, 24],
     });
+    keepClear(cardPopup);
     popupFor = picked.num;
   }
 
@@ -835,8 +838,8 @@ window.meshctlMap = (() => {
       maxWidth: 320,
       maxHeight: Math.max(160, map.size().y - 150),
       offset: [0, -12],
-      autoPanPadding: [24, 24],
     });
+    keepClear(waypointPopup);
   }
 
   // A waypoint to show, from its notification: the map goes to it once it
@@ -891,7 +894,7 @@ window.meshctlMap = (() => {
     // Its popup, opened before, fitted in again now that it is centred:
     // over it, it could be left above the map. Once, here; never as it is
     // only drawn again.
-    if (cardPopup) cardPopup.fit();
+    if (cardPopup) keepClear(cardPopup);
   }
 
   function drawMarkers() {
@@ -1145,6 +1148,49 @@ window.meshctlMap = (() => {
     if (!allButton || !shown.labels.all) return;
     allButton.title = shown.labels.all;
     allButton.setAttribute("aria-label", shown.labels.all);
+  }
+
+  // What is over the map, a popup kept clear of: the buttons down its left,
+  // pushing it right; the legend at its foot, pushing it up; the notices at
+  // its top, pushing it down. Each only where it is level with the popup.
+  const OVER_LEFT = ".leaflet-control-zoom, .mc-zoom-all, .map-menu-toggle, .map-age, .map-waypoints-toggle";
+  const OVER_FOOT = ".map-legend";
+  const OVER_TOP = ".map-route-notice, .notice, .map-offline > *";
+  // Room left about a popup, in pixels.
+  const POPUP_MARGIN = 12;
+
+  // A popup kept within the map and clear of what is over it, the map
+  // panned as little as it takes, once it is drawn. Where it cannot be
+  // clear of both its top and its foot, its top shows.
+  function keepClear(popup) {
+    requestAnimationFrame(() => {
+      const shown = popup && popup.element();
+      if (!map || !opened || !shown || !shown.isConnected) return;
+      const page = opened.target.closest(".map-page") || document;
+      const area = opened.target.getBoundingClientRect();
+      const box = shown.getBoundingClientRect();
+      const m = POPUP_MARGIN;
+      const over = (query) =>
+        [...page.querySelectorAll(query)]
+          .map((e) => e.getBoundingClientRect())
+          .filter((r) => r.width && r.height);
+      const level = (r) => r.top < box.bottom + m && r.bottom > box.top - m;
+      const above = (r) => r.left < box.right + m && r.right > box.left - m;
+      let left = area.left + m;
+      let right = area.right - m;
+      let top = area.top + m;
+      let bottom = area.bottom - m;
+      for (const r of over(OVER_LEFT)) if (level(r)) left = Math.max(left, r.right + m);
+      for (const r of over(OVER_FOOT)) if (above(r)) bottom = Math.min(bottom, r.top - m);
+      for (const r of over(OVER_TOP)) if (above(r)) top = Math.max(top, r.bottom + m);
+      let dx = 0;
+      let dy = 0;
+      if (box.left < left) dx = box.left - left;
+      else if (box.right > right) dx = Math.min(box.right - right, box.left - left);
+      if (box.top < top) dy = box.top - top;
+      else if (box.bottom > bottom) dy = Math.min(box.bottom - bottom, box.top - top);
+      if (dx || dy) map.panBy(dx, dy);
+    });
   }
 
   // The element changed size: the map has to know.

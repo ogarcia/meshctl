@@ -16,7 +16,10 @@
 //       moveend, zoomstart, zoomend, keydown (event), popupclose (the popup)
 //   layer(): a group to draw on, with marker, line, ring, circle, rect,
 //       clear and remove
-//   popup(lat, lon, content, options), closePopup(popup?)
+//   popup(lat, lon, content, options): a popup, with content, at, move,
+//       reposition, element and close, which pans nothing by itself;
+//       closePopup(popup?)
+//   panBy(dx, dy): the view moved by so many pixels
 //   control(element, position)
 //   stop(event): a click handled, which the map is not to take as its own
 //
@@ -92,6 +95,7 @@ window.meshctlLeaflet = (() => {
       // The zoom fit() goes to, worked out as it does.
       fitZoom: (points, padding) =>
         map.getBoundsZoom(boundsOf(points), false, L.point(pair(padding))),
+      panBy: (dx, dy) => map.panBy([dx, dy], { duration: 0.25 }),
       toPoint: (lat, lon) => map.latLngToContainerPoint([lat, lon]),
       toLatLon: (x, y) => {
         const at = map.containerPointToLatLng([x, y]);
@@ -119,8 +123,9 @@ window.meshctlLeaflet = (() => {
       popup: (lat, lon, content, o = {}) => {
         // Only what is given: one left undefined would stand for Leaflet's
         // own default, and break it.
-        const options = { closeButton: o.closeButton !== false };
-        for (const name of ["className", "maxWidth", "maxHeight", "offset", "autoPanPadding"]) {
+        // Kept clear of what is over the map by map.js, not by Leaflet.
+        const options = { closeButton: o.closeButton !== false, autoPan: false };
+        for (const name of ["className", "maxWidth", "maxHeight", "offset"]) {
           if (o[name] !== undefined) options[name] = o[name];
         }
         const popup = L.popup(options)
@@ -135,8 +140,7 @@ window.meshctlLeaflet = (() => {
           move: (lat, lon) => popup.setLatLng([lat, lon]),
           // Placed again over what it is on, its content changed in place.
           reposition: () => popup._updatePosition && popup._updatePosition(),
-          // Brought back within the map, if it was left out of it.
-          fit: () => popup._adjustPan && popup._adjustPan(),
+          element: () => popup.getElement(),
           close: () => map.closePopup(popup),
         };
         popups.set(popup, handle);

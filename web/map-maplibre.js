@@ -341,6 +341,7 @@ window.meshctlMapLibre = (() => {
         });
         return camera ? camera.zoom + 1 : map.getZoom() + 1;
       },
+      panBy: (dx, dy) => map.panBy([dx, dy], { duration: 250 }),
       toPoint: (lat, lon) => map.project(lngLat(lat, lon)),
       toLatLon: (x, y) => {
         const at = map.unproject([x, y]);
@@ -373,8 +374,7 @@ window.meshctlMapLibre = (() => {
           },
           move: (lat, lon) => popup.setLngLat(lngLat(lat, lon)),
           reposition: () => {},
-          // Brought within the map, if it is out of it.
-          fit: () => fitPopup(map, element, popup),
+          element: () => popup.getElement(),
           close: () => popup.remove(),
         };
         popup.on("close", () => {
@@ -382,7 +382,6 @@ window.meshctlMapLibre = (() => {
           fire("popupclose", handle);
         });
         popupNow = handle;
-        fitPopup(map, element, popup);
         return handle;
       },
       closePopup: (handle) => {
@@ -411,24 +410,6 @@ window.meshctlMapLibre = (() => {
       },
     };
     return self;
-  }
-
-  // Brings a popup within the map, panning it if it is out of it.
-  function fitPopup(map, element, popup) {
-    requestAnimationFrame(() => {
-      const shown = popup.getElement();
-      if (!shown || !shown.isConnected) return;
-      const area = element.getBoundingClientRect();
-      const box = shown.getBoundingClientRect();
-      const margin = 24;
-      let dx = 0;
-      let dy = 0;
-      if (box.left < area.left + margin) dx = box.left - area.left - margin;
-      else if (box.right > area.right - margin) dx = box.right - area.right + margin;
-      if (box.top < area.top + margin) dy = box.top - area.top - margin;
-      else if (box.bottom > area.bottom - margin) dy = box.bottom - area.bottom + margin;
-      if (dx || dy) map.panBy([dx, dy], { duration: 250 });
-    });
   }
 
   // What is drawn on a group: markers of the page's own elements, and lines,
