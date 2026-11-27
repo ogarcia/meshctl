@@ -219,6 +219,8 @@ pub fn SettingsView(#[prop(optional)] node: Option<u32>) -> impl IntoView {
         let Some(id) = radio else { return radio };
         failed.set(None);
         let have_sections = !sections.with_untracked(Vec::is_empty);
+        // What comes after the page is gone, as a node's may take a minute
+        // to: let be, the page's signals with it.
         spawn_local(async move {
             let read = daemon::settings(id, node, fresh).await;
             if let Err(failure) = &read {
@@ -227,15 +229,18 @@ pub fn SettingsView(#[prop(optional)] node: Option<u32>) -> impl IntoView {
             if let Ok(read) = read
                 && live.selected.get_untracked() == Some(id)
             {
-                let before = loaded.get_untracked();
-                let now = draft.get_untracked();
+                let (Some(before), Some(now)) =
+                    (loaded.try_get_untracked(), draft.try_get_untracked())
+                else {
+                    return;
+                };
                 let merged = match (before, now) {
                     (Some(before), Some(now)) => merge(&before, &now, &read),
                     _ => read.clone(),
                 };
                 let no_status = read.owner.status.is_none();
-                draft.set(Some(merged));
-                loaded.set(Some(read));
+                let _ = draft.try_set(Some(merged));
+                let _ = loaded.try_set(Some(read));
                 // A node's status message, asked of it apart, as one whose
                 // firmware has none may not answer at all: its field shows
                 // once it comes, edited from what it is.
@@ -283,7 +288,7 @@ pub fn SettingsView(#[prop(optional)] node: Option<u32>) -> impl IntoView {
             if let Ok(read) = read
                 && live.selected.get_untracked() == Some(id)
             {
-                sections.set(read);
+                let _ = sections.try_set(read);
             }
         });
         radio
@@ -331,18 +336,19 @@ pub fn SettingsView(#[prop(optional)] node: Option<u32>) -> impl IntoView {
         notice.set(None);
         spawn_local(async move {
             let applied = daemon::change_settings(radio, node, &change).await;
+            // As said by then, the page perhaps gone.
             if applied.is_ok() {
                 // Taken as the radio's until it is read back.
-                if let Some(now) = draft.get_untracked() {
-                    loaded.update(|l| {
+                if let Some(now) = draft.try_get_untracked().flatten() {
+                    let _ = loaded.try_update(|l| {
                         if let Some(l) = l {
                             copy_part(tab, &now, l);
                         }
                     });
                 }
             }
-            notice.set(Some(applied.map(|a| a.reboots)));
-            busy.set(false);
+            let _ = notice.try_set(Some(applied.map(|a| a.reboots)));
+            let _ = busy.try_set(false);
         });
     };
     let undo = move |tab: Tab| {

@@ -75,7 +75,7 @@ pub fn NotificationsView() -> impl IntoView {
     let permission = RwSignal::new(notify::permission());
     let ask = move || {
         spawn_local(async move {
-            permission.set(notify::ask().await);
+            let _ = permission.try_set(notify::ask().await);
         });
     };
     let flip_enabled = move |_| {

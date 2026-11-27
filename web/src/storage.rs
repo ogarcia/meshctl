@@ -109,10 +109,10 @@ pub fn DataView() -> impl IntoView {
         live.storage_turn.track();
         spawn_local(async move {
             if let Ok(read) = daemon::kept().await {
-                storage.set(Some(read));
+                let _ = storage.try_set(Some(read));
             }
             if let Ok(read) = daemon::retention().await {
-                retention.set(Some(read));
+                let _ = retention.try_set(Some(read));
             }
         });
     });
@@ -121,7 +121,7 @@ pub fn DataView() -> impl IntoView {
         problem.set(None);
         spawn_local(async move {
             if let Err(failure) = daemon::set_retention(&changed).await {
-                problem.set(Some(failure));
+                let _ = problem.try_set(Some(failure));
             }
         });
     };
@@ -130,10 +130,14 @@ pub fn DataView() -> impl IntoView {
         result.set(None);
         spawn_local(async move {
             match daemon::clean().await {
-                Ok(cleaned) => result.set(Some(cleaned)),
-                Err(failure) => problem.set(Some(failure)),
+                Ok(cleaned) => {
+                    let _ = result.try_set(Some(cleaned));
+                }
+                Err(failure) => {
+                    let _ = problem.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
 
@@ -311,9 +315,9 @@ fn LeftBehind(title: AnyView, gone: Signal<Option<Gone>>, channels: bool) -> imp
                 daemon::forget_gone_directs().await
             };
             // Read again as every client hears of it.
-            failed.set(done.is_err());
-            busy.set(false);
-            sure.set(false);
+            let _ = failed.try_set(done.is_err());
+            let _ = busy.try_set(false);
+            let _ = sure.try_set(false);
         });
     };
     view! {

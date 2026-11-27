@@ -94,7 +94,7 @@ pub fn MeshcoreChannelsTab() -> impl IntoView {
             if let Ok(read) = daemon::meshcore_channels(radio).await
                 && live.selected.get_untracked() == Some(radio)
             {
-                loaded.set(Some(read));
+                let _ = loaded.try_set(Some(read));
             }
         });
     };
@@ -147,7 +147,7 @@ pub fn MeshcoreChannelsTab() -> impl IntoView {
         problem.set(None);
         spawn_local(async move {
             if let Err(failure) = daemon::reorder_meshcore_channels(radio, &order).await {
-                problem.set(Some(failure));
+                let _ = problem.try_set(Some(failure));
                 reload();
             }
         });
@@ -364,7 +364,7 @@ fn ChannelEditor(
     if !adding && let Some(radio) = live.selected.get_untracked() {
         spawn_local(async move {
             if let Ok(read) = daemon::meshcore_channel_link(radio, slot).await {
-                link.set(Some(read.url));
+                let _ = link.try_set(Some(read.url));
             }
         });
     }
@@ -415,9 +415,11 @@ fn ChannelEditor(
                     reload();
                     close();
                 }
-                Err(failure) => error.set(Some(failure)),
+                Err(failure) => {
+                    let _ = error.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
     let remove = move |_| {
@@ -432,9 +434,11 @@ fn ChannelEditor(
                     reload();
                     close();
                 }
-                Err(failure) => error.set(Some(failure)),
+                Err(failure) => {
+                    let _ = error.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
 

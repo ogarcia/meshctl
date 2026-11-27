@@ -225,7 +225,7 @@ pub fn EmojiPicker(
             Locale::en => "en",
         };
         spawn_local(async move {
-            data.set(Some(load(language).await));
+            let _ = data.try_set(Some(load(language).await));
         });
     });
 

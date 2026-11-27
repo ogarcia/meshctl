@@ -78,7 +78,7 @@ pub fn PacketsView() -> impl IntoView {
                 }
                 live.packets.update(|packets| packets.extend(page));
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
 
@@ -806,9 +806,13 @@ fn PacketDrawer() -> impl IntoView {
         }
         spawn_local(async move {
             if let Ok(read) = daemon::packet_routes(radio, id).await
-                && shown.packet.with_untracked(|p| p.as_ref().map(|p| p.id)) == Some(id)
+                && shown
+                    .packet
+                    .try_with_untracked(|p| p.as_ref().map(|p| p.id))
+                    .flatten()
+                    == Some(id)
             {
-                routes.set(read);
+                let _ = routes.try_set(read);
             }
         });
     });

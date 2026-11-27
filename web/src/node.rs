@@ -1254,8 +1254,8 @@ fn MeshcorePath() -> impl IntoView {
         busy.set(true);
         outcome.set(None);
         spawn_local(async move {
-            outcome.set(Some(daemon::reset_path(radio, asking.num).await));
-            busy.set(false);
+            let _ = outcome.try_set(Some(daemon::reset_path(radio, asking.num).await));
+            let _ = busy.try_set(false);
         });
     };
     // The latest asked that ended: the ways found, or none, as it did not
@@ -1391,8 +1391,8 @@ fn Advert() -> impl IntoView {
         outcome.set(None);
         spawn_local(async move {
             let done = daemon::advert(radio, flood).await;
-            outcome.set(Some(done.map(|()| flood)));
-            busy.set(false);
+            let _ = outcome.try_set(Some(done.map(|()| flood)));
+            let _ = busy.try_set(false);
         });
     };
     view! {
@@ -1435,7 +1435,7 @@ fn MeshcoreStatus() -> impl IntoView {
         if let Some(radio) = live.selected.get_untracked() {
             spawn_local(async move {
                 if let Ok(read) = daemon::meshcore_status(radio).await {
-                    status.set(Some(read));
+                    let _ = status.try_set(Some(read));
                 }
             });
         }
@@ -1538,7 +1538,7 @@ fn Share() -> impl IntoView {
             return;
         };
         spawn_local(async move {
-            url.set(daemon::contact(radio).await.ok().map(|c| c.url));
+            let _ = url.try_set(daemon::contact(radio).await.ok().map(|c| c.url));
         });
     });
     move || {
@@ -2019,7 +2019,7 @@ fn Sensors(
     {
         spawn_local(async move {
             if let Ok(sections) = daemon::sections(radio).await {
-                enabled.set(Some(modules_on(&sections)));
+                let _ = enabled.try_set(Some(modules_on(&sections)));
             }
         });
     }
@@ -2320,8 +2320,8 @@ fn Forget(history: History, reload: Callback<()>) -> impl IntoView {
                 History::Requests => live.forget_requests(asking.num).await,
                 History::Traceroutes => live.forget_traceroutes(asking.num).await,
             };
-            busy.set(false);
-            sure.set(false);
+            let _ = busy.try_set(false);
+            let _ = sure.try_set(false);
             if done.is_ok() {
                 reload.run(());
             }
@@ -2421,12 +2421,14 @@ fn Removal(
         problem.set(None);
         spawn_local(async move {
             let done = daemon::remove_node(radio, asking.num, how).await;
-            busy.set(false);
-            sure.set(false);
+            let _ = busy.try_set(false);
+            let _ = sure.try_set(false);
             match done {
                 // The page goes as the node does, as every client hears.
                 Ok(()) => live.removing.set(false),
-                Err(failure) => problem.set(Some(failure)),
+                Err(failure) => {
+                    let _ = problem.try_set(Some(failure));
+                }
             }
         });
     };
@@ -2497,10 +2499,10 @@ fn TracesDrawer(open: RwSignal<bool>) -> impl IntoView {
         };
         spawn_local(async move {
             if let Ok(page) = daemon::traceroutes_to(radio, asking.num, before).await {
-                more.set(page.len() == TRACES_PAGE);
+                let _ = more.try_set(page.len() == TRACES_PAGE);
                 // The latest is no history: it is on the page, and stays.
                 let skip = usize::from(before.is_none());
-                pages.update(|pages| pages.extend(page.into_iter().skip(skip)));
+                let _ = pages.try_update(|pages| pages.extend(page.into_iter().skip(skip)));
             }
         });
     };
@@ -2568,12 +2570,12 @@ fn RequestsDrawer() -> impl IntoView {
         };
         spawn_local(async move {
             if let Ok(page) = daemon::requests_page(radio, asking.num, before).await {
-                more.set(page.len() == REQUESTS_PAGE);
+                let _ = more.try_set(page.len() == REQUESTS_PAGE);
                 // The routes traced have a history of their own.
                 let asked = page
                     .into_iter()
                     .filter(|r| r.kind != RequestKind::Traceroute);
-                pages.update(|pages| pages.extend(asked));
+                let _ = pages.try_update(|pages| pages.extend(asked));
             }
         });
     };

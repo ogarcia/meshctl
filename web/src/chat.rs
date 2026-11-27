@@ -1490,9 +1490,9 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
         }
         spawn_local(async move {
             if let Ok(read) = daemon::message_routes(radio, id).await
-                && thread.details.get_untracked() == Some(id)
+                && thread.details.try_get_untracked().flatten() == Some(id)
             {
-                routes.set(read);
+                let _ = routes.try_set(read);
             }
         });
     });
@@ -1511,9 +1511,9 @@ fn MessageDetails(peer: Peer) -> impl IntoView {
         }
         spawn_local(async move {
             if let Ok(heard) = daemon::message_packet(radio, id).await
-                && thread.details.get_untracked() == Some(id)
+                && thread.details.try_get_untracked().flatten() == Some(id)
             {
-                packet.set(Some(heard));
+                let _ = packet.try_set(Some(heard));
             }
         });
     });
@@ -2370,14 +2370,16 @@ fn Composer(peer: Peer) -> impl IntoView {
         spawn_local(async move {
             match send(live, peer, written, reply_id, false, None).await {
                 Ok(()) => {
-                    text.set(String::new());
-                    picking.set(false);
-                    error.set(None);
+                    let _ = text.try_set(String::new());
+                    let _ = picking.try_set(false);
+                    let _ = error.try_set(None);
                     thread.replying.set(None);
                 }
-                Err(failure) => error.set(Some(failure)),
+                Err(failure) => {
+                    let _ = error.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
     // What is answered, over the field: who, the start of it, and a way out.
@@ -2476,16 +2478,18 @@ fn Composer(peer: Peer) -> impl IntoView {
             let share = meshctl_api::PositionShare { channel, node };
             match daemon::share_position(radio, &share).await {
                 Ok(sent) => {
-                    error.set(None);
+                    let _ = error.try_set(None);
                     live.thread.update(|thread| {
                         if !thread.iter().any(|m| m.id == sent.id) {
                             thread.push(sent);
                         }
                     });
                 }
-                Err(failure) => error.set(Some(failure)),
+                Err(failure) => {
+                    let _ = error.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
 

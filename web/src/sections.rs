@@ -230,23 +230,24 @@ pub fn SectionsTab(
         asked.update(|a| {
             a.insert(id.clone());
         });
+        // Over the mesh, a while: the page may be gone by the time it comes.
         spawn_local(async move {
             match daemon::node_section(radio, node, &id).await {
                 Ok(read) => {
-                    asked.update(|a| {
+                    let _ = asked.try_update(|a| {
                         a.remove(&read.id);
                     });
-                    sections.update(|all| {
+                    let _ = sections.try_update(|all| {
                         if let Some(section) = all.iter_mut().find(|s| s.id == read.id) {
                             *section = read;
                         }
                     });
                 }
                 Err(failure) => {
-                    asked.update(|a| {
+                    let _ = asked.try_update(|a| {
                         a.remove(&id);
                     });
-                    failed.set(Some((id, failure)));
+                    let _ = failed.try_set(Some((id, failure)));
                 }
             }
         });
@@ -467,20 +468,21 @@ pub(crate) fn SectionForm(
             busy.set(true);
             spawn_local(async move {
                 let outcome = daemon::change_section(radio, node, &id, values, fixed).await;
+                // As said by then, the page perhaps gone.
                 let done = outcome.is_ok();
                 if done {
-                    edits.update(|e| {
+                    let _ = edits.try_update(|e| {
                         e.remove(&id);
                     });
                 }
-                notice.set(Some(outcome.map(|applied| applied.reboots)));
-                busy.set(false);
+                let _ = notice.try_set(Some(outcome.map(|applied| applied.reboots)));
+                let _ = busy.try_set(false);
                 // A node's, read from it again, as it has it now.
                 if done
                     && node.is_some()
                     && let Some(sections) = sections
                 {
-                    sections.update(|all| {
+                    let _ = sections.try_update(|all| {
                         if let Some(section) = all.iter_mut().find(|s| s.id == id) {
                             section.fields.clear();
                         }
@@ -1060,7 +1062,7 @@ fn FieldInput(
                         if let Ok(secret) =
                             daemon::section_secret(radio, node, &section, &name).await
                         {
-                            shown.set(Some(secret.value));
+                            let _ = shown.try_set(Some(secret.value));
                         }
                     });
                 }

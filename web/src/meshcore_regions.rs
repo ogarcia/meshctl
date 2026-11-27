@@ -87,7 +87,7 @@ impl ChannelRegions {
             spawn_local(async move {
                 let read = defaults_of(radio, Peer::Channel { channel }).await;
                 if live.selected.get_untracked() == Some(radio) {
-                    defaults.set(read);
+                    let _ = defaults.try_set(read);
                 }
             });
         });

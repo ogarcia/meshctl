@@ -167,11 +167,17 @@ pub fn MeshcoreSettingsView() -> impl IntoView {
             if let Ok(read) = daemon::meshcore_settings(radio).await
                 && live.selected.get_untracked() == Some(radio)
             {
-                let clean = draft.with_untracked(|d| d.is_none() || *d == loaded.get_untracked());
+                // The page perhaps gone by then.
+                let Some(before) = loaded.try_get_untracked() else {
+                    return;
+                };
+                let clean = draft
+                    .try_with_untracked(|d| d.is_none() || *d == before)
+                    .unwrap_or(false);
                 if clean {
-                    draft.set(Some(read.clone()));
+                    let _ = draft.try_set(Some(read.clone()));
                 }
-                loaded.set(Some(read));
+                let _ = loaded.try_set(Some(read));
             }
         });
     });
@@ -219,10 +225,10 @@ pub fn MeshcoreSettingsView() -> impl IntoView {
         spawn_local(async move {
             let done = daemon::set_meshcore_settings(radio, &wanted).await;
             if done.is_ok() {
-                loaded.set(Some(wanted));
+                let _ = loaded.try_set(Some(wanted));
             }
-            notice.set(Some(done));
-            busy.set(false);
+            let _ = notice.try_set(Some(done));
+            let _ = busy.try_set(false);
         });
     };
     let undo = move || draft.set(loaded.get_untracked());

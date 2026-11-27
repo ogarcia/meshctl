@@ -310,8 +310,12 @@ pub fn LinkAdder() -> impl IntoView {
                 return;
             }
             match read {
-                Ok(read) => contents.set(Some(read)),
-                Err(failure) => problem.set(Some(failure)),
+                Ok(read) => {
+                    let _ = contents.try_set(Some(read));
+                }
+                Err(failure) => {
+                    let _ = problem.try_set(Some(failure));
+                }
             }
         });
     });
@@ -348,9 +352,11 @@ pub fn LinkAdder() -> impl IntoView {
                         live.open_node(node);
                     }
                 }
-                Err(failure) => problem.set(Some(failure)),
+                Err(failure) => {
+                    let _ = problem.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
 

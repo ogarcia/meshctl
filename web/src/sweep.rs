@@ -101,13 +101,13 @@ pub fn Sweep(open: RwSignal<bool>, shown: Memo<Vec<u32>>) -> impl IntoView {
                     }
                     Err(_) => failed += 1,
                 }
-                going.set(Some((done + failed, total)));
+                let _ = going.try_set(Some((done + failed, total)));
             }
-            going.set(None);
-            swept.set(Some(Swept {
+            let _ = going.try_set(None);
+            let _ = swept.try_set(Some(Swept {
                 done,
                 failed,
-                stopped: stopping.get_untracked() && done + failed < total,
+                stopped: stopping.try_get_untracked().unwrap_or(false) && done + failed < total,
             }));
         });
     };

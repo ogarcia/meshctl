@@ -77,14 +77,17 @@ pub fn AdminKeysPanel() -> impl IntoView {
                 keys: next.clone(),
                 managed,
             };
+            // As said by then, the page perhaps gone.
             match daemon::change_admin_keys(radio, node, &change).await {
                 Ok(_) => {
-                    keys.set(Some(change));
-                    applied.set(true);
+                    let _ = keys.try_set(Some(change));
+                    let _ = applied.try_set(true);
                 }
-                Err(failure) => problem.set(Some(failure)),
+                Err(failure) => {
+                    let _ = problem.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
     let current = move || keys.with(|k| k.as_ref().map(|k| k.keys.clone()).unwrap_or_default());

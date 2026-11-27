@@ -183,15 +183,17 @@ fn RadioStep(
             // Checked again after a link that did not come up: the same radio.
             match daemon::save_radio(welcoming.get_untracked(), &settings).await {
                 Ok(radio) => {
-                    error.set(None);
-                    welcoming.set(Some(radio.id));
+                    let _ = error.try_set(None);
+                    let _ = welcoming.try_set(Some(radio.id));
                     let _ = live.refresh_radios().await;
                     live.select(radio.id);
-                    step.set(Step::Linking);
+                    let _ = step.try_set(Step::Linking);
                 }
-                Err(failure) => error.set(Some(failure)),
+                Err(failure) => {
+                    let _ = error.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
     let message = move || {

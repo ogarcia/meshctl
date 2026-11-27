@@ -298,7 +298,7 @@ pub fn Telemetry(
             if let Ok(telemetry) = daemon::node_telemetry(radio, num, window).await
                 && live.node.get_untracked() == Some(num)
             {
-                data.set(Some(telemetry));
+                let _ = data.try_set(Some(telemetry));
             }
         });
     });

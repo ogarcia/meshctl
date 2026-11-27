@@ -157,15 +157,15 @@ pub fn QrScanner(found: Callback<String>) -> impl IntoView {
                     Ok(given) => {
                         let given: web_sys::MediaStream = given.unchecked_into();
                         // Gone, or read, before it came: let it go at once.
-                        if done.get_value() || video.get_untracked().is_none() {
+                        let gone = done.try_get_value().unwrap_or(true);
+                        let Some(element) = video.try_get_untracked().flatten().filter(|_| !gone)
+                        else {
                             stop_stream(&given);
                             return;
-                        }
-                        if let Some(element) = video.get_untracked() {
-                            element.set_src_object(Some(&given));
-                            let _ = element.play();
-                        }
-                        stream.set_value(Some(given));
+                        };
+                        element.set_src_object(Some(&given));
+                        let _ = element.play();
+                        let _ = stream.try_set_value(Some(given));
                         camera.try_set(Camera::On);
                     }
                     Err(_) => {

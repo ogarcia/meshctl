@@ -181,8 +181,8 @@ pub fn ChannelsTab(loaded: RwSignal<Option<NodeSettings>>, notice: Notice) -> im
         sending.set(node.is_some());
         spawn_local(async move {
             let applied = daemon::reorder_channels(radio, node, &order).await;
-            notice.set(Some(applied.map(|a| a.reboots)));
-            sending.set(false);
+            let _ = notice.try_set(Some(applied.map(|a| a.reboots)));
+            let _ = sending.try_set(false);
             crate::settings::Refresh::run(refresh);
         });
     };
@@ -535,8 +535,12 @@ fn ChannelEditor(
         };
         spawn_local(async move {
             match daemon::channel_secret(radio, node, slot).await {
-                Ok(read) => secret.set(Some(read)),
-                Err(failure) => error.set(Some(failure)),
+                Ok(read) => {
+                    let _ = secret.try_set(Some(read));
+                }
+                Err(failure) => {
+                    let _ = error.try_set(Some(failure));
+                }
             }
         });
     };
@@ -565,13 +569,15 @@ fn ChannelEditor(
             };
             match daemon::change_settings(radio, node, &change).await {
                 Ok(applied) => {
-                    notice.set(Some(Ok(applied.reboots)));
-                    editing.set(Editing::Closed);
+                    let _ = notice.try_set(Some(Ok(applied.reboots)));
+                    let _ = editing.try_set(Editing::Closed);
                     crate::settings::Refresh::run(refresh);
                 }
-                Err(failure) => error.set(Some(failure)),
+                Err(failure) => {
+                    let _ = error.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
     let submit = move |ev: leptos::ev::SubmitEvent| {
@@ -604,13 +610,15 @@ fn ChannelEditor(
         spawn_local(async move {
             match daemon::remove_channel(radio, node, slot, history).await {
                 Ok(applied) => {
-                    notice.set(Some(Ok(applied.reboots)));
-                    editing.set(Editing::Closed);
+                    let _ = notice.try_set(Some(Ok(applied.reboots)));
+                    let _ = editing.try_set(Editing::Closed);
                     crate::settings::Refresh::run(refresh);
                 }
-                Err(failure) => error.set(Some(failure)),
+                Err(failure) => {
+                    let _ = error.try_set(Some(failure));
+                }
             }
-            busy.set(false);
+            let _ = busy.try_set(false);
         });
     };
 
