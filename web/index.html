@@ -75,10 +75,12 @@
         else document.addEventListener('DOMContentLoaded', start);
       })();
     </script>
-    <!-- Leaflet's directory carries its version, and map.js gets a hash from
-         trunk: both can be kept by browsers for good, as the server says. -->
+    <!-- Leaflet's directory carries its version, and the maps' scripts get a
+         hash from trunk: all can be kept by browsers for good, as the server
+         says. The engine first, Leaflet's, which map.js draws with. -->
     <link rel="stylesheet" href="/leaflet-1.9.4/dist/leaflet.css" />
     <script src="/leaflet-1.9.4/dist/leaflet.js"></script>
+    <script data-trunk src="map-leaflet.js"></script>
     <script data-trunk src="map.js"></script>
     <style>
       /*

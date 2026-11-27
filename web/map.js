@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Óscar García Amor <ogarcia@connectical.com>
 
-// The one map of the interface, drawn by Leaflet, and all the interface asks
-// of it: to open on an element, to show the nodes it is given, and to say
-// which one was picked. The Rust side calls these as meshctlMap.open and so
-// on; nothing else here is reached from outside. What it shows, words and
-// all, comes from there: here it is only drawn.
+// The one map of the interface, and all the interface asks of it: to open on
+// an element, to show the nodes it is given, and to say which one was picked.
+// The Rust side calls these as meshctlMap.open and so on; nothing else here
+// is reached from outside. What it shows, words and all, comes from there:
+// here it is only drawn.
+//
+// What is shown is made here, of the page's own elements: pins, popups,
+// lists. Where it is drawn is the engine's, map-leaflet.js, which is the
+// only one that knows the library underneath.
 window.meshctlMap = (() => {
-  // OpenStreetMap's tiles, as their usage policy asks to be credited.
-  const TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-  const ATTRIBUTION =
-    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+  const engine = window.meshctlLeaflet;
 
   // Nodes this close (in pixels) to a click count as clicked: the smallest
   // pins are 20px wide, so those that touch or overlap the one under the
@@ -84,10 +85,28 @@ window.meshctlMap = (() => {
     return made;
   }
 
+  // A longitude within -180 and 180.
+  const wrapLon = (lon) => ((((lon + 180) % 360) + 360) % 360) - 180;
+
+  // The area a circle takes, in metres around a point, as [[south, west],
+  // [north, east]].
+  function circleBounds(lat, lon, metres) {
+    const dLat = metres / 111320;
+    const dLon = metres / (111320 * Math.max(Math.cos((lat * Math.PI) / 180), 0.01));
+    return [[lat - dLat, lon - dLon], [lat + dLat, lon + dLon]];
+  }
+
+  // The pin of a place, its point at its foot, where the place is.
+  const placePin = (icon) => ({
+    html: `<span class="mc-picked">${icon}</span>`,
+    size: [36, 36],
+    anchor: [18, 34],
+  });
+
   function open(target, onPick, onAct, onMoved) {
     close();
-    map = L.map(target, { zoomControl: true, worldCopyJump: true });
-    allControl().addTo(map);
+    map = engine.create(target);
+    map.control(allControl());
     moved = onMoved;
     savedView = undefined;
     touched = false;
@@ -101,36 +120,36 @@ window.meshctlMap = (() => {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(save, SAVE_AFTER);
     });
-    map.attributionControl.setPrefix(false);
-    L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(map);
-    markers = L.layerGroup().addTo(map);
+    markers = map.layer();
+    spotLayer = map.layer();
+    preview = map.layer();
     pick = onPick;
     act = onAct;
     placed = false;
-    map.setView([20, 0], 2);
+    map.setView(20, 0, 2);
     showSpot();
     // A click off every node lets the picked one go.
-    map.on("click", (event) => {
-      if (!pickAt(event.containerPoint, event.originalEvent)) {
+    map.on("click", (click) => {
+      if (!pickAt(click, click.event)) {
         pick && pick(null);
       }
     });
-    // Escape on the map, which Leaflet keeps from reaching the page, takes the
-    // route away as it does elsewhere.
     // A route keeps its sides a few pixels apart, whatever the zoom.
     map.on("zoomend", drawRoute);
     // The ring of a node in the overlap list goes as the map zooms: the list
     // is gone by then, and the ring would grow with the zoom's animation.
     map.on("zoomstart", () => showPreview(null));
+    // Escape on the map, which the engine keeps from reaching the page, takes
+    // the route away as it does elsewhere.
     map.on("keydown", (event) => {
-      if (event.originalEvent.key === "Escape") {
+      if (event.key === "Escape") {
         act && act(0, "unroute");
       }
     });
     // The node's popup closed by the person, not by another opening in its
     // place: the node is let go.
-    map.on("popupclose", (event) => {
-      if (event.popup === cardPopup) {
+    map.on("popupclose", (popup) => {
+      if (popup && popup === cardPopup) {
         cardPopup = null;
         popupFor = null;
         pick && pick(null);
@@ -142,7 +161,7 @@ window.meshctlMap = (() => {
   // A place shown on the map rather than a node, as one shared in a
   // conversation: the map centred there, with a pin, once it is there.
   let spotted = null;
-  let spotMarker = null;
+  let spotLayer = null;
 
   function spot(lat, lon, icon) {
     spotted = { lat, lon, icon };
@@ -153,25 +172,16 @@ window.meshctlMap = (() => {
     if (!map || !spotted) return;
     const { lat, lon, icon } = spotted;
     spotted = null;
-    if (spotMarker) spotMarker.remove();
-    spotMarker = L.marker([lat, lon], {
-      icon: L.divIcon({
-        className: "",
-        html: `<span class="mc-picked">${icon}</span>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 34],
-      }),
-      interactive: false,
-      keyboard: false,
-    }).addTo(map);
+    spotLayer.clear();
+    spotLayer.marker(lat, lon, { ...placePin(icon), interactive: false });
     placed = true;
-    map.setView([lat, lon], Math.max(map.getZoom(), FOCUS_ZOOM), { animate: false });
+    map.setView(lat, lon, Math.max(map.zoom(), FOCUS_ZOOM), false);
   }
 
   function close() {
     if (map) map.remove();
     map = null;
-    spotMarker = null;
+    spotLayer = null;
     markers = null;
     pick = null;
     act = null;
@@ -186,10 +196,10 @@ window.meshctlMap = (() => {
   // The nodes near a point of the map's, the nearest first.
   function nodesNear(point, radius) {
     return visible()
-      .map((node) => ({
-        node,
-        distance: map.latLngToContainerPoint([node.lat, node.lon]).distanceTo(point),
-      }))
+      .map((node) => {
+        const at = map.toPoint(node.lat, node.lon);
+        return { node, distance: Math.hypot(at.x - point.x, at.y - point.y) };
+      })
       .filter(({ distance }) => distance <= radius)
       .sort((a, b) => a.distance - b.distance)
       .map(({ node }) => node);
@@ -206,23 +216,18 @@ window.meshctlMap = (() => {
     if (found.length === 1) {
       choose(found[0].num);
     } else {
-      showPicker(found, map.containerPointToLatLng(point));
+      const at = map.toLatLon(point.x, point.y);
+      showPicker(found, at.lat, at.lon);
     }
     return true;
   }
 
   // A ring on the node an item of the list stands for.
   function showPreview(node) {
-    if (preview) preview.remove();
-    preview = null;
-    if (!node || !map) return;
-    preview = L.circleMarker([node.lat, node.lon], {
-      radius: 12,
-      color: color("--mc-primary"),
-      weight: 3,
-      fill: false,
-      interactive: false,
-    }).addTo(map);
+    if (!preview) return;
+    preview.clear();
+    if (!node) return;
+    preview.ring(node.lat, node.lon, 12, { color: color("--mc-primary"), weight: 3 });
   }
 
   // A node's colour, as the style sheet gives it to its kind.
@@ -255,17 +260,16 @@ window.meshctlMap = (() => {
     const classes = ["mc-pin", node.kind];
     if (node.role) classes.push(`role-${node.role}`);
     if (node.selected) classes.push("selected");
-    return L.divIcon({
-      className: "",
+    return {
       html: `<span class="${classes.join(" ")}"><i></i></span>`,
-      iconSize: [size, size],
-      iconAnchor: [size / 2, size / 2],
+      size: [size, size],
+      anchor: [size / 2, size / 2],
       tooltipAnchor: [0, -size / 2],
-    });
+    };
   }
 
   // The list of the nodes that overlap where a click fell.
-  function showPicker(found, latlng) {
+  function showPicker(found, lat, lon) {
     const labels = shown.labels;
     const box = element("div", "mc-picker");
     const head = element("div", "mc-picker-head");
@@ -277,12 +281,16 @@ window.meshctlMap = (() => {
     zoom.title = labels.zoom;
     zoom.setAttribute("aria-label", labels.zoom);
     zoom.addEventListener("click", (event) => {
-      L.DomEvent.stop(event);
+      map.stop(event);
       showPreview(null);
       map.closePopup();
-      const bounds = L.latLngBounds(found.map((n) => [n.lat, n.lon]));
       // Quick: the group is near, there is no need to fly far.
-      map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 18, duration: 0.5 });
+      map.fit(found.map((n) => [n.lat, n.lon]), {
+        padding: 60,
+        maxZoom: 18,
+        fly: true,
+        duration: 0.5,
+      });
     });
     head.append(zoom);
     const list = element("ul", "mc-picker-list");
@@ -298,7 +306,7 @@ window.meshctlMap = (() => {
       button.addEventListener("focus", () => showPreview(node));
       button.addEventListener("mouseleave", () => showPreview(null));
       button.addEventListener("click", (event) => {
-        L.DomEvent.stop(event);
+        map.stop(event);
         map.closePopup();
         choose(node.num);
       });
@@ -307,15 +315,12 @@ window.meshctlMap = (() => {
     }
     box.append(head, list);
     // No cross: a click anywhere else closes it, as picking a node does.
-    L.popup({
+    map.popup(lat, lon, box, {
       className: "mc-picker-popup",
       maxWidth: 300,
       autoPanPadding: [24, 24],
       closeButton: false,
-    })
-      .setLatLng(latlng)
-      .setContent(box)
-      .openOn(map);
+    });
   }
 
   // What the popup of a node says, and its buttons.
@@ -367,7 +372,7 @@ window.meshctlMap = (() => {
         button.title = labels.unmessagable;
       }
       button.addEventListener("click", (event) => {
-        L.DomEvent.stop(event);
+        map.stop(event);
         act && act(node.num, what);
       });
       buttons.append(button);
@@ -380,7 +385,7 @@ window.meshctlMap = (() => {
       button.disabled = node.route === "tracing";
       button.setAttribute("aria-pressed", String(node.route === "hide"));
       button.addEventListener("click", (event) => {
-        L.DomEvent.stop(event);
+        map.stop(event);
         act && act(node.num, "route");
       });
       box.append(button);
@@ -406,31 +411,27 @@ window.meshctlMap = (() => {
       // Drawn again in place, as it is: neither how far it was scrolled nor
       // where the map was left moves, as setting its content would, and pan
       // the map to it again. Only where the node is, if it moved.
-      cardPopup.getContent().replaceChildren(...content.childNodes);
-      const at = cardPopup.getLatLng();
-      if (at.lat !== picked.lat || at.lng !== picked.lon) {
-        cardPopup.setLatLng([picked.lat, picked.lon]);
-      } else if (cardPopup._updatePosition) {
-        cardPopup._updatePosition();
+      cardPopup.content().replaceChildren(...content.childNodes);
+      const at = cardPopup.at();
+      if (at.lat !== picked.lat || at.lon !== picked.lon) {
+        cardPopup.move(picked.lat, picked.lon);
+      } else {
+        cardPopup.reposition();
       }
       return;
     }
     // Whatever popup was open closes as this one opens, and that is no
     // letting go of anything.
     cardPopup = null;
-    const popup = L.popup({
+    cardPopup = map.popup(picked.lat, picked.lon, content, {
       className: "mc-node-popup",
       maxWidth: 320,
       // Never taller than the map leaves, as on a phone on its side: what
       // does not fit scrolls within it, the legend under it left clear.
-      maxHeight: Math.max(160, map.getSize().y - 150),
+      maxHeight: Math.max(160, map.size().y - 150),
       offset: [0, -6],
       autoPanPadding: [24, 24],
-    })
-      .setLatLng([picked.lat, picked.lon])
-      .setContent(content)
-      .openOn(map);
-    cardPopup = popup;
+    });
     popupFor = picked.num;
   }
 
@@ -450,7 +451,6 @@ window.meshctlMap = (() => {
   function nodes(json) {
     if (!map) return;
     shown = JSON.parse(json);
-    const list = shown.nodes;
     drawMarkers();
     labelAll();
     centre();
@@ -473,26 +473,22 @@ window.meshctlMap = (() => {
     if (!node) return;
     focusOn = null;
     placed = true;
-    map.setView([node.lat, node.lon], Math.max(map.getZoom(), FOCUS_ZOOM), { animate: false });
+    map.setView(node.lat, node.lon, Math.max(map.zoom(), FOCUS_ZOOM), false);
     // Its popup, opened before, fitted in again now that it is centred:
     // over it, it could be left above the map. Once, here; never as it is
     // only drawn again.
-    if (cardPopup && cardPopup._adjustPan) cardPopup._adjustPan();
+    if (cardPopup) cardPopup.fit();
   }
 
   function drawMarkers() {
-    markers.clearLayers();
+    markers.clear();
     for (const node of visible()) {
-      const marker = L.marker([node.lat, node.lon], {
-        icon: pin(node),
-        keyboard: false,
+      markers.marker(node.lat, node.lon, {
+        ...pin(node),
+        tooltip: tip(node),
         // The picked node and the radio's own over the rest.
-        zIndexOffset: node.selected ? 1000 : node.kind === "local" ? 500 : node.role ? 100 : 0,
-        // Clicks reach the map, which looks for every node near them.
-        bubblingMouseEvents: true,
+        z: node.selected ? 1000 : node.kind === "local" ? 500 : node.role ? 100 : 0,
       });
-      marker.bindTooltip(tip(node), { direction: "top", className: "mc-tip" });
-      marker.addTo(markers);
     }
   }
 
@@ -509,38 +505,34 @@ window.meshctlMap = (() => {
 
   // A stretch moved to the right of the way it goes, in pixels on the screen
   // as the map is now; with the angle it goes at, in degrees.
-  function keepRight(from, to) {
-    const a = map.latLngToLayerPoint(from);
-    const b = map.latLngToLayerPoint(to);
-    const length = a.distanceTo(b) || 1;
+  function keepRight(on, from, to) {
+    const a = on.toPoint(from[0], from[1]);
+    const b = on.toPoint(to[0], to[1]);
+    const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     // The right of the way from a to b, on a screen whose y goes down.
-    const side = L.point(-(b.y - a.y) / length, (b.x - a.x) / length).multiplyBy(ROUTE_SIDE);
+    const side = { x: (-(b.y - a.y) / length) * ROUTE_SIDE, y: ((b.x - a.x) / length) * ROUTE_SIDE };
+    const moved = (p) => {
+      const at = on.toLatLon(p.x + side.x, p.y + side.y);
+      return [at.lat, at.lon];
+    };
     return {
-      from: map.layerPointToLatLng(a.add(side)),
-      to: map.layerPointToLatLng(b.add(side)),
+      from: moved(a),
+      to: moved(b),
       angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI,
     };
   }
 
   // An arrowhead halfway along a stretch, pointing the way it went.
-  function arrow(stretch, fill, casing) {
-    const middle = L.latLng(
-      (stretch.from.lat + stretch.to.lat) / 2,
-      (stretch.from.lng + stretch.to.lng) / 2,
-    );
-    return L.marker(middle, {
-      icon: L.divIcon({
-        className: "",
-        // Edged like the line it is on, to stand out on the map.
-        html:
-          `<svg class="mc-arrow" viewBox="0 0 22 22" style="transform:rotate(${stretch.angle}deg)">` +
-          `<path d="M4 4 L19 11 L4 18 L8.5 11 Z" fill="${fill}" stroke="${casing}" stroke-width="2.5" stroke-linejoin="round" paint-order="stroke"/>` +
-          `</svg>`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
-      }),
+  function arrow(layer, stretch, fill, casing) {
+    layer.marker((stretch.from[0] + stretch.to[0]) / 2, (stretch.from[1] + stretch.to[1]) / 2, {
+      // Edged like the line it is on, to stand out on the map.
+      html:
+        `<svg class="mc-arrow" viewBox="0 0 22 22" style="transform:rotate(${stretch.angle}deg)">` +
+        `<path d="M4 4 L19 11 L4 18 L8.5 11 Z" fill="${fill}" stroke="${casing}" stroke-width="2.5" stroke-linejoin="round" paint-order="stroke"/>` +
+        `</svg>`,
+      size: [22, 22],
+      anchor: [11, 11],
       interactive: false,
-      keyboard: false,
     });
   }
 
@@ -550,22 +542,16 @@ window.meshctlMap = (() => {
     if (routeLayer) routeLayer.remove();
     routeLayer = null;
     if (!map || !shownRoute) return;
-    routeLayer = L.layerGroup();
+    routeLayer = map.layer();
     // A wider band under each line, of the colour that stands apart from the
     // tiles (light on a dark map, dark on a light one), as road maps edge
     // their roads: the route reads on any terrain.
     const casing = color("--mc-route-casing");
     const draw = (segment, back) => {
-      const stretch = keepRight(segment.from, segment.to);
+      const stretch = keepRight(map, segment.from, segment.to);
       const fill = color(QUALITY_COLOR[segment.quality] || "--mc-route-unknown");
-      L.polyline([stretch.from, stretch.to], {
-        color: casing,
-        weight: 7,
-        opacity: 0.85,
-        lineCap: "round",
-        interactive: false,
-      }).addTo(routeLayer);
-      L.polyline([stretch.from, stretch.to], {
+      routeLayer.line([stretch.from, stretch.to], { color: casing, weight: 7, opacity: 0.85 });
+      routeLayer.line([stretch.from, stretch.to], {
         // The colour says how the hop was heard: grey across nodes that
         // could not be placed, as then it cannot be told.
         color: fill,
@@ -573,25 +559,15 @@ window.meshctlMap = (() => {
         // There, solid; back, dashed and a little lighter: always, as the
         // notice's key says.
         opacity: back ? 0.8 : 0.95,
-        dashArray: back ? "8 6" : null,
-        interactive: false,
-      }).addTo(routeLayer);
-      arrow(stretch, fill, casing).addTo(routeLayer);
+        dash: back ? "8 6" : null,
+      });
+      arrow(routeLayer, stretch, fill, casing);
     };
     shownRoute.towards.forEach((segment) => draw(segment, false));
     shownRoute.back.forEach((segment) => draw(segment, true));
     for (const relay of shownRoute.relays) {
-      L.circleMarker(relay, {
-        radius: 11,
-        color: color("--mc-text"),
-        weight: 2,
-        fill: false,
-        interactive: false,
-      }).addTo(routeLayer);
+      routeLayer.ring(relay[0], relay[1], 11, { color: color("--mc-text"), weight: 2 });
     }
-    // Lines go in Leaflet's overlay pane, under the markers' own: the nodes
-    // stay on top, and can still be picked.
-    routeLayer.addTo(map);
   }
 
   // A traced route, as JSON: {towards: [segment], back: [segment], relays:
@@ -626,12 +602,10 @@ window.meshctlMap = (() => {
       if (points.length > 0) {
         // Another route in place of the first: back to before the first.
         if (!beforeRoute) {
-          beforeRoute = { centre: map.getCenter(), zoom: map.getZoom() };
+          beforeRoute = { centre: map.centre(), zoom: map.zoom() };
         }
-        // The zoom fitBounds goes to, worked out as it does.
-        const bounds = L.latLngBounds(points);
-        beforeRoute.routeZoom = Math.min(15, map.getBoundsZoom(bounds, false, L.point(80, 160)));
-        map.fitBounds(bounds, {
+        beforeRoute.routeZoom = Math.min(15, map.fitZoom(points, [80, 160]));
+        map.fit(points, {
           paddingTopLeft: [40, 80],
           paddingBottomRight: [40, 80],
           maxZoom: 15,
@@ -645,8 +619,8 @@ window.meshctlMap = (() => {
   function goBack() {
     const before = beforeRoute;
     beforeRoute = null;
-    if (!before || map.getZoom() !== before.routeZoom) return;
-    map.setView(before.centre, before.zoom);
+    if (!before || map.zoom() !== before.routeZoom) return;
+    map.setView(before.centre.lat, before.centre.lon, before.zoom);
   }
 
   // The route about to go for a reason that is not closing it, as another
@@ -661,16 +635,17 @@ window.meshctlMap = (() => {
   function save() {
     saveTimer = null;
     if (!map || !moved) return;
-    const bounds = map.getBounds();
-    const shift = map.getCenter().wrap().lng - map.getCenter().lng;
-    const west = bounds.getWest() + shift;
-    const east = bounds.getEast() + shift;
+    const bounds = map.bounds();
+    const centre = map.centre();
+    const shift = wrapLon(centre.lon) - centre.lon;
+    const west = bounds.west + shift;
+    const east = bounds.east + shift;
     const width = Math.min(east - west, 360);
     const middle = (west + east) / 2;
     moved(
-      Math.max(bounds.getSouth(), -90),
+      Math.max(bounds.south, -90),
       middle - width / 2,
-      Math.min(bounds.getNorth(), 90),
+      Math.min(bounds.north, 90),
       middle + width / 2,
     );
   }
@@ -706,7 +681,7 @@ window.meshctlMap = (() => {
     if (savedView) {
       placed = true;
       const { south, west, north, east } = savedView;
-      map.fitBounds([[south, west], [north, east]], { animate: false });
+      map.fit([[south, west], [north, east]], { animate: false });
     } else {
       placeAll();
     }
@@ -716,7 +691,7 @@ window.meshctlMap = (() => {
   function fitAll() {
     const list = visible();
     if (list.length === 0) return;
-    map.fitBounds(list.map((n) => [n.lat, n.lon]), { maxZoom: 15, padding: [32, 32] });
+    map.fit(list.map((n) => [n.lat, n.lon]), { maxZoom: 15, padding: 32 });
   }
 
   // The first view of a radio's nodes: its own node, or all of them.
@@ -726,37 +701,27 @@ window.meshctlMap = (() => {
     placed = true;
     const local = list.find((n) => n.kind === "local");
     if (local) {
-      map.setView([local.lat, local.lon], 11, { animate: false });
+      map.setView(local.lat, local.lon, 11, false);
     } else {
-      map.fitBounds(list.map((n) => [n.lat, n.lon]), {
-        maxZoom: 13,
-        padding: [32, 32],
-        animate: false,
-      });
+      map.fit(list.map((n) => [n.lat, n.lon]), { maxZoom: 13, padding: 32, animate: false });
     }
   }
 
   // The button under the zoom's that takes in every node.
   function allControl() {
-    const Control = L.Control.extend({
-      options: { position: "topleft" },
-      onAdd() {
-        const bar = L.DomUtil.create("div", "leaflet-bar mc-zoom-all");
-        const button = L.DomUtil.create("a", "", bar);
-        button.href = "#";
-        button.setAttribute("role", "button");
-        allButton = button;
-        labelAll();
-        L.DomEvent.disableClickPropagation(bar);
-        L.DomEvent.on(button, "click", (event) => {
-          L.DomEvent.preventDefault(event);
-          touched = true;
-          fitAll();
-        });
-        return bar;
-      },
+    const bar = element("div", "leaflet-bar mc-zoom-all");
+    const button = element("a", "");
+    bar.append(button);
+    button.href = "#";
+    button.setAttribute("role", "button");
+    allButton = button;
+    labelAll();
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      touched = true;
+      fitAll();
     });
-    return new Control();
+    return bar;
   }
 
   function labelAll() {
@@ -767,7 +732,7 @@ window.meshctlMap = (() => {
 
   // The element changed size: the map has to know.
   function resize() {
-    if (map) map.invalidateSize();
+    if (map) map.resize();
   }
 
   // The small maps of the nodes' pages, apart from the one map: each where
@@ -775,65 +740,53 @@ window.meshctlMap = (() => {
   // how far it may be from there when it says. By their elements.
   const minis = new Map();
 
-  // Draws a small map on an element, or draws it again: where (lat, lon),
-  // how far it may be from there (radius, in metres, or none) and the
-  // colour of its pin, as one of the interface's (pin).
   // The small map on an element, made the first time: still, its tiles and
   // a layer for what is drawn on it.
   function smallMap(element) {
     let small = minis.get(element);
     if (!small) {
-      small = L.map(element, {
-        // In quarters, so that the circle fills it, whatever its size.
-        zoomSnap: 0.25,
-        zoomControl: false,
-        dragging: false,
-        scrollWheelZoom: false,
-        doubleClickZoom: false,
-        boxZoom: false,
-        keyboard: false,
-        touchZoom: false,
-        tap: false,
-      });
-      small.attributionControl.setPrefix(false);
-      L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(small);
-      small.drawn = L.layerGroup().addTo(small);
+      // In quarters, so that the circle fills it, whatever its size.
+      small = engine.create(element, { still: true, zoomSnap: 0.25 });
+      small.drawn = small.layer();
       minis.set(element, small);
     }
     return small;
   }
 
+  // Draws a small map on an element, or draws it again: where (lat, lon),
+  // how far it may be from there (radius, in metres, or none) and the
+  // colour of its pin, as one of the interface's (pin).
   function mini(element, json) {
     const at = JSON.parse(json);
     const small = smallMap(element);
     // Laid out first: placed by its circle, it has to know its size.
     requestAnimationFrame(() => {
-      small.invalidateSize();
-      small.drawn.clearLayers();
-      const where = [at.lat, at.lon];
-      // Placed before the circle is drawn: a circle on a map not yet
-      // placed has no bounds to place it by.
+      small.resize();
+      small.drawn.clear();
+      // Placed before the circle is drawn: a circle on a map not yet placed
+      // has nothing to be placed by.
       if (at.radius) {
-        const bounds = L.latLng(where).toBounds(at.radius * 2);
-        small.fitBounds(bounds, { padding: [12, 12], maxZoom: 16, animate: false });
-        L.circle(where, {
-          radius: at.radius,
-          color: color("--mc-primary"),
+        small.fit(circleBounds(at.lat, at.lon, at.radius), {
+          padding: 12,
+          maxZoom: 16,
+          animate: false,
+        });
+        const primary = color("--mc-primary");
+        small.drawn.circle(at.lat, at.lon, at.radius, {
+          color: primary,
           weight: 1.5,
+          fill: primary,
           fillOpacity: 0.12,
-          interactive: false,
-        }).addTo(small.drawn);
+        });
       } else {
-        small.setView(where, FOCUS_ZOOM, { animate: false });
+        small.setView(at.lat, at.lon, FOCUS_ZOOM, false);
       }
-      L.circleMarker(where, {
-        radius: 7,
+      small.drawn.ring(at.lat, at.lon, 7, {
         color: color("--mc-surface"),
         weight: 2,
-        fillColor: color(at.pin),
+        fill: color(at.pin),
         fillOpacity: 1,
-        interactive: false,
-      }).addTo(small.drawn);
+      });
     });
   }
 
@@ -845,53 +798,44 @@ window.meshctlMap = (() => {
     const drawn = JSON.parse(json);
     const small = smallMap(element);
     requestAnimationFrame(() => {
-      small.invalidateSize();
-      small.drawn.clearLayers();
-      const points = drawn.points.map((p) => L.latLng(p.lat, p.lon));
+      small.resize();
+      small.drawn.clear();
+      const points = drawn.points.map((p) => [p.lat, p.lon]);
       if (points.length === 0) return;
       const casing = color("--mc-route-casing");
       for (let i = 1; i < points.length; i++) {
         const stretch = [points[i - 1], points[i]];
-        L.polyline(stretch, {
-          color: casing,
-          weight: 6,
-          opacity: 0.85,
-          lineCap: "round",
-          interactive: false,
-        }).addTo(small.drawn);
-        L.polyline(stretch, {
+        small.drawn.line(stretch, { color: casing, weight: 6, opacity: 0.85 });
+        small.drawn.line(stretch, {
           color: color("--mc-primary"),
           weight: 3,
-          dashArray: drawn.points[i].gap ? "6 6" : null,
-          interactive: false,
-        }).addTo(small.drawn);
+          dash: drawn.points[i].gap ? "6 6" : null,
+        });
       }
       // A guessed one hollow, its ring dashed.
       drawn.points.forEach((p, i) => {
-        L.circleMarker(points[i], {
-          radius: 6,
+        small.drawn.ring(points[i][0], points[i][1], 6, {
           color: p.guess ? color(p.pin) : color("--mc-surface"),
           weight: 2,
-          fillColor: color(p.pin),
+          fill: color(p.pin),
           fillOpacity: p.guess ? 0.25 : 1,
-          dashArray: p.guess ? "3 2" : null,
-          interactive: false,
-        }).addTo(small.drawn);
+          dash: p.guess ? "3 2" : null,
+        });
       });
       if (points.length === 1) {
-        small.setView(points[0], FOCUS_ZOOM, { animate: false });
+        small.setView(points[0][0], points[0][1], FOCUS_ZOOM, false);
       } else {
-        small.fitBounds(L.latLngBounds(points), { padding: [20, 20], maxZoom: 15, animate: false });
+        small.fit(points, { padding: 20, maxZoom: 15, animate: false });
       }
       // An arrowhead halfway along each stretch, the way it went: its angle
       // on the screen, so known once the map is placed.
       const fill = color("--mc-primary");
       for (let i = 1; i < points.length; i++) {
-        const from = small.latLngToContainerPoint(points[i - 1]);
-        const to = small.latLngToContainerPoint(points[i]);
-        if (from.distanceTo(to) < 24) continue;
+        const from = small.toPoint(points[i - 1][0], points[i - 1][1]);
+        const to = small.toPoint(points[i][0], points[i][1]);
+        if (Math.hypot(to.x - from.x, to.y - from.y) < 24) continue;
         const angle = (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
-        arrow({ from: points[i - 1], to: points[i], angle }, fill, casing).addTo(small.drawn);
+        arrow(small.drawn, { from: points[i - 1], to: points[i], angle }, fill, casing);
       }
     });
   }
@@ -914,46 +858,34 @@ window.meshctlMap = (() => {
   // lon) told where it went.
   function picker(element, json, moved) {
     const at = JSON.parse(json);
-    const map = L.map(element, { zoomSnap: 0.5 });
-    map.attributionControl.setPrefix(false);
-    L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(map);
-    // Its point at its foot, where the place is.
-    const icon = L.divIcon({
-      className: "",
-      html: `<span class="mc-picked">${at.icon}</span>`,
-      iconSize: [36, 36],
-      iconAnchor: [18, 34],
-    });
+    const picking = engine.create(element, { zoomSnap: 0.5 });
+    const layer = picking.layer();
     let marker = null;
-    const put = (latlng) => {
+    const put = (lat, lon) => {
       if (marker) {
-        marker.setLatLng(latlng);
+        marker.move(lat, lon);
         return;
       }
-      marker = L.marker(latlng, { icon, draggable: true, keyboard: false }).addTo(map);
-      marker.on("dragend", () => {
-        const where = marker.getLatLng().wrap();
-        moved(where.lat, where.lng);
-      });
+      marker = layer.marker(lat, lon, { ...placePin(at.icon), draggable: true, moved });
     };
-    map.on("click", (event) => {
-      const where = event.latlng.wrap();
-      put(where);
-      moved(where.lat, where.lng);
+    picking.on("click", (click) => {
+      const lon = wrapLon(click.lon);
+      put(click.lat, lon);
+      moved(click.lat, lon);
     });
-    map.setView([at.lat, at.lon], at.zoom, { animate: false });
-    if (at.pin) put([at.lat, at.lon]);
-    pickers.set(element, { map, put });
+    picking.setView(at.lat, at.lon, at.zoom, false);
+    if (at.pin) put(at.lat, at.lon);
+    pickers.set(element, { map: picking, put });
     // Laid out by then, in a dialog that has just opened.
-    requestAnimationFrame(() => map.invalidateSize());
+    requestAnimationFrame(() => picking.resize());
   }
 
   // Puts the pin of a map to pick on somewhere, and goes there.
   function pickerAt(element, lat, lon) {
     const picking = pickers.get(element);
     if (!picking) return;
-    picking.put([lat, lon]);
-    picking.map.setView([lat, lon], Math.max(picking.map.getZoom(), FOCUS_ZOOM + 2));
+    picking.put(lat, lon);
+    picking.map.setView(lat, lon, Math.max(picking.map.zoom(), FOCUS_ZOOM + 2));
   }
 
   function pickerClose(element) {
