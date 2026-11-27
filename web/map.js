@@ -353,8 +353,19 @@ window.meshctlMap = (() => {
     ]) {
       // Not written to, the chat is not offered.
       if (what === "chat" && node.writable === false) continue;
-      const button = element("button", primary ? "primary" : "", label);
+      // Written to but read by nobody, it tells: offered, as on its page,
+      // with the bubble crossed out and not as the thing to do.
+      const unread = what === "chat" && node.unmessagable;
+      const button = element("button", primary && !unread ? "primary" : "", label);
       button.type = "button";
+      if (unread) {
+        const icon = element("span", "mc-icon");
+        icon.style.setProperty("--icon", "url(/tabler-icons-3.51.0/icons/outline/message-off.svg)");
+        icon.setAttribute("aria-hidden", "true");
+        button.prepend(icon);
+        button.classList.add("unheeded");
+        button.title = labels.unmessagable;
+      }
       button.addEventListener("click", (event) => {
         L.DomEvent.stop(event);
         act && act(node.num, what);
@@ -423,10 +434,11 @@ window.meshctlMap = (() => {
     popupFor = picked.num;
   }
 
-  // What to show, as JSON: {labels: {page, chat, here, zoom}, nodes: [{num,
-  // id, name, short, seen, facts: [[label, value]], lat, lon, kind,
-  // selected}]}, kind one of local, direct, near and far. The first time
-  // there are nodes, the view goes to the radio's own, or to them all.
+  // What to show, as JSON: {labels: {page, chat, unmessagable, here, zoom},
+  // nodes: [{num, id, name, short, seen, facts: [[label, value]], lat, lon,
+  // kind, selected, writable, unmessagable}]}, kind one of local, direct,
+  // near and far. The first time there are nodes, the view goes to the
+  // radio's own, or to them all.
   // The nodes on the map: while a route is shown, only those on it, and the
   // one picked, so that the route reads clear of the rest.
   function visible() {

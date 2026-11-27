@@ -245,6 +245,8 @@ struct Drawing {
 struct Labels {
     page: String,
     chat: String,
+    /// What the chat button says on a node nobody reads messages on.
+    unmessagable: String,
     /// With `{n}` where the number of nodes goes.
     here: String,
     zoom: String,
@@ -335,6 +337,9 @@ struct Marker {
     /// Whether it can be written to: not a MeshCore node the radio does not
     /// keep, as MeshCore sends only to its contacts.
     writable: bool,
+    /// Whether it tells that nobody reads what is sent to it: its chat is
+    /// offered, as on its page, but not as the thing to do.
+    unmessagable: bool,
 }
 
 /// The node's traceroutes the map cares for: the newest, and the newest that
@@ -703,6 +708,7 @@ pub fn MapView() -> impl IntoView {
                         selected: picked == Some(n.num),
                         route: route_button(n.num),
                         writable: traceable || n.on_radio != Some(false),
+                        unmessagable: n.unmessagable,
                     })
                 })
                 .collect()
@@ -713,6 +719,7 @@ pub fn MapView() -> impl IntoView {
             labels: Labels {
                 page: t_string!(i18n, node_page).to_owned(),
                 chat: t_string!(i18n, node_message).to_owned(),
+                unmessagable: t_string!(i18n, node_unmessagable).to_owned(),
                 here: t_string!(i18n, map_here).to_owned(),
                 zoom: t_string!(i18n, map_zoom).to_owned(),
                 all: t_string!(i18n, map_all).to_owned(),
