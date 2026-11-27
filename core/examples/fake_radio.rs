@@ -1251,6 +1251,42 @@ fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Event>) 
             }
             format!("{} waypoints on slot {channel}", shared.len())
         }
+        // The neighbour somewhere else, as its position says: to see what
+        // follows it, as fences that watch it.
+        Some("move") => {
+            let (Some(lat), Some(lon)) = (
+                words.next().and_then(|w| w.parse::<f64>().ok()),
+                words.next().and_then(|w| w.parse::<f64>().ok()),
+            ) else {
+                return "usage: move <lat> <lon>".into();
+            };
+            #[allow(clippy::cast_possible_truncation)]
+            let scaled = |degrees: f64| (degrees * 1e7).round() as i32;
+            let packet = MeshPacket {
+                from: NEIGHBOUR,
+                to: BROADCAST,
+                id: fresh_id(&NEXT_ID),
+                rx_time: Some(now_secs()),
+                rx_snr: 6.0,
+                hop_limit: 3,
+                hop_start: 3,
+                payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                    portnum: PortNum::PositionApp as i32,
+                    payload: pb::Position {
+                        latitude_i: Some(scaled(lat)),
+                        longitude_i: Some(scaled(lon)),
+                        time: now_secs(),
+                        precision_bits: 32,
+                        ..Default::default()
+                    }
+                    .encode_to_vec(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            let _ = events.send(Event::Heard(packet));
+            format!("the neighbour is at {lat}, {lon}")
+        }
         // A waypoint deleted for everyone by whoever shared it, by its id in
         // hex: sent again, expired.
         Some("unwaypoint") => {
