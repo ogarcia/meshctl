@@ -2552,6 +2552,18 @@
           filter: invert(1) hue-rotate(180deg) brightness(0.85) saturate(0.75);
         }
       }
+      /* In greys, as asked for: light, or dark as above, but with no colour
+         left to turn. The nodes and routes over them keep theirs. */
+      :root[data-map-colors="gray"] .leaflet-tile-pane { filter: grayscale(1); }
+      :root[data-map-colors="gray"][data-map-theme="dark"] .leaflet-tile-pane,
+      :root[data-map-colors="gray"][data-theme="dark"]:not([data-map-theme="light"]) .leaflet-tile-pane {
+        filter: grayscale(1) invert(1) brightness(0.85);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root[data-map-colors="gray"]:not([data-theme="light"]):not([data-map-theme="light"]) .leaflet-tile-pane {
+          filter: grayscale(1) invert(1) brightness(0.85);
+        }
+      }
       /* A route's colours, by how each hop was heard, and the band edging its
          lines: for the map's own theme, which may not be the page's. Bright
          and apart from the tiles' greens and the roads' reds and browns.

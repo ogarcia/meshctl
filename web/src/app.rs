@@ -28,8 +28,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
 use meshctl_api::{
-    Accent, Channel, Conversation, Language, LinkState, MapTheme, Message, NewRequest, Node,
-    NodeCheck, NodeLatest, Pace, Packet, PacketFilter, Peer, Preferences, Radio, RadioId,
+    Accent, Channel, Conversation, Language, LinkState, MapColors, MapTheme, Message, NewRequest,
+    Node, NodeCheck, NodeLatest, Pace, Packet, PacketFilter, Peer, Preferences, Radio, RadioId,
     RadioKind, Request, RequestKind, RequestStatus, SightingId, Status, Theme,
 };
 use std::collections::{BTreeMap, HashMap};
@@ -1474,6 +1474,10 @@ fn shown() -> Preferences {
             Some("dark") => MapTheme::Dark,
             _ => MapTheme::Page,
         },
+        map_colors: match get("data-map-colors").as_deref() {
+            Some("gray") => MapColors::Gray,
+            _ => MapColors::Full,
+        },
         ..Preferences::default()
     }
 }
@@ -1518,6 +1522,13 @@ fn show(preferences: Preferences) {
             MapTheme::Page => None,
             MapTheme::Light => Some("light"),
             MapTheme::Dark => Some("dark"),
+        },
+    );
+    set(
+        "data-map-colors",
+        match preferences.map_colors {
+            MapColors::Full => None,
+            MapColors::Gray => Some("gray"),
         },
     );
     // The tab's icon in the accent, drawn here: the daemon's `/favicon.svg`

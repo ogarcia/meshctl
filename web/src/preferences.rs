@@ -8,7 +8,7 @@
 use crate::app::Live;
 use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
-use meshctl_api::{Accent, Language, MapTheme, Preferences, Theme};
+use meshctl_api::{Accent, Language, MapColors, MapTheme, Preferences, Theme};
 
 /// The accents, each as its swatch shows it: as it looks on the dark theme,
 /// the brightest; gray, between its light and its dark, to be seen on both.
@@ -61,6 +61,18 @@ pub fn PreferencesView() -> impl IntoView {
             Signal::derive(label),
         )
     });
+    let map_colors = [MapColors::Full, MapColors::Gray].map(|colors| {
+        let label = move || match colors {
+            MapColors::Full => t_string!(i18n, map_colors_full).to_string(),
+            MapColors::Gray => t_string!(i18n, map_colors_gray).to_string(),
+        };
+        let pick = choose(Box::new(move |p| p.map_colors = colors));
+        (
+            Signal::derive(move || current().map_colors == colors),
+            Box::new(pick) as Box<dyn Fn() + Send + Sync>,
+            Signal::derive(label),
+        )
+    });
     let accents = ACCENTS.map(|(accent, color)| {
         let on = move || current().accent == accent;
         let name = move || match accent {
@@ -99,6 +111,12 @@ pub fn PreferencesView() -> impl IntoView {
             </Row>
             <Row title=t!(i18n, prefs_map).into_any() hint=t!(i18n, prefs_map_hint).into_any()>
                 {pills(Vec::from(maps))}
+            </Row>
+            <Row
+                title=t!(i18n, prefs_map_colors).into_any()
+                hint=t!(i18n, prefs_map_colors_hint).into_any()
+            >
+                {pills(Vec::from(map_colors))}
             </Row>
             <Row title=t!(i18n, prefs_accent).into_any() hint=t!(i18n, prefs_accent_hint).into_any()>
                 <div class="pref-control accents" role="radiogroup">

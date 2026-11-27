@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use meshctl_api::{Accent, Error, ErrorCode, MapTheme, Preferences, Theme};
+use meshctl_api::{Accent, Error, ErrorCode, MapColors, MapTheme, Preferences, Theme};
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
@@ -149,6 +149,9 @@ fn themed(html: &str, preferences: &Preferences) -> String {
         MapTheme::Light => attributes.push_str(r#" data-map-theme="light""#),
         MapTheme::Dark => attributes.push_str(r#" data-map-theme="dark""#),
     }
+    if preferences.map_colors == MapColors::Gray {
+        attributes.push_str(r#" data-map-colors="gray""#);
+    }
     match html.find("<html") {
         Some(at) => {
             let at = at + "<html".len();
@@ -225,10 +228,11 @@ mod tests {
         let dark = Preferences {
             theme: Theme::Dark,
             map_theme: MapTheme::Light,
+            map_colors: MapColors::Gray,
             ..Default::default()
         };
         assert!(themed(html, &dark).contains(
-            r#"<html data-theme="dark" data-accent="amber" data-map-theme="light" lang="en">"#
+            r#"<html data-theme="dark" data-accent="amber" data-map-theme="light" data-map-colors="gray" lang="en">"#
         ));
     }
 }

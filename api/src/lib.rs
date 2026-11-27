@@ -2670,6 +2670,9 @@ pub struct Preferences {
     pub accent: Accent,
     /// The maps' own theme, which may differ from the rest.
     pub map_theme: MapTheme,
+    /// The maps' colours: OpenStreetMap's, or none but greys, for the nodes
+    /// and routes on them to stand out.
+    pub map_colors: MapColors,
     /// Whether the map's legend is folded away, for more map.
     pub map_legend_folded: bool,
     /// The interface's language; none for the browser's.
@@ -2753,6 +2756,18 @@ pub enum MapTheme {
     Dark,
 }
 
+/// The colours of the maps' tiles.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MapColors {
+    /// OpenStreetMap's own.
+    #[default]
+    Full,
+    /// Greys only, light or dark as the map's theme is.
+    Gray,
+}
+
 /// A language the interface speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -2829,7 +2844,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&Preferences::default()).unwrap(),
-            r#"{"theme":"system","accent":"amber","map_theme":"page","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0,"packets_with_own":false,"sections_folded":0}"#
+            r#"{"theme":"system","accent":"amber","map_theme":"page","map_colors":"full","map_legend_folded":false,"language":null,"nodes_sort":null,"telemetry_window":null,"telemetry_folded":0,"packets_with_own":false,"sections_folded":0}"#
         );
     }
 
