@@ -154,6 +154,10 @@ pub struct Live {
     /// `None` until the daemon has said which radios there are.
     pub radios: RwSignal<Option<Vec<Radio>>>,
     pub selected: RwSignal<Option<RadioId>>,
+    /// The selected radio's kind, told only as it changes: not as the radios
+    /// are read again, which they are at every message, and would draw
+    /// anew whatever goes by it, its menus closed.
+    kind: Memo<Option<RadioKind>>,
     /// The radio settings' tab, kept as it was left or as a shortcut asks.
     pub settings_tab: RwSignal<crate::settings::Tab>,
     /// The same, for a MeshCore radio, whose tabs are its own.
@@ -309,13 +313,20 @@ pub struct Live {
 
 impl Live {
     fn new() -> Self {
+        let radios = RwSignal::new(None::<Vec<Radio>>);
+        let selected = RwSignal::new(daemon::last_radio());
+        let kind = Memo::new(move |_| {
+            let id = selected.get()?;
+            radios.with(|radios| radios.as_ref()?.iter().find(|r| r.id == id).map(|r| r.kind))
+        });
         Self {
             daemon: RwSignal::new(Daemon::Connecting),
             page: RwSignal::new(Page::Map),
             menu: RwSignal::new(false),
             preferences: RwSignal::new(shown()),
-            radios: RwSignal::new(None),
-            selected: RwSignal::new(daemon::last_radio()),
+            radios,
+            selected,
+            kind,
             settings_tab: RwSignal::new(crate::settings::Tab::User),
             meshcore_tab: RwSignal::new(crate::meshcore_settings::MeshcoreTab::User),
             radio_editing: RwSignal::new(Editing::Closed),
@@ -1110,9 +1121,7 @@ impl Live {
     }
 
     pub fn selected_kind(self) -> Option<RadioKind> {
-        let id = self.selected.get()?;
-        self.radios
-            .with(|radios| radios.as_ref()?.iter().find(|r| r.id == id).map(|r| r.kind))
+        self.kind.get()
     }
 
     fn is_selected(self, radio: RadioId) -> bool {
