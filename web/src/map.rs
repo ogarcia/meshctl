@@ -863,12 +863,11 @@ pub fn MapView() -> impl IntoView {
         picked
     });
 
-    // The route shown, drawn again as its nodes or its traces change.
-    Effect::new(move |_| {
-        if element.get().is_none() {
-            return;
-        }
-        live.preferences.track();
+    // The route shown, as the map draws it: worked out again as its nodes or
+    // its traces change, but told the map only as it does change, not as
+    // any node is heard, which drew it anew all the while, blinking on a
+    // vector map.
+    let route_drawing = Memo::new(move |_| {
         let drawing = live.map_route.get().and_then(|num| {
             let traceroute = traces_of(live, num).1?;
             let at = |node: u32| {
@@ -904,7 +903,15 @@ pub fn MapView() -> impl IntoView {
                 nodes: on_it,
             })
         });
-        map_route(drawing.and_then(|d| serde_json::to_string(&d).ok()));
+        drawing.and_then(|d| serde_json::to_string(&d).ok())
+    });
+    // Drawn again in the colours of the preferences, as they change too.
+    Effect::new(move |_| {
+        if element.get().is_none() {
+            return;
+        }
+        live.preferences.track();
+        map_route(route_drawing.get());
     });
 
     // A node to go to, asked for from its page: once the map is there, which
