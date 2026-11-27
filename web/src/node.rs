@@ -776,7 +776,7 @@ fn Section(
                     {when.map(|when| view! { <span>{when}</span> })}
                     {quiet}
                 </span>
-                {asked.map(|asked| view! { <AskButton asked /> })}
+                {asked.map(|asked| view! { <AskButton asked /> }.into_any())}
             </header>
             {children()}
         </section>
@@ -971,6 +971,9 @@ fn AskButton(asked: Asked, #[prop(optional)] place: &'static str) -> impl IntoVi
                     </Show>
                 </span>
             }
+            // Its type erased: nested as deep as it is, a debug build ran
+            // out of stack building it.
+            .into_any()
         })
     }
 }
