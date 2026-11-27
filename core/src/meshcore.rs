@@ -1459,19 +1459,9 @@ impl Mesh {
             return Err(AdminError::OwnNode);
         }
         let key = self.meshcore_key(&session, num)?;
-        let mut contact = match session
-            .client
-            .ask_one(command::get_contact(&key), |r| {
-                matches!(r, Response::Contact(_))
-            })
-            .await
-        {
-            Ok(Response::Contact(contact)) => contact,
-            Ok(Response::Error(_)) => return Err(AdminError::UnknownNode),
-            Ok(_) => return Err(AdminError::Refused("UNEXPECTED".to_owned())),
-            Err("the radio did not answer") => return Err(AdminError::NoAnswer),
-            Err(_) => return Err(AdminError::NotConnected),
-        };
+        let mut contact = contact_now(&session, &key)
+            .await?
+            .ok_or(AdminError::UnknownNode)?;
         contact.flags = (contact.flags & !1) | u8::from(favorite);
         contact.last_modified = now();
         session.client.done(command::add_contact(&contact)).await?;
@@ -1481,6 +1471,27 @@ impl Mesh {
                 vec![Event::Node(node.clone())]
             }
             None => Vec::new(),
+        });
+        Ok(())
+    }
+
+    /// Reads a contact again from the radio, as it has it now, and takes it
+    /// for the node: whatever was known of it here gone first, by whoever
+    /// asks. One the radio does not have is left as it is.
+    pub(crate) async fn meshcore_reread(&self, num: u32) -> Result<(), AdminError> {
+        let session = self.meshcore_session()?;
+        let key = self.meshcore_key(&session, num)?;
+        let Some(contact) = contact_now(&session, &key).await? else {
+            return Ok(());
+        };
+        remember_keys(&session, std::slice::from_ref(&contact));
+        let node = Node {
+            on_radio: Some(true),
+            ..node_from(&contact)
+        };
+        self.update(|state| {
+            state.nodes.insert(node.num, node.clone());
+            vec![Event::Node(node)]
         });
         Ok(())
     }
@@ -2337,6 +2348,24 @@ impl LoginSent {
 /// says it had no such thing. A splitter in between that keeps contacts of
 /// its own may list what the radio no longer has, and what is gone is as
 /// forgotten as it was meant to be.
+/// A contact as the radio has it now, by its whole key; none if it has no
+/// such contact.
+async fn contact_now(session: &Session, key: &[u8; 32]) -> Result<Option<Contact>, AdminError> {
+    match session
+        .client
+        .ask_one(command::get_contact(key), |r| {
+            matches!(r, Response::Contact(_))
+        })
+        .await
+    {
+        Ok(Response::Contact(contact)) => Ok(Some(contact)),
+        Ok(Response::Error(_)) => Ok(None),
+        Ok(_) => Err(AdminError::Refused("UNEXPECTED".to_owned())),
+        Err("the radio did not answer") => Err(AdminError::NoAnswer),
+        Err(_) => Err(AdminError::NotConnected),
+    }
+}
+
 fn forgotten(said: Result<(), AdminError>) -> Result<(), AdminError> {
     match said {
         Err(AdminError::Refused(why)) if why == "NOT_FOUND" => Ok(()),

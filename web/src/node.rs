@@ -2375,9 +2375,14 @@ fn RemoveDrawer() -> impl IntoView {
                         .nodes
                         .with(|nodes| nodes.get(&asking.num).and_then(|n| n.on_radio));
                     (on_radio != Some(false))
-                        .then(|| view! { <Removal everything=false busy problem /> })
+                        .then(|| {
+                            view! {
+                                <Removal how=daemon::Forget::Radio busy problem />
+                                <Removal how=daemon::Forget::Meshctl busy problem />
+                            }
+                        })
                 }}
-                <Removal everything=true busy problem />
+                <Removal how=daemon::Forget::Everything busy problem />
                 {move || {
                     problem
                         .get()
@@ -2400,7 +2405,7 @@ fn RemoveDrawer() -> impl IntoView {
 /// sure.
 #[component]
 fn Removal(
-    everything: bool,
+    how: daemon::Forget,
     busy: RwSignal<bool>,
     problem: RwSignal<Option<Failure>>,
 ) -> impl IntoView {
@@ -2415,7 +2420,7 @@ fn Removal(
         busy.set(true);
         problem.set(None);
         spawn_local(async move {
-            let done = daemon::remove_node(radio, asking.num, everything).await;
+            let done = daemon::remove_node(radio, asking.num, how).await;
             busy.set(false);
             sure.set(false);
             match done {
@@ -2425,23 +2430,24 @@ fn Removal(
             }
         });
     };
-    let (title, text) = if everything {
-        (
+    let (title, text) = match how {
+        daemon::Forget::Everything => (
             t!(i18n, remove_all).into_any(),
             t!(i18n, remove_all_text).into_any(),
-        )
-    } else {
-        (
+        ),
+        daemon::Forget::Radio => (
             t!(i18n, remove_radio).into_any(),
             t!(i18n, remove_radio_text).into_any(),
-        )
+        ),
+        daemon::Forget::Meshctl => (
+            t!(i18n, remove_meshctl).into_any(),
+            t!(i18n, remove_meshctl_text).into_any(),
+        ),
     };
-    let button = move || {
-        if everything {
-            t!(i18n, remove_all_button).into_any()
-        } else {
-            t!(i18n, remove_radio_button).into_any()
-        }
+    let button = move || match how {
+        daemon::Forget::Everything => t!(i18n, remove_all_button).into_any(),
+        daemon::Forget::Radio => t!(i18n, remove_radio_button).into_any(),
+        daemon::Forget::Meshctl => t!(i18n, remove_meshctl_button).into_any(),
     };
     view! {
         <section class="way">

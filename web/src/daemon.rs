@@ -522,11 +522,28 @@ pub async fn set_favorite(radio: RadioId, node: u32, favorite: bool) -> Result<(
 
 /// Has the radio forget a node, and with `everything`, meshctl all it kept
 /// of it besides; once the radio says it did.
-pub async fn remove_node(radio: RadioId, node: u32, everything: bool) -> Result<(), Failure> {
+pub async fn remove_node(radio: RadioId, node: u32, how: Forget) -> Result<(), Failure> {
+    let query = match how {
+        Forget::Radio => "",
+        Forget::Everything => "?everything=true",
+        Forget::Meshctl => "?history=true",
+    };
     let request = with_token(Request::delete(&url(&format!(
-        "/radios/{radio}/nodes/{node}?everything={everything}"
+        "/radios/{radio}/nodes/{node}{query}"
     ))));
     answer(request.send().await).await.map(|_| ())
+}
+
+/// How much of a node to forget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Forget {
+    /// The radio forgets it; meshctl keeps it, as no longer on the radio.
+    Radio,
+    /// The radio forgets it, and meshctl all it kept of it.
+    Everything,
+    /// meshctl alone forgets all it kept of it, and reads it again from the
+    /// radio.
+    Meshctl,
 }
 
 /// A node's telemetry over the latest so many seconds.

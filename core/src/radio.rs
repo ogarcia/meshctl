@@ -658,6 +658,17 @@ impl Mesh {
         Ok(())
     }
 
+    /// Reads a node again from the radio, as it has it now: whatever was
+    /// known of it here gone first, by whoever asks. A Meshtastic radio sends
+    /// no node alone: its whole node list is asked for again, as on
+    /// connecting. Nothing goes on the air.
+    pub async fn reread_node(&self, num: u32) -> Result<(), AdminError> {
+        if self.is_meshcore() {
+            return self.meshcore_reread(num).await;
+        }
+        self.resync()
+    }
+
     /// Has the radio forget a node: out of its node list, until it is heard
     /// again. Here it stays, as not in the radio's list. Nothing goes on the
     /// air; nothing is asked of the radio if it is known not to have it.

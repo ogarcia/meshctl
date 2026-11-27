@@ -1113,6 +1113,18 @@ impl Drop for Running {
     }
 }
 
+/// How much of a node to forget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Forgetting {
+    /// The radio forgets it; meshctl keeps it, as no longer on the radio.
+    Radio,
+    /// The radio forgets it, and meshctl all it kept of it.
+    Everything,
+    /// meshctl alone forgets all it kept of it, and reads it again from the
+    /// radio, which is asked for nothing else.
+    Meshctl,
+}
+
 #[derive(Clone)]
 pub struct Radios {
     pub(crate) store: Store,
@@ -2366,30 +2378,55 @@ impl Radios {
         Ok(Some(()))
     }
 
-    /// Has a radio forget a node, and with `everything`, forgets all kept of
-    /// it besides: `None` if there is no such radio. Every client hears of it
-    /// as `node_removed`, and of the rest as `node_forgotten`.
+    /// Forgets a node as `how` says: `None` if there is no such radio. Every
+    /// client hears of it as `node_removed`, and of the rest as
+    /// `node_forgotten`; of a node read again, as `node`.
     pub async fn remove_node(
         &self,
         id: RadioId,
         num: u32,
-        everything: bool,
+        how: Forgetting,
     ) -> Result<Result<Option<()>, AdminError>> {
         let Some(mesh) = self.mesh(id) else {
             return Ok(Ok(None));
         };
-        if let Err(err) = mesh.remove_node(num).await {
+        if how == Forgetting::Meshctl {
+            let (own, known) = mesh.read(|state| {
+                (
+                    state.local.as_ref().map(|l| l.num) == Some(num),
+                    state.nodes.contains_key(&num),
+                )
+            });
+            if own {
+                return Ok(Err(AdminError::OwnNode));
+            }
+            if !known {
+                return Ok(Err(AdminError::UnknownNode));
+            }
+        } else if let Err(err) = mesh.remove_node(num).await {
             return Ok(Err(err));
         }
         // Out of the radio only, it stays here, as the radio no longer
         // having it. All of it forgotten, out of the list too: now, rather
         // than once the event is taken, so that what comes from it next
         // finds it gone.
-        if everything {
+        if how != Forgetting::Radio {
             mesh.drop_node(num);
             self.store.remove_node(id, num).await?;
             self.store.forget_node(id, num).await?;
             let _ = self.changes.send(Change::NodeForgotten(id, num));
+        }
+        // Forgotten here alone: as the radio has it, again. Not read, it
+        // comes back as the radio next tells of it.
+        if how == Forgetting::Meshctl
+            && let Err(err) = mesh.reread_node(num).await
+        {
+            tracing::warn!(
+                radio = id,
+                node = num,
+                ?err,
+                "a node forgotten here, not read again"
+            );
         }
         Ok(Ok(Some(())))
     }

@@ -5,7 +5,7 @@
 //! nodes it hears.
 
 use super::{AppState, convert};
-use crate::radios::{tidy, validate};
+use crate::radios::{Forgetting, tidy, validate};
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -490,6 +490,11 @@ struct Removal {
     /// forgets it, and meshctl's list with it.
     #[serde(default)]
     everything: bool,
+    /// All kept of it, as with `everything`, but by meshctl alone: the radio
+    /// is not asked to forget it, and it is read again from the radio as it
+    /// has it. Not with `everything`.
+    #[serde(default)]
+    history: bool,
 }
 
 /// Remove node
@@ -499,7 +504,9 @@ struct Removal {
 /// which every client hears of as `node`. With `everything`, meshctl
 /// forgets it and all it kept of it besides, which every client hears of
 /// as `node_removed` and `node_forgotten`; a node the radio is known not to
-/// have is not asked of it.
+/// have is not asked of it. With `history`, meshctl alone forgets all it
+/// kept of it, and reads it again from the radio, which every client hears
+/// of as `node`: on Meshtastic the radio's whole node list is read again.
 #[utoipa::path(
     delete,
     path = "/radios/{radio}/nodes/{node}",
@@ -528,11 +535,13 @@ async fn remove_node(
     let Some(num) = node_num(&node) else {
         return error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest);
     };
-    match state
-        .radios
-        .remove_node(radio, num, removal.everything)
-        .await
-    {
+    let how = match (removal.everything, removal.history) {
+        (false, false) => Forgetting::Radio,
+        (true, false) => Forgetting::Everything,
+        (false, true) => Forgetting::Meshctl,
+        (true, true) => return error(StatusCode::BAD_REQUEST, ErrorCode::BadRequest),
+    };
+    match state.radios.remove_node(radio, num, how).await {
         Ok(Ok(Some(()))) => StatusCode::NO_CONTENT.into_response(),
         Ok(Ok(None) | Err(AdminError::UnknownNode)) => not_found(),
         Ok(Err(AdminError::OwnNode | AdminError::NoPath)) => {

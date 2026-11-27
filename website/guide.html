@@ -184,10 +184,12 @@
               known for sure.
             </p>
             <p>
-              Removing a node offers two things: <em>Remove from the radio</em>,
+              Removing a node offers three things: <em>Remove from the radio</em>,
               which keeps it in meshctl with its history (heard again, it is back
-              on the radio); or <em>Delete everything</em>, which also deletes all
-              meshctl keeps of it but its messages in channels.
+              on the radio); <em>Only from meshctl</em>, which deletes all meshctl
+              keeps of it and reads it again from the radio, untouched; or
+              <em>Delete everything</em>, which has the radio forget it too. Its
+              messages in channels always stay.
             </p>
           </div>
         </section>

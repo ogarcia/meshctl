@@ -190,7 +190,8 @@ pub fn RoomGone(node: u32) -> impl IntoView {
         busy.set(true);
         problem.set(false);
         spawn_local(async move {
-            let done = crate::daemon::remove_node(radio, node, true).await;
+            let done =
+                crate::daemon::remove_node(radio, node, crate::daemon::Forget::Everything).await;
             // The conversation goes as the node does, as every client hears,
             // maybe before this answer: then there is nothing left to tell.
             match done {
