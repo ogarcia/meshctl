@@ -1294,5 +1294,14 @@
   "notify_waypoint_entered": "Went into",
   "notify_waypoint_left": "Left",
   "waypoint_watch": "Tell me of its fence",
-  "waypoint_unwatch": "Stop telling me of its fence"
+  "waypoint_unwatch": "Stop telling me of its fence",
+  "waypoint_crossings": "Lately",
+  "waypoint_crossed_in": "went in",
+  "waypoint_crossed_out": "went out",
+  "waypoint_ago": "{t} ago",
+  "notice_shared": "shared",
+  "notice_entered": "went into",
+  "notice_left": "left",
+  "notice_see": "See",
+  "notice_close": "Put away"
 }

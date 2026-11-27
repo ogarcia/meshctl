@@ -9,7 +9,7 @@
 use super::{Store, now};
 use anyhow::Result;
 use meshctl_api::RadioId;
-use meshctl_api::waypoints::{Fence, FenceArea, Waypoint};
+use meshctl_api::waypoints::{CROSSINGS_TOLD, Fence, FenceArea, FenceCrossing, Waypoint};
 use meshctl_core::waypoint::{FenceBox, Waypoint as Shared};
 
 /// What came of a waypoint heard or shared.
@@ -123,6 +123,7 @@ impl Row {
                 notify_favorites_only: self.notify_favorites_only,
             }),
             watched: self.watched,
+            crossings: Vec::new(),
             channel: num(self.channel),
             created_by: num(self.created_by),
             updated_by: num(self.updated_by),
@@ -157,7 +158,68 @@ impl Store {
         .bind(now())
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.iter().map(Row::waypoint).collect())
+        let mut waypoints: Vec<Waypoint> = rows.iter().map(Row::waypoint).collect();
+        for waypoint in &mut waypoints {
+            waypoint.crossings = self.crossings(radio, waypoint.id).await?;
+        }
+        Ok(waypoints)
+    }
+
+    /// The latest nodes gone in or out of a waypoint's fence, the newest
+    /// first.
+    async fn crossings(&self, radio: RadioId, id: u32) -> Result<Vec<FenceCrossing>> {
+        let rows: Vec<(i64, bool, i64)> = sqlx::query_as(
+            "SELECT node, entered, at FROM waypoint_crossing
+            WHERE radio_id = ? AND waypoint_id = ? ORDER BY at DESC, id DESC LIMIT ?",
+        )
+        .bind(radio)
+        .bind(i64::from(id))
+        .bind(i64::try_from(CROSSINGS_TOLD).unwrap_or(5))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(node, entered, at)| FenceCrossing {
+                node: num(node),
+                entered,
+                at,
+            })
+            .collect())
+    }
+
+    /// Keeps a node gone in or out of a waypoint's fence, and forgets the
+    /// waypoint's oldest past the latest twenty.
+    pub async fn add_crossing(
+        &self,
+        radio: RadioId,
+        id: u32,
+        crossing: FenceCrossing,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO waypoint_crossing (radio_id, waypoint_id, node, entered, at)
+            VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(radio)
+        .bind(i64::from(id))
+        .bind(i64::from(crossing.node))
+        .bind(crossing.entered)
+        .bind(crossing.at)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM waypoint_crossing WHERE radio_id = ? AND waypoint_id = ? AND id NOT IN
+                (SELECT id FROM waypoint_crossing WHERE radio_id = ? AND waypoint_id = ?
+                ORDER BY at DESC, id DESC LIMIT 20)",
+        )
+        .bind(radio)
+        .bind(i64::from(id))
+        .bind(radio)
+        .bind(i64::from(id))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     /// One of a radio's waypoints, as the API tells it and as it goes on the
@@ -169,7 +231,12 @@ impl Store {
                 .bind(i64::from(id))
                 .fetch_optional(&self.pool)
                 .await?;
-        Ok(row.map(|row| (row.waypoint(), row.shared())))
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let mut waypoint = row.waypoint();
+        waypoint.crossings = self.crossings(radio, id).await?;
+        Ok(Some((waypoint, row.shared())))
     }
 
     /// The waypoints whose fences a radio watches, those not gone, as they
@@ -486,6 +553,39 @@ mod tests {
         assert!(!watched(&store, radio).await);
         assert!(store.watch_waypoint(radio, 77, true).await.unwrap());
         assert!(watched(&store, radio).await);
+    }
+
+    #[tokio::test]
+    async fn the_latest_crossings_go_with_their_waypoint() {
+        let (store, radio) = store_with_radio().await;
+        store
+            .keep_waypoint(radio, &summit(), from(5, false))
+            .await
+            .unwrap();
+        for at in 0..25 {
+            let crossing = FenceCrossing {
+                node: 9,
+                entered: at % 2 == 0,
+                at: 1000 + at,
+            };
+            store.add_crossing(radio, 77, crossing).await.unwrap();
+        }
+        let (kept, _) = store.waypoint(radio, 77).await.unwrap().unwrap();
+        assert_eq!(kept.crossings.len(), CROSSINGS_TOLD);
+        assert_eq!(kept.crossings[0].at, 1024);
+        assert!(kept.crossings[0].entered);
+        let left: (i64,) = sqlx::query_as("SELECT count(*) FROM waypoint_crossing")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(left.0, 20);
+        // Forgotten, its crossings with it.
+        store.forget_waypoint(radio, 77).await.unwrap();
+        let left: (i64,) = sqlx::query_as("SELECT count(*) FROM waypoint_crossing")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(left.0, 0);
     }
 
     #[tokio::test]

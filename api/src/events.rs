@@ -96,6 +96,18 @@ pub enum ServerMessage {
     /// A waypoint gone from a radio: deleted by whoever may, expired, or
     /// forgotten in meshctl.
     WaypointGone { radio: RadioId, id: u32 },
+    /// A node gone in or out of a fence meshctl watches, whether or not
+    /// notifications are on: a client open tells of it its own way.
+    FenceCrossed {
+        radio: RadioId,
+        waypoint: u32,
+        crossing: crate::waypoints::FenceCrossing,
+        /// Who crossed it, by name, and the waypoint's emoji and name: to
+        /// tell of it with no more to read.
+        who: String,
+        icon: String,
+        name: String,
+    },
     /// A conversation read further, in any client: up to which message.
     ConversationRead {
         radio: RadioId,

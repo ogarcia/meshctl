@@ -52,6 +52,16 @@ pub enum Change {
     Waypoint(RadioId, meshctl_api::waypoints::Waypoint),
     /// A waypoint gone: deleted, expired, or forgotten in meshctl.
     WaypointGone(RadioId, u32),
+    /// A node gone in or out of a fence watched, as kept: by whom, and the
+    /// waypoint's emoji and name.
+    FenceCrossed {
+        radio: RadioId,
+        waypoint: u32,
+        crossing: meshctl_api::waypoints::FenceCrossing,
+        who: String,
+        icon: String,
+        name: String,
+    },
     /// A login to a room sent, and how long its answer is waited for.
     LoginWaiting {
         radio: RadioId,

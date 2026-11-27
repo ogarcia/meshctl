@@ -43,6 +43,10 @@ pub struct Waypoint {
     /// radio's own, as asked when shared; of another's, once asked to.
     #[serde(default)]
     pub watched: bool,
+    /// The latest nodes gone in or out of its fence while it was watched,
+    /// the newest first: up to five.
+    #[serde(default)]
+    pub crossings: Vec<FenceCrossing>,
     /// The channel's slot it was last heard or sent on.
     pub channel: u32,
     /// Who shared it first, and who last changed it, by their node numbers.
@@ -84,6 +88,20 @@ pub struct FenceArea {
     pub north: f64,
     pub east: f64,
 }
+
+/// A node gone in or out of a waypoint's fence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct FenceCrossing {
+    pub node: u32,
+    /// Whether it went in; out, if not.
+    pub entered: bool,
+    /// When, in seconds since the epoch.
+    pub at: i64,
+}
+
+/// How many of a waypoint's crossings it carries.
+pub const CROSSINGS_TOLD: usize = 5;
 
 /// A waypoint to share, new or changed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

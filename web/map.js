@@ -594,6 +594,15 @@ window.meshctlMap = (() => {
       facts.append(pair);
     }
     box.append(facts);
+    // The latest nodes gone in or out of its fence.
+    if (waypoint.crossings && waypoint.crossings.length) {
+      const crossed = element("div", "mc-crossings");
+      crossed.append(element("p", "mc-crossings-title", labels.crossings));
+      const list = element("ul");
+      for (const line of waypoint.crossings) list.append(element("li", "", line));
+      crossed.append(list);
+      box.append(crossed);
+    }
     const buttons = element("div", "mc-card-buttons");
     const actions = waypoint.editable
       ? [["waypoint-edit", labels.edit, true], ["waypoint-delete", labels.deleteAll, false]]

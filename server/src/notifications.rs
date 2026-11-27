@@ -310,17 +310,34 @@ impl Fences {
     }
 }
 
-/// Tells of a node gone in or out of a fence, wherever notifications are on.
+/// Keeps a node gone in or out of a fence, and tells every client; and
+/// notifies of it, wherever notifications are on.
 async fn crossing(radios: &Radios, radio: RadioId, fence: &Shared, node: u32, went_in: bool) {
+    let crossed = meshctl_api::waypoints::FenceCrossing {
+        node,
+        entered: went_in,
+        at: now(),
+    };
+    if let Err(err) = radios.store.add_crossing(radio, fence.id, crossed).await {
+        tracing::warn!(error = format_args!("{err:#}"), "fences");
+    }
+    let Some(mesh) = radios.mesh(radio) else {
+        return;
+    };
+    radios.tell(Change::FenceCrossed {
+        radio,
+        waypoint: fence.id,
+        crossing: crossed,
+        who: mesh.read(|state| node_name(state, node)),
+        icon: fence.emoji().to_string(),
+        name: fence.name.clone(),
+    });
     let Ok(settings) = radios.notifications().await else {
         return;
     };
     if !settings.enabled {
         return;
     }
-    let Some(mesh) = radios.mesh(radio) else {
-        return;
-    };
     let kept = radios.store.waypoint(radio, fence.id).await.ok().flatten();
     let channel = kept.as_ref().map_or(0, |(w, _)| w.channel);
     let (sender, channel_name) =

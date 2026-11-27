@@ -232,6 +232,8 @@ pub struct Live {
     pub map_spot: RwSignal<Option<(f64, f64)>>,
     /// A waypoint to show on the map, with its popup open.
     pub map_waypoint: RwSignal<Option<u32>>,
+    /// What happened to waypoints, told of over the panel for a while.
+    pub notices: RwSignal<Vec<crate::waypoints::Notice>>,
     /// Whether the about window is open.
     pub about: RwSignal<bool>,
     /// meshctl's version, and the commit it was built from, once asked.
@@ -319,6 +321,7 @@ impl Live {
             waypoints: RwSignal::new(Vec::new()),
             waypoint_form: RwSignal::new(None),
             map_waypoint: RwSignal::new(None),
+            notices: RwSignal::new(Vec::new()),
             packets: RwSignal::new(Vec::new()),
             packet_filter: RwSignal::new(PacketFilter::default()),
             packets_held: RwSignal::new(Vec::new()),
@@ -1432,7 +1435,62 @@ impl Live {
                     Ok(())
                 }
                 ServerMessage::Notification { notification } => {
+                    // A waypoint shared: told over the panel too. A fence
+                    // crossed is, as it comes on its own.
+                    if let Some(waypoint) = notification
+                        .waypoint
+                        .as_ref()
+                        .filter(|w| w.event == meshctl_api::WaypointEvent::Shared)
+                    {
+                        let (icon, name) = notification
+                            .text
+                            .as_deref()
+                            .and_then(|t| t.split_once(' '))
+                            .map_or((String::new(), String::new()), |(i, n)| {
+                                (i.to_owned(), n.to_owned())
+                            });
+                        crate::waypoints::tell(
+                            self,
+                            notification.radio,
+                            waypoint.id,
+                            notification.sender.clone(),
+                            icon,
+                            name,
+                            waypoint.event,
+                        );
+                    }
                     crate::notify::show(self, notification);
+                    Ok(())
+                }
+                ServerMessage::FenceCrossed {
+                    radio,
+                    waypoint,
+                    crossing,
+                    who,
+                    icon,
+                    name,
+                } => {
+                    if self.is_selected(radio) {
+                        self.waypoints.update(|waypoints| {
+                            if let Some(w) = waypoints.iter_mut().find(|w| w.id == waypoint) {
+                                w.crossings.insert(0, crossing);
+                                w.crossings.truncate(meshctl_api::waypoints::CROSSINGS_TOLD);
+                            }
+                        });
+                    }
+                    crate::waypoints::tell(
+                        self,
+                        radio,
+                        waypoint,
+                        who,
+                        icon,
+                        name,
+                        if crossing.entered {
+                            meshctl_api::WaypointEvent::Entered
+                        } else {
+                            meshctl_api::WaypointEvent::Left
+                        },
+                    );
                     Ok(())
                 }
                 ServerMessage::Radios | ServerMessage::Lagged => self.refresh().await,
@@ -1710,6 +1768,7 @@ fn Frame() -> impl IntoView {
             <crate::phone::RadioSheet />
             <crate::links::LinkAdder />
             <crate::about::AboutDialog />
+            <crate::waypoints::Notices />
             <Newer />
         </div>
     }

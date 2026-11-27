@@ -1294,5 +1294,14 @@
   "notify_waypoint_entered": "Entró en",
   "notify_waypoint_left": "Salió de",
   "waypoint_watch": "Avisarme de su geovalla",
-  "waypoint_unwatch": "Dejar de avisarme de su geovalla"
+  "waypoint_unwatch": "Dejar de avisarme de su geovalla",
+  "waypoint_crossings": "Últimamente",
+  "waypoint_crossed_in": "entró",
+  "waypoint_crossed_out": "salió",
+  "waypoint_ago": "hace {t}",
+  "notice_shared": "compartió",
+  "notice_entered": "entró en",
+  "notice_left": "salió de",
+  "notice_see": "Ver",
+  "notice_close": "Quitar"
 }

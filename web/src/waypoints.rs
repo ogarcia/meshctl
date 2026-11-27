@@ -15,7 +15,7 @@ use leptos::task::spawn_local;
 use meshctl_api::waypoints::{
     DESCRIPTION_BYTES, Fence, FenceArea, NAME_BYTES, NewWaypoint, Waypoint,
 };
-use meshctl_api::{ErrorCode, LinkState, Peer, RadioKind};
+use meshctl_api::{ErrorCode, LinkState, Peer, RadioId, RadioKind, WaypointEvent};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -85,6 +85,8 @@ struct Drawn {
     /// For one with a fence that tells of anything: whether meshctl tells
     /// of it; none for one without.
     watched: Option<bool>,
+    /// The latest nodes gone in or out of its fence, in words.
+    crossings: Vec<String>,
 }
 
 /// A fence as the map draws it: a circle, in metres, a box, or both.
@@ -147,6 +149,7 @@ struct Labels {
     locked: String,
     watch: String,
     unwatch: String,
+    crossings: String,
 }
 
 /// What the map draws of the waypoints, as `map.js` takes it.
@@ -177,6 +180,7 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
         locked: t_string!(i18n, waypoint_locked).to_owned(),
         watch: t_string!(i18n, waypoint_watch).to_owned(),
         unwatch: t_string!(i18n, waypoint_unwatch).to_owned(),
+        crossings: t_string!(i18n, waypoint_crossings).to_owned(),
     };
     let sharing = can_share(live);
     if !shown(live) {
@@ -255,6 +259,28 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
                     facts,
                     locked: w.locked_to.is_some(),
                     editable: sharing && w.locked_to.is_none_or(|to| Some(to) == local),
+                    crossings: w
+                        .crossings
+                        .iter()
+                        .map(|c| {
+                            let said = if c.entered {
+                                t_string!(i18n, waypoint_crossed_in)
+                            } else {
+                                t_string!(i18n, waypoint_crossed_out)
+                            };
+                            format!(
+                                "{} {said} · {}",
+                                by(c.node),
+                                t_string!(i18n, waypoint_ago).replace(
+                                    "{t}",
+                                    &ago(
+                                        u32::try_from(now).unwrap_or(0),
+                                        u32::try_from(c.at).unwrap_or(0),
+                                    ),
+                                ),
+                            )
+                        })
+                        .collect(),
                     watched: w
                         .fence
                         .filter(|f| f.is_some() && (f.notify_on_enter || f.notify_on_exit))
@@ -271,6 +297,135 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
         labels,
         add: sharing,
         waypoints,
+    }
+}
+
+/// What happened to a waypoint, told over the panel for a while.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Notice {
+    key: u32,
+    radio: RadioId,
+    waypoint: u32,
+    who: String,
+    icon: String,
+    name: String,
+    event: WaypointEvent,
+}
+
+/// How long a notice stays, in milliseconds.
+const NOTICE_MS: u32 = 15_000;
+
+/// Tells of what happened to a waypoint over the panel, for a while.
+pub fn tell(
+    live: Live,
+    radio: RadioId,
+    waypoint: u32,
+    who: String,
+    icon: String,
+    name: String,
+    event: WaypointEvent,
+) {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let key = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    live.notices.update(|notices| {
+        notices.push(Notice {
+            key,
+            radio,
+            waypoint,
+            who,
+            icon,
+            name,
+            event,
+        });
+        // A few at once, the newest.
+        let extra = notices.len().saturating_sub(3);
+        notices.drain(..extra);
+    });
+    spawn_local(async move {
+        gloo_timers::future::TimeoutFuture::new(NOTICE_MS).await;
+        live.notices
+            .try_update(|notices| notices.retain(|n| n.key != key));
+    });
+}
+
+/// What happened to waypoints, over the panel: each with the way to see it
+/// on the map, and to put it away.
+#[component]
+pub fn Notices() -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let many_radios = move || {
+        live.radios
+            .with(|r| r.as_ref().is_some_and(|r| r.len() > 1))
+    };
+    let radio_name = move |radio: RadioId| {
+        live.radios.with(|r| {
+            r.as_ref()
+                .and_then(|r| r.iter().find(|r| r.id == radio))
+                .map(|r| r.name.clone())
+                .unwrap_or_default()
+        })
+    };
+    view! {
+        <div class="notices" role="status" aria-live="polite">
+            <For
+                each=move || live.notices.get()
+                key=|notice| notice.key
+                children=move |notice| {
+                    let said = match notice.event {
+                        WaypointEvent::Shared => t_string!(i18n, notice_shared),
+                        WaypointEvent::Entered => t_string!(i18n, notice_entered),
+                        WaypointEvent::Left => t_string!(i18n, notice_left),
+                    };
+                    let what = if notice.name.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{} {}", notice.icon, notice.name)
+                    };
+                    let (radio, waypoint, key) = (notice.radio, notice.waypoint, notice.key);
+                    let close_label = move || t_string!(i18n, notice_close);
+                    view! {
+                        <div class="notice">
+                            <span class="notice-text">
+                                <strong>{notice.who.clone()}</strong>
+                                " "
+                                {said}
+                                " "
+                                <strong>{what}</strong>
+                                {move || {
+                                    many_radios()
+                                        .then(|| {
+                                            view! {
+                                                <span class="dim">{format!(" · {}", radio_name(radio))}</span>
+                                            }
+                                        })
+                                }}
+                            </span>
+                            <button
+                                type="button"
+                                on:click=move |_| {
+                                    if live.selected.get_untracked() != Some(radio) {
+                                        live.select(radio);
+                                    }
+                                    live.show_waypoint(waypoint);
+                                    live.notices.update(|n| n.retain(|n| n.key != key));
+                                }
+                            >
+                                {t!(i18n, notice_see)}
+                            </button>
+                            <button
+                                type="button"
+                                class="close"
+                                title=close_label
+                                aria-label=close_label
+                                on:click=move |_| live.notices.update(|n| n.retain(|n| n.key != key))
+                                inner_html=CLOSE
+                            ></button>
+                        </div>
+                    }
+                }
+            />
+        </div>
     }
 }
 

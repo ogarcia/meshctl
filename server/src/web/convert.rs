@@ -87,6 +87,21 @@ pub fn change(change: Change) -> Option<api::events::ServerMessage> {
         Change::Mesh(radio, mesh::Event::Synced) => ServerMessage::Synced { radio },
         Change::Waypoint(radio, waypoint) => ServerMessage::Waypoint { radio, waypoint },
         Change::WaypointGone(radio, id) => ServerMessage::WaypointGone { radio, id },
+        Change::FenceCrossed {
+            radio,
+            waypoint,
+            crossing,
+            who,
+            icon,
+            name,
+        } => ServerMessage::FenceCrossed {
+            radio,
+            waypoint,
+            crossing,
+            who,
+            icon,
+            name,
+        },
         Change::Mesh(radio, mesh::Event::NodeRemoved(node)) => {
             ServerMessage::NodeRemoved { radio, node }
         }
