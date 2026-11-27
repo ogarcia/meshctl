@@ -64,7 +64,7 @@ sys-locale = "0.3"
 # its id in the user's registry, as a portable folder installs nothing.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications"] }
-windows-registry = "0.6"
+windows-registry = "0.100"
 
 # No tray on Linux's desktops: kept running as a background app through the
 # XDG portal instead, which the desktop lists and can stop; and messages
