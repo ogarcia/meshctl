@@ -74,8 +74,9 @@ a reason to point at another tool, not to grow this one.
   [Meshview](https://github.com/meshview/meshview) for that.
 - Users, roles and permissions. See [Access](#access).
 - Sharing one radio between several clients. Put
-  [tasticsplitter](https://github.com/ogarcia/tasticsplitter) in front of it,
-  and point meshctl at it as if it were the radio.
+  [tasticsplitter](https://github.com/ogarcia/tasticsplitter) (for Meshtastic)
+  or [coresplitter](https://github.com/ogarcia/coresplitter) (for MeshCore) in
+  front of it, and point meshctl at it as if it were the radio.
 
 Meshtastic and MeshCore are both supported, side by side, each as far as its
 firmware goes: what one mesh has and the other has not is offered only where
@@ -147,7 +148,8 @@ radio.lan:4404            on the network, another port
 
 A radio serves one client at a time. If something else (the phone app, say)
 also needs it, put [tasticsplitter](https://github.com/ogarcia/tasticsplitter)
-in front and give meshctl its address instead.
+(for Meshtastic) or [coresplitter](https://github.com/ogarcia/coresplitter)
+(for MeshCore) in front and give meshctl its address instead.
 
 ### In a container
 
