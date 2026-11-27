@@ -20,6 +20,7 @@ use meshctl_api::{ChannelKey, ErrorCode, LinkContents, LinkMode, RadioKind};
 /// its `*-plus` icons carry in a corner (`user-plus`'s), which none of its
 /// strokes reach.
 pub(crate) const ANTENNA_PLUS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v8" /><path d="M16 4.5v7" /><path d="M12 5v16" /><path d="M8 5.5v5" /><path d="M4 6v4" /><path d="M20 8h-16" /><path d="M16 19h6" /><path d="M19 16v6" /></svg>"#;
+const TRASH: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/trash.svg");
 const LINK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/link.svg");
 const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.svg");
 const QRCODE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/qrcode.svg");
@@ -33,16 +34,26 @@ pub enum LinkWant {
     Lora,
 }
 
-/// The action of the list of nodes, in its heading, that adds one from its
-/// link, as the radios' adds a radio: only with a radio picked.
+/// The actions of the list of nodes, in its heading, only with a radio
+/// picked: removing many at once, as a node's page removes it, and adding
+/// one from its link, as the radios' adds a radio.
 #[component]
 pub fn AddNodeLink() -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
+    let sweep_label = move || t_string!(i18n, sweep_open);
     move || {
         live.selected_kind().is_some().then(|| {
             view! {
                 <div class="actions">
+                    <button
+                        type="button"
+                        class="icon-button"
+                        title=sweep_label
+                        aria-label=sweep_label
+                        inner_html=TRASH
+                        on:click=move |_| live.sweeping.set(true)
+                    ></button>
                     <button
                         type="button"
                         class="primary with-icon"

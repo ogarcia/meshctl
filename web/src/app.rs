@@ -240,6 +240,8 @@ pub struct Live {
     pub vector_failed: RwSignal<bool>,
     /// Whether that was told and put away.
     pub vector_told: RwSignal<bool>,
+    /// Whether the drawer that removes many nodes at once is open.
+    pub sweeping: RwSignal<bool>,
     /// MeshCore radios whose list of contacts is full, told over the panel.
     pub full: RwSignal<Vec<RadioId>>,
     /// When each was put away, in milliseconds: not told again for a while,
@@ -335,6 +337,7 @@ impl Live {
             notices: RwSignal::new(Vec::new()),
             vector_failed: RwSignal::new(false),
             vector_told: RwSignal::new(false),
+            sweeping: RwSignal::new(false),
             full: RwSignal::new(Vec::new()),
             full_told: RwSignal::new(std::collections::BTreeMap::new()),
             packets: RwSignal::new(Vec::new()),

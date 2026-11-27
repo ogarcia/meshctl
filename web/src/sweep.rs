@@ -44,6 +44,8 @@ pub fn Sweep(open: RwSignal<bool>, shown: Memo<Vec<u32>>) -> impl IntoView {
     let going = RwSignal::new(None::<(usize, usize)>);
     let stopping = RwSignal::new(false);
     let swept = RwSignal::new(None::<Swept>);
+    // Closed as the list goes: not open again by itself when it is back.
+    on_cleanup(move || open.set(false));
     // Those the list shows and are old enough, never a favourite: by their
     // numbers, and whether the radio has each.
     let picked = Memo::new(move |_| {
