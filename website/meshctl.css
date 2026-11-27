@@ -134,6 +134,7 @@ p, figure, h1, h2, h3 { margin: 0; }
 .ti-sun { --icon: url(icons/sun.svg); }
 .ti-send { --icon: url(icons/send.svg); }
 .ti-settings { --icon: url(icons/settings.svg); }
+.ti-map-pin { --icon: url(icons/map-pin.svg); }
 
 /* --- the bar on top, as the interface's headings ------------------------- */
 

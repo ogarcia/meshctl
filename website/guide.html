@@ -68,6 +68,7 @@
           <li><a href="#radios">Several radios</a></li>
           <li><a href="#nodes">Nodes</a></li>
           <li><a href="#map">The map</a></li>
+          <li><a href="#waypoints">Waypoints</a></li>
           <li><a href="#chat">Chat</a></li>
           <li><a href="#marks">Message marks</a></li>
           <li><a href="#sharing">Sharing in a chat</a></li>
@@ -201,6 +202,44 @@
             <p>
               A node's popup traces the route to it, or shows the last one, there
               and back, on the map.
+            </p>
+          </div>
+        </section>
+
+        <section id="waypoints">
+          <div class="mc-heading"><h2><span class="ti ti-map-pin" aria-hidden="true"></span> Waypoints</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              Meshtastic's points on the map, shared with the mesh: each with an
+              emoji, a name and a description, and maybe a date it expires on. The
+              official apps and the firmware show them too, whoever shared them.
+            </p>
+            <ul>
+              <li><strong>To share one</strong>, a right click or a long touch on the map, <em>Add a waypoint here</em>. It goes on the channel you choose: whoever has it sees it.</li>
+              <li><strong>Locked</strong>, no other node may change or delete it; open, anyone may.</li>
+              <li><strong>Its popup</strong> tells who shared and changed it, when it expires and on which channel; and edits it or deletes it for everyone, where your radio may, or here alone.</li>
+              <li><strong>The pin under the clock</strong> shows or hides them on the map, for each radio.</li>
+            </ul>
+            <p>
+              A waypoint may have a fence around it: a circle of 100 m to 5 km, or
+              a box, the area the map shows as you open the form. Its author says
+              whether a node going in or out is told of, of the favourites only,
+              maybe. meshctl tells of your radio's own fences, and of another's
+              once you ask, from its popup; the first time it places a node against
+              one it only notes where it is.
+            </p>
+            <p>
+              A waypoint shared new is notified of where its channel's messages all
+              are; a node going in or out of a fence, wherever notifications are
+              on. Picked, the notification opens the map on it.
+            </p>
+            <p class="mc-warning">
+              <span class="ti ti-alert-triangle" aria-hidden="true"></span>
+              <span>
+                The firmware takes no more than one waypoint every ten seconds,
+                changes and deletions included: meshctl says so before sending one
+                too soon.
+              </span>
             </p>
           </div>
         </section>

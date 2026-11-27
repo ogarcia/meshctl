@@ -67,6 +67,7 @@
           <li><a href="#radios">Varias radios</a></li>
           <li><a href="#nodes">Nodos</a></li>
           <li><a href="#map">El mapa</a></li>
+          <li><a href="#waypoints">Waypoints</a></li>
           <li><a href="#chat">Chat</a></li>
           <li><a href="#marks">Las marcas de los mensajes</a></li>
           <li><a href="#sharing">Compartir en un chat</a></li>
@@ -206,6 +207,46 @@
             <p>
               La ventanita de un nodo traza la ruta hasta él, o enseña la última,
               ida y vuelta, en el mapa.
+            </p>
+          </div>
+        </section>
+
+        <section id="waypoints">
+          <div class="mc-heading"><h2><span class="ti ti-map-pin" aria-hidden="true"></span> Waypoints</h2></div>
+          <div class="mc-card mc-prose">
+            <p>
+              Los puntos en el mapa de Meshtastic, compartidos con la malla: cada uno
+              con un emoji, un nombre y una descripción, y quizá una fecha en la que
+              caduca. Las apps oficiales y el firmware también los muestran, los
+              comparta quien los comparta.
+            </p>
+            <ul>
+              <li><strong>Para compartir uno</strong>, clic derecho o pulsación larga en el mapa, <em>Añadir un waypoint aquí</em>. Va por el canal que elijas: lo ve quien lo tenga.</li>
+              <li><strong>Bloqueado</strong>, ningún otro nodo puede cambiarlo ni borrarlo; abierto, cualquiera.</li>
+              <li><strong>Su ventanita</strong> dice quién lo puso y quién lo cambió, cuándo caduca y por qué canal; y lo edita o lo borra para todos, donde tu radio pueda, o solo aquí.</li>
+              <li><strong>El pin bajo el reloj</strong> los muestra u oculta en el mapa, para cada radio.</li>
+            </ul>
+            <p>
+              Un waypoint puede tener una geovalla alrededor: un círculo de 100 m a
+              5 km, o un rectángulo, lo que muestra el mapa al abrir el formulario.
+              Quien lo crea dice si se avisa cuando un nodo entra o sale, quizá solo
+              de los favoritos. meshctl avisa de las geovallas de tu radio, y de las
+              de otros si se lo pides desde su ventanita; la primera vez que sitúa
+              un nodo frente a una solo anota dónde está.
+            </p>
+            <p>
+              De un waypoint nuevo se avisa donde se avisa de todos los mensajes de
+              su canal; de un nodo que entra o sale de una geovalla, siempre que las
+              notificaciones estén encendidas. Al pulsar la notificación, el mapa se
+              abre en él.
+            </p>
+            <p class="mc-warning">
+              <span class="ti ti-alert-triangle" aria-hidden="true"></span>
+              <span>
+                El firmware no admite más de un waypoint cada diez segundos, cambios
+                y borrados incluidos: meshctl lo dice antes de enviar uno demasiado
+                pronto.
+              </span>
             </p>
           </div>
         </section>
