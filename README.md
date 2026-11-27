@@ -283,6 +283,10 @@ cargo run                              # the daemon, on 127.0.0.1:7434,
 cargo run -p meshctl-core --example probe -- <host> [port] [seconds]
                                        # what a radio says, line by line;
                                        # read only, never transmits
+cargo run -p meshctl-fakes --bin fake-meshtastic -- [port] [control port]
+cargo run -p meshctl-fakes --bin fake-meshcore -- [port] [control port]
+                                       # a pretend radio to add to meshctl,
+                                       # see fakes/README.md
 ```
 
 | Crate     | What it is                                                     |
@@ -293,6 +297,7 @@ cargo run -p meshctl-core --example probe -- <host> [port] [seconds]
 | `server`  | The daemon, `meshctld`: a library and its binary               |
 | `web`     | The Leptos interface (client-side rendered), with translations |
 | `desktop` | The desktop app, with Tauri: the daemon in a window of its own |
+| `fakes`   | Pretend Meshtastic and MeshCore radios, to work without one    |
 
 Translations are in `web/locales/`, one JSON file per language, English being
 the reference. Using a key English does not declare is a compile error; one
