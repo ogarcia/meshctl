@@ -260,14 +260,16 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
                 key: new_key,
                 kind,
                 flags: 0,
-                path_len: i8::try_from(random(3)).unwrap_or(0),
+                // No way to it known, as the firmware adds one heard.
+                path_len: -1,
                 name: format!("{called} {n}"),
                 last_advert: at,
                 lat: 43_350_000 + i32::try_from(random(40_000)).unwrap_or(0),
                 lon: -8_420_000 + i32::try_from(random(40_000)).unwrap_or(0),
                 last_modified: at,
             };
-            // Heard raw, its advert flooded through Monte.
+            // Heard raw, its advert flooded: through Torre and Monte, and
+            // through Monte alone, the copy that came the shortest way.
             let mut payload = new.key.to_vec();
             payload.extend(at.to_le_bytes());
             payload.extend([0; 64]);
@@ -275,6 +277,8 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             payload.extend(new.lat.to_le_bytes());
             payload.extend(new.lon.to_le_bytes());
             payload.extend(new.name.as_bytes());
+            let longer = flooded(raw::PAYLOAD_ADVERT, &[key(0x55), key(0x52)], None, &payload);
+            let _ = events.send(Event::Push(rx_log(3, -101, &longer)));
             let packet = flooded(raw::PAYLOAD_ADVERT, &[key(0x52)], None, &payload);
             let _ = events.send(Event::Push(rx_log(5, -95, &packet)));
             advertised(&mut radio, new, 1, events)
