@@ -187,6 +187,10 @@ pub struct Live {
     pub thread: RwSignal<Vec<Message>>,
     /// Of the selected radio, the newest first.
     pub traceroutes: RwSignal<Vec<Traceroute>>,
+    /// The selected radio's waypoints, those not gone.
+    pub waypoints: RwSignal<Vec<meshctl_api::waypoints::Waypoint>>,
+    /// A waypoint being shared, where, or changed, which: its form open.
+    pub waypoint_form: RwSignal<Option<crate::waypoints::Form>>,
     /// What the selected radio heard, the newest first.
     pub packets: RwSignal<Vec<Packet>>,
     /// Which packets the live view shows, but for the radio's own: those go
@@ -310,6 +314,8 @@ impl Live {
             open: RwSignal::new(None),
             thread: RwSignal::new(Vec::new()),
             traceroutes: RwSignal::new(Vec::new()),
+            waypoints: RwSignal::new(Vec::new()),
+            waypoint_form: RwSignal::new(None),
             packets: RwSignal::new(Vec::new()),
             packet_filter: RwSignal::new(PacketFilter::default()),
             packets_held: RwSignal::new(Vec::new()),
@@ -658,6 +664,7 @@ impl Live {
             self.nodes.set(BTreeMap::new());
             self.channels.set(Vec::new());
             self.conversations.set(Vec::new());
+            self.waypoints.set(Vec::new());
             return Ok(());
         };
         let status = daemon::status(radio).await?;
@@ -665,6 +672,7 @@ impl Live {
         let channels = daemon::channels(radio).await?;
         let conversations = daemon::conversations(radio).await?;
         let traceroutes = daemon::traceroutes(radio).await?;
+        let waypoints = daemon::waypoints(radio).await?;
         // The live view's, as its filters say: the radio's own node, from
         // what was just read of it.
         let filter = PacketFilter {
@@ -684,6 +692,7 @@ impl Live {
             self.channels.set(channels);
             self.conversations.set(conversations);
             self.traceroutes.set(traceroutes);
+            self.waypoints.set(waypoints);
             self.set_packets(packets);
             self.loaded.set(Some(radio));
         }
@@ -1229,6 +1238,18 @@ impl Live {
                             self.go(Page::Chats);
                         }
                     }
+                    Ok(())
+                }
+                ServerMessage::Waypoint { radio, waypoint } if self.is_selected(radio) => {
+                    self.waypoints.update(|waypoints| {
+                        waypoints.retain(|w| w.id != waypoint.id);
+                        waypoints.insert(0, waypoint);
+                    });
+                    Ok(())
+                }
+                ServerMessage::WaypointGone { radio, id } if self.is_selected(radio) => {
+                    self.waypoints
+                        .update(|waypoints| waypoints.retain(|w| w.id != id));
                     Ok(())
                 }
                 ServerMessage::Synced { radio } if self.is_selected(radio) => {

@@ -895,6 +895,46 @@ pub async fn set_map_max_age(radio: RadioId, max_age: Option<u32>) -> Result<(),
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Keeps whether a radio's map shows its waypoints.
+pub async fn set_map_waypoints(radio: RadioId, shown: bool) -> Result<(), Failure> {
+    let request = with_token(Request::put(&url(&format!(
+        "/radios/{radio}/map-waypoints"
+    ))))
+    .json(&meshctl_api::waypoints::MapWaypoints { shown })
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
+/// A radio's waypoints, those not gone.
+pub async fn waypoints(radio: RadioId) -> Result<Vec<meshctl_api::waypoints::Waypoint>, Failure> {
+    get(&format!("/radios/{radio}/waypoints")).await
+}
+
+/// Shares a waypoint through a radio, or changes one already shared.
+pub async fn send_waypoint(
+    radio: RadioId,
+    id: Option<u32>,
+    waypoint: &meshctl_api::waypoints::NewWaypoint,
+) -> Result<meshctl_api::waypoints::Waypoint, Failure> {
+    let request = match id {
+        Some(id) => Request::put(&url(&format!("/radios/{radio}/waypoints/{id}"))),
+        None => Request::post(&url(&format!("/radios/{radio}/waypoints"))),
+    };
+    let request = with_token(request)
+        .json(waypoint)
+        .map_err(|_| Failure::Unreachable)?;
+    let response = answer(request.send().await).await?;
+    response.json().await.map_err(|_| Failure::Unreachable)
+}
+
+/// Deletes a waypoint, for everyone or in meshctl alone.
+pub async fn delete_waypoint(radio: RadioId, id: u32, everyone: bool) -> Result<(), Failure> {
+    let request = with_token(Request::delete(&url(&format!(
+        "/radios/{radio}/waypoints/{id}?everyone={everyone}"
+    ))));
+    answer(request.send().await).await.map(|_| ())
+}
+
 pub async fn save_map_view(radio: RadioId, view: &MapView) -> Result<(), Failure> {
     let request = with_token(Request::put(&url(&format!("/radios/{radio}/map-view"))))
         .json(view)

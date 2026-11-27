@@ -24,7 +24,15 @@ const CLOSE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/x.
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = open)]
-    fn map_open(element: &web_sys::HtmlElement, pick: &JsValue, act: &JsValue, moved: &JsValue);
+    fn map_open(
+        element: &web_sys::HtmlElement,
+        pick: &JsValue,
+        act: &JsValue,
+        moved: &JsValue,
+        place: &JsValue,
+    );
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = waypoints)]
+    fn map_waypoints(json: &str);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = close)]
     fn map_close();
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = nodes)]
@@ -568,6 +576,9 @@ pub fn MapView() -> impl IntoView {
         let act = Closure::<dyn Fn(u32, String)>::new(move |num, what: String| {
             untrack(|| match what.as_str() {
                 "chat" => live.open_chat(Peer::Node { node: num }),
+                "waypoint-edit" => crate::waypoints::edit(live, num),
+                "waypoint-delete" => crate::waypoints::delete(live, i18n, num, true),
+                "waypoint-forget" => crate::waypoints::delete(live, i18n, num, false),
                 "unroute" => live.map_route.set(None),
                 "route" => {
                     if live.map_route.get_untracked() == Some(num) {
@@ -599,11 +610,17 @@ pub fn MapView() -> impl IntoView {
                 let _ = daemon::save_map_view(radio, &view).await;
             });
         });
+        // A waypoint to share there, from the map's own menu.
+        let place = Closure::<dyn Fn(f64, f64)>::new(move |lat, lon| {
+            live.waypoint_form
+                .set(Some(crate::waypoints::Form::at(lat, lon)));
+        });
         map_open(
             &element,
             &pick.into_js_value(),
             &act.into_js_value(),
             &moved.into_js_value(),
+            &place.into_js_value(),
         );
         true
     });
@@ -736,6 +753,18 @@ pub fn MapView() -> impl IntoView {
         };
         if let Ok(json) = serde_json::to_string(&drawing) {
             map_nodes(&json);
+        }
+    });
+
+    // The waypoints, drawn again as they, the time, the radio's link or the
+    // language change; none while its map leaves them out.
+    Effect::new(move |_| {
+        if element.get().is_none() {
+            return;
+        }
+        let drawing = crate::waypoints::drawing(live, i18n);
+        if let Ok(json) = serde_json::to_string(&drawing) {
+            map_waypoints(&json);
         }
     });
 
@@ -883,6 +912,8 @@ pub fn MapView() -> impl IntoView {
                 <crate::offline::OfflineBanner />
             </div>
             <AgeButton />
+            <crate::waypoints::WaypointsButton />
+            <crate::waypoints::WaypointForm />
             <Show when=move || placed(live) == 0 && crate::offline::offline(live).is_none()>
                 <p class="map-empty card dim">{t!(i18n, map_empty)}</p>
             </Show>

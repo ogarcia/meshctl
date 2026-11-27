@@ -12,10 +12,10 @@
 //   fit(points, {padding, paddingTopLeft, paddingBottomRight, maxZoom,
 //       animate, fly, duration}), fitZoom(points, padding)
 //   toPoint(lat, lon) {x, y} and toLatLon(x, y) {lat, lon}, on the screen
-//   on(name, handler): click {x, y, lat, lon, event}, moveend, zoomstart,
-//       zoomend, keydown (event), popupclose (the popup)
-//   layer(): a group to draw on, with marker, line, ring, circle, clear
-//       and remove; the map is one too, for what goes on it alone
+//   on(name, handler): click and contextmenu {x, y, lat, lon, event},
+//       moveend, zoomstart, zoomend, keydown (event), popupclose (the popup)
+//   layer(): a group to draw on, with marker, line, ring, circle, rect,
+//       clear and remove
 //   popup(lat, lon, content, options), closePopup(popup?)
 //   control(element, position)
 //   stop(event): a click handled, which the map is not to take as its own
@@ -98,8 +98,8 @@ window.meshctlLeaflet = (() => {
         return { lat: at.lat, lon: at.lng };
       },
       on: (name, handler) => {
-        if (name === "click") {
-          map.on("click", (e) =>
+        if (name === "click" || name === "contextmenu") {
+          map.on(name, (e) =>
             handler({
               x: e.containerPoint.x,
               y: e.containerPoint.y,
@@ -164,9 +164,12 @@ window.meshctlLeaflet = (() => {
   // rings of a size on the screen and circles of one on the ground.
   //
   //   marker(lat, lon, {html, size: [w, h], anchor: [x, y], tooltip,
-  //          tooltipAnchor, z, interactive, draggable, moved(lat, lon)})
+  //          tooltipAnchor, z, interactive, draggable, moved(lat, lon),
+  //          click()}): a click on one with click() is its own, and the
+  //          map does not take it
   //   line(points, style), ring(lat, lon, pixels, style),
-  //   circle(lat, lon, metres, style), clear(), remove()
+  //   circle(lat, lon, metres, style), rect([[south, west], [north,
+  //   east]], style), clear(), remove()
   //
   // A style is {color, weight, opacity, dash, cap, fill, fillOpacity}: a
   // dash as "8 6", fill a colour (none, no fill).
@@ -196,9 +199,16 @@ window.meshctlLeaflet = (() => {
           interactive: o.interactive !== false || !!o.draggable,
           draggable: !!o.draggable,
           zIndexOffset: o.z || 0,
-          // Clicks reach the map, which looks for whatever is near them.
-          bubblingMouseEvents: true,
+          // Clicks reach the map, which looks for whatever is near them;
+          // but for one that takes them itself.
+          bubblingMouseEvents: !o.click,
         });
+        if (o.click) {
+          marker.on("click", (e) => {
+            L.DomEvent.stop(e);
+            o.click();
+          });
+        }
         if (o.tooltip) {
           marker.bindTooltip(o.tooltip, { direction: "top", className: "mc-tip" });
         }
@@ -219,6 +229,7 @@ window.meshctlLeaflet = (() => {
         L.circleMarker([lat, lon], { ...lineStyle(style), radius: pixels }).addTo(layer),
       circle: (lat, lon, metres, style) =>
         L.circle([lat, lon], { ...lineStyle(style), radius: metres }).addTo(layer),
+      rect: (bounds, style) => L.rectangle(bounds, lineStyle(style)).addTo(layer),
       clear: () => layer.clearLayers(),
       remove: () => layer.remove(),
     };

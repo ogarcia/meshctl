@@ -72,6 +72,14 @@ window.meshctlMap = (() => {
   let moved = null;
   let saveTimer = null;
   let allButton = null;
+  // Told where a waypoint is to be shared, from the map's own menu.
+  let onPlaceAt = null;
+  // The waypoints, as the Rust side gave them last, their layer, and the
+  // popup on one, while open, and which one.
+  let shownWaypoints = { labels: {}, waypoints: [], add: false };
+  let waypointLayer = null;
+  let waypointPopup = null;
+  let waypointPopupFor = null;
 
   // A colour of the interface's, as the style sheet has it now.
   const color = (name) =>
@@ -103,9 +111,10 @@ window.meshctlMap = (() => {
     anchor: [18, 34],
   });
 
-  function open(target, onPick, onAct, onMoved) {
+  function open(target, onPick, onAct, onMoved, onPlace) {
     close();
     map = engine.create(target);
+    onPlaceAt = onPlace;
     map.control(allControl());
     moved = onMoved;
     savedView = undefined;
@@ -120,6 +129,7 @@ window.meshctlMap = (() => {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(save, SAVE_AFTER);
     });
+    waypointLayer = map.layer();
     markers = map.layer();
     spotLayer = map.layer();
     preview = map.layer();
@@ -146,9 +156,31 @@ window.meshctlMap = (() => {
         act && act(0, "unroute");
       }
     });
+    // The map's own menu, a right click or a long touch: a waypoint shared
+    // there, where the radio can share one.
+    map.on("contextmenu", (click) => {
+      if (!shownWaypoints.add || !onPlaceAt) return;
+      const button = element("button", "mc-place-add", shownWaypoints.labels.add);
+      button.type = "button";
+      const at = { lat: click.lat, lon: wrapLon(click.lon) };
+      button.addEventListener("click", (event) => {
+        map.stop(event);
+        map.closePopup();
+        onPlaceAt(at.lat, at.lon);
+      });
+      map.popup(click.lat, click.lon, button, {
+        className: "mc-place-popup",
+        closeButton: false,
+        offset: [0, -2],
+      });
+    });
     // The node's popup closed by the person, not by another opening in its
     // place: the node is let go.
     map.on("popupclose", (popup) => {
+      if (popup && popup === waypointPopup) {
+        waypointPopup = null;
+        waypointPopupFor = null;
+      }
       if (popup && popup === cardPopup) {
         cardPopup = null;
         popupFor = null;
@@ -183,6 +215,10 @@ window.meshctlMap = (() => {
     map = null;
     spotLayer = null;
     markers = null;
+    waypointLayer = null;
+    waypointPopup = null;
+    waypointPopupFor = null;
+    onPlaceAt = null;
     pick = null;
     act = null;
     cardPopup = null;
@@ -456,6 +492,137 @@ window.meshctlMap = (() => {
     centre();
     place();
     showCard();
+  }
+
+  // The waypoints to show, as JSON: {labels: {add, edit, deleteAll,
+  // deleteHere, locked}, add, waypoints: [{id, lat, lon, icon, name,
+  // description, facts: [{icon, label, value}], locked, editable}]}: add
+  // whether the map's menu offers to share one, editable whether this one
+  // can be changed and deleted for everyone.
+  function waypoints(json) {
+    if (!map) return;
+    shownWaypoints = JSON.parse(json);
+    drawWaypoints();
+    showWaypointCard();
+  }
+
+  // A waypoint's pin: its emoji, on a disc that stands out from the map.
+  function waypointPin(waypoint) {
+    const pin = element("span", "mc-waypoint");
+    pin.append(element("span", "", waypoint.icon));
+    return pin.outerHTML;
+  }
+
+  function waypointTip(waypoint) {
+    const box = element("div");
+    const title = element("div", "mc-tip-title");
+    title.append(element("span", "", waypoint.name));
+    box.append(title);
+    if (waypoint.description) box.append(element("div", "mc-tip-heard", waypoint.description));
+    return box;
+  }
+
+  function drawWaypoints() {
+    waypointLayer.clear();
+    for (const waypoint of shownWaypoints.waypoints) {
+      waypointLayer.marker(waypoint.lat, waypoint.lon, {
+        html: waypointPin(waypoint),
+        size: [30, 30],
+        anchor: [15, 15],
+        tooltipAnchor: [0, -15],
+        tooltip: waypointTip(waypoint),
+        // Under the nodes, which are what the map is for.
+        z: -100,
+        click: () => {
+          waypointPopupFor = waypoint.id;
+          showWaypointCard(true);
+        },
+      });
+    }
+  }
+
+  // What the popup of a waypoint says, and its buttons.
+  function waypointCard(waypoint) {
+    const labels = shownWaypoints.labels;
+    const box = element("div", "mc-card mc-waypoint-card");
+    const head = element("div", "mc-card-head");
+    head.append(element("span", "mc-waypoint-icon", waypoint.icon));
+    const title = element("div", "mc-card-title");
+    title.append(element("strong", "", waypoint.name));
+    if (waypoint.locked) title.append(element("span", "mc-card-id", labels.locked));
+    head.append(title);
+    box.append(head);
+    if (waypoint.description) {
+      box.append(element("p", "mc-waypoint-description", waypoint.description));
+    }
+    const facts = element("dl", "mc-card-facts");
+    for (const fact of waypoint.facts) {
+      const pair = element("div", fact.wide ? "wide" : "");
+      const term = element("dt");
+      const icon = element("span", "mc-icon");
+      icon.style.setProperty(
+        "--icon",
+        `url(/tabler-icons-3.51.0/icons/outline/${fact.icon}.svg)`,
+      );
+      icon.setAttribute("aria-hidden", "true");
+      term.append(icon, fact.label);
+      pair.append(term, element("dd", "", fact.value));
+      facts.append(pair);
+    }
+    box.append(facts);
+    const buttons = element("div", "mc-card-buttons");
+    const actions = waypoint.editable
+      ? [["waypoint-edit", labels.edit, true], ["waypoint-delete", labels.deleteAll, false]]
+      : [];
+    actions.push(["waypoint-forget", labels.deleteHere, false]);
+    for (const [what, label, primary] of actions) {
+      const button = element("button", primary ? "primary" : "", label);
+      button.type = "button";
+      button.addEventListener("click", (event) => {
+        map.stop(event);
+        act && act(waypoint.id, what);
+      });
+      buttons.append(button);
+    }
+    box.append(buttons);
+    return box;
+  }
+
+  // The popup on the waypoint picked, opened (open), current, or closed if
+  // it is gone.
+  function showWaypointCard(open) {
+    if (waypointPopupFor === null) return;
+    const waypoint = shownWaypoints.waypoints.find((w) => w.id === waypointPopupFor);
+    if (!waypoint) {
+      if (waypointPopup) map.closePopup(waypointPopup);
+      waypointPopup = null;
+      waypointPopupFor = null;
+      return;
+    }
+    const content = waypointCard(waypoint);
+    if (waypointPopup && !open) {
+      waypointPopup.content().replaceChildren(...content.childNodes);
+      waypointPopup.move(waypoint.lat, waypoint.lon);
+      return;
+    }
+    if (!open) return;
+    // Whatever was picked is let go: one popup at a time.
+    const id = waypointPopupFor;
+    if (cardPopup) {
+      const shown = cardPopup;
+      cardPopup = null;
+      popupFor = null;
+      map.closePopup(shown);
+      pick && pick(null);
+    }
+    waypointPopupFor = id;
+    waypointPopup = map.popup(waypoint.lat, waypoint.lon, content, {
+      className: "mc-node-popup",
+      maxWidth: 320,
+      maxHeight: Math.max(160, map.size().y - 150),
+      offset: [0, -12],
+      autoPanPadding: [24, 24],
+    });
   }
 
   // A node to show, asked for from elsewhere, as its page: the map goes to
@@ -897,7 +1064,7 @@ window.meshctlMap = (() => {
   }
 
   return {
-    open, close, nodes, focus, route, stay, reset, resize, view, mini, miniRoute, miniClose,
-    picker, pickerAt, pickerClose, spot,
+    open, close, nodes, waypoints, focus, route, stay, reset, resize, view, mini, miniRoute,
+    miniClose, picker, pickerAt, pickerClose, spot,
   };
 })();

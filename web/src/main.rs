@@ -44,6 +44,7 @@ mod sortable;
 mod stepper;
 mod storage;
 mod traces;
+mod waypoints;
 mod welcome;
 
 fn main() {
