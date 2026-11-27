@@ -14,6 +14,7 @@
 //! README.
 
 mod control;
+mod crowd;
 mod link;
 mod neighbour;
 mod radio;

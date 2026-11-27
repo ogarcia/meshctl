@@ -324,6 +324,19 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             });
             format!("{count} messages on slot {channel}, one every 1.5 s")
         }
+        // Many nodes heard, about Madrid, at every distance, of every role and
+        // heard at every age; the link dropped to have them read. 0, none.
+        Some("crowd") => {
+            let Some(count) = words.next().and_then(|w| w.parse::<u32>().ok()) else {
+                return format!("usage: crowd <nodes, up to {}>", crate::crowd::MOST);
+            };
+            let mut radio = radio.lock().unwrap();
+            radio.crowd = crate::crowd::crowd(count);
+            let told = radio.crowd.len();
+            drop(radio);
+            let _ = events.send(Event::Drop);
+            format!("a crowd of {told}; dropped to have them read")
+        }
         Some("fill") => {
             // Every slot a channel, as a radio that has them all; one with
             // a long name, to be cut.
@@ -646,7 +659,7 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             format!("the neighbour takes the radio's key as an admin key: {allowed}")
         }
         _ => "commands: hear <slot> <text>, past <slot>, chat <slot>, dms, fill, \
-             twin <from> <to>, off <slot>, own, place, move <lat> <lon>, status [<text>], \
+             twin <from> <to>, off <slot>, crowd <nodes>, own, place, move <lat> <lon>, status [<text>], \
              waypoints <slot>, unwaypoint <id>, history <hours>, \
              answers always|sometimes|never, limits on|off, admin allow|deny, drop"
             .into(),

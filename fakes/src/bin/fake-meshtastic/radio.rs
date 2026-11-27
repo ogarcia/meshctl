@@ -64,6 +64,8 @@ pub struct Radio {
     pub admin_key: bool,
     /// The neighbour's own settings, once asked as its admin.
     pub neighbour: Option<NeighbourSettings>,
+    /// Many other nodes heard, as `crowd` has them.
+    pub crowd: Vec<pb::NodeInfo>,
 }
 
 /// A packet's id from one of the counters, each with its own top byte: the
@@ -197,6 +199,7 @@ impl Radio {
             contacts: BTreeMap::new(),
             admin_key: true,
             neighbour: None,
+            crowd: Vec::new(),
         }
     }
 
@@ -259,6 +262,7 @@ impl Radio {
                 ..Default::default()
             }),
         ];
+        out.extend(self.crowd.iter().cloned().map(V::NodeInfo));
         // The contacts added to it, as nodes not heard yet.
         out.extend(self.contacts.iter().map(|(num, user)| {
             V::NodeInfo(pb::NodeInfo {
