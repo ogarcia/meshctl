@@ -2595,20 +2595,6 @@
       }
       .notice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .notice button { flex: none; min-height: 30px; padding: 0 12px; font-size: 13px; }
-      .notice .close {
-        min-width: 0;
-        min-height: 0;
-        height: 30px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 30px;
-        padding: 0;
-        border: 0;
-        background: none;
-        color: var(--mc-muted);
-      }
-      .notice .close svg { width: 16px; height: 16px; }
       /* On a phone, under the top bar; on the map, in the middle of what its
          buttons on the left leave, as far from them as from the right edge,
          as the route's notice; and, with a route shown, under its notice. */
@@ -2941,20 +2927,29 @@
         height: 22px;
         overflow: visible;
       }
-      .map-route-notice button {
+      /* The notices' close buttons, the route's and the waypoints': a bare
+         cross, round when hovered, whatever size a touch screen gives
+         buttons. */
+      .map-route-notice button,
+      .notice .close {
         flex: none;
         display: flex;
         align-items: center;
         justify-content: center;
         width: 28px;
         height: 28px;
-        /* Round, whatever size a touch screen gives buttons. */
         min-width: 0;
         min-height: 0;
         padding: 0;
+        border: 0;
         border-radius: 50%;
+        background: none;
+        color: var(--mc-muted);
       }
-      .map-route-notice button svg { width: 16px; height: 16px; }
+      .map-route-notice button:hover,
+      .notice .close:hover { background: var(--mc-raised); color: var(--mc-text); }
+      .map-route-notice button svg,
+      .notice .close svg { width: 16px; height: 16px; }
       .mc-picker-popup .leaflet-popup-content { margin: 6px; width: 260px !important; max-width: calc(100vw - 64px); }
       .mc-picker-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 4px 8px; }
       .mc-picker-head p { flex: 1; margin: 0; font-size: 12px; color: var(--mc-muted); }
