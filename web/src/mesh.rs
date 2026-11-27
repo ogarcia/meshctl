@@ -703,8 +703,8 @@ fn NodeLine(node: Node, now: RwSignal<u32>) -> impl IntoView {
                         }
                     })}
                 // Written to only once the radio keeps it, as MeshCore sends
-                // only to its contacts.
-                {(!keepable)
+                // only to its contacts; and never a MeshCore repeater or sensor.
+                {(!keepable && untrack(|| live.talks(num)))
                     .then(|| {
                         view! {
                             <button

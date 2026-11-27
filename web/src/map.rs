@@ -335,7 +335,8 @@ struct Marker {
     /// `trace` or `tracing`; none when routes cannot be traced.
     route: Option<&'static str>,
     /// Whether it can be written to: not a MeshCore node the radio does not
-    /// keep, as MeshCore sends only to its contacts.
+    /// keep, as MeshCore sends only to its contacts, nor a MeshCore repeater
+    /// or sensor, which reads nothing written to it.
     writable: bool,
     /// Whether it tells that nobody reads what is sent to it: its chat is
     /// offered, as on its page, but not as the thing to do.
@@ -707,7 +708,9 @@ pub fn MapView() -> impl IntoView {
                         role: role(n.role.as_deref()),
                         selected: picked == Some(n.num),
                         route: route_button(n.num),
-                        writable: traceable || n.on_radio != Some(false),
+                        writable: (traceable || n.on_radio != Some(false))
+                            && (traceable
+                                || !matches!(n.role.as_deref(), Some("REPEATER" | "SENSOR"))),
                         unmessagable: n.unmessagable,
                     })
                 })

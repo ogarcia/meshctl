@@ -962,6 +962,19 @@ impl Live {
             .with(|nodes| nodes.get(&node).and_then(|n| n.role.as_deref()) == Some("ROOM"))
     }
 
+    /// Whether a node of the selected radio is one to write to. A MeshCore
+    /// repeater or sensor is not: it drops what it is sent, and takes it as a
+    /// command only from its admin, which its console is for.
+    pub fn talks(self, node: u32) -> bool {
+        self.selected_kind() != Some(RadioKind::Meshcore)
+            || !self.nodes.with(|nodes| {
+                matches!(
+                    nodes.get(&node).and_then(|n| n.role.as_deref()),
+                    Some("REPEATER" | "SENSOR")
+                )
+            })
+    }
+
     /// Reads a room's login, as it is opened or the radio syncs again; not
     /// logged in since the radio connected, with a password kept, it logs in
     /// with it, as once each time the radio connects.
@@ -2692,33 +2705,34 @@ fn PeerHeading(peer: Peer) -> impl IntoView {
                 // Written to only once a MeshCore radio keeps it.
                 let unkept = live.selected_kind() == Some(RadioKind::Meshcore)
                     && known().is_some_and(|n| n.on_radio == Some(false));
-                let chat = (page == Page::Node && !local() && !unkept).then(|| {
-                    if unmessagable() {
-                        view! {
-                            <button
-                                class="with-icon"
-                                title=move || t_string!(i18n, node_unmessagable)
-                                on:click=move |_| live.open_chat(peer)
-                            >
-                                <span class="icon" inner_html=MESSAGE_OFF></span>
-                                <span class="label">{t!(i18n, node_message)}</span>
-                            </button>
+                let chat =
+                    (page == Page::Node && !local() && !unkept && live.talks(node)).then(|| {
+                        if unmessagable() {
+                            view! {
+                                <button
+                                    class="with-icon"
+                                    title=move || t_string!(i18n, node_unmessagable)
+                                    on:click=move |_| live.open_chat(peer)
+                                >
+                                    <span class="icon" inner_html=MESSAGE_OFF></span>
+                                    <span class="label">{t!(i18n, node_message)}</span>
+                                </button>
+                            }
+                            .into_any()
+                        } else {
+                            view! {
+                                <button
+                                    class="primary with-icon"
+                                    title=move || t_string!(i18n, node_message)
+                                    on:click=move |_| live.open_chat(peer)
+                                >
+                                    <span class="icon" inner_html=MESSAGE></span>
+                                    <span class="label">{t!(i18n, node_message)}</span>
+                                </button>
+                            }
+                            .into_any()
                         }
-                        .into_any()
-                    } else {
-                        view! {
-                            <button
-                                class="primary with-icon"
-                                title=move || t_string!(i18n, node_message)
-                                on:click=move |_| live.open_chat(peer)
-                            >
-                                <span class="icon" inner_html=MESSAGE></span>
-                                <span class="label">{t!(i18n, node_message)}</span>
-                            </button>
-                        }
-                        .into_any()
-                    }
-                });
+                    });
                 let profile = (page == Page::Chat).then(|| {
                     view! {
                         <button on:click=move |_| live.open_node(node)>{t!(i18n, node_page)}</button>
