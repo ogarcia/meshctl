@@ -17,7 +17,8 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
     ActionRequest, AdminKeys, ChannelHistory, ChannelOrder, ChannelSecret, Contact, Error,
-    NodeSettings, NodeSettingsChange, RadioId, SectionChange, SectionSecret, SettingsApplied,
+    NodeSettings, NodeSettingsChange, NodeStatusMessage, RadioId, SectionChange, SectionSecret,
+    SettingsApplied,
 };
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -27,6 +28,7 @@ use utoipa_axum::routes;
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(show, change))
+        .routes(routes!(status))
         .routes(routes!(change_section))
         .routes(routes!(admin_keys, change_admin_keys))
         .routes(routes!(act))
@@ -84,6 +86,38 @@ async fn show(
         .await
     {
         Ok(settings) => Json(settings).into_response(),
+        Err(failure) => refused(failure),
+    }
+}
+
+/// A node's status message
+///
+/// What another node says of itself, as part of its owner's settings,
+/// asked of it over the mesh apart from them: a node whose firmware has no
+/// status message may not answer at all, and would hold up the rest. Asked
+/// once; kept after, as the rest is. `status` is none if it has none, or
+/// did not say.
+#[utoipa::path(
+    get,
+    path = "/radios/{radio}/nodes/{node}/settings/status",
+    tag = "settings",
+    params(
+        ("radio" = RadioId, Path, description = "The radio's id"),
+        ("node" = u32, Path, description = "The node's number"),
+    ),
+    responses(
+        (status = 200, description = "Its status message, if it has one", body = NodeStatusMessage),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+        (status = 409, description = "The radio is not connected: `radio_not_connected`", body = Error),
+    )
+)]
+async fn status(
+    State(state): State<AppState>,
+    Path((radio, node)): Path<(RadioId, u32)>,
+) -> Response {
+    match state.radios.node_status(radio, node).await {
+        Ok(status) => Json(NodeStatusMessage { status }).into_response(),
         Err(failure) => refused(failure),
     }
 }

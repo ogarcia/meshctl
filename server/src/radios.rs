@@ -1148,6 +1148,9 @@ pub struct Radios {
     /// What other nodes answered each radio of their settings, asked as
     /// their admin. In memory only, secrets and all, as the radio's own.
     remote: Arc<Mutex<HashMap<(RadioId, u32), meshctl_core::mesh::Settings>>>,
+    /// The nodes asked for their status message that said nothing of it:
+    /// not asked again, which takes a minute over the mesh each time.
+    statusless: Arc<Mutex<std::collections::HashSet<(RadioId, u32)>>>,
     /// The app it runs within, if any.
     host: Arc<std::sync::OnceLock<Arc<dyn crate::Host>>>,
     /// The conversation each client of the event stream shows, and is seen,
@@ -1172,6 +1175,7 @@ impl Radios {
             login_failed: Arc::default(),
             busy: Arc::default(),
             remote: Arc::default(),
+            statusless: Arc::default(),
             host: Arc::default(),
             viewing: Arc::default(),
             waypoint_sent: Arc::default(),
@@ -2881,6 +2885,70 @@ impl Radios {
         Ok(f(remote.get(&(id, node)).unwrap_or(&none)))
     }
 
+    /// A node's status message, asked of it apart from the rest of its
+    /// settings, and kept with them, for a change to it to know it: a node
+    /// whose firmware has none may not answer at all, which would hold up
+    /// the rest a minute. None if it has none, or did not say; then not
+    /// asked again while meshctl runs.
+    pub async fn node_status(
+        &self,
+        id: RadioId,
+        node: u32,
+    ) -> Result<Option<String>, SettingsFailure> {
+        let mesh = self.configurable(id)?;
+        let known = |radios: &Self| {
+            radios
+                .remote
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&(id, node))
+                .filter(|settings| has_part(settings, STATUS_PART))
+                .and_then(crate::settings::status_of)
+        };
+        if let Some(status) = known(self) {
+            return Ok(Some(status));
+        }
+        let asked = (id, node);
+        if self
+            .statusless
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&asked)
+        {
+            return Ok(None);
+        }
+        let request = meshctl_core::mesh::settings_request(STATUS_PART)
+            .ok_or_else(|| SettingsFailure::Invalid(STATUS_PART.to_owned()))?;
+        match mesh.ask_node(node, request).await {
+            Ok(answer) => {
+                self.remote
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .entry((id, node))
+                    .or_default()
+                    .keep_answer(&answer);
+            }
+            Err(AdminError::NotConnected) => return Err(SettingsFailure::NotConnected),
+            // Not answered, or refused: as having none, not asked again.
+            Err(error) => {
+                tracing::debug!(radio = id, node, ?error, "no status message");
+                self.statusless
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(asked);
+                return Ok(None);
+            }
+        }
+        let status = known(self);
+        if status.is_none() {
+            self.statusless
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(asked);
+        }
+        Ok(status)
+    }
+
     /// Sends a change of whose settings: to the radio, which is read back;
     /// to a node, over the mesh as its admin, and kept as it then has them.
     async fn apply(
@@ -4492,6 +4560,9 @@ pub enum Whose {
     Radio,
     Node(u32),
 }
+
+/// A node's status message, asked of it apart: its firmware may have none.
+const STATUS_PART: &str = "module.statusmessage";
 
 /// The parts of a node's settings its pages show at once: its owner and
 /// role, its LoRa, and its eight channels.

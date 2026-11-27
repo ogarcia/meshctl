@@ -233,8 +233,31 @@ pub fn SettingsView(#[prop(optional)] node: Option<u32>) -> impl IntoView {
                     (Some(before), Some(now)) => merge(&before, &now, &read),
                     _ => read.clone(),
                 };
+                let no_status = read.owner.status.is_none();
                 draft.set(Some(merged));
                 loaded.set(Some(read));
+                // A node's status message, asked of it apart, as one whose
+                // firmware has none may not answer at all: its field shows
+                // once it comes, edited from what it is.
+                if let (Some(node), true) = (node, no_status) {
+                    spawn_local(async move {
+                        let Ok(Some(status)) = daemon::node_status(id, node).await else {
+                            return;
+                        };
+                        if live.selected.get_untracked() != Some(id) {
+                            return;
+                        }
+                        let put = |settings: &mut Option<NodeSettings>| {
+                            if let Some(settings) = settings
+                                && settings.owner.status.is_none()
+                            {
+                                settings.owner.status = Some(status.clone());
+                            }
+                        };
+                        let _ = loaded.try_update(put);
+                        let _ = draft.try_update(put);
+                    });
+                }
             }
             // A node's, by their names: each read of it as it is picked;
             // asked again only when it is all asked anew.

@@ -373,6 +373,14 @@ pub async fn settings(
     get(&format!("{}/settings{fresh}", at(radio, node))).await
 }
 
+/// A node's status message, asked of it apart from the rest of its settings:
+/// none if its firmware has none, or it did not say.
+pub async fn node_status(radio: RadioId, node: u32) -> Result<Option<String>, Failure> {
+    get::<meshctl_api::NodeStatusMessage>(&format!("/radios/{radio}/nodes/{node}/settings/status"))
+        .await
+        .map(|answer| answer.status)
+}
+
 pub async fn change_settings(
     radio: RadioId,
     node: Option<u32>,

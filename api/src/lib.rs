@@ -2410,6 +2410,15 @@ pub struct ChannelSecret {
     pub key: String,
 }
 
+/// A node's status message, asked of it apart from the rest of its
+/// settings: none if its firmware has none, or it did not say.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct NodeStatusMessage {
+    #[cfg_attr(feature = "openapi", schema(example = "En casa"))]
+    pub status: Option<String>,
+}
+
 /// What to change of the radio's settings: each part given is set whole,
 /// each part left out stays as it is.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

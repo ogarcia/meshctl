@@ -156,7 +156,7 @@ fn own_key(text: Option<&str>) -> Result<Vec<u8>, Invalid> {
 }
 
 /// The status message the radio sends, if its firmware has them.
-fn status_of(settings: &Settings) -> Option<String> {
+pub(crate) fn status_of(settings: &Settings) -> Option<String> {
     if !crate::sections::has(settings, "statusmessage") {
         return None;
     }
