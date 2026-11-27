@@ -195,9 +195,11 @@
               same spot gather into one that opens on a click.
             </p>
             <p>
-              The clock under the zoom buttons leaves out those not heard for a
-              while: 8 hours, 24 hours, 3 days, a week or a month. It is kept for
-              each radio, and in the accent while it leaves some out.
+              The three dots under the zoom buttons let down the map's own
+              settings, kept for each radio, and are in the accent while either
+              leaves something out. The clock leaves out the nodes not heard for
+              a while: 8 hours, 24 hours, 3 days, a week or a month. The pin
+              shows or hides the waypoints.
             </p>
             <p>
               A node's popup traces the route to it, or shows the last one, there
@@ -220,7 +222,7 @@
               <li><strong>Locked</strong>, no other node may change or delete it; open, anyone may.</li>
               <li><strong>Only in meshctl</strong>, it is not sent at all: yours to see on the map, on any radio, MeshCore's too. It can be shared later; one shared cannot be taken back.</li>
               <li><strong>Its popup</strong> tells who shared and changed it, when it expires and on which channel; and edits it or deletes it for everyone, where your radio may, or here alone.</li>
-              <li><strong>The pin under the clock</strong> shows or hides them on the map, for each radio.</li>
+              <li><strong>The pin under the map's three dots</strong> shows or hides them on the map, for each radio.</li>
             </ul>
             <p>
               A waypoint may have a fence around it: a circle of 100 m to 5 km, or
@@ -492,13 +494,17 @@
           <div class="mc-heading"><h2><span class="ti ti-sun" aria-hidden="true"></span> Appearance</h2></div>
           <div class="mc-card mc-prose">
             <p>
-              The theme, light, dark or as the system is; the accent colour; the
-              map's own theme, and its colours, OpenStreetMap's or black and white
-              for the nodes to stand out; the map's type, OpenStreetMap's own
-              tiles or vector maps, OpenFreeMap's, sharp at any zoom; and the
-              language. They are kept in meshctl, not in
-              the browser, so every browser and app shows it the same.
+              The theme, light, dark or as the system is; the map's own theme; the
+              map's type, OpenStreetMap's own tiles or vector maps, OpenFreeMap's,
+              sharp at any zoom; the map's colours; the accent colour; and the
+              language. They are kept in meshctl, not in the browser, so every
+              browser and app shows it the same.
             </p>
+            <ul>
+              <li><strong>OpenStreetMap's tiles</strong> come in colour, or in black and white for the nodes to stand out.</li>
+              <li><strong>Vector maps</strong> come detailed, vivid, or plain (in greys); each has its own dark version.</li>
+              <li><strong>A browser that cannot draw vector maps</strong>, with no WebGL 2, shows OpenStreetMap's tiles instead, and says so: the setting stays for the others, unless you make the change permanent.</li>
+            </ul>
           </div>
         </section>
       </div>

@@ -199,10 +199,11 @@
               pulsarlo.
             </p>
             <p>
-              El reloj bajo los botones del zoom deja fuera los que no se oyen desde
-              hace un tiempo: 8 horas, 24 horas, 3 días, una semana o un mes. Se
-              guarda para cada radio, y va en el color de acento mientras deja
-              alguno fuera.
+              Los tres puntos bajo los botones del zoom despliegan los ajustes del
+              propio mapa, que se guardan para cada radio, y van en el color de
+              acento mientras alguno deja algo fuera. El reloj deja fuera los nodos
+              que no se oyen desde hace un tiempo: 8 horas, 24 horas, 3 días, una
+              semana o un mes. El pin muestra u oculta los waypoints.
             </p>
             <p>
               La ventanita de un nodo traza la ruta hasta él, o enseña la última,
@@ -226,7 +227,7 @@
               <li><strong>Bloqueado</strong>, ningún otro nodo puede cambiarlo ni borrarlo; abierto, cualquiera.</li>
               <li><strong>Solo en meshctl</strong>, no se envía: es tuyo para verlo en el mapa, en cualquier radio, también en las MeshCore. Se puede compartir después; uno compartido no se puede retirar.</li>
               <li><strong>Su ventanita</strong> dice quién lo puso y quién lo cambió, cuándo caduca y por qué canal; y lo edita o lo borra para todos, donde tu radio pueda, o solo aquí.</li>
-              <li><strong>El pin bajo el reloj</strong> los muestra u oculta en el mapa, para cada radio.</li>
+              <li><strong>El pin bajo los tres puntos del mapa</strong> los muestra u oculta en el mapa, para cada radio.</li>
             </ul>
             <p>
               Un waypoint puede tener una geovalla alrededor: un círculo de 100 m a
@@ -504,13 +505,17 @@
           <div class="mc-heading"><h2><span class="ti ti-sun" aria-hidden="true"></span> Apariencia</h2></div>
           <div class="mc-card mc-prose">
             <p>
-              El tema, claro, oscuro o según el sistema; el color de acento; el tema
-              propio del mapa, y sus colores, los de OpenStreetMap o en blanco y
-              negro para que resalten los nodos; el tipo de mapa, las teselas de
-              OpenStreetMap o mapas vectoriales, los de OpenFreeMap, nítidos a
-              cualquier zoom; y el idioma. Se guardan en meshctl, no en el
+              El tema, claro, oscuro o según el sistema; el tema propio del mapa;
+              el tipo de mapa, las teselas de OpenStreetMap o mapas vectoriales,
+              los de OpenFreeMap, nítidos a cualquier zoom; los colores del mapa;
+              el color de acento; y el idioma. Se guardan en meshctl, no en el
               navegador, así que todos los navegadores y apps lo muestran igual.
             </p>
+            <ul>
+              <li><strong>Las teselas de OpenStreetMap</strong> van en color, o en blanco y negro para que resalten los nodos.</li>
+              <li><strong>Los mapas vectoriales</strong> van detallados, vivos o sobrios (en grises); cada uno con su versión oscura.</li>
+              <li><strong>Un navegador que no puede mostrar mapas vectoriales</strong>, sin WebGL 2, enseña en su lugar las teselas de OpenStreetMap, y lo avisa: el ajuste se mantiene para los demás, salvo que hagas el cambio permanente.</li>
+            </ul>
           </div>
         </section>
       </div>
