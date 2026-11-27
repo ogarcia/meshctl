@@ -121,14 +121,14 @@ pub fn PreferencesView() -> impl IntoView {
             <Row title=t!(i18n, prefs_theme).into_any() hint=t!(i18n, prefs_theme_hint).into_any()>
                 {pills(Vec::from(themes))}
             </Row>
+            <Row title=t!(i18n, prefs_map).into_any() hint=t!(i18n, prefs_map_hint).into_any()>
+                {pills(Vec::from(maps))}
+            </Row>
             <Row
                 title=t!(i18n, prefs_map_engine).into_any()
                 hint=t!(i18n, prefs_map_engine_hint).into_any()
             >
                 {pills(Vec::from(map_engines))}
-            </Row>
-            <Row title=t!(i18n, prefs_map).into_any() hint=t!(i18n, prefs_map_hint).into_any()>
-                {pills(Vec::from(maps))}
             </Row>
             <Row
                 title=t!(i18n, prefs_map_colors).into_any()
