@@ -522,6 +522,10 @@ window.meshctlMapLibre = (() => {
           holder.addEventListener("click", (event) => {
             event.stopPropagation();
             markerClicked();
+            // What hovering said goes as it is clicked, as on Leaflet's: a
+            // finger's tap hovers it, and never leaves.
+            if (tip) tip.remove();
+            tip = null;
             if (o.click) {
               o.click();
               return;
