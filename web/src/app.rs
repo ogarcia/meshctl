@@ -230,6 +230,8 @@ pub struct Live {
     pub offered_link: RwSignal<Option<String>>,
     /// A place to show on the map, not a node's.
     pub map_spot: RwSignal<Option<(f64, f64)>>,
+    /// A waypoint to show on the map, with its popup open.
+    pub map_waypoint: RwSignal<Option<u32>>,
     /// Whether the about window is open.
     pub about: RwSignal<bool>,
     /// meshctl's version, and the commit it was built from, once asked.
@@ -316,6 +318,7 @@ impl Live {
             traceroutes: RwSignal::new(Vec::new()),
             waypoints: RwSignal::new(Vec::new()),
             waypoint_form: RwSignal::new(None),
+            map_waypoint: RwSignal::new(None),
             packets: RwSignal::new(Vec::new()),
             packet_filter: RwSignal::new(PacketFilter::default()),
             packets_held: RwSignal::new(Vec::new()),
@@ -513,6 +516,22 @@ impl Live {
         self.map_pick.set(None);
         self.map_spot.set(Some((lat, lon)));
         self.go(Page::Map);
+    }
+
+    /// Shows a waypoint on the map, with its popup open, the map gone to it.
+    pub fn show_waypoint(self, id: u32) {
+        self.map_pick.set(None);
+        self.map_waypoint.set(Some(id));
+        self.go(Page::Map);
+    }
+
+    /// The language the interface speaks: the one kept, or the browser's.
+    pub fn locale(self) -> Locale {
+        match self.preferences.with_untracked(|p| p.language) {
+            Some(Language::En) => Locale::en,
+            Some(Language::Es) => Locale::es,
+            None => browser_locale(),
+        }
     }
 
     /// Shows a node on the map: picked, with its card, and the map gone to

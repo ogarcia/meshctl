@@ -87,11 +87,14 @@ pub fn ready(live: Live) {
     }
 }
 
-/// A conversation to open, as the app gives it, in JSON.
+/// A conversation to open, as the app gives it, in JSON; or a waypoint, to
+/// show on the map.
 #[derive(serde::Deserialize)]
 struct Chat {
     radio: RadioId,
     peer: Peer,
+    #[serde(default)]
+    waypoint: Option<u32>,
 }
 
 fn open_chat(live: Live, chat: &str) {
@@ -101,7 +104,10 @@ fn open_chat(live: Live, chat: &str) {
     if live.selected.get_untracked() != Some(chat.radio) {
         live.select(chat.radio);
     }
-    live.open_chat(chat.peer);
+    match chat.waypoint {
+        Some(id) => live.show_waypoint(id),
+        None => live.open_chat(chat.peer),
+    }
 }
 
 /// A new event stream: the daemon told what the page shows, as it is now,
@@ -191,19 +197,33 @@ pub fn show(live: Live, notification: Notification) {
         title.push_str(&format!(" · {}", notification.radio_name));
     }
     let options = web_sys::NotificationOptions::new();
-    options.set_body(notification.text.as_deref().unwrap_or_default());
-    // One for each conversation, the newest in place of the one before.
-    options.set_tag(&format!(
-        "meshctl-{}-{}",
-        notification.radio,
-        peer_key(notification.peer)
+    let body = notification.waypoint.as_ref().map_or_else(
+        || notification.text.clone().unwrap_or_default(),
+        |waypoint| waypoint_body(live, waypoint.event, notification.text.as_deref()),
+    );
+    options.set_body(&body);
+    // One for each conversation, the newest in place of the one before; a
+    // waypoint's, one of its own.
+    options.set_tag(&notification.waypoint.as_ref().map_or_else(
+        || {
+            format!(
+                "meshctl-{}-{}",
+                notification.radio,
+                peer_key(notification.peer)
+            )
+        },
+        |waypoint| format!("meshctl-{}-w{}", notification.radio, waypoint.id),
     ));
     options.set_icon("/favicon.svg");
     let Ok(shown) = web_sys::Notification::new_with_options(&title, &options) else {
         return;
     };
-    let chat =
-        serde_json::json!({ "radio": notification.radio, "peer": notification.peer }).to_string();
+    let chat = serde_json::json!({
+        "radio": notification.radio,
+        "peer": notification.peer,
+        "waypoint": notification.waypoint.as_ref().map(|w| w.id),
+    })
+    .to_string();
     let closing = shown.clone();
     let open = Closure::once_into_js(move || {
         let _ = window().focus();
@@ -211,6 +231,23 @@ pub fn show(live: Live, notification: Notification) {
         open_chat(live, &chat);
     });
     shown.set_onclick(Some(open.unchecked_ref()));
+}
+
+/// What happened to a waypoint, in the interface's language, and to which.
+fn waypoint_body(live: Live, event: meshctl_api::WaypointEvent, text: Option<&str>) -> String {
+    use crate::i18n::{Locale, td_string};
+    use meshctl_api::WaypointEvent;
+    let locale: Locale = untrack(|| live.locale());
+    let said = match event {
+        WaypointEvent::Shared => td_string!(locale, notify_waypoint_shared),
+        WaypointEvent::Entered => td_string!(locale, notify_waypoint_entered),
+        WaypointEvent::Left => td_string!(locale, notify_waypoint_left),
+    };
+    match text {
+        Some(text) if event == WaypointEvent::Shared => format!("{said}: {text}"),
+        Some(text) => format!("{said} {text}"),
+        None => said.to_owned(),
+    }
 }
 
 fn peer_key(peer: Peer) -> String {

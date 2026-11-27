@@ -1289,5 +1289,10 @@
   "waypoint_notify_enter": "Tell when a node goes in",
   "waypoint_notify_exit": "Tell when a node goes out",
   "waypoint_notify_favorites": "Only of the favourites",
-  "waypoint_notify_hint": "Whoever has it decides whether to heed them: meshctl tells of this radio's own, and of another's if asked to."
+  "waypoint_notify_hint": "Whoever has it decides whether to heed them: meshctl tells of this radio's own, and of another's if asked to.",
+  "notify_waypoint_shared": "Shared a waypoint",
+  "notify_waypoint_entered": "Went into",
+  "notify_waypoint_left": "Left",
+  "waypoint_watch": "Tell me of its fence",
+  "waypoint_unwatch": "Stop telling me of its fence"
 }

@@ -935,6 +935,16 @@ pub async fn delete_waypoint(radio: RadioId, id: u32, everyone: bool) -> Result<
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Watches a waypoint's fence, or no longer.
+pub async fn watch_waypoint(radio: RadioId, id: u32, watched: bool) -> Result<(), Failure> {
+    let request = with_token(Request::put(&url(&format!(
+        "/radios/{radio}/waypoints/{id}/watched"
+    ))))
+    .json(&serde_json::json!({ "watched": watched }))
+    .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 pub async fn save_map_view(radio: RadioId, view: &MapView) -> Result<(), Failure> {
     let request = with_token(Request::put(&url(&format!("/radios/{radio}/map-view"))))
         .json(view)

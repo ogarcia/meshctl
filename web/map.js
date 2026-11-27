@@ -509,6 +509,7 @@ window.meshctlMap = (() => {
     shownWaypoints = JSON.parse(json);
     drawWaypoints();
     showWaypointCard();
+    centreWaypoint();
   }
 
   // A waypoint's pin: its emoji, on a disc that stands out from the map.
@@ -608,6 +609,21 @@ window.meshctlMap = (() => {
       buttons.append(button);
     }
     box.append(buttons);
+    // Its fence told of, or not: as the route button of a node's.
+    if (waypoint.watched !== null && waypoint.watched !== undefined) {
+      const watch = element(
+        "button",
+        "mc-card-route",
+        waypoint.watched ? labels.unwatch : labels.watch,
+      );
+      watch.type = "button";
+      watch.setAttribute("aria-pressed", String(waypoint.watched));
+      watch.addEventListener("click", (event) => {
+        map.stop(event);
+        act && act(waypoint.id, waypoint.watched ? "waypoint-unwatch" : "waypoint-watch");
+      });
+      box.append(watch);
+    }
     return box;
   }
 
@@ -646,6 +662,26 @@ window.meshctlMap = (() => {
       offset: [0, -12],
       autoPanPadding: [24, 24],
     });
+  }
+
+  // A waypoint to show, from its notification: the map goes to it once it
+  // has it, with its popup open.
+  let focusWaypointOn = null;
+
+  function focusWaypoint(id) {
+    focusWaypointOn = id;
+    centreWaypoint();
+  }
+
+  function centreWaypoint() {
+    if (!map || focusWaypointOn === null) return;
+    const waypoint = shownWaypoints.waypoints.find((w) => w.id === focusWaypointOn);
+    if (!waypoint) return;
+    focusWaypointOn = null;
+    placed = true;
+    map.setView(waypoint.lat, waypoint.lon, Math.max(map.zoom(), FOCUS_ZOOM), false);
+    waypointPopupFor = waypoint.id;
+    showWaypointCard(true);
   }
 
   // The area the map shows now, as JSON {south, west, north, east}, within
@@ -1100,7 +1136,7 @@ window.meshctlMap = (() => {
   }
 
   return {
-    open, close, nodes, waypoints, bounds, focus, route, stay, reset, resize, view, mini, miniRoute,
+    open, close, nodes, waypoints, focusWaypoint, bounds, focus, route, stay, reset, resize, view, mini, miniRoute,
     miniClose, picker, pickerAt, pickerClose, spot,
   };
 })();

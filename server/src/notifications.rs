@@ -9,13 +9,21 @@
 //! radio catches up on what it kept while away, nor one from long ago; nor
 //! one in a conversation a client shows, and is seen. On a channel, maybe
 //! only those that mention the radio by its name.
+//!
+//! Waypoints too: one shared new by another node, on a channel notified of
+//! whole (not only its mentions); and a node going in or out of a fence the
+//! radio watches, as its author asked, told of wherever notifications are
+//! on.
 
 use crate::radios::{Change, Radios};
 use crate::store::now;
+use meshctl_api::waypoints::Waypoint;
 use meshctl_api::{
     AutoReplyPlace, BROADCAST, Message, Notification, NotificationPlace, Peer, RadioId,
+    WaypointEvent, WaypointNotice,
 };
 use meshctl_core::mesh::{self, LinkState, MeshState};
+use meshctl_core::waypoint::Waypoint as Shared;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
@@ -33,6 +41,10 @@ pub fn spawn(radios: Radios) {
     tokio::spawn(async move {
         let mut changes = radios.subscribe();
         let mut ready: HashMap<RadioId, Instant> = HashMap::new();
+        let mut fences = Fences::default();
+        // The waypoints told of as shared: once each, however often they
+        // change after.
+        let mut told: std::collections::HashSet<(RadioId, u32)> = std::collections::HashSet::new();
         loop {
             let change = tokio::select! {
                 change = changes.recv() => change,
@@ -41,6 +53,23 @@ pub fn spawn(radios: Radios) {
             match change {
                 Ok(Change::Mesh(radio, mesh::Event::Link(LinkState::Ready))) => {
                     ready.insert(radio, Instant::now());
+                }
+                Ok(Change::Waypoint(radio, waypoint)) => {
+                    fences.forget(radio);
+                    if ready
+                        .get(&radio)
+                        .is_some_and(|at| at.elapsed() >= CATCHING_UP)
+                        && told.insert((radio, waypoint.id))
+                    {
+                        shared(&radios, radio, &waypoint).await;
+                    }
+                }
+                Ok(Change::WaypointGone(radio, id)) => {
+                    fences.forget(radio);
+                    told.remove(&(radio, id));
+                }
+                Ok(Change::Mesh(radio, mesh::Event::Node(node))) => {
+                    fences.moved(&radios, radio, &node).await;
                 }
                 Ok(Change::Message(radio, message)) => {
                     if ready
@@ -105,11 +134,219 @@ async fn heard(radios: &Radios, radio: RadioId, message: &Message) {
         radio_name: radios.radio_name(radio).await.unwrap_or_default(),
         channel,
         text: settings.show_text.then(|| message.text.clone()),
+        waypoint: None,
     };
     if let Some(host) = radios.host() {
         host.notify(&notification);
     }
     radios.notify(notification);
+}
+
+/// Notifies of a waypoint shared new by another node, on a channel whose
+/// messages are all notified of, and not silenced.
+async fn shared(radios: &Radios, radio: RadioId, waypoint: &Waypoint) {
+    let new =
+        waypoint.created_at == waypoint.updated_at && now() - waypoint.created_at <= FRESH_SECS;
+    if !new {
+        return;
+    }
+    let Some(mesh) = radios.mesh(radio) else {
+        return;
+    };
+    let local = mesh.read(|state| state.local.as_ref().map(|l| l.num));
+    if local == Some(waypoint.created_by) {
+        return;
+    }
+    let settings = match radios.notifications().await {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::warn!(error = format_args!("{err:#}"), "notifications");
+            return;
+        }
+    };
+    let whole = settings.places.iter().any(|place| {
+        !place.mentions
+            && matches!(&place.place, AutoReplyPlace::Channel { radio: r, channel: slot, .. }
+                if *r == radio && *slot == Some(waypoint.channel))
+    });
+    let peer = Peer::Channel {
+        channel: waypoint.channel,
+    };
+    if !settings.enabled || !whole || radios.muted(radio, peer).await {
+        return;
+    }
+    let (sender, channel) = mesh.read(|state| {
+        (
+            node_name(state, waypoint.created_by),
+            slot_name(state, waypoint.channel),
+        )
+    });
+    notify_waypoint(
+        radios,
+        Notification {
+            radio,
+            peer,
+            message: 0,
+            sender,
+            radio_name: radios.radio_name(radio).await.unwrap_or_default(),
+            channel,
+            text: settings
+                .show_text
+                .then(|| format!("{} {}", waypoint.icon, waypoint.name)),
+            waypoint: Some(WaypointNotice {
+                id: waypoint.id,
+                event: WaypointEvent::Shared,
+            }),
+        },
+    );
+}
+
+fn notify_waypoint(radios: &Radios, notification: Notification) {
+    if let Some(host) = radios.host() {
+        host.notify(&notification);
+    }
+    radios.notify(notification);
+}
+
+/// A node's name, as a notification gives it: its long name, or its id.
+fn node_name(state: &MeshState, num: u32) -> String {
+    state
+        .nodes
+        .get(&num)
+        .and_then(|n| n.user.as_ref())
+        .map(|u| u.long_name.clone())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| format!("!{num:08x}"))
+}
+
+/// A channel's name, by its slot.
+fn slot_name(state: &MeshState, slot: u32) -> Option<String> {
+    crate::channels::slots_of(state)
+        .into_iter()
+        .find(|s| s.index == slot)
+        .map(|s| s.name)
+}
+
+/// Whether a point is within a waypoint's fence: its circle or its box,
+/// edges included.
+fn inside(fence: &Shared, latitude: f64, longitude: f64) -> bool {
+    let in_circle = fence.fence_radius > 0
+        && distance(fence.latitude, fence.longitude, latitude, longitude)
+            <= f64::from(fence.fence_radius);
+    let in_box = fence.fence_box.is_some_and(|b| {
+        (b.south..=b.north).contains(&latitude) && (b.west..=b.east).contains(&longitude)
+    });
+    in_circle || in_box
+}
+
+/// How far apart two points are on the Earth, in metres.
+fn distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    const EARTH: f64 = 6_371_000.0;
+    let (p1, p2) = (lat1.to_radians(), lat2.to_radians());
+    let dp = (lat2 - lat1).to_radians();
+    let dl = (lon2 - lon1).to_radians();
+    let a = (dp / 2.0).sin().powi(2) + p1.cos() * p2.cos() * (dl / 2.0).sin().powi(2);
+    2.0 * EARTH * a.sqrt().asin()
+}
+
+/// The fences each radio watches, read as needed, and whether each node
+/// was last inside each: the first time a node is placed against one, it
+/// is only noted, as the firmware and the apps do.
+#[derive(Default)]
+struct Fences {
+    watched: HashMap<RadioId, Vec<Shared>>,
+    inside: HashMap<(RadioId, u32, u32), bool>,
+}
+
+impl Fences {
+    /// A radio's fences changed: read again when next needed.
+    fn forget(&mut self, radio: RadioId) {
+        self.watched.remove(&radio);
+    }
+
+    /// A node of a radio's heard of again: told of if it went in or out of
+    /// a fence watched, as the fence asks.
+    async fn moved(&mut self, radios: &Radios, radio: RadioId, node: &mesh::Node) {
+        let Some(at) = node.position else {
+            return;
+        };
+        let Some(mesh) = radios.mesh(radio) else {
+            return;
+        };
+        if mesh.read(|state| state.local.as_ref().map(|l| l.num)) == Some(node.num) {
+            return;
+        }
+        let watched = match self.watched.entry(radio) {
+            std::collections::hash_map::Entry::Occupied(kept) => kept.into_mut(),
+            std::collections::hash_map::Entry::Vacant(empty) => {
+                match radios.store.watched_waypoints(radio).await {
+                    Ok(watched) => empty.insert(watched),
+                    Err(err) => {
+                        tracing::warn!(error = format_args!("{err:#}"), "fences");
+                        return;
+                    }
+                }
+            }
+        };
+        let inside_now = &mut self.inside;
+        let crossed: Vec<(Shared, bool)> = watched
+            .iter()
+            .filter_map(|fence| {
+                let now_inside = inside(fence, at.latitude, at.longitude);
+                let was = inside_now.insert((radio, fence.id, node.num), now_inside);
+                (was.is_some_and(|was| was != now_inside)).then(|| (fence.clone(), now_inside))
+            })
+            .collect();
+        for (fence, went_in) in crossed {
+            let asked = if went_in {
+                fence.notify_on_enter
+            } else {
+                fence.notify_on_exit
+            };
+            if asked && (!fence.notify_favorites_only || node.favorite) {
+                crossing(radios, radio, &fence, node.num, went_in).await;
+            }
+        }
+    }
+}
+
+/// Tells of a node gone in or out of a fence, wherever notifications are on.
+async fn crossing(radios: &Radios, radio: RadioId, fence: &Shared, node: u32, went_in: bool) {
+    let Ok(settings) = radios.notifications().await else {
+        return;
+    };
+    if !settings.enabled {
+        return;
+    }
+    let Some(mesh) = radios.mesh(radio) else {
+        return;
+    };
+    let kept = radios.store.waypoint(radio, fence.id).await.ok().flatten();
+    let channel = kept.as_ref().map_or(0, |(w, _)| w.channel);
+    let (sender, channel_name) =
+        mesh.read(|state| (node_name(state, node), slot_name(state, channel)));
+    notify_waypoint(
+        radios,
+        Notification {
+            radio,
+            peer: Peer::Channel { channel },
+            message: 0,
+            sender,
+            radio_name: radios.radio_name(radio).await.unwrap_or_default(),
+            channel: channel_name,
+            text: settings
+                .show_text
+                .then(|| format!("{} {}", fence.emoji(), fence.name)),
+            waypoint: Some(WaypointNotice {
+                id: fence.id,
+                event: if went_in {
+                    WaypointEvent::Entered
+                } else {
+                    WaypointEvent::Left
+                },
+            }),
+        },
+    );
 }
 
 /// Whether a message is one to notify of at `now`, wherever it came: a
@@ -225,6 +462,33 @@ fn channel_name(state: &MeshState, message: &Message) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fence_holds_its_circle_and_its_box() {
+        let fence = Shared {
+            latitude: 43.36,
+            longitude: -8.41,
+            fence_radius: 250,
+            ..Default::default()
+        };
+        assert!(inside(&fence, 43.36, -8.41));
+        // About 220 m north, and about 330 m.
+        assert!(inside(&fence, 43.362, -8.41));
+        assert!(!inside(&fence, 43.363, -8.41));
+        let boxed = Shared {
+            fence_radius: 0,
+            fence_box: Some(meshctl_core::waypoint::FenceBox {
+                south: 43.0,
+                west: -9.0,
+                north: 44.0,
+                east: -8.0,
+            }),
+            ..fence
+        };
+        assert!(inside(&boxed, 43.5, -8.5));
+        assert!(!inside(&boxed, 44.5, -8.5));
+        assert!((distance(43.36, -8.41, 43.37, -8.41) - 1_112.0).abs() < 2.0);
+    }
 
     fn message(to: u32, channel: u32, text: &str) -> Message {
         Message {

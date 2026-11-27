@@ -33,8 +33,23 @@ class Messages(private val context: Context) {
     val peer = notification.optJSONObject("peer") ?: return
     val key = key(radio, peer)
     val channel = notification.optString("channel").takeIf { it.isNotEmpty() }
-    val text = notification.optString("text").takeIf { it.isNotEmpty() }
-      ?: context.getString(R.string.message_new)
+    val said = notification.optString("text").takeIf { it.isNotEmpty() }
+    // A waypoint's: what happened to it, then its emoji and name.
+    val waypoint = notification.optJSONObject("waypoint")
+    val text = if (waypoint != null) {
+      val happened = when (waypoint.optString("event")) {
+        "entered" -> context.getString(R.string.waypoint_entered)
+        "left" -> context.getString(R.string.waypoint_left)
+        else -> context.getString(R.string.waypoint_shared)
+      }
+      when {
+        said == null -> happened
+        waypoint.optString("event") == "shared" -> "$happened: $said"
+        else -> "$happened $said"
+      }
+    } else {
+      said ?: context.getString(R.string.message_new)
+    }
     val radioName = notification.optString("radio_name")
     val sender = Person.Builder().setName(notification.optString("sender")).build()
 
@@ -51,7 +66,9 @@ class Messages(private val context: Context) {
       .setGroupConversation(channel != null)
     messages.forEach { style.addMessage(it) }
 
-    val chat = JSONObject().put("radio", radio).put("peer", peer).toString()
+    val chat = JSONObject().put("radio", radio).put("peer", peer)
+      .apply { waypoint?.let { put("waypoint", it.optLong("id")) } }
+      .toString()
     val open = PendingIntent.getActivity(
       context,
       key.hashCode(),

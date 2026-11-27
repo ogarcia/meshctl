@@ -33,6 +33,8 @@ extern "C" {
     );
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = waypoints)]
     fn map_waypoints(json: &str);
+    #[wasm_bindgen(js_namespace = meshctlMap, js_name = focusWaypoint)]
+    fn map_focus_waypoint(id: u32);
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = close)]
     fn map_close();
     #[wasm_bindgen(js_namespace = meshctlMap, js_name = nodes)]
@@ -579,6 +581,8 @@ pub fn MapView() -> impl IntoView {
                 "waypoint-edit" => crate::waypoints::edit(live, num),
                 "waypoint-delete" => crate::waypoints::delete(live, i18n, num, true),
                 "waypoint-forget" => crate::waypoints::delete(live, i18n, num, false),
+                "waypoint-watch" => crate::waypoints::watch(live, num, true),
+                "waypoint-unwatch" => crate::waypoints::watch(live, num, false),
                 "unroute" => live.map_route.set(None),
                 "route" => {
                     if live.map_route.get_untracked() == Some(num) {
@@ -837,6 +841,16 @@ pub fn MapView() -> impl IntoView {
         if let Some(num) = live.map_focus.get() {
             map_focus(num);
             live.map_focus.set(None);
+        }
+    });
+    // A waypoint to go to, from its notification: likewise.
+    Effect::new(move |_| {
+        if element.get().is_none() {
+            return;
+        }
+        if let Some(id) = live.map_waypoint.get() {
+            map_focus_waypoint(id);
+            live.map_waypoint.set(None);
         }
     });
     // A place to go to, shared in a conversation: likewise.

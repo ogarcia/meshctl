@@ -172,6 +172,19 @@ impl Store {
         Ok(row.map(|row| (row.waypoint(), row.shared())))
     }
 
+    /// The waypoints whose fences a radio watches, those not gone, as they
+    /// go on the air.
+    pub async fn watched_waypoints(&self, radio: RadioId) -> Result<Vec<Shared>> {
+        let rows: Vec<Row> = sqlx::query_as(select!(
+            "FROM waypoint WHERE radio_id = ? AND watched AND (expire = 0 OR expire > ?)"
+        ))
+        .bind(radio)
+        .bind(now())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(Row::shared).collect())
+    }
+
     /// Takes a waypoint heard, or shared by the radio: kept, new or in place
     /// of the one with its id; or gone, deleted or expired; or ignored, from
     /// a node it is not open to.

@@ -550,9 +550,37 @@ pub struct Notification {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "openapi", schema(example = "Galicia"))]
     pub channel: Option<String>,
-    /// What it says; none unless notifications are to show it.
+    /// What it says; none unless notifications are to show it. Of a
+    /// waypoint, its emoji and name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// What it is about when it is no message, `message` then 0: a waypoint
+    /// shared by `sender`, or `sender` going in or out of its fence. Each
+    /// client says it in its own words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waypoint: Option<WaypointNotice>,
+}
+
+/// A waypoint notified of, and what happened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WaypointNotice {
+    /// The waypoint's id: what opens on the notification, on the map.
+    pub id: u32,
+    pub event: WaypointEvent,
+}
+
+/// What happened to a waypoint notified of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum WaypointEvent {
+    /// Shared, new, by the sender.
+    Shared,
+    /// The sender went into its fence.
+    Entered,
+    /// The sender went out of its fence.
+    Left,
 }
 
 /// How busy a radio hears its channel, as it last said, if lately.

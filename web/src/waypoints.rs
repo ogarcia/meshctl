@@ -82,6 +82,9 @@ struct Drawn {
     /// now.
     editable: bool,
     fence: Option<DrawnFence>,
+    /// For one with a fence that tells of anything: whether meshctl tells
+    /// of it; none for one without.
+    watched: Option<bool>,
 }
 
 /// A fence as the map draws it: a circle, in metres, a box, or both.
@@ -142,6 +145,8 @@ struct Labels {
     #[serde(rename = "deleteHere")]
     delete_here: String,
     locked: String,
+    watch: String,
+    unwatch: String,
 }
 
 /// What the map draws of the waypoints, as `map.js` takes it.
@@ -170,6 +175,8 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
         delete_all: t_string!(i18n, waypoint_delete_all).to_owned(),
         delete_here: t_string!(i18n, waypoint_delete_here).to_owned(),
         locked: t_string!(i18n, waypoint_locked).to_owned(),
+        watch: t_string!(i18n, waypoint_watch).to_owned(),
+        unwatch: t_string!(i18n, waypoint_unwatch).to_owned(),
     };
     let sharing = can_share(live);
     if !shown(live) {
@@ -248,6 +255,10 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
                     facts,
                     locked: w.locked_to.is_some(),
                     editable: sharing && w.locked_to.is_none_or(|to| Some(to) == local),
+                    watched: w
+                        .fence
+                        .filter(|f| f.is_some() && (f.notify_on_enter || f.notify_on_exit))
+                        .map(|_| w.watched),
                     fence: w.fence.filter(Fence::is_some).map(|f| DrawnFence {
                         radius: f.radius.filter(|r| *r > 0),
                         area: f.area.map(|a| [[a.south, a.west], [a.north, a.east]]),
@@ -261,6 +272,17 @@ pub fn drawing(live: Live, i18n: leptos_i18n::I18nContext<crate::i18n::Locale>) 
         add: sharing,
         waypoints,
     }
+}
+
+/// Watches a waypoint's fence, telling of nodes going in or out of it, or
+/// no longer.
+pub fn watch(live: Live, id: u32, watched: bool) {
+    let Some(radio) = live.selected.get_untracked() else {
+        return;
+    };
+    spawn_local(async move {
+        let _ = daemon::watch_waypoint(radio, id, watched).await;
+    });
 }
 
 /// Opens the form of one of the selected radio's waypoints, to change it.

@@ -13,7 +13,7 @@
 //! the user's part of the registry, as it starts. Whatever of this fails
 //! is logged, and the app goes on without toasts.
 
-use crate::notifying::{body, chat, id, open, title};
+use crate::notifying::{body, chat, id, notice_id, open, title};
 use meshctl_api::{Notification, Peer, RadioId};
 use std::path::Path;
 use std::sync::Arc;
@@ -76,12 +76,12 @@ fn show(app: &AppHandle, notification: &Notification) -> windows::core::Result<(
     let xml = format!(
         r#"<toast><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual></toast>"#,
         escape(&title(notification)),
-        escape(body(notification)),
+        escape(&body(notification)),
     );
     let document = XmlDocument::new()?;
     document.LoadXml(&HSTRING::from(xml))?;
     let toast = ToastNotification::CreateToastNotification(&document)?;
-    toast.SetTag(&HSTRING::from(id(notification.radio, notification.peer)))?;
+    toast.SetTag(&HSTRING::from(notice_id(notification)))?;
     toast.SetGroup(&HSTRING::from(GROUP))?;
     let (app, chat) = (app.clone(), chat(notification));
     toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(

@@ -6,7 +6,7 @@
 //! who wrote and where, and what it says; picked, the window shows on its
 //! conversation.
 
-use meshctl_api::{Notification, Peer, RadioId};
+use meshctl_api::{Notification, Peer, RadioId, WaypointEvent};
 use tauri::{AppHandle, Manager};
 
 /// A conversation's notification's id: its radio, and its channel or node.
@@ -17,9 +17,24 @@ pub fn id(radio: RadioId, peer: Peer) -> String {
     }
 }
 
-/// A notification's conversation, as the panel takes it to open it.
+/// A notification's own id: its conversation's, but a waypoint's own, so
+/// that it does not take the place of a message's.
+pub fn notice_id(notification: &Notification) -> String {
+    match &notification.waypoint {
+        Some(waypoint) => format!("meshctl-{}-w{}", notification.radio, waypoint.id),
+        None => id(notification.radio, notification.peer),
+    }
+}
+
+/// A notification's conversation, as the panel takes it to open it: for a
+/// waypoint, the waypoint, which opens on the map.
 pub fn chat(notification: &Notification) -> String {
-    serde_json::json!({ "radio": notification.radio, "peer": notification.peer }).to_string()
+    serde_json::json!({
+        "radio": notification.radio,
+        "peer": notification.peer,
+        "waypoint": notification.waypoint.as_ref().map(|w| w.id),
+    })
+    .to_string()
 }
 
 /// Who wrote, where, and through which radio.
@@ -32,14 +47,30 @@ pub fn title(notification: &Notification) -> String {
     title
 }
 
-/// What it says, or, not to be shown, that there is a message: in the
-/// system's language.
-pub fn body(notification: &Notification) -> &str {
-    notification.text.as_deref().unwrap_or_else(|| {
-        if sys_locale::get_locale().is_some_and(|locale| locale.starts_with("es")) {
-            "Mensaje nuevo"
+/// What it says, or, not to be shown, that there is a message; of a
+/// waypoint, what happened to it: in the system's language.
+pub fn body(notification: &Notification) -> String {
+    let spanish = sys_locale::get_locale().is_some_and(|locale| locale.starts_with("es"));
+    if let Some(waypoint) = &notification.waypoint {
+        let said = match (waypoint.event, spanish) {
+            (WaypointEvent::Shared, false) => "Shared a waypoint",
+            (WaypointEvent::Shared, true) => "Compartió un waypoint",
+            (WaypointEvent::Entered, false) => "Went into",
+            (WaypointEvent::Entered, true) => "Entró en",
+            (WaypointEvent::Left, false) => "Left",
+            (WaypointEvent::Left, true) => "Salió de",
+        };
+        return match &notification.text {
+            Some(text) if waypoint.event == WaypointEvent::Shared => format!("{said}: {text}"),
+            Some(text) => format!("{said} {text}"),
+            None => said.to_owned(),
+        };
+    }
+    notification.text.clone().unwrap_or_else(|| {
+        if spanish {
+            "Mensaje nuevo".to_owned()
         } else {
-            "New message"
+            "New message".to_owned()
         }
     })
 }

@@ -1289,5 +1289,10 @@
   "waypoint_notify_enter": "Avisar cuando un nodo entre",
   "waypoint_notify_exit": "Avisar cuando un nodo salga",
   "waypoint_notify_favorites": "Solo de los favoritos",
-  "waypoint_notify_hint": "Cada cual decide si hacerles caso: meshctl avisa de las de esta radio, y de las de otros si se lo pides."
+  "waypoint_notify_hint": "Cada cual decide si hacerles caso: meshctl avisa de las de esta radio, y de las de otros si se lo pides.",
+  "notify_waypoint_shared": "Compartió un waypoint",
+  "notify_waypoint_entered": "Entró en",
+  "notify_waypoint_left": "Salió de",
+  "waypoint_watch": "Avisarme de su geovalla",
+  "waypoint_unwatch": "Dejar de avisarme de su geovalla"
 }

@@ -7,7 +7,7 @@
 //! conversation, the newest in place of the one before; picked, the window
 //! shows on its conversation; read anywhere, it goes.
 
-use crate::notifying::{body, chat, id, open, title};
+use crate::notifying::{body, chat, id, notice_id, open, title};
 use futures_util::StreamExt;
 use meshctl_api::{Notification, Peer, RadioId};
 use std::collections::HashMap;
@@ -113,9 +113,9 @@ impl meshctld::Host for Shared {
             let Some(portal) = host.portal().await else {
                 return;
             };
-            let id = id(notification.radio, notification.peer);
+            let id = notice_id(&notification);
             let shown = Shown::new(&title(&notification))
-                .body(body(&notification))
+                .body(body(&notification).as_str())
                 .category(Category::ImMessage)
                 .priority(Priority::High)
                 .default_action(OPEN);
