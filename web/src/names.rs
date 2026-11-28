@@ -4,6 +4,20 @@
 //! The radio's codes as people read them, in the interface's language, with
 //! the code itself after, so that there is no doubt which it is: "Unión
 //! Europea 868 MHz (EU_868)". A code not known here is shown as it is.
+//!
+//! # Translating
+//!
+//! These names are not in `locales/`: each table here holds them beside
+//! their code, a column for each language, `(code, Spanish, English)`, as the
+//! protobufs' lists are long and change with them, and reading a code beside
+//! its words is what keeps them right. A new language is a new column in
+//! every table of this file, and a new arm in [`named`] and [`role_name`],
+//! which read them; the compiler points at those two, as a match on
+//! [`Locale`] without the new language does not build. The settings' words
+//! are kept apart, in `fields.rs`: there the Spanish has a table of its own,
+//! English being the protobufs' own words, and a new language would need
+//! one like it; its choices, and some steps in `sections.rs`, have a column
+//! for each language, as here.
 
 use crate::i18n::Locale;
 
@@ -112,6 +126,74 @@ const ROLES: &[(&str, &str, &str)] = &[
     ("CHAT", "Compañero", "Companion"),
     ("ROOM", "Sala", "Room"),
 ];
+
+/// Why a packet could not be delivered, as a routing packet says, by the
+/// names the protobufs give the reasons.
+const ROUTING_ERRORS: &[(&str, &str, &str)] = &[
+    ("NO_ROUTE", "Sin ruta al destino", "No route to it"),
+    ("GOT_NAK", "Rechazado al pasarlo", "Refused on the way"),
+    ("TIMEOUT", "Se acabó el tiempo", "Timed out"),
+    (
+        "NO_INTERFACE",
+        "Sin interfaz por la que enviarlo",
+        "No interface to send it on",
+    ),
+    (
+        "MAX_RETRANSMIT",
+        "Nadie lo confirmó tras reintentarlo",
+        "Nobody confirmed it after retrying",
+    ),
+    ("NO_CHANNEL", "Sin ese canal", "No such channel"),
+    ("TOO_LARGE", "Demasiado grande", "Too large"),
+    (
+        "NO_RESPONSE",
+        "Llegó, pero no hay quien responda",
+        "It got there, but nothing answers it",
+    ),
+    (
+        "DUTY_CYCLE_LIMIT",
+        "Límite de ciclo de trabajo",
+        "Duty cycle limit",
+    ),
+    ("BAD_REQUEST", "Petición no válida", "Bad request"),
+    ("NOT_AUTHORIZED", "No autorizado", "Not authorized"),
+    (
+        "PKI_FAILED",
+        "No se pudo cifrar con su clave",
+        "Could not encrypt with its key",
+    ),
+    (
+        "PKI_UNKNOWN_PUBKEY",
+        "No tiene la clave pública de quien lo envió",
+        "It lacks the sender's public key",
+    ),
+    (
+        "ADMIN_BAD_SESSION_KEY",
+        "Clave de sesión de administración caducada",
+        "Admin session key expired",
+    ),
+    (
+        "ADMIN_PUBLIC_KEY_UNAUTHORIZED",
+        "Esa clave no puede administrarlo",
+        "That key may not administer it",
+    ),
+    (
+        "RATE_LIMIT_EXCEEDED",
+        "Demasiados seguidos",
+        "Rate limit exceeded",
+    ),
+    (
+        "PKI_SEND_FAIL_PUBLIC_KEY",
+        "Sin la clave pública del destino",
+        "No public key for it",
+    ),
+];
+
+/// Why a packet could not be delivered, in words, with the protobufs' name
+/// of it; the name alone when it has no words.
+pub fn routing_error(locale: Locale, code: &str) -> String {
+    named(ROUTING_ERRORS, locale, code)
+}
 
 /// The configuration's sections and the modules, by their names in the
 /// protobufs.

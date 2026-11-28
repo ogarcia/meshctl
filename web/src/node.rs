@@ -887,7 +887,7 @@ pub(crate) fn telemetry_figures(i18n: I18nContext<Locale>, payload: &Value) -> O
 /// One of the node's figures: what it is, its value, a word more if any, and
 /// a bar for a percentage, marked when it is not good.
 #[component]
-fn Tile(
+pub(crate) fn Tile(
     label: AnyView,
     value: String,
     #[prop(default = None)] sub: Option<String>,
@@ -2075,7 +2075,7 @@ const NEIGHBOURS_SHOWN: usize = 6;
 
 /// The nodes it hears directly, each opening its page if the radio knows
 /// of it: the best heard first, the first few, all of them while `all`.
-fn neighbour_list(
+pub(crate) fn neighbour_list(
     i18n: I18nContext<Locale>,
     live: Live,
     packet: Option<&Packet>,

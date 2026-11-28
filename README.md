@@ -304,3 +304,10 @@ cargo run -p meshctl-fakes --bin fake-meshcore -- [port] [control port]
 Translations are in `web/locales/`, one JSON file per language, English being
 the reference. Using a key English does not declare is a compile error; one
 another language lacks is a build warning, and shows in English meanwhile.
+
+The names of the radios' codes (regions, roles, settings, why a packet was
+not delivered…) are not there: they are in tables in the code, beside their
+codes, in `web/src/names.rs`, `fields.rs` and `sections.rs`, as `names.rs`
+explains. A new language also needs its words in them, and its way of writing
+numbers and dates where the code matches on the language; the compiler points
+at each of those once the language is added.

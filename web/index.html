@@ -2042,7 +2042,8 @@
       .facts .copyable .icon-button { flex: none; }
       .facts .copyable .icon-button svg { width: 16px; height: 16px; }
       .facts .public-key { font-size: 12px; font-weight: 400; }
-      .node-page button.link {
+      .node-page button.link,
+      .packet-neighbours button.link {
         padding: 0;
         border: 0;
         background: none;
@@ -2050,12 +2051,14 @@
         font: inherit;
         cursor: pointer;
       }
-      .node-page button.link:hover { text-decoration: underline; }
+      .node-page button.link:hover,
+      .packet-neighbours button.link:hover { text-decoration: underline; }
       .neighbours { list-style: none; margin: 0; padding: 0; columns: 2 220px; column-gap: 24px; }
       .neighbours li { display: flex; gap: 8px; padding: 4px 0; break-inside: avoid; }
       .neighbours .snr { margin-left: auto; color: var(--mc-muted); font-variant-numeric: tabular-nums; }
       .neighbours:not(.all) .extra { display: none; }
-      .node-page button.neighbours-more { margin-top: 6px; font-size: 13px; }
+      .node-page button.neighbours-more,
+      .packet-neighbours button.neighbours-more { margin-top: 6px; font-size: 13px; }
       /* What a MeshCore node said, asked of it: its readings, one a line; a
          password to log in to it with; what went wrong. */
       .readings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -3396,6 +3399,31 @@
       .packet-who .names { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
       .packet-who .name { font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
       .packet-who .about { font-size: 13px; overflow-wrap: anywhere; }
+      /* A waypoint, by its emoji as its pin on the map. */
+      .packet-waypoint .waypoint-icon { flex: none; width: 40px; font-size: 30px; line-height: 1; text-align: center; }
+      .packet-waypoint .about:not(.dim) { font-size: 14px; }
+      /* Whether what a routing packet answers got there, said by its icon
+         too. */
+      .packet-status {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 20px 16px;
+        padding: 12px 14px;
+        border-radius: 8px;
+        background: var(--mc-surface-2);
+        font-size: 15px;
+      }
+      .packet-status .icon { display: flex; flex: none; }
+      .packet-status .icon svg { width: 22px; height: 22px; }
+      .packet-status.ok .icon { color: var(--mc-ok); }
+      .packet-status.bad .icon { color: var(--mc-danger); }
+      /* A traceroute's ways, and the neighbours a node hears, as wide as
+         the rest of the drawer. */
+      .packet-detail .packet-trace h3 + .path { margin-bottom: 12px; }
+      .packet-detail .packet-trace, .packet-detail .packet-neighbours { margin: 0 20px 16px; padding-top: 14px; }
+      .packet-detail .packet-neighbours { border-top: 1px solid var(--mc-border); }
+      .packet-detail .packet-neighbours h3 { margin: 0 0 8px; font-size: 14px; }
       /* A text, whole, as it was written. */
       .packet-message {
         margin: 0 20px 16px;

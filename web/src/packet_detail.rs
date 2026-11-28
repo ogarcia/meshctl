@@ -3,12 +3,26 @@
 
 //! What a packet heard says, drawn in its drawer as the rest of the
 //! interface draws it: who a node says it is, a text whole, where it says on
-//! a small map, its telemetry as a node's figures.
+//! a small map with what more it tells of it, a waypoint, its telemetry as a
+//! node's figures, a traceroute's ways, the neighbours a node hears, and
+//! whether what it answers got there.
 
 use crate::app::Live;
-use crate::i18n::{t_string, use_i18n};
+use crate::i18n::{Locale, t, t_string, use_i18n};
+use crate::node::Tile;
 use leptos::prelude::*;
-use meshctl_api::Packet;
+use leptos_i18n::I18nContext;
+use meshctl_api::{Hop, Packet};
+use serde_json::Value;
+
+const CHECK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/circle-check.svg");
+const ALERT: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/alert-triangle.svg");
+
+/// A relay a traceroute could not tell, as the firmware marks it.
+const UNKNOWN_HOP: u64 = 0xffff_ffff;
+
+/// An SNR a traceroute could not tell, as the firmware marks it.
+const UNKNOWN_SNR: i64 = -128;
 
 /// What a packet says, drawn, for the kinds that can be: nothing for the
 /// others. `close` closes its drawer, as going to the map does.
@@ -16,24 +30,326 @@ use meshctl_api::Packet;
 pub fn Contents(packet: Packet, #[prop(into)] close: Callback<()>) -> impl IntoView {
     let i18n = use_i18n();
     let from = packet.from;
+    let port = packet.port.as_deref().unwrap_or_default();
+    let payload = packet.payload.as_ref();
     let place = place_of(&packet).map(|at| {
         view! { <PacketPlace at from waypoint=waypoint_of(&packet) close /> }
     });
-    let telemetry = packet
-        .payload
-        .as_ref()
-        .filter(|_| packet.port.as_deref() == Some("TELEMETRY_APP"))
+    let telemetry = payload
+        .filter(|_| port == "TELEMETRY_APP")
         .and_then(|payload| crate::node::telemetry_figures(i18n, payload));
+    let position = payload
+        .filter(|_| port == "POSITION_APP")
+        .and_then(|payload| position_figures(i18n, payload));
+    let waypoint = payload
+        .filter(|_| port == "WAYPOINT_APP")
+        .map(|payload| view! { <PacketWaypoint payload=payload.clone() /> });
+    let routing = payload
+        .filter(|_| port == "ROUTING_APP")
+        .map(|payload| view! { <Delivery payload=payload.clone() /> });
+    let trace = trace_ways(&packet).map(|ways| view! { <TraceWays ways /> });
+    let neighbours =
+        (port == "NEIGHBORINFO_APP").then(|| view! { <Neighbours packet=packet.clone() /> });
     view! {
         {who_of(&packet).map(|who| view! { <PacketWho who from /> })}
+        {waypoint}
         {message_of(&packet).map(|(sender, text)| view! {
             <p class="packet-message">
                 {sender.map(|sender| view! { <strong>{sender}</strong> })}
                 {text}
             </p>
         })}
+        {routing}
         {place}
+        {position}
         {telemetry}
+        {trace}
+        {neighbours}
+    }
+}
+
+/// What more a position tells of where its node is: how high, how fast and
+/// which way, with how many satellites, how far off it may be, and where it
+/// comes from. None when it tells none of it.
+fn position_figures(i18n: I18nContext<Locale>, payload: &Value) -> Option<AnyView> {
+    let tile = |label: &str, value: String| {
+        view! { <Tile label=label.to_owned().into_any() value /> }.into_any()
+    };
+    let int = |key: &str| payload[key].as_i64();
+    let mut tiles: Vec<AnyView> = Vec::new();
+    if let Some(altitude) = int("altitude") {
+        tiles.push(tile(
+            t_string!(i18n, node_altitude),
+            format!("{altitude} m"),
+        ));
+    }
+    // In metres a second, as the firmware sends it.
+    if let Some(speed) = int("ground_speed") {
+        #[allow(clippy::cast_precision_loss)]
+        let kmh = speed as f64 * 3.6;
+        tiles.push(tile(
+            t_string!(i18n, packets_speed),
+            format!("{kmh:.0} km/h"),
+        ));
+    }
+    // In 1e-5 degrees.
+    if let Some(track) = int("ground_track") {
+        #[allow(clippy::cast_precision_loss)]
+        let degrees = track as f64 * 1e-5;
+        tiles.push(tile(
+            t_string!(i18n, packets_heading),
+            format!("{degrees:.0}°"),
+        ));
+    }
+    if let Some(sats) = int("sats_in_view") {
+        tiles.push(tile(t_string!(i18n, packets_satellites), sats.to_string()));
+    }
+    if let Some(metres) = place_radius(payload) {
+        tiles.push(tile(
+            t_string!(i18n, node_precision),
+            crate::mesh::radius(metres),
+        ));
+    }
+    let source = match payload["location_source"].as_str() {
+        Some("LOC_MANUAL") => Some(t_string!(i18n, position_manual)),
+        Some("LOC_INTERNAL") => Some(t_string!(i18n, position_internal)),
+        Some("LOC_EXTERNAL") => Some(t_string!(i18n, position_external)),
+        _ => None,
+    };
+    if let Some(source) = source {
+        tiles.push(tile(t_string!(i18n, node_source), source.to_owned()));
+    }
+    (!tiles.is_empty())
+        .then(|| view! { <div class="node-figures packet-figures">{tiles}</div> }.into_any())
+}
+
+/// A waypoint, as its pin on the map shows it: its emoji, its name and what
+/// it says of itself, when it expires and whether it is locked; or that it
+/// deletes the one it names, for everyone.
+#[component]
+fn PacketWaypoint(payload: Value) -> impl IntoView {
+    let i18n = use_i18n();
+    let icon = payload["icon"]
+        .as_u64()
+        .and_then(|code| char::from_u32(u32::try_from(code).ok()?))
+        .map_or_else(|| "📍".to_owned(), String::from);
+    let name = payload["name"].as_str().unwrap_or_default().to_owned();
+    let description = payload["description"]
+        .as_str()
+        .filter(|d| !d.is_empty())
+        .map(str::to_owned);
+    let expire = payload["expire"].as_i64().unwrap_or(0);
+    // Deleted, it is sent again expired, and with nowhere.
+    let deleted = expire == 1 || payload.get("latitude_i").is_none();
+    let locked = payload["locked_to"].as_u64().is_some_and(|n| n != 0);
+    let mut about = vec![if deleted {
+        t_string!(i18n, packets_waypoint_deleted).to_owned()
+    } else if expire == 0 {
+        format!(
+            "{}: {}",
+            t_string!(i18n, waypoint_expires),
+            t_string!(i18n, waypoint_never)
+        )
+    } else {
+        format!(
+            "{}: {}",
+            t_string!(i18n, waypoint_expires),
+            crate::packets::when(expire)
+        )
+    }];
+    if locked {
+        about.push(t_string!(i18n, waypoint_locked).to_owned());
+    }
+    view! {
+        <div class="packet-who packet-waypoint">
+            <span class="waypoint-icon">{icon}</span>
+            <div class="names">
+                <span class="name">{name}</span>
+                {description.map(|d| view! { <span class="about">{d}</span> })}
+                <span class="about dim">{about.join(" · ")}</span>
+            </div>
+        </div>
+    }
+}
+
+/// Whether what a routing packet answers got there: confirmed, or why not,
+/// in words.
+#[component]
+fn Delivery(payload: Value) -> impl IntoView {
+    let live = expect_context::<Live>();
+    let i18n = use_i18n();
+    // Its reason left out is the first, none.
+    let code = payload["error_reason"]
+        .as_str()
+        .unwrap_or("NONE")
+        .to_owned();
+    let ok = code == "NONE";
+    let words = if ok {
+        t_string!(i18n, packets_ack).to_owned()
+    } else {
+        crate::names::routing_error(live.locale(), &code)
+    };
+    view! {
+        <p class="packet-status" class:ok=ok class:bad=!ok>
+            <span class="icon" inner_html=if ok { CHECK } else { ALERT }></span>
+            <span>{words}</span>
+        </p>
+    }
+}
+
+/// A traceroute's ways, as the packet heard tells them: there, and back once
+/// it is answered; or, on its way there, as far as it went.
+#[derive(Clone, Debug, PartialEq)]
+struct Ways {
+    towards: Vec<Hop>,
+    back: Option<Vec<Hop>>,
+}
+
+/// The ways a traceroute heard tells: its answer, from whoever asked to the
+/// node traced and back; its request, from whoever asked as far as it went.
+fn trace_ways(packet: &Packet) -> Option<Ways> {
+    if packet.port.as_deref() != Some("TRACEROUTE_APP") {
+        return None;
+    }
+    let payload = packet.payload.as_ref()?;
+    let list = |key: &str| -> Vec<i64> {
+        payload[key]
+            .as_array()
+            .map(|a| a.iter().filter_map(Value::as_i64).collect())
+            .unwrap_or_default()
+    };
+    let hops = |first: u32, relays: &[i64], last: Option<u32>, snrs: &[i64]| -> Vec<Hop> {
+        let rest = relays
+            .iter()
+            .map(|&n| {
+                u32::try_from(n)
+                    .ok()
+                    .filter(|&n| u64::from(n) != UNKNOWN_HOP)
+            })
+            .chain(last.map(Some))
+            .enumerate()
+            .map(|(i, node)| {
+                // Scaled by four.
+                #[allow(clippy::cast_precision_loss)]
+                let snr = snrs
+                    .get(i)
+                    .filter(|&&s| s != UNKNOWN_SNR)
+                    .map(|&s| s as f32 / 4.0);
+                Hop::known(node, snr)
+            });
+        std::iter::once(Hop::known(Some(first), None))
+            .chain(rest)
+            .collect()
+    };
+    let (route, snr_towards) = (list("route"), list("snr_towards"));
+    Some(if packet.request_id.is_some() {
+        // The answer, from the node traced to whoever asked.
+        let (origin, target) = (packet.to, packet.from);
+        Ways {
+            towards: hops(origin, &route, Some(target), &snr_towards),
+            back: Some(hops(
+                target,
+                &list("route_back"),
+                Some(origin),
+                &list("snr_back"),
+            )),
+        }
+    } else {
+        Ways {
+            towards: hops(packet.from, &route, None, &snr_towards),
+            back: None,
+        }
+    })
+}
+
+/// A traceroute's ways, node by node with how well each hop was heard, as a
+/// trace on a node's page shows them; and on a small map, where its nodes
+/// can be placed.
+#[component]
+fn TraceWays(ways: Ways) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let local = live
+        .status
+        .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+    let all: Vec<Hop> = ways
+        .towards
+        .iter()
+        .chain(ways.back.iter().flatten().skip(1))
+        .cloned()
+        .collect();
+    let points = Signal::derive(move || {
+        live.nodes.with(|nodes| {
+            let mut points = Vec::new();
+            let mut gap = false;
+            for hop in &all {
+                let at = hop.node.and_then(|num| {
+                    let node = nodes.get(&num)?;
+                    let at = node.position?;
+                    Some(crate::map::RoutePoint {
+                        lat: at.latitude,
+                        lon: at.longitude,
+                        pin: crate::mesh::pin(node, Some(num) == local),
+                        gap: gap && !points.is_empty(),
+                        guess: false,
+                    })
+                });
+                match at {
+                    Some(point) => {
+                        points.push(point);
+                        gap = false;
+                    }
+                    None => gap = true,
+                }
+            }
+            points
+        })
+    });
+    let answered = ways.back.is_some();
+    let there = ways
+        .towards
+        .len()
+        .saturating_sub(if answered { 2 } else { 1 });
+    let towards = ways.towards;
+    let back = ways.back.map(|back| {
+        let count = back.len().saturating_sub(2);
+        view! {
+            <h3>{t!(i18n, trace_back)} " (" {count} ")"</h3>
+            <crate::traces::Route hops=back />
+        }
+    });
+    view! {
+        <section class="routes packet-trace">
+            <h3>
+                {if answered { t!(i18n, trace_towards).into_any() } else { t!(i18n, packets_trace_so_far).into_any() }}
+                " (" {there} ")"
+            </h3>
+            <crate::traces::Route hops=towards />
+            {back}
+            {move || {
+                (points.with(Vec::len) >= 2).then(|| view! { <crate::map::RouteMap points /> })
+            }}
+        </section>
+    }
+}
+
+/// The nodes a node says it hears directly, as its page lists them.
+#[component]
+fn Neighbours(packet: Packet) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let all = RwSignal::new(false);
+    let count = packet
+        .payload
+        .as_ref()
+        .and_then(|p| p["neighbors"].as_array().map(Vec::len))
+        .unwrap_or(0);
+    let list = crate::node::neighbour_list(i18n, live, Some(&packet), all);
+    view! {
+        <section class="packet-neighbours">
+            <h3>{t!(i18n, node_neighbors)} " (" {count} ")"</h3>
+            {list}
+        </section>
     }
 }
 
@@ -144,6 +460,10 @@ fn message_of(packet: &Packet) -> Option<(Option<String>, String)> {
     if let Some(text) = payload.as_str() {
         return (!text.is_empty()).then(|| (None, text.to_owned()));
     }
+    if packet.port.as_deref() == Some("NODE_STATUS_APP") {
+        let status = payload["status"].as_str().filter(|s| !s.is_empty())?;
+        return Some((None, status.to_owned()));
+    }
     if packet.port.as_deref() != Some("GRP_TXT") {
         return None;
     }
@@ -225,11 +545,16 @@ fn place_of(packet: &Packet) -> Option<Place> {
     Some(Place {
         lat: lat as f64 * 1e-7,
         lon: lon as f64 * 1e-7,
-        radius: payload["precision_bits"]
-            .as_u64()
-            .and_then(|bits| u32::try_from(bits).ok())
-            .and_then(radius),
+        radius: place_radius(payload),
     })
+}
+
+/// How far off a position may be, in metres, as its precision says.
+fn place_radius(payload: &Value) -> Option<u32> {
+    payload["precision_bits"]
+        .as_u64()
+        .and_then(|bits| u32::try_from(bits).ok())
+        .and_then(radius)
 }
 
 /// A waypoint's id, for one heard.
@@ -330,7 +655,38 @@ mod tests {
     }
 
     #[test]
+    fn traceroutes_say_their_ways() {
+        // Asked by 1 of 9, through 5 and an unknown relay there, and 7 back.
+        let answer = serde_json::json!({
+            "route": [5, 0xffff_ffff_u32], "snr_towards": [24, -128, 10],
+            "route_back": [7], "snr_back": [-8]
+        });
+        let mut heard = packet("TRACEROUTE_APP", answer);
+        heard.from = 9;
+        heard.to = 1;
+        heard.request_id = Some(42);
+        let ways = trace_ways(&heard).unwrap();
+        let nodes = |hops: &[Hop]| hops.iter().map(|h| h.node).collect::<Vec<_>>();
+        let snrs = |hops: &[Hop]| hops.iter().map(|h| h.snr).collect::<Vec<_>>();
+        assert_eq!(nodes(&ways.towards), [Some(1), Some(5), None, Some(9)]);
+        assert_eq!(snrs(&ways.towards), [None, Some(6.0), None, Some(2.5)]);
+        let back = ways.back.unwrap();
+        assert_eq!(nodes(&back), [Some(9), Some(7), Some(1)]);
+        assert_eq!(snrs(&back), [None, Some(-2.0), None]);
+        // On its way there, as far as it went.
+        let asked = serde_json::json!({"route": [5], "snr_towards": [24]});
+        let ways = trace_ways(&packet("TRACEROUTE_APP", asked)).unwrap();
+        assert_eq!(nodes(&ways.towards), [Some(1), Some(5)]);
+        assert_eq!(ways.back, None);
+    }
+
+    #[test]
     fn texts_say_what_they_say() {
+        let status = serde_json::json!({"status": "De ruta"});
+        assert_eq!(
+            message_of(&packet("NODE_STATUS_APP", status)),
+            Some((None, "De ruta".to_owned()))
+        );
         let text = packet("TEXT_MESSAGE_APP", "hola".into());
         assert_eq!(message_of(&text), Some((None, "hola".to_owned())));
         let channel = serde_json::json!({"sender": "Pepe", "text": "Bos días"});

@@ -265,7 +265,7 @@ fn hop_name(live: Live, hop: &Hop) -> String {
 
 /// A route, node by node, with the SNR each hop was heard at between them.
 #[component]
-fn Route(hops: Vec<Hop>) -> impl IntoView {
+pub(crate) fn Route(hops: Vec<Hop>) -> impl IntoView {
     let i18n = use_i18n();
     let live = expect_context::<Live>();
     let steps = hops

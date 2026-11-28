@@ -1032,7 +1032,7 @@ fn title_of(live: Live, channel: u32) -> String {
 }
 
 /// The day and the time, in the browser's own zone.
-fn when(at: i64) -> String {
+pub(crate) fn when(at: i64) -> String {
     #[allow(clippy::cast_precision_loss)]
     let date = js_sys::Date::new_0();
     date.set_time(at as f64 * 1000.0);
