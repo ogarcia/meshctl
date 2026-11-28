@@ -135,6 +135,7 @@ pub fn RadioChip() -> impl IntoView {
                         <span class=format!("dot {}", live.link_class(link))></span>
                     </span>
                     <span class="name">{radio.name.clone()}</span>
+                    <crate::app::RadioBattery />
                     <svg class="caret" viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M6 9l6 6l6 -6"></path>
                     </svg>
@@ -244,8 +245,9 @@ pub fn RadioSheet() -> impl IntoView {
                                     </span>
                                     <span class="who">
                                         <b>{radio.name.clone()}</b>
-                                        <span class="dim">
+                                        <span class="dim radio-facts">
                                             <LinkLabel link />
+                                            <crate::app::RadioBattery radio=id />
                                         </span>
                                     </span>
                                     {move || {

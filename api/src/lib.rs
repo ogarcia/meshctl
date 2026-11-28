@@ -172,6 +172,13 @@ pub struct Radio {
     /// button shows when nothing else was picked for it.
     #[cfg_attr(feature = "openapi", schema(example = "G3L0"))]
     pub short_name: Option<String>,
+    /// Its own node's number, once it told it: whose news are its own.
+    #[serde(default)]
+    pub node: Option<u32>,
+    /// Its own node's battery, in percent, for a Meshtastic radio that told
+    /// it; over 100 means it is powered.
+    #[serde(default)]
+    pub battery_level: Option<u32>,
     pub link: LinkState,
     /// When it was last connected and in sync, in seconds since the epoch;
     /// none if it never was. What meshctl shows of a radio that is not

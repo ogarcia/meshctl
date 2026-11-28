@@ -1214,6 +1214,17 @@ impl Live {
                     }
                 }
                 ServerMessage::Node { radio, node } => {
+                    // A radio's own: its battery, on its button and in the
+                    // list of radios.
+                    self.radios.update(|radios| {
+                        if let Some(r) = radios
+                            .iter_mut()
+                            .flatten()
+                            .find(|r| r.id == radio && r.node == Some(node.num))
+                        {
+                            r.battery_level = node.battery_level;
+                        }
+                    });
                     if self.is_selected(radio) {
                         self.nodes.update(|nodes| {
                             nodes.insert(node.num, node);
@@ -2279,6 +2290,62 @@ fn Section(bit: u8, title: Signal<String>, peers: Signal<Vec<Peer>>) -> impl Int
     }
 }
 
+/// A battery, as full as it is, by a fifth: empty, and a bar for each
+/// quarter it holds, rounded.
+const BATTERIES: [&str; 5] = [
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-vertical.svg"),
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-vertical-1.svg"),
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-vertical-2.svg"),
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-vertical-3.svg"),
+    include_str!("../vendor/tabler-icons-3.51.0/icons/outline/battery-vertical-4.svg"),
+];
+
+/// The icon of a battery so full, in percent.
+fn battery_icon(level: u32) -> &'static str {
+    BATTERIES[match level {
+        0..=12 => 0,
+        13..=37 => 1,
+        38..=62 => 2,
+        63..=87 => 3,
+        _ => 4,
+    }]
+}
+
+/// A radio's battery, the selected one's if none is said, while it is
+/// connected and runs on it: its icon by how full it is, and how much,
+/// marked when low. Nothing when it is powered, which Meshtastic says with
+/// more than 100, whether it charges a battery or has none; nor for
+/// MeshCore, which says only its voltage, and when asked.
+#[component]
+pub(crate) fn RadioBattery(#[prop(optional)] radio: Option<RadioId>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let level = Memo::new(move |_| {
+        let id = radio.or_else(|| live.selected.get())?;
+        live.radios.with(|radios| {
+            let radio = radios.as_ref()?.iter().find(|r| r.id == id)?;
+            if radio.link != LinkState::Ready || radio.kind != RadioKind::Meshtastic {
+                return None;
+            }
+            radio.battery_level.filter(|&level| level <= 100)
+        })
+    });
+    move || {
+        level.get().map(|level| {
+            view! {
+                <span
+                    class="radio-battery"
+                    class:low=level < 20
+                    title=move || t_string!(i18n, node_battery)
+                >
+                    <span class="icon" inner_html=battery_icon(level)></span>
+                    {format!("{level} %")}
+                </span>
+            }
+        })
+    }
+}
+
 /// The selected radio's name, and how it is.
 #[component]
 fn RadioHead() -> impl IntoView {
@@ -2300,6 +2367,7 @@ fn RadioHead() -> impl IntoView {
                 <span class="link">
                     <LinkLabel link />
                 </span>
+                <RadioBattery />
             </span>
         </header>
     }
@@ -3237,4 +3305,25 @@ fn login_failure(failure: &Failure) -> bool {
                 | meshctl_api::ErrorCode::NotOnRadio
         )
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_battery_shows_as_full_as_it_is() {
+        let bars = |level| {
+            BATTERIES
+                .iter()
+                .position(|&icon| icon == battery_icon(level))
+        };
+        assert_eq!(bars(0), Some(0));
+        assert_eq!(bars(12), Some(0));
+        assert_eq!(bars(13), Some(1));
+        assert_eq!(bars(50), Some(2));
+        assert_eq!(bars(87), Some(3));
+        assert_eq!(bars(88), Some(4));
+        assert_eq!(bars(100), Some(4));
+    }
 }

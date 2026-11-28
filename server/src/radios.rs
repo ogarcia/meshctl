@@ -4271,6 +4271,10 @@ impl Radios {
             short_name: (record.settings.kind == RadioKind::Meshtastic)
                 .then(|| self.short_name(record.id))
                 .flatten(),
+            node: self.own_node(record.id),
+            battery_level: (record.settings.kind == RadioKind::Meshtastic)
+                .then(|| self.battery_level(record.id))
+                .flatten(),
             badge: record.settings.badge,
             last_connected: record.last_connected,
             map_max_age: record.map_max_age,
@@ -4288,6 +4292,23 @@ impl Radios {
             let local = state.local.as_ref()?.num;
             let short = &state.nodes.get(&local)?.user.as_ref()?.short_name;
             (!short.trim().is_empty()).then(|| short.clone())
+        })
+    }
+
+    /// A radio's own node's number, as it last said it.
+    fn own_node(&self, id: RadioId) -> Option<u32> {
+        let lock = self.lock();
+        let running = lock.get(&id)?;
+        running.mesh.read(|state| Some(state.local.as_ref()?.num))
+    }
+
+    /// A radio's own node's battery, as it last said it.
+    fn battery_level(&self, id: RadioId) -> Option<u32> {
+        let lock = self.lock();
+        let running = lock.get(&id)?;
+        running.mesh.read(|state| {
+            let local = state.local.as_ref()?.num;
+            state.nodes.get(&local)?.battery_level
         })
     }
 

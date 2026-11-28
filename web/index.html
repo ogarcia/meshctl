@@ -619,6 +619,15 @@
       .sidebar-head .head-facts { display: flex; white-space: nowrap; min-width: 0; }
       .sidebar-head .head-facts > span { flex: none; }
       .sidebar-head .head-facts > span + span::before { content: "·"; margin: 0 0.35em; }
+      /* The radio's battery, while it runs on it: its icon and how much;
+         in red when low. */
+      .radio-battery { display: inline-flex; align-items: center; gap: 2px; font-variant-numeric: tabular-nums; }
+      .radio-battery .icon { display: flex; }
+      .radio-battery .icon svg { width: 14px; height: 14px; }
+      .radio-battery.low { color: var(--mc-danger); }
+      .radio-chip .radio-battery { flex: none; font-size: 13px; font-weight: 500; color: var(--mc-muted); }
+      .radio-chip .radio-battery.low { color: var(--mc-danger); }
+      .radio-chip .radio-battery .icon svg { width: 16px; height: 16px; }
       .sidebar-head .head-facts > .link {
         flex: 0 1 auto;
         min-width: 0;
@@ -1061,6 +1070,10 @@
       .radio-list button.on { background: var(--mc-soft); }
       .radio-list .who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
       .radio-list .who .dim { font-size: 12px; }
+      /* How its link is, and its battery after, while it runs on it. */
+      .radio-list .who .radio-facts { display: flex; align-items: center; min-width: 0; white-space: nowrap; }
+      .radio-list .who .radio-facts .radio-battery::before { content: "·"; margin: 0 0.35em; color: var(--mc-muted); }
+      .radio-list .radio-battery .icon svg { width: 13px; height: 13px; }
       .radio-list .check { width: 20px; height: 20px; color: var(--mc-primary); }
       .drawer-foot .link { padding: 0; border: 0; background: none; color: var(--mc-primary); cursor: pointer; }
       /* What a phone has in pages, a wider screen has in its bars. */
