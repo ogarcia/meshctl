@@ -648,6 +648,53 @@ async fn keep_reply(
     Ok(())
 }
 
+/// How often a MeshCore radio's battery is asked for: not to keep it busy
+/// while there is time; often once low, to see it go.
+const BATTERY_EVERY: Duration = Duration::from_secs(10 * 60);
+const LOW_BATTERY_EVERY: Duration = Duration::from_secs(2 * 60);
+
+/// Below this, in percent, a battery is low.
+const LOW_BATTERY: u32 = 20;
+
+/// Asks a MeshCore radio for its battery as it gets in sync, and then now
+/// and then while it is, as it does not tell it of its own accord: kept as
+/// its own node's, and told as that.
+fn watch_battery(id: RadioId, mesh: &Mesh) -> JoinHandle<()> {
+    let mesh = mesh.clone();
+    tokio::spawn(async move {
+        let mut events = mesh.subscribe();
+        let mut wait = None;
+        loop {
+            // In sync again, at once; then as long as was said.
+            let synced = async {
+                loop {
+                    match events.recv().await {
+                        Ok(mesh::Event::Synced) => return true,
+                        Err(RecvError::Closed) => return false,
+                        _ => {}
+                    }
+                }
+            };
+            tokio::select! {
+                synced = synced => if !synced { return },
+                () = tokio::time::sleep(wait.unwrap_or(BATTERY_EVERY)), if wait.is_some() => {}
+            }
+            if mesh.read(|state| state.link) != mesh::LinkState::Ready {
+                wait = None;
+                continue;
+            }
+            wait = Some(match mesh.meshcore_battery().await {
+                Ok(Some(level)) if level < LOW_BATTERY => LOW_BATTERY_EVERY,
+                Ok(_) => BATTERY_EVERY,
+                Err(error) => {
+                    tracing::debug!(radio = id, ?error, "cannot read the battery");
+                    BATTERY_EVERY
+                }
+            });
+        }
+    })
+}
+
 /// A node's answer, as the API tells it: a route's hops with the nodes
 /// they may be, as the radio knows them.
 fn reply_of(mesh: &Mesh, answer: &mesh::Answer) -> meshctl_api::RequestReply {
@@ -4272,9 +4319,7 @@ impl Radios {
                 .then(|| self.short_name(record.id))
                 .flatten(),
             node: self.own_node(record.id),
-            battery_level: (record.settings.kind == RadioKind::Meshtastic)
-                .then(|| self.battery_level(record.id))
-                .flatten(),
+            battery_level: self.battery_level(record.id),
             badge: record.settings.badge,
             last_connected: record.last_connected,
             map_max_age: record.map_max_age,
@@ -4338,6 +4383,9 @@ impl Radios {
                 Ok(transport) => {
                     tracing::info!(radio = id, name = %record.settings.name, %transport, "connecting");
                     tasks.push(mesh.spawn(protocol_of(record.settings.kind), transport));
+                    if record.settings.kind == RadioKind::Meshcore {
+                        tasks.push(watch_battery(id, &mesh));
+                    }
                 }
                 Err(error) => {
                     tracing::warn!(radio = id, ?error, "cannot connect to this radio");

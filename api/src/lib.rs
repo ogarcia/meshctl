@@ -175,8 +175,10 @@ pub struct Radio {
     /// Its own node's number, once it told it: whose news are its own.
     #[serde(default)]
     pub node: Option<u32>,
-    /// Its own node's battery, in percent, for a Meshtastic radio that told
-    /// it; over 100 means it is powered.
+    /// Its own node's battery, in percent, once told; over 100 means it is
+    /// powered. A MeshCore radio says only its voltage, now and then asked
+    /// for: how full it is goes in a straight line from 3.0 V to 4.2 V, and
+    /// at 4.2 V or more it is taken as powered, as on USB.
     #[serde(default)]
     pub battery_level: Option<u32>,
     pub link: LinkState,

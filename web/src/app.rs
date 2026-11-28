@@ -2313,9 +2313,10 @@ fn battery_icon(level: u32) -> &'static str {
 
 /// A radio's battery, the selected one's if none is said, while it is
 /// connected and runs on it: its icon by how full it is, and how much,
-/// marked when low. Nothing when it is powered, which Meshtastic says with
-/// more than 100, whether it charges a battery or has none; nor for
-/// MeshCore, which says only its voltage, and when asked.
+/// marked when low. Nothing when it is powered, which is said with more
+/// than 100: by Meshtastic, whether it charges a battery or has none; by
+/// the daemon for MeshCore, which says only its voltage, when that is a
+/// full battery's or more, as on USB.
 #[component]
 pub(crate) fn RadioBattery(#[prop(optional)] radio: Option<RadioId>) -> impl IntoView {
     let i18n = use_i18n();
@@ -2324,7 +2325,7 @@ pub(crate) fn RadioBattery(#[prop(optional)] radio: Option<RadioId>) -> impl Int
         let id = radio.or_else(|| live.selected.get())?;
         live.radios.with(|radios| {
             let radio = radios.as_ref()?.iter().find(|r| r.id == id)?;
-            if radio.link != LinkState::Ready || radio.kind != RadioKind::Meshtastic {
+            if radio.link != LinkState::Ready {
                 return None;
             }
             radio.battery_level.filter(|&level| level <= 100)

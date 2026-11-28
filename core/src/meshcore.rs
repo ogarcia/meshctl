@@ -390,6 +390,20 @@ impl Client {
         }
     }
 
+    /// Its battery's voltage, in millivolts, alone.
+    pub async fn battery(&self) -> Result<u16, AdminError> {
+        match self
+            .ask_one(command::get_battery(), |r| {
+                matches!(r, Response::Battery { .. })
+            })
+            .await
+        {
+            Ok(Response::Battery { millivolts, .. }) => Ok(millivolts),
+            Ok(_) | Err("the radio did not answer") => Err(AdminError::NoAnswer),
+            Err(_) => Err(AdminError::NotConnected),
+        }
+    }
+
     /// Its battery and storage, and each kind of figure it has.
     pub async fn status(&self) -> Result<Status, AdminError> {
         let mut status = Status::default();
@@ -591,6 +605,32 @@ fn kind_of(role: &str) -> u8 {
 }
 
 /// A position as MeshCore gives it, in millionths of a degree; none at zero.
+/// Under this, in millivolts, a radio has no battery it can measure, or
+/// none: what it says is no voltage of one.
+const MIN_BATTERY_MV: u16 = 2_000;
+
+/// Empty and full, in millivolts: a lithium battery's, NMC or LiPo, as the
+/// MeshCore apps that say how full one is take it by default.
+const EMPTY_MV: u16 = 3_000;
+const FULL_MV: u16 = 4_200;
+
+/// How full a MeshCore radio's battery is, in percent, from its voltage, as
+/// the apps that say it work it out: in a straight line from empty to full.
+/// More than 100 at full or over, as a Meshtastic radio says it is powered:
+/// a radio on USB reads so, and is told so, which a battery just charged
+/// also does a while. None when it has no battery it can measure.
+pub fn battery_level(millivolts: u16) -> Option<u32> {
+    if millivolts < MIN_BATTERY_MV {
+        return None;
+    }
+    if millivolts >= FULL_MV {
+        return Some(101);
+    }
+    let above = u32::from(millivolts.saturating_sub(EMPTY_MV));
+    let span = u32::from(FULL_MV - EMPTY_MV);
+    Some((above * 100 + span / 2) / span)
+}
+
 fn position(lat: i32, lon: i32) -> Option<Position> {
     (lat != 0 || lon != 0).then(|| Position {
         latitude: f64::from(lat) / 1e6,
@@ -1397,6 +1437,29 @@ impl Mesh {
     /// A MeshCore radio's figures, asked for now.
     pub async fn meshcore_status(&self) -> Result<Status, AdminError> {
         self.meshcore_session()?.client.status().await
+    }
+
+    /// A MeshCore radio's battery, asked for now and kept as its own
+    /// node's, as a Meshtastic radio tells its own: its voltage, and how full
+    /// it is, as [`battery_level`] guesses it. Told as the node, when it
+    /// changes. How full it is, if it can be told.
+    pub async fn meshcore_battery(&self) -> Result<Option<u32>, AdminError> {
+        let millivolts = self.meshcore_session()?.client.battery().await?;
+        let level = battery_level(millivolts);
+        self.update(|state| {
+            let own = state.local.as_ref().map(|l| l.num);
+            let Some(node) = own.and_then(|num| state.nodes.get_mut(&num)) else {
+                return Vec::new();
+            };
+            let voltage = (millivolts >= MIN_BATTERY_MV).then(|| f32::from(millivolts) / 1000.0);
+            if node.battery_level == level && node.voltage == voltage {
+                return Vec::new();
+            }
+            node.battery_level = level;
+            node.voltage = voltage;
+            vec![Event::Node(node.clone())]
+        });
+        Ok(level)
     }
 
     /// The seconds a MeshCore radio has spent sending and receiving since it
@@ -2629,6 +2692,22 @@ fn channel(state: &mut MeshState, message: &ChannelMessage) -> Vec<Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_battery_is_as_full_as_its_voltage_says() {
+        // No battery it can measure.
+        assert_eq!(battery_level(0), None);
+        assert_eq!(battery_level(1_999), None);
+        // In a straight line from 3.0 V to 4.2 V, rounded.
+        assert_eq!(battery_level(2_500), Some(0));
+        assert_eq!(battery_level(3_000), Some(0));
+        assert_eq!(battery_level(3_600), Some(50));
+        assert_eq!(battery_level(3_700), Some(58));
+        assert_eq!(battery_level(4_199), Some(100));
+        // Full, or on USB: powered, as Meshtastic says it.
+        assert_eq!(battery_level(4_200), Some(101));
+        assert_eq!(battery_level(5_000), Some(101));
+    }
 
     fn contact(key_start: u8, name: &str, kind: u8) -> Contact {
         let mut public_key = [0u8; 32];
