@@ -3384,6 +3384,30 @@
       }
       /* Where a position or a waypoint says, as wide as the rest of it. */
       .packet-detail .place-map { margin: 0 20px 16px; }
+      /* Who a node info or an advert says sent it, by its avatar. */
+      .packet-who {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0 20px 16px;
+        padding: 14px 0 0;
+        border-top: 1px solid var(--mc-border);
+      }
+      .packet-who .names { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .packet-who .name { font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+      .packet-who .about { font-size: 13px; overflow-wrap: anywhere; }
+      /* A text, whole, as it was written. */
+      .packet-message {
+        margin: 0 20px 16px;
+        padding: 12px 14px;
+        border-left: 3px solid var(--mc-primary);
+        border-radius: 8px;
+        background: var(--mc-surface-2);
+        font-size: 15px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .packet-message strong { display: block; margin-bottom: 2px; font-size: 13px; }
       /* What a telemetry packet says, as a node's figures, as many to a row
          as fit the drawer. */
       .packet-detail .packet-figures {
@@ -5221,6 +5245,8 @@
         .channel-row .pick { flex-wrap: wrap; row-gap: 6px; }
         .channel-row .channel-facts { flex-basis: 100%; flex-wrap: wrap; padding-left: 52px; }
         .channel-row .channel-facts:empty { display: none; }
+        /* A packet's copy as wide as its drawer, as all above it. */
+        .drawer-foot .packet-copy { width: 100%; justify-content: center; }
         /* A node's figures, two by two. */
         .node-figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
         .figure, .figure:first-child { min-width: 0; padding: 0; border-left: 0; }
