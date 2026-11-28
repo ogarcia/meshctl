@@ -142,7 +142,19 @@
               <li><strong>El ojo</strong> oculta una radio de la barra sin olvidarla.</li>
               <li><strong>El interruptor</strong> es <em>Conectar automáticamente</em>: apagado, meshctl se desconecta de ella al momento y la deja en paz.</li>
               <li><strong>Su botón</strong>: hasta cuatro letras o un emoji, como los nombres cortos de Meshtastic, o un icono, y un color propio.</li>
+              <li><strong>Alimentación</strong>, en una radio MeshCore: si su batería sale según su voltaje, siempre o nunca (mira abajo).</li>
             </ul>
+            <p>
+              Una radio que va a batería muestra cuánta le queda junto a su nombre,
+              en la cabecera de la barra lateral, en la radio de arriba del móvil y
+              en su lista de radios, en rojo por debajo del 20 %; enchufada, nada.
+              Meshtastic lo dice ella misma. MeshCore solo dice su voltaje, que
+              meshctl le pide cada diez minutos, cada dos cuando está baja, y lee en
+              línea recta de 3,0 V a 4,2 V, como hacen sus apps; a 4,2 V o más la da
+              por enchufada. Como algunas placas marcan con USB un voltaje que podría
+              ser de batería, su <em>Alimentación</em> puede decir en cambio que va a
+              batería, o que está enchufada.
+            </p>
             <p>
               Una radio sin conectar sigue mostrando lo que sabía la última vez que
               lo estuvo, marcado así; se puede leer, no enviar ni preguntar.
@@ -431,6 +443,16 @@
               por qué canal, qué lleva, sus saltos y su señal y, en MeshCore, los
               repetidores por los que vino. Fíltralo por tipo, canal o nodo, y
               páusalo para leer.
+            </p>
+            <p>
+              Un paquete abierto muestra lo que dice como el resto del panel, sobre
+              su texto: un mensaje entero; una posición o un waypoint en un mapa
+              pequeño, con su altitud, velocidad y demás; la telemetría en cifras;
+              quién dice haberlo enviado un nodeinfo o un anuncio, con su avatar; los
+              caminos de un traceroute, salto a salto, y en un mapa; los vecinos que
+              oye un nodo; si llegó lo que responde un paquete de routing, o por qué
+              no; el latido y las cifras de un servidor Store &amp; Forward. Lo que
+              responde o contesta, si está en la lista, se abre desde él.
             </p>
           </div>
         </section>

@@ -3,6 +3,73 @@
 What each release brings. Until 1.0, a release may change the interface, the
 API and the database; each one carries the database forward, as far as it can.
 
+## 0.10.0 (2026-11-28)
+
+The live packets drawn as the rest of the panel, and each radio's battery.
+
+### Live
+
+- A packet opened shows what it says over its text, as the rest of the
+  panel shows it: a text whole, with who wrote it on a MeshCore channel; a
+  node's status; a position, a waypoint or a MeshCore advert on a small map,
+  a rounded position with the circle of how far off it may be, a waypoint
+  by its emoji; what more a position tells, its altitude, speed, heading,
+  satellites and source, in boxes; a waypoint's emoji, name, description,
+  expiry and lock, or that it deletes one for everyone.
+- Telemetry as a node's figures: battery, channel use, airtime and time on;
+  every sensor of its environment; each power channel; how the radio sees
+  the mesh. Measures of other kinds by their names.
+- Who a node info or an advert says sent it, by its avatar, with its id,
+  model and role.
+- A traceroute's ways there and back, hop by hop with how well each was
+  heard, and on a small map; one on its way, as far as it went.
+- The neighbours a node hears, as its page lists them.
+- Whether what a routing packet answers got there, or why not, in words.
+- A Store & Forward server's heartbeat, statistics and history, and what
+  its clients ask.
+- What a packet answers or replies to, when it is in the list, opens from
+  it.
+- On a phone, copying a packet takes the drawer's width.
+
+### Battery
+
+- A radio that runs on its battery shows how full it is, by an icon and in
+  percent, beside its name in the sidebar's heading, on the phone's radio at
+  the top and in its list of radios; in red under 20%. Plugged in, nothing.
+- Meshtastic says it itself. MeshCore says only its voltage, when asked:
+  meshctl asks as it gets in sync, then every ten minutes, every two once
+  low, and reads it in a straight line from 3.0 V to 4.2 V, as the MeshCore
+  apps do; at 4.2 V or more it is taken as plugged in.
+- A MeshCore radio's *Power*, in its editor: as its battery says, on its
+  battery, always shown, or plugged in, never; for boards that read on USB
+  a voltage a battery might.
+
+### Fixes
+
+- A conversation opened with what was not read leaves the line where it
+  starts in sight, under some of what was read before, rather than under
+  the way back to the newest, which hid it.
+- A route on a vector map stays together as the map zooms, its way there
+  and back a few pixels apart at any zoom, and no longer blinks as the mesh
+  tells of its nodes.
+- The live packets' words follow the language.
+
+### Documentation
+
+- How a new language goes into the tables of names kept in the code, in
+  `names.rs` and the README.
+- The guide tells the live packets' drawer, the battery and *Power*.
+
+### Development
+
+- The fake Meshtastic radio's repeater can be heard as a Store & Forward
+  router; the fake MeshCore radio's battery set to a voltage.
+
+### Under the hood
+
+- The Android app built with Gradle 9.9.3, and the Windows app with
+  `windows-registry` 0.100.
+
 ## 0.9.1 (2026-11-27)
 
 - Leaving a page before what it asked for came, as a node's settings read

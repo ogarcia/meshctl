@@ -140,7 +140,18 @@
               <li><strong>The eye</strong> hides a radio from the rail without forgetting it.</li>
               <li><strong>The switch</strong> is <em>Connect automatically</em>: off, meshctl disconnects from it at once and leaves it alone.</li>
               <li><strong>Its button</strong>: up to four letters or an emoji, as Meshtastic's short names, or an icon, and a colour of its own.</li>
+              <li><strong>Power</strong>, on a MeshCore radio: whether its battery shows as its voltage says, always, or never (see below).</li>
             </ul>
+            <p>
+              A radio that runs on its battery shows how full it is beside its name,
+              in the sidebar's heading, on the phone's radio at the top and in its
+              list of radios, in red under 20%; plugged in, nothing. Meshtastic says
+              so itself. MeshCore says only its voltage, which meshctl asks for every
+              ten minutes, every two once low, and reads in a straight line from
+              3.0 V to 4.2 V, as its apps do; at 4.2 V or more it is taken as plugged
+              in. As some boards read a voltage on USB that a battery might, its
+              <em>Power</em> can say instead that it is on its battery, or plugged in.
+            </p>
             <p>
               A radio that is not connected still shows what it knew when it last
               was, marked so; you can read, not send or ask.
@@ -422,6 +433,16 @@
               which channel, what it carries, its hops and signal, and on MeshCore
               the repeaters it came through. Filter it by kind, channel or node, and
               pause it to read.
+            </p>
+            <p>
+              A packet opened shows what it says as the rest of the panel does, over
+              its text: a text whole; a position or a waypoint on a small map, with
+              its altitude, speed and the like; telemetry in figures; who a node info
+              or an advert says sent it, by its avatar; a traceroute's ways, hop by
+              hop, and on a map; the neighbours a node hears; whether what a routing
+              packet answers got there, or why not; a Store &amp; Forward server's
+              beat and figures. What it answers or replies to, when it is in the
+              list, opens from it.
             </p>
           </div>
         </section>
