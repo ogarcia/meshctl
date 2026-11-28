@@ -658,6 +658,58 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             radio.lock().unwrap().old_firmware = old;
             format!("the neighbour's firmware has status messages: {}", !old)
         }
+        // A Store & Forward router heard, as the firmware's beats on the
+        // mesh: its heartbeat, and its statistics, broadcast.
+        Some("storeforward") => {
+            use pb::store_and_forward::{Heartbeat, RequestResponse, Statistics, Variant};
+            let said = [
+                (
+                    RequestResponse::RouterHeartbeat,
+                    Variant::Heartbeat(Heartbeat {
+                        period: 900,
+                        secondary: 0,
+                    }),
+                ),
+                (
+                    RequestResponse::RouterStats,
+                    Variant::Stats(Statistics {
+                        messages_total: 1_200 + random(800) as u32,
+                        messages_saved: 300 + random(200) as u32,
+                        messages_max: 800,
+                        up_time: 3_600 + random(86_400) as u32,
+                        requests: 40 + random(40) as u32,
+                        requests_history: 10 + random(20) as u32,
+                        heartbeat: true,
+                        return_max: 25,
+                        return_window: 240,
+                    }),
+                ),
+            ];
+            for (rr, variant) in said {
+                let packet = MeshPacket {
+                    from: REPEATER,
+                    to: BROADCAST,
+                    id: fresh_id(&NEXT_ID),
+                    rx_time: Some(now()),
+                    rx_snr: 3.25,
+                    hop_limit: 2,
+                    hop_start: 3,
+                    payload_variant: Some(mesh_packet::PayloadVariant::Decoded(pb::Data {
+                        portnum: PortNum::StoreForwardApp as i32,
+                        payload: pb::StoreAndForward {
+                            rr: rr as i32,
+                            variant: Some(variant),
+                            ..Default::default()
+                        }
+                        .encode_to_vec(),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                };
+                let _ = events.send(Event::Heard(packet));
+            }
+            "the repeater beats as a Store & Forward router, and tells its statistics".into()
+        }
         Some("admin") => {
             let allowed = match words.next() {
                 Some("allow") => true,
@@ -669,7 +721,7 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
         }
         _ => "commands: hear <slot> <text>, past <slot>, chat <slot>, dms, fill, \
              twin <from> <to>, off <slot>, crowd <nodes>, own, place, move <lat> <lon>, status [<text>], \
-             waypoints <slot>, unwaypoint <id>, history <hours>, \
+             waypoints <slot>, unwaypoint <id>, history <hours>, storeforward, \
              answers always|sometimes|never, limits on|off, admin allow|deny, firmware old|new, drop"
             .into(),
     }

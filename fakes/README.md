@@ -76,6 +76,7 @@ the radio gives up on them after two seconds.
 | `waypoints <slot>` | Waypoints shared on a channel by the neighbour and the repeater, as the apps share them: one open to all, fenced by a circle; one locked to the repeater, fenced by a box; one that expires in an hour. |
 | `unwaypoint <id>` | A waypoint, by its id in hex, deleted for everyone by whoever shared it: sent again, expired. |
 | `history <hours>` | The neighbour's telemetry and signal over the last so many hours, as heard then, for charts to show. |
+| `storeforward` | The repeater heard as a Store & Forward router: its heartbeat, every 15 minutes and the main one, and its statistics, broadcast. |
 | `answers always\|sometimes\|never` | How the neighbour answers. Always is within one to six seconds; sometimes, four times in ten not at all and otherwise within up to 26 seconds. |
 | `limits on\|off` | Whether the neighbour keeps from answering too often. |
 | `admin allow\|deny` | Whether the neighbour takes the radio's key as an admin key. Allowed, it answers admin requests sealed to it with its settings, the radio's own as they were but for who it is, after a few seconds, and takes changes to them, with the passkey it gave out; denied, it says the key is not one of its own, as the firmware does. |
