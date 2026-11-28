@@ -957,6 +957,11 @@ fn PacketDrawer() -> impl IntoView {
                             <div class="packet-detail">
                                 <dl class="packet-facts">{facts}</dl>
                                 {place}
+                                {packet
+                                    .payload
+                                    .as_ref()
+                                    .filter(|_| packet.port.as_deref() == Some("TELEMETRY_APP"))
+                                    .and_then(|payload| crate::node::telemetry_figures(i18n, payload))}
                                 {meshcore.then(|| view! { <crate::chat::RouteList routes origin outgoing=false /> })}
                                 {(packet.port.as_deref() == Some("TRACE"))
                                     .then(|| packet.payload.as_ref().map(trace))

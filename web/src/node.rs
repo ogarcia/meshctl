@@ -725,6 +725,165 @@ fn Tiles(num: u32) -> impl IntoView {
     }
 }
 
+/// What a telemetry packet says, as a node's figures: its battery, its
+/// channel and its time on; what its sensors read; how it sees the mesh.
+/// Measures of kinds not read here show by their names. None when it says
+/// nothing.
+pub(crate) fn telemetry_figures(i18n: I18nContext<Locale>, payload: &Value) -> Option<AnyView> {
+    let groups = payload.as_object()?;
+    let tile =
+        |label: String, value: String| view! { <Tile label=label.into_any() value /> }.into_any();
+    let percent = |label: String, value: f64, low: bool| {
+        view! {
+            <Tile label=label.into_any() value=format!("{value:.1} %") bar=Some(value) low />
+        }
+        .into_any()
+    };
+    let mut tiles: Vec<AnyView> = Vec::new();
+    for (group, metrics) in groups {
+        let Some(metrics) = metrics.as_object() else {
+            continue;
+        };
+        match group.as_str() {
+            "device_metrics" => {
+                let voltage = number(metrics, "voltage").map(|v| format!("{v:.2} V"));
+                let label = t_string!(i18n, node_battery).to_owned();
+                match number(metrics, "battery_level") {
+                    Some(level) if level > 100.0 => tiles.push(
+                        view! {
+                            <Tile
+                                label=label.into_any()
+                                value=t_string!(i18n, power_external).to_owned()
+                                sub=voltage
+                            />
+                        }
+                        .into_any(),
+                    ),
+                    Some(level) => tiles.push(
+                        view! {
+                            <Tile
+                                label=label.into_any()
+                                value=format!("{level:.0} %")
+                                sub=voltage
+                                bar=Some(level)
+                                low={level < 20.0}
+                            />
+                        }
+                        .into_any(),
+                    ),
+                    None => tiles
+                        .extend(voltage.map(|v| tile(t_string!(i18n, node_voltage).to_owned(), v))),
+                }
+                if let Some(busy) = number(metrics, "channel_utilization") {
+                    tiles.push(percent(
+                        t_string!(i18n, node_channel_use).to_owned(),
+                        busy,
+                        busy > 25.0,
+                    ));
+                }
+                if let Some(air) = number(metrics, "air_util_tx") {
+                    tiles.push(percent(
+                        t_string!(i18n, node_air_tx).to_owned(),
+                        air,
+                        air > 10.0,
+                    ));
+                }
+                if let Some(up) = number(metrics, "uptime_seconds") {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    tiles.push(tile(
+                        t_string!(i18n, node_uptime).to_owned(),
+                        duration(up as u64),
+                    ));
+                }
+            }
+            "environment_metrics" => tiles.extend(ENVIRONMENT_FIELDS.iter().filter_map(|key| {
+                let value = number(metrics, key)?;
+                let (label, unit, decimals) = environment_field(i18n, key)?;
+                Some(tile(label, format!("{value:.decimals$}{unit}")))
+            })),
+            "power_metrics" => tiles.extend((1..=8).filter_map(|channel| {
+                let voltage = number(metrics, &format!("ch{channel}_voltage"));
+                let current = number(metrics, &format!("ch{channel}_current"));
+                let label = t_string!(i18n, power_channel).replace("{n}", &channel.to_string());
+                let (value, sub) = match (voltage, current) {
+                    (Some(v), c) => (format!("{v:.2} V"), c.map(|c| format!("{c:.0} mA"))),
+                    (None, Some(c)) => (format!("{c:.0} mA"), None),
+                    (None, None) => return None,
+                };
+                Some(view! { <Tile label=label.into_any() value sub /> }.into_any())
+            })),
+            "local_stats" => {
+                // What a protobuf leaves at zero its JSON leaves out.
+                let count = |key: &str| number(metrics, key).unwrap_or_default();
+                let total = t_string!(i18n, own_online_of)
+                    .replace("{total}", &format!("{:.0}", count("num_total_nodes")));
+                tiles.push(
+                    view! {
+                        <Tile
+                            label=t!(i18n, stats_online).into_any()
+                            value=format!("{:.0}", count("num_online_nodes"))
+                            sub=Some(total)
+                        />
+                    }
+                    .into_any(),
+                );
+                let counted = [
+                    (t_string!(i18n, stats_packets_tx), "num_packets_tx"),
+                    (t_string!(i18n, stats_packets_rx), "num_packets_rx"),
+                    (t_string!(i18n, stats_rx_bad), "num_packets_rx_bad"),
+                    (t_string!(i18n, stats_dupes), "num_rx_dupe"),
+                    (t_string!(i18n, stats_relayed), "num_tx_relay"),
+                    (
+                        t_string!(i18n, stats_relay_canceled),
+                        "num_tx_relay_canceled",
+                    ),
+                    (t_string!(i18n, stats_dropped), "num_tx_dropped"),
+                ];
+                for (label, key) in counted {
+                    tiles.push(tile(label.to_owned(), format!("{:.0}", count(key))));
+                }
+                if let Some(noise) = number(metrics, "noise_floor") {
+                    tiles.push(tile(
+                        t_string!(i18n, stats_noise).to_owned(),
+                        format!("{noise:.0} dBm"),
+                    ));
+                }
+                let busy = count("channel_utilization");
+                tiles.push(percent(
+                    t_string!(i18n, node_channel_use).to_owned(),
+                    busy,
+                    busy > 25.0,
+                ));
+                let air = count("air_util_tx");
+                tiles.push(percent(
+                    t_string!(i18n, node_air_tx).to_owned(),
+                    air,
+                    air > 10.0,
+                ));
+                if let Some(up) = number(metrics, "uptime_seconds") {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    tiles.push(tile(
+                        t_string!(i18n, node_uptime).to_owned(),
+                        duration(up as u64),
+                    ));
+                }
+            }
+            // The rest, by their names, as they come.
+            _ => tiles.extend(metrics.iter().filter_map(|(key, value)| {
+                let value = value.as_f64()?;
+                let value = if value.fract() == 0.0 {
+                    format!("{value:.0}")
+                } else {
+                    format!("{value:.2}")
+                };
+                Some(tile(key.replace('_', " "), value))
+            })),
+        }
+    }
+    (!tiles.is_empty())
+        .then(|| view! { <div class="node-figures packet-figures">{tiles}</div> }.into_any())
+}
+
 /// One of the node's figures: what it is, its value, a word more if any, and
 /// a bar for a percentage, marked when it is not good.
 #[component]

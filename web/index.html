@@ -3384,6 +3384,19 @@
       }
       /* Where a position or a waypoint says, as wide as the rest of it. */
       .packet-detail .place-map { margin: 0 20px 16px; }
+      /* What a telemetry packet says, as a node's figures, as many to a row
+         as fit the drawer. */
+      .packet-detail .packet-figures {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 16px;
+        margin: 0 20px 16px;
+        padding: 14px 0 16px;
+        border-top: 1px solid var(--mc-border);
+        border-bottom: 1px solid var(--mc-border);
+      }
+      .packet-figures .figure, .packet-figures .figure:first-child { min-width: 0; padding: 0; border-left: 0; }
+      .packet-figures .figure .bar { width: 100%; }
       /* The ways it came, MeshCore's, as wide as the rest of the drawer. */
       .packet-detail .routes { margin: 0 20px 16px; padding-top: 14px; }
       /* A trace's hops, each with the SNR it heard it at beside it. */
