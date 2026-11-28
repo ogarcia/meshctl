@@ -29,42 +29,46 @@ const UNKNOWN_SNR: i64 = -128;
 #[component]
 pub fn Contents(packet: Packet, #[prop(into)] close: Callback<()>) -> impl IntoView {
     let i18n = use_i18n();
-    let from = packet.from;
-    let port = packet.port.as_deref().unwrap_or_default();
-    let payload = packet.payload.as_ref();
-    let place = place_of(&packet).map(|at| {
-        view! { <PacketPlace at from waypoint=waypoint_of(&packet) close /> }
-    });
-    let telemetry = payload
-        .filter(|_| port == "TELEMETRY_APP")
-        .and_then(|payload| crate::node::telemetry_figures(i18n, payload));
-    let position = payload
-        .filter(|_| port == "POSITION_APP")
-        .and_then(|payload| position_figures(i18n, payload));
-    let waypoint = payload
-        .filter(|_| port == "WAYPOINT_APP")
-        .map(|payload| view! { <PacketWaypoint payload=payload.clone() /> });
-    let routing = payload
-        .filter(|_| port == "ROUTING_APP")
-        .map(|payload| view! { <Delivery payload=payload.clone() /> });
-    let trace = trace_ways(&packet).map(|ways| view! { <TraceWays ways /> });
-    let neighbours =
-        (port == "NEIGHBORINFO_APP").then(|| view! { <Neighbours packet=packet.clone() /> });
-    view! {
-        {who_of(&packet).map(|who| view! { <PacketWho who from /> })}
-        {waypoint}
-        {message_of(&packet).map(|(sender, text)| view! {
-            <p class="packet-message">
-                {sender.map(|sender| view! { <strong>{sender}</strong> })}
-                {text}
-            </p>
-        })}
-        {routing}
-        {place}
-        {position}
-        {telemetry}
-        {trace}
-        {neighbours}
+    // Its words follow the language: built where that is tracked, as a
+    // component's body is not.
+    move || {
+        let from = packet.from;
+        let port = packet.port.as_deref().unwrap_or_default();
+        let payload = packet.payload.as_ref();
+        let place = place_of(&packet).map(|at| {
+            view! { <PacketPlace at from waypoint=waypoint_of(&packet) close /> }
+        });
+        let telemetry = payload
+            .filter(|_| port == "TELEMETRY_APP")
+            .and_then(|payload| crate::node::telemetry_figures(i18n, payload));
+        let position = payload
+            .filter(|_| port == "POSITION_APP")
+            .and_then(|payload| position_figures(i18n, payload));
+        let waypoint = payload
+            .filter(|_| port == "WAYPOINT_APP")
+            .map(|payload| view! { <PacketWaypoint payload=payload.clone() /> });
+        let routing = payload
+            .filter(|_| port == "ROUTING_APP")
+            .map(|payload| view! { <Delivery payload=payload.clone() /> });
+        let trace = trace_ways(&packet).map(|ways| view! { <TraceWays ways /> });
+        let neighbours =
+            (port == "NEIGHBORINFO_APP").then(|| view! { <Neighbours packet=packet.clone() /> });
+        view! {
+            {who_of(&packet).map(|who| view! { <PacketWho who from /> })}
+            {waypoint}
+            {message_of(&packet).map(|(sender, text)| view! {
+                <p class="packet-message">
+                    {sender.map(|sender| view! { <strong>{sender}</strong> })}
+                    {text}
+                </p>
+            })}
+            {routing}
+            {place}
+            {position}
+            {telemetry}
+            {trace}
+            {neighbours}
+        }
     }
 }
 
@@ -142,31 +146,35 @@ fn PacketWaypoint(payload: Value) -> impl IntoView {
     // Deleted, it is sent again expired, and with nowhere.
     let deleted = expire == 1 || payload.get("latitude_i").is_none();
     let locked = payload["locked_to"].as_u64().is_some_and(|n| n != 0);
-    let mut about = vec![if deleted {
-        t_string!(i18n, packets_waypoint_deleted).to_owned()
-    } else if expire == 0 {
-        format!(
-            "{}: {}",
-            t_string!(i18n, waypoint_expires),
-            t_string!(i18n, waypoint_never)
-        )
-    } else {
-        format!(
-            "{}: {}",
-            t_string!(i18n, waypoint_expires),
-            crate::packets::when(expire)
-        )
-    }];
-    if locked {
-        about.push(t_string!(i18n, waypoint_locked).to_owned());
-    }
+    // Its words follow the language.
+    let about = move || {
+        let mut about = vec![if deleted {
+            t_string!(i18n, packets_waypoint_deleted).to_owned()
+        } else if expire == 0 {
+            format!(
+                "{}: {}",
+                t_string!(i18n, waypoint_expires),
+                t_string!(i18n, waypoint_never)
+            )
+        } else {
+            format!(
+                "{}: {}",
+                t_string!(i18n, waypoint_expires),
+                crate::packets::when(expire)
+            )
+        }];
+        if locked {
+            about.push(t_string!(i18n, waypoint_locked).to_owned());
+        }
+        about.join(" · ")
+    };
     view! {
         <div class="packet-who packet-waypoint">
             <span class="waypoint-icon">{icon}</span>
             <div class="names">
                 <span class="name">{name}</span>
                 {description.map(|d| view! { <span class="about">{d}</span> })}
-                <span class="about dim">{about.join(" · ")}</span>
+                <span class="about dim">{about}</span>
             </div>
         </div>
     }
@@ -176,7 +184,6 @@ fn PacketWaypoint(payload: Value) -> impl IntoView {
 /// in words.
 #[component]
 fn Delivery(payload: Value) -> impl IntoView {
-    let live = expect_context::<Live>();
     let i18n = use_i18n();
     // Its reason left out is the first, none.
     let code = payload["error_reason"]
@@ -184,10 +191,13 @@ fn Delivery(payload: Value) -> impl IntoView {
         .unwrap_or("NONE")
         .to_owned();
     let ok = code == "NONE";
-    let words = if ok {
-        t_string!(i18n, packets_ack).to_owned()
-    } else {
-        crate::names::routing_error(live.locale(), &code)
+    // Its words follow the language.
+    let words = move || {
+        if ok {
+            t_string!(i18n, packets_ack).to_owned()
+        } else {
+            crate::names::routing_error(i18n.get_locale(), &code)
+        }
     };
     view! {
         <p class="packet-status" class:ok=ok class:bad=!ok>
@@ -478,23 +488,28 @@ fn message_of(packet: &Packet) -> Option<(Option<String>, String)> {
 /// and under it its id, its model and its role.
 #[component]
 fn PacketWho(who: Who, from: u32) -> impl IntoView {
+    let i18n = use_i18n();
     let live = expect_context::<Live>();
-    let locale = live.locale();
     let style = crate::mesh::avatar_style(live, from, &who.name);
     let class = if crate::badge::is_emoji(&who.short) {
         "node-avatar emoji"
     } else {
         "node-avatar"
     };
-    let role = match who.role.as_str() {
-        "UNKNOWN" => None,
-        code => Some(crate::names::role_name(locale, code)),
+    // Its role's words follow the language.
+    let (id, model, role) = (
+        who.id,
+        who.model.as_deref().map(crate::mesh::model),
+        who.role,
+    );
+    let more = move || {
+        let role = (role != "UNKNOWN").then(|| crate::names::role_name(i18n.get_locale(), &role));
+        [id.clone(), model.clone(), role]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ")
     };
-    let more = [who.id, who.model.as_deref().map(crate::mesh::model), role]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" · ");
     view! {
         <div class="packet-who">
             <span class=class style=style>{crate::badge::fit(&who.short)}</span>
