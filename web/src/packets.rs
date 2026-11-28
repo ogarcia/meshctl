@@ -937,11 +937,24 @@ fn PacketDrawer() -> impl IntoView {
                         if packet.want_response {
                             marks.push(t!(i18n, packets_want_response).into_any());
                         }
+                        // What it answers, or replies to, opened in its
+                        // place when it is in the list.
+                        let opening = |label: AnyView, found: Option<Packet>| match found {
+                            Some(found) => view! {
+                                <button class="link" on:click=move |_| shown.packet.set(Some(found.clone()))>
+                                    {label}
+                                </button>
+                            }
+                            .into_any(),
+                            None => label,
+                        };
                         if let Some(id) = packet.request_id {
-                            marks.push(t!(i18n, packets_answer_to, id = id).into_any());
+                            let found = answered(live, &packet, id);
+                            marks.push(opening(t!(i18n, packets_answer_to, id = id).into_any(), found));
                         }
                         if let Some(id) = packet.reply_id {
-                            marks.push(t!(i18n, packets_reply_to, id = id).into_any());
+                            let found = answered(live, &packet, id);
+                            marks.push(opening(t!(i18n, packets_reply_to, id = id).into_any(), found));
                         }
                         if !marks.is_empty() {
                             let marks = marks
@@ -969,6 +982,24 @@ fn PacketDrawer() -> impl IntoView {
             }}
         </crate::node::Drawer>
     }
+}
+
+/// The packet one answers or replies to, by its id, among those in the
+/// list.
+fn answered(live: Live, packet: &Packet, id: u32) -> Option<Packet> {
+    live.packets
+        .with_untracked(|packets| answered_in(packets, packet, id).cloned())
+}
+
+/// The packet one answers or replies to, by its id, among some: of those
+/// with that id (another node may have used it too), the one sent by whom
+/// it goes to, as what answers goes back to whoever asked; or the first.
+fn answered_in<'a>(packets: &'a [Packet], packet: &Packet, id: u32) -> Option<&'a Packet> {
+    let mut with_id = packets
+        .iter()
+        .filter(|p| p.packet_id == id && p.id != packet.id);
+    let first = with_id.clone().next();
+    with_id.find(|p| p.from == packet.to).or(first)
 }
 
 /// A trace's way, hop by hop, as it was asked for: each by its node, a
@@ -1338,5 +1369,24 @@ mod tests {
             "packets seen 12"
         );
         assert_eq!(short_port("TEXT_MESSAGE_APP"), "TEXT MESSAGE");
+    }
+
+    #[test]
+    fn what_a_packet_answers_is_found() {
+        let numbered = |id: i64, packet_id: u32, from: u32| Packet {
+            id,
+            packet_id,
+            from,
+            ..packet("TEXT_MESSAGE_APP", "hola".into())
+        };
+        // Two with the id it answers: the one its node sent, not the other.
+        let packets = [numbered(1, 7, 3), numbered(2, 7, 5), numbered(3, 8, 5)];
+        let mut ack = numbered(4, 9, 6);
+        ack.to = 5;
+        assert_eq!(answered_in(&packets, &ack, 7).map(|p| p.id), Some(2));
+        // None from it: the first with that id; none with it, none.
+        ack.to = 9;
+        assert_eq!(answered_in(&packets, &ack, 7).map(|p| p.id), Some(1));
+        assert_eq!(answered_in(&packets, &ack, 42), None);
     }
 }
