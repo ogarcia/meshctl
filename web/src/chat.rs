@@ -704,8 +704,16 @@ pub fn ChatView() -> impl IntoView {
                     .flatten();
                 match (line, list.try_get_untracked().flatten()) {
                     (Some(line), Some(list)) => {
-                        let line: web_sys::HtmlElement = line.unchecked_into();
-                        list.set_scroll_top(line.offset_top() - 12);
+                        // Where it is in the list, scrolled as it is.
+                        let at = line.get_bounding_client_rect().top()
+                            - list.get_bounding_client_rect().top()
+                            + f64::from(list.scroll_top());
+                        // A quarter of the way down: clear of the way back to
+                        // the newest, over the list's top, and under some of
+                        // what was read before it.
+                        let room = (f64::from(list.client_height()) / 4.0).max(64.0);
+                        #[allow(clippy::cast_possible_truncation)]
+                        list.set_scroll_top((at - room).max(0.0) as i32);
                         let left = list.scroll_height() - list.scroll_top() - list.client_height();
                         away.set(left > AWAY);
                     }
