@@ -950,9 +950,13 @@ fn PacketDrawer() -> impl IntoView {
                                 .collect_view();
                             facts.push(fact(t_string!(i18n, packets_marks).to_owned(), marks.into_any()));
                         }
+                        let place = place_of(&packet).map(|at| {
+                            view! { <PacketPlace at from waypoint=waypoint_of(&packet) /> }
+                        });
                         view! {
                             <div class="packet-detail">
                                 <dl class="packet-facts">{facts}</dl>
+                                {place}
                                 {meshcore.then(|| view! { <crate::chat::RouteList routes origin outgoing=false /> })}
                                 {(packet.port.as_deref() == Some("TRACE"))
                                     .then(|| packet.payload.as_ref().map(trace))
@@ -965,6 +969,99 @@ fn PacketDrawer() -> impl IntoView {
             }}
         </crate::node::Drawer>
     }
+}
+
+/// Where a position or a waypoint heard says, on a small map, its pin in the
+/// colour of its sender as the map draws it. A click shows it on the big
+/// map: the waypoint itself if it is still there, or the place.
+#[component]
+fn PacketPlace(at: Place, from: u32, waypoint: Option<u32>) -> impl IntoView {
+    let i18n = use_i18n();
+    let live = expect_context::<Live>();
+    let shown = expect_context::<Shown>();
+    let local = live
+        .status
+        .with_untracked(|s| s.as_ref()?.local.as_ref().map(|l| l.num));
+    let pin = live.nodes.with_untracked(|nodes| {
+        nodes.get(&from).map_or("--mc-pin-far", |node| {
+            crate::mesh::pin(node, local == Some(from))
+        })
+    });
+    let label = Signal::derive(move || t_string!(i18n, node_on_map).to_owned());
+    view! {
+        <crate::map::PlaceMap
+            lat=at.lat
+            lon=at.lon
+            radius=at.radius
+            pin
+            label
+            open=move |()| {
+                shown.open.set(false);
+                let kept = waypoint.filter(|id| {
+                    live.waypoints.with_untracked(|w| w.iter().any(|w| w.id == *id))
+                });
+                match kept {
+                    Some(id) => live.show_waypoint(id),
+                    None => live.show_place(at.lat, at.lon),
+                }
+            }
+        />
+    }
+}
+
+/// Where a packet says, in degrees, and how far off it may be.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Place {
+    lat: f64,
+    lon: f64,
+    radius: Option<u32>,
+}
+
+/// Where a position or a waypoint says: none for the others, or for one
+/// that says nowhere, zero for both as an unset one reads.
+fn place_of(packet: &Packet) -> Option<Place> {
+    let port = packet.port.as_deref()?;
+    if port != "POSITION_APP" && port != "WAYPOINT_APP" {
+        return None;
+    }
+    let payload = packet.payload.as_ref()?;
+    let (lat, lon) = (
+        payload["latitude_i"].as_i64()?,
+        payload["longitude_i"].as_i64()?,
+    );
+    if lat == 0 && lon == 0 {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss)]
+    Some(Place {
+        lat: lat as f64 * 1e-7,
+        lon: lon as f64 * 1e-7,
+        radius: payload["precision_bits"]
+            .as_u64()
+            .and_then(|bits| u32::try_from(bits).ok())
+            .and_then(radius),
+    })
+}
+
+/// A waypoint's id, for one heard.
+fn waypoint_of(packet: &Packet) -> Option<u32> {
+    (packet.port.as_deref() == Some("WAYPOINT_APP"))
+        .then(|| packet.payload.as_ref()?["id"].as_u64())
+        .flatten()
+        .and_then(|id| u32::try_from(id).ok())
+}
+
+/// How far, in metres, a position shared rounded may be from where the node
+/// is, as the daemon tells it for a node's: half the side of the cell its
+/// precision rounds to. None when it is exact (32 bits) or does not say (0).
+fn radius(precision_bits: u32) -> Option<u32> {
+    if !(1..32).contains(&precision_bits) {
+        return None;
+    }
+    // A degree of latitude is about 111 320 m; coordinates go by 1e-7 degrees.
+    let side = f64::from(1_u32 << (32 - precision_bits)) * 1e-7 * 111_320.0;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    Some((side / 2.0).round() as u32)
 }
 
 /// A trace's way, hop by hop, as it was asked for: each by its node, a
@@ -1334,5 +1431,27 @@ mod tests {
             "packets seen 12"
         );
         assert_eq!(short_port("TEXT_MESSAGE_APP"), "TEXT MESSAGE");
+    }
+
+    #[test]
+    fn positions_and_waypoints_have_a_place() {
+        let position = serde_json::json!({
+            "latitude_i": 433_000_000, "longitude_i": -84_000_000, "precision_bits": 13
+        });
+        let place = place_of(&packet("POSITION_APP", position)).unwrap();
+        assert!((place.lat - 43.3).abs() < 1e-9 && (place.lon + 8.4).abs() < 1e-9);
+        assert_eq!(place.radius, Some(2918));
+        let waypoint = serde_json::json!({
+            "id": 77, "latitude_i": 433_000_000, "longitude_i": -84_000_000, "name": "Faro"
+        });
+        let heard = packet("WAYPOINT_APP", waypoint);
+        assert_eq!(place_of(&heard).unwrap().radius, None);
+        assert_eq!(waypoint_of(&heard), Some(77));
+        // An unset one, and those of other kinds, say nowhere.
+        let unset = serde_json::json!({"latitude_i": 0, "longitude_i": 0});
+        assert_eq!(place_of(&packet("POSITION_APP", unset)), None);
+        let text = packet("TEXT_MESSAGE_APP", "43.3, -8.4".into());
+        assert_eq!(place_of(&text), None);
+        assert_eq!(waypoint_of(&text), None);
     }
 }
