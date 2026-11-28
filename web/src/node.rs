@@ -418,7 +418,7 @@ fn number(map: &Map<String, Value>, key: &str) -> Option<f64> {
 }
 
 /// How long, in the two largest units that say it: `3 d 4 h`, `5 h 12 min`.
-fn duration(seconds: u64) -> String {
+pub(crate) fn duration(seconds: u64) -> String {
     let (days, hours, minutes) = (
         seconds / 86_400,
         seconds % 86_400 / 3_600,

@@ -189,6 +189,72 @@ const ROUTING_ERRORS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// What a Store & Forward packet is, by the names the protobufs give its
+/// kinds: what its server, or a client of it, says or asks.
+const STORE_FORWARD: &[(&str, &str, &str)] = &[
+    ("ROUTER_ERROR", "Error del servidor", "Server error"),
+    (
+        "ROUTER_HEARTBEAT",
+        "Latido del servidor",
+        "Server heartbeat",
+    ),
+    ("ROUTER_PING", "Ping del servidor", "Server ping"),
+    (
+        "ROUTER_PONG",
+        "El servidor responde al ping",
+        "The server answers a ping",
+    ),
+    ("ROUTER_BUSY", "Servidor ocupado", "Server busy"),
+    (
+        "ROUTER_HISTORY",
+        "El servidor envía el historial",
+        "The server sends its history",
+    ),
+    (
+        "ROUTER_STATS",
+        "Estadísticas del servidor",
+        "Server statistics",
+    ),
+    (
+        "ROUTER_TEXT_DIRECT",
+        "Mensaje directo guardado",
+        "A direct message kept",
+    ),
+    (
+        "ROUTER_TEXT_BROADCAST",
+        "Mensaje de canal guardado",
+        "A channel message kept",
+    ),
+    ("CLIENT_ERROR", "Error del cliente", "Client error"),
+    (
+        "CLIENT_HISTORY",
+        "Un cliente pide el historial",
+        "A client asks for the history",
+    ),
+    (
+        "CLIENT_STATS",
+        "Un cliente pide las estadísticas",
+        "A client asks for statistics",
+    ),
+    ("CLIENT_PING", "Ping de un cliente", "A client's ping"),
+    (
+        "CLIENT_PONG",
+        "Un cliente responde al ping",
+        "A client answers a ping",
+    ),
+    (
+        "CLIENT_ABORT",
+        "Un cliente lo cancela",
+        "A client calls it off",
+    ),
+];
+
+/// What a Store & Forward packet is, in words, with the protobufs' name of
+/// it; the name alone when it has no words.
+pub fn store_forward(locale: Locale, code: &str) -> String {
+    named(STORE_FORWARD, locale, code)
+}
+
 /// Why a packet could not be delivered, in words, with the protobufs' name
 /// of it; the name alone when it has no words.
 pub fn routing_error(locale: Locale, code: &str) -> String {

@@ -4,8 +4,9 @@
 //! What a packet heard says, drawn in its drawer as the rest of the
 //! interface draws it: who a node says it is, a text whole, where it says on
 //! a small map with what more it tells of it, a waypoint, its telemetry as a
-//! node's figures, a traceroute's ways, the neighbours a node hears, and
-//! whether what it answers got there.
+//! node's figures, a traceroute's ways, the neighbours a node hears,
+//! whether what it answers got there, and what a Store & Forward server or
+//! its clients say.
 
 use crate::app::Live;
 use crate::i18n::{Locale, t, t_string, use_i18n};
@@ -17,6 +18,7 @@ use serde_json::Value;
 
 const CHECK: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/circle-check.svg");
 const ALERT: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/alert-triangle.svg");
+const STORE: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/database.svg");
 
 /// A relay a traceroute could not tell, as the firmware marks it.
 const UNKNOWN_HOP: u64 = 0xffff_ffff;
@@ -53,6 +55,9 @@ pub fn Contents(packet: Packet, #[prop(into)] close: Callback<()>) -> impl IntoV
         let routing = payload
             .filter(|_| port == "ROUTING_APP")
             .map(|payload| view! { <Delivery payload=payload.clone() /> });
+        let store = payload
+            .filter(|_| port == "STORE_FORWARD_APP")
+            .map(|payload| store_forward(i18n, payload));
         let trace = trace_ways(&packet).map(|ways| view! { <TraceWays ways /> });
         let neighbours =
             (port == "NEIGHBORINFO_APP").then(|| view! { <Neighbours packet=packet.clone() /> });
@@ -66,6 +71,7 @@ pub fn Contents(packet: Packet, #[prop(into)] close: Callback<()>) -> impl IntoV
                 </p>
             })}
             {routing}
+            {store}
             {place}
             {position}
             {telemetry}
@@ -178,6 +184,112 @@ fn PacketWaypoint(payload: Value) -> impl IntoView {
             </div>
         </div>
     }
+}
+
+/// What a Store & Forward packet is, in words, and what it tells in boxes:
+/// how often its server beats and whether it is the main one; what it
+/// keeps and was asked; how much of its history it sends. A message it
+/// passes on, whole.
+fn store_forward(i18n: I18nContext<Locale>, payload: &Value) -> AnyView {
+    let code = payload["rr"].as_str().unwrap_or("UNSET");
+    let what = crate::names::store_forward(i18n.get_locale(), code);
+    let tile = |label: &str, value: String, sub: Option<String>| {
+        view! { <Tile label=label.to_owned().into_any() value sub /> }.into_any()
+    };
+    let count = |group: &Value, key: &str| group[key].as_u64();
+    let mut tiles: Vec<AnyView> = Vec::new();
+    let beat = &payload["heartbeat"];
+    if beat.is_object() {
+        if let Some(period) = count(beat, "period") {
+            tiles.push(tile(
+                t_string!(i18n, sf_period),
+                crate::node::duration(period),
+                None,
+            ));
+        }
+        let role = if count(beat, "secondary").is_some_and(|s| s != 0) {
+            t_string!(i18n, sf_secondary)
+        } else {
+            t_string!(i18n, sf_primary)
+        };
+        tiles.push(tile(t_string!(i18n, sf_role), role.to_owned(), None));
+    }
+    let stats = &payload["stats"];
+    if stats.is_object() {
+        // What a protobuf leaves at zero its JSON leaves out.
+        let n = |key: &str| count(stats, key).unwrap_or(0);
+        tiles.push(tile(
+            t_string!(i18n, sf_seen),
+            n("messages_total").to_string(),
+            None,
+        ));
+        let max = t_string!(i18n, sf_saved_of).replace("{max}", &n("messages_max").to_string());
+        tiles.push(tile(
+            t_string!(i18n, sf_saved),
+            n("messages_saved").to_string(),
+            Some(max),
+        ));
+        tiles.push(tile(
+            t_string!(i18n, sf_requests),
+            n("requests").to_string(),
+            None,
+        ));
+        tiles.push(tile(
+            t_string!(i18n, sf_requests_history),
+            n("requests_history").to_string(),
+            None,
+        ));
+        tiles.push(tile(
+            t_string!(i18n, sf_return_max),
+            n("return_max").to_string(),
+            None,
+        ));
+        // In minutes.
+        tiles.push(tile(
+            t_string!(i18n, sf_window),
+            crate::node::duration(n("return_window") * 60),
+            None,
+        ));
+        tiles.push(tile(
+            t_string!(i18n, node_uptime),
+            crate::node::duration(n("up_time")),
+            None,
+        ));
+    }
+    let history = &payload["history"];
+    if history.is_object() {
+        let n = |key: &str| count(history, key).unwrap_or(0);
+        tiles.push(tile(
+            t_string!(i18n, sf_history_messages),
+            n("history_messages").to_string(),
+            None,
+        ));
+        // In milliseconds, as the firmware sends it.
+        tiles.push(tile(
+            t_string!(i18n, sf_window),
+            crate::node::duration(n("window") / 1000),
+            None,
+        ));
+    }
+    // A message kept, passed on: its bytes, in base64 as JSON has them.
+    let text = payload["text"]
+        .as_str()
+        .and_then(|b64| window().atob(b64).ok())
+        .map(|binary| {
+            #[allow(clippy::cast_possible_truncation)]
+            let bytes: Vec<u8> = binary.chars().map(|c| c as u8).collect();
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+        .filter(|t| !t.is_empty());
+    view! {
+        <p class="packet-status">
+            <span class="icon" inner_html=STORE></span>
+            <span>{what}</span>
+        </p>
+        {text.map(|text| view! { <p class="packet-message">{text}</p> })}
+        {(!tiles.is_empty()).then(|| view! { <div class="node-figures packet-figures">{tiles}</div> })}
+    }
+    .into_any()
 }
 
 /// A waypoint's emoji, as its code point says; a pin when it has none.
