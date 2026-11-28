@@ -12,7 +12,7 @@ use crate::i18n::{t, t_string, use_i18n};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use meshctl_api::{
-    Badge, BadgeContent, BadgeIcon, ErrorCode, Radio, RadioId, RadioKind, RadioSettings,
+    Badge, BadgeContent, BadgeIcon, ErrorCode, Power, Radio, RadioId, RadioKind, RadioSettings,
 };
 
 const GRIP: &str = include_str!("../vendor/tabler-icons-3.51.0/icons/outline/grip-vertical.svg");
@@ -476,6 +476,20 @@ pub fn RadioEditor(
     let error = RwSignal::new(None::<Failure>);
     let busy = RwSignal::new(false);
     let section = RwSignal::new(section);
+    // How it is powered, kept on its own as it is saved, with the rest.
+    let kept_power = move || {
+        id.and_then(|id| {
+            live.radios.with_untracked(|radios| {
+                radios
+                    .iter()
+                    .flatten()
+                    .find(|r| r.id == id)
+                    .map(|r| r.power)
+            })
+        })
+        .unwrap_or_default()
+    };
+    let power = RwSignal::new(kept_power());
     let close = move || live.radio_editing.set(Editing::Closed);
     // Escape closes it, as its ✕ and Cancel do.
     if modal {
@@ -517,6 +531,14 @@ pub fn RadioEditor(
             // by hand, or by this once saved. Nothing of it is touched then.
             match daemon::save_radio(id, &settings).await {
                 Ok(radio) => {
+                    let wanted = power.get_untracked();
+                    if wanted != radio.power
+                        && let Err(failure) = daemon::set_power(radio.id, wanted).await
+                    {
+                        error.try_set(Some(failure));
+                        busy.try_set(false);
+                        return;
+                    }
                     error.try_set(None);
                     let saved = Draft::new(&settings_of(&radio));
                     base.try_set_value(saved.clone());
@@ -699,6 +721,40 @@ pub fn RadioEditor(
                             <span class="dim">{t!(i18n, radio_enabled_hint)}</span>
                         </span>
                     </div>
+                    // MeshCore's battery says only its voltage, which on some
+                    // boards does not tell USB from a battery.
+                    {move || {
+                        (id.is_some() && draft.with(|d| d.kind) == RadioKind::Meshcore).then(|| {
+                            let option = |value: Power, label: &'static str| {
+                                view! {
+                                    <option value=label selected=move || power.get() == value>
+                                        {move || match value {
+                                            Power::Auto => t_string!(i18n, radio_power_auto),
+                                            Power::Battery => t_string!(i18n, radio_power_battery),
+                                            Power::Plugged => t_string!(i18n, radio_power_plugged),
+                                        }}
+                                    </option>
+                                }
+                            };
+                            view! {
+                                <label>
+                                    <span class="dim">{t!(i18n, radio_power)}</span>
+                                    <select on:change=move |ev| {
+                                        power.set(match event_target_value(&ev).as_str() {
+                                            "battery" => Power::Battery,
+                                            "plugged" => Power::Plugged,
+                                            _ => Power::Auto,
+                                        });
+                                    }>
+                                        {option(Power::Auto, "auto")}
+                                        {option(Power::Battery, "battery")}
+                                        {option(Power::Plugged, "plugged")}
+                                    </select>
+                                    <span class="dim hint">{t!(i18n, radio_power_hint)}</span>
+                                </label>
+                            }
+                        })
+                    }}
                     <div class="toggle">
                         <Switch
                             on=Signal::derive(move || draft.with(|d| d.shown))

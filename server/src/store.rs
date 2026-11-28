@@ -8,7 +8,8 @@ use crate::channels::{Chat, Fingerprint, Slot, assign, provisional};
 use anyhow::{Context, Result};
 use meshctl_api::{
     BROADCAST, Badge, Conversation, MapView, Message, MessageId, MessageStatus, PacketFilter,
-    PacketKind, PacketReach, Peer, Preferences, RadioId, RadioKind, RadioSettings, SightingId,
+    PacketKind, PacketReach, Peer, Power, Preferences, RadioId, RadioKind, RadioSettings,
+    SightingId,
 };
 use meshctl_core::mesh::{Heard, LocalNode, Node, Position, PositionSource, User};
 use sqlx::SqliteConnection;
@@ -53,6 +54,8 @@ pub struct RadioRecord {
     pub map_max_age: Option<u32>,
     /// Whether its map shows its waypoints.
     pub map_waypoints: bool,
+    /// How it is powered, to show its battery.
+    pub power: Power,
 }
 
 #[derive(sqlx::FromRow)]
@@ -67,6 +70,7 @@ struct RadioRow {
     last_connected: Option<i64>,
     map_max_age: Option<i64>,
     map_waypoints: bool,
+    power: String,
 }
 
 impl RadioRow {
@@ -90,6 +94,8 @@ impl RadioRow {
             last_connected: self.last_connected,
             map_max_age: self.map_max_age.and_then(|age| u32::try_from(age).ok()),
             map_waypoints: self.map_waypoints,
+            // One this build does not know, as it is by default.
+            power: power_from(&self.power).unwrap_or_default(),
         })
     }
 }
@@ -262,6 +268,23 @@ fn kind_name(kind: RadioKind) -> &'static str {
     }
 }
 
+fn power_name(power: Power) -> &'static str {
+    match power {
+        Power::Auto => "auto",
+        Power::Battery => "battery",
+        Power::Plugged => "plugged",
+    }
+}
+
+fn power_from(name: &str) -> Option<Power> {
+    match name {
+        "auto" => Some(Power::Auto),
+        "battery" => Some(Power::Battery),
+        "plugged" => Some(Power::Plugged),
+        _ => None,
+    }
+}
+
 fn kind_from(name: &str) -> Option<RadioKind> {
     match name {
         "meshtastic" => Some(RadioKind::Meshtastic),
@@ -428,7 +451,7 @@ impl Store {
     pub async fn radios(&self) -> Result<Vec<RadioRecord>> {
         let rows: Vec<RadioRow> = sqlx::query_as(
             "SELECT id, name, kind, address, enabled, shown, badge, last_connected, map_max_age,
-                map_waypoints
+                map_waypoints, power
             FROM radio ORDER BY position, id",
         )
         .fetch_all(&self.pool)
@@ -439,7 +462,7 @@ impl Store {
     pub async fn radio(&self, id: RadioId) -> Result<Option<RadioRecord>> {
         let row: Option<RadioRow> = sqlx::query_as(
             "SELECT id, name, kind, address, enabled, shown, badge, last_connected, map_max_age,
-                map_waypoints
+                map_waypoints, power
             FROM radio WHERE id = ?",
         )
         .bind(id)
@@ -469,6 +492,7 @@ impl Store {
             last_connected: None,
             map_max_age: None,
             map_waypoints: true,
+            power: Power::Auto,
         })
     }
 
@@ -519,6 +543,18 @@ impl Store {
     pub async fn set_map_max_age(&self, radio: RadioId, max_age: Option<u32>) -> Result<bool> {
         let changed = sqlx::query("UPDATE radio SET map_max_age = ? WHERE id = ?")
             .bind(max_age.map(i64::from))
+            .bind(radio)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        Ok(changed > 0)
+    }
+
+    /// Keeps how a radio is powered, to show its battery; `false` if there is
+    /// no such radio.
+    pub async fn set_power(&self, radio: RadioId, power: Power) -> Result<bool> {
+        let changed = sqlx::query("UPDATE radio SET power = ? WHERE id = ?")
+            .bind(power_name(power))
             .bind(radio)
             .execute(&self.pool)
             .await?
@@ -2227,6 +2263,29 @@ mod tests {
         assert!(store.set_map_max_age(one, None).await.unwrap());
         assert_eq!(store.radio(one).await.unwrap().unwrap().map_max_age, None);
         assert!(!store.set_map_max_age(999, None).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn each_radio_keeps_how_it_is_powered() {
+        let store = Store::in_memory().await;
+        let one = store.add_radio(&home()).await.unwrap().id;
+        let other = store.add_radio(&home()).await.unwrap().id;
+        assert_eq!(store.radio(one).await.unwrap().unwrap().power, Power::Auto);
+        assert!(store.set_power(one, Power::Plugged).await.unwrap());
+        assert_eq!(
+            store.radio(one).await.unwrap().unwrap().power,
+            Power::Plugged
+        );
+        assert_eq!(
+            store.radio(other).await.unwrap().unwrap().power,
+            Power::Auto
+        );
+        assert!(store.set_power(one, Power::Battery).await.unwrap());
+        assert_eq!(
+            store.radio(one).await.unwrap().unwrap().power,
+            Power::Battery
+        );
+        assert!(!store.set_power(999, Power::Auto).await.unwrap());
     }
 
     #[tokio::test]

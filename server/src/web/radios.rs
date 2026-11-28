@@ -12,7 +12,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use meshctl_api::{
     Channel, Contact, Error, ErrorCode, LinkState, MapMaxAge, MapView, Node, NodeCheck,
-    NodeFavorite, NodeLatest, NodeTelemetry, Radio, RadioId, RadioOrder, RadioSettings, Status,
+    NodeFavorite, NodeLatest, NodeTelemetry, Radio, RadioId, RadioOrder, RadioPower, RadioSettings,
+    Status,
 };
 use meshctl_core::radio::{AdminError, Mesh};
 use serde::Deserialize;
@@ -26,6 +27,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(reorder))
         .routes(routes!(map_view, set_map_view))
         .routes(routes!(set_map_max_age))
+        .routes(routes!(set_power))
         .routes(routes!(get, update, remove))
         .routes(routes!(status))
         .routes(routes!(contact))
@@ -195,6 +197,36 @@ async fn set_map_max_age(
     Json(age): Json<MapMaxAge>,
 ) -> Response {
     match state.radios.set_map_max_age(radio, age.max_age).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => not_found(),
+        Err(err) => failed(&err),
+    }
+}
+
+/// How a radio is powered
+///
+/// To show its battery: as its battery says (`auto`), always (`battery`)
+/// or never (`plugged`). A MeshCore radio says only its voltage, which on
+/// some boards does not tell USB from a battery. Every client hears of it,
+/// as the radios changed.
+#[utoipa::path(
+    put,
+    path = "/radios/{radio}/power",
+    tag = "radios",
+    params(("radio" = RadioId, Path, description = "The radio's id")),
+    request_body = RadioPower,
+    responses(
+        (status = 204, description = "Kept"),
+        (status = 401, description = "The access token is missing or wrong", body = Error),
+        (status = 404, description = "There is no such radio", body = Error),
+    )
+)]
+async fn set_power(
+    State(state): State<AppState>,
+    Path(radio): Path<RadioId>,
+    Json(power): Json<RadioPower>,
+) -> Response {
+    match state.radios.set_power(radio, power.power).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => not_found(),
         Err(err) => failed(&err),

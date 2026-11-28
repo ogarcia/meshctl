@@ -198,6 +198,33 @@ pub struct Radio {
     /// read yet, all of them.
     #[serde(default)]
     pub unread: u32,
+    /// How it is powered, to show its battery: as its battery says, or as
+    /// said here.
+    #[serde(default)]
+    pub power: Power,
+}
+
+/// How a radio is powered, to show its battery or not. A MeshCore radio says
+/// only its voltage, which on some boards does not tell USB from a battery:
+/// here its battery can be shown always, or never.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Power {
+    /// As its battery says: shown while it runs on it.
+    #[default]
+    Auto,
+    /// On its battery: always shown.
+    Battery,
+    /// Plugged in: never shown.
+    Plugged,
+}
+
+/// How a radio is powered, to keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RadioPower {
+    pub power: Power,
 }
 
 /// What it takes to add a radio, or to change one.

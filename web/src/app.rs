@@ -29,8 +29,8 @@ use leptos::task::spawn_local;
 use meshctl_api::events::ServerMessage;
 use meshctl_api::{
     Accent, Channel, Conversation, Language, LinkState, MapColors, MapEngine, MapTheme, Message,
-    NewRequest, Node, NodeCheck, NodeLatest, Pace, Packet, PacketFilter, Peer, Preferences, Radio,
-    RadioId, RadioKind, Request, RequestKind, RequestStatus, SightingId, Status, Theme,
+    NewRequest, Node, NodeCheck, NodeLatest, Pace, Packet, PacketFilter, Peer, Power, Preferences,
+    Radio, RadioId, RadioKind, Request, RequestKind, RequestStatus, SightingId, Status, Theme,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
@@ -2316,7 +2316,8 @@ fn battery_icon(level: u32) -> &'static str {
 /// marked when low. Nothing when it is powered, which is said with more
 /// than 100: by Meshtastic, whether it charges a battery or has none; by
 /// the daemon for MeshCore, which says only its voltage, when that is a
-/// full battery's or more, as on USB.
+/// full battery's or more, as on USB. Or as its user said it is powered:
+/// on its battery, always shown, full at most; plugged in, never.
 #[component]
 pub(crate) fn RadioBattery(#[prop(optional)] radio: Option<RadioId>) -> impl IntoView {
     let i18n = use_i18n();
@@ -2328,7 +2329,11 @@ pub(crate) fn RadioBattery(#[prop(optional)] radio: Option<RadioId>) -> impl Int
             if radio.link != LinkState::Ready {
                 return None;
             }
-            radio.battery_level.filter(|&level| level <= 100)
+            match radio.power {
+                Power::Auto => radio.battery_level.filter(|&level| level <= 100),
+                Power::Battery => radio.battery_level.map(|level| level.min(100)),
+                Power::Plugged => None,
+            }
         })
     });
     move || {

@@ -935,6 +935,14 @@ pub async fn set_map_max_age(radio: RadioId, max_age: Option<u32>) -> Result<(),
     answer(request.send().await).await.map(|_| ())
 }
 
+/// Keeps how a radio is powered, to show its battery.
+pub async fn set_power(radio: RadioId, power: meshctl_api::Power) -> Result<(), Failure> {
+    let request = with_token(Request::put(&url(&format!("/radios/{radio}/power"))))
+        .json(&meshctl_api::RadioPower { power })
+        .map_err(|_| Failure::Unreachable)?;
+    answer(request.send().await).await.map(|_| ())
+}
+
 /// Keeps whether a radio's map shows its waypoints.
 pub async fn set_map_waypoints(radio: RadioId, shown: bool) -> Result<(), Failure> {
     let request = with_token(Request::put(&url(&format!(
