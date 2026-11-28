@@ -36,7 +36,10 @@ pub fn Contents(packet: Packet, #[prop(into)] close: Callback<()>) -> impl IntoV
         let port = packet.port.as_deref().unwrap_or_default();
         let payload = packet.payload.as_ref();
         let place = place_of(&packet).map(|at| {
-            view! { <PacketPlace at from waypoint=waypoint_of(&packet) close /> }
+            let icon = payload
+                .filter(|_| port == "WAYPOINT_APP")
+                .map(waypoint_icon);
+            view! { <PacketPlace at from waypoint=waypoint_of(&packet) icon close /> }
         });
         let telemetry = payload
             .filter(|_| port == "TELEMETRY_APP")
@@ -133,10 +136,7 @@ fn position_figures(i18n: I18nContext<Locale>, payload: &Value) -> Option<AnyVie
 #[component]
 fn PacketWaypoint(payload: Value) -> impl IntoView {
     let i18n = use_i18n();
-    let icon = payload["icon"]
-        .as_u64()
-        .and_then(|code| char::from_u32(u32::try_from(code).ok()?))
-        .map_or_else(|| "📍".to_owned(), String::from);
+    let icon = waypoint_icon(&payload);
     let name = payload["name"].as_str().unwrap_or_default().to_owned();
     let description = payload["description"]
         .as_str()
@@ -178,6 +178,14 @@ fn PacketWaypoint(payload: Value) -> impl IntoView {
             </div>
         </div>
     }
+}
+
+/// A waypoint's emoji, as its code point says; a pin when it has none.
+fn waypoint_icon(payload: &Value) -> String {
+    payload["icon"]
+        .as_u64()
+        .and_then(|code| char::from_u32(u32::try_from(code).ok()?))
+        .map_or_else(|| "📍".to_owned(), String::from)
 }
 
 /// Whether what a routing packet answers got there: confirmed, or why not,
@@ -371,6 +379,8 @@ fn PacketPlace(
     at: Place,
     from: u32,
     waypoint: Option<u32>,
+    /// A waypoint's emoji, for its pin.
+    icon: Option<String>,
     #[prop(into)] close: Callback<()>,
 ) -> impl IntoView {
     let i18n = use_i18n();
@@ -390,6 +400,7 @@ fn PacketPlace(
             lon=at.lon
             radius=at.radius
             pin
+            icon
             label
             open=move |()| {
                 close.run(());

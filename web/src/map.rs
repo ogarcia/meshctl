@@ -119,13 +119,16 @@ pub fn RouteMap(points: Signal<Vec<RoutePoint>>) -> impl IntoView {
     view! { <div class="route-map" node_ref=element></div> }
 }
 
-/// Where a small map shows a node, and in which colour.
+/// Where a small map shows a node, and in which colour; or a waypoint, by
+/// its emoji.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 struct Spot {
     lat: f64,
     lon: f64,
     radius: Option<u32>,
     pin: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
 }
 
 /// A node where it says it is, small, on its page: with the circle of how
@@ -147,6 +150,7 @@ pub fn MiniMap(num: u32) -> impl IntoView {
                 lon: at.longitude,
                 radius: at.radius,
                 pin: crate::mesh::pin(node, local == Some(num)),
+                icon: None,
             })
         })
     });
@@ -198,14 +202,16 @@ pub fn MiniMap(num: u32) -> impl IntoView {
 }
 
 /// A place, small, still: where a position sent in a conversation says,
-/// with the circle of how far off it may be, its pin in the colour given.
-/// A click, or Enter, does what `open` says.
+/// with the circle of how far off it may be, its pin in the colour given;
+/// a waypoint's, its emoji on its pin instead. A click, or Enter, does what
+/// `open` says.
 #[component]
 pub fn PlaceMap(
     lat: f64,
     lon: f64,
     radius: Option<u32>,
     pin: &'static str,
+    #[prop(default = None)] icon: Option<String>,
     #[prop(into)] label: Signal<String>,
     #[prop(into)] open: Callback<()>,
 ) -> impl IntoView {
@@ -221,6 +227,7 @@ pub fn PlaceMap(
             lon,
             radius,
             pin,
+            icon: icon.clone(),
         };
         if let Ok(json) = serde_json::to_string(&spot) {
             map_mini(&div, &json);

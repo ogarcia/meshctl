@@ -1234,7 +1234,8 @@ window.meshctlMap = (() => {
 
   // Draws a small map on an element, or draws it again: where (lat, lon),
   // how far it may be from there (radius, in metres, or none) and the
-  // colour of its pin, as one of the interface's (pin).
+  // colour of its pin, as one of the interface's (pin); or, for a waypoint,
+  // its emoji (icon), on its pin as the map draws it.
   function mini(element, json) {
     const at = JSON.parse(json);
     const small = smallMap(element);
@@ -1259,6 +1260,14 @@ window.meshctlMap = (() => {
         });
       } else {
         small.setView(at.lat, at.lon, FOCUS_ZOOM, false);
+      }
+      if (at.icon) {
+        small.drawn.marker(at.lat, at.lon, {
+          html: waypointPin(at),
+          size: [30, 30],
+          anchor: [15, 15],
+        });
+        return;
       }
       small.drawn.ring(at.lat, at.lon, 7, {
         color: color("--mc-surface"),
