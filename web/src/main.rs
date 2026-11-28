@@ -29,6 +29,7 @@ mod node_admin;
 mod notifications;
 mod notify;
 mod offline;
+mod packet_detail;
 mod packets;
 mod phone;
 mod plugged;
