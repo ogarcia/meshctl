@@ -568,11 +568,10 @@ pub fn answer(
         // GET_BATT_AND_STORAGE
         0x14 => {
             let mut frame = vec![0x0c];
-            frame.extend(
-                u16::try_from(3_900 + random(250))
-                    .unwrap_or(4_000)
-                    .to_le_bytes(),
-            );
+            let millivolts = radio
+                .battery_mv
+                .unwrap_or_else(|| u16::try_from(3_900 + random(250)).unwrap_or(4_000));
+            frame.extend(millivolts.to_le_bytes());
             frame.extend(118u32.to_le_bytes());
             frame.extend(1_408u32.to_le_bytes());
             vec![frame]

@@ -126,6 +126,7 @@ Its contacts, around A Coruña:
 | `trace` | Someone else's trace heard going by, raw, along Monte, Torre and Monte again. |
 | `answers on\|off` | Whether pings come back and requests are answered. |
 | `busy <percent>` | The channel that much busier than it was, as the radio's airtime says, up to 95%; `busy 0`, as it was. |
+| `battery <mV>\|random` | The radio's battery at that voltage, as it says when asked: 4200 or more, as on USB; under 2000, as with none it can measure. `random`, as it goes, a little different each time. |
 | `echoes on\|off` | Whether repeaters are heard passing on what the radio sends on a channel; off, as when none heard it. |
 | `drop` | The link to every client drops, which reads it all anew. |
 

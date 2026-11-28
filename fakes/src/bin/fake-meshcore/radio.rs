@@ -109,6 +109,9 @@ pub struct Radio {
     /// How busy it hears the channel besides, in percent, from when, and
     /// the seconds received that way so far.
     pub busy: (u32, u32, u32),
+    /// Its battery's voltage, in millivolts, when told one: as it goes
+    /// otherwise, a little different each time it is asked.
+    pub battery_mv: Option<u16>,
     pub contacts: Vec<Contact>,
     /// Each slot's name and secret, both empty when unset.
     pub channels: Vec<(String, [u8; 16])>,
@@ -230,6 +233,7 @@ impl Radio {
             clock_offset: -3600,
             started: at,
             busy: (0, at, 0),
+            battery_mv: None,
             contacts: vec![
                 contact(0x41, 1, 0, "Ana", 43_365_000, -8_405_000),
                 contact(0x52, 2, 1, "Repetidor Monte", 43_340_000, -8_380_000),

@@ -181,6 +181,21 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
             radio.busy.0 = percent.min(95);
             format!("channel {}% busier", radio.busy.0)
         }
+        Some("battery") => {
+            let millivolts = match words.next() {
+                Some("random") => None,
+                Some(word) => match word.parse::<u16>() {
+                    Ok(mv) => Some(mv),
+                    Err(_) => return "usage: battery <millivolts>|random".into(),
+                },
+                None => return "usage: battery <millivolts>|random".into(),
+            };
+            radio.battery_mv = millivolts;
+            match millivolts {
+                Some(mv) => format!("the battery at {mv} mV"),
+                None => "the battery as it goes".into(),
+            }
+        }
         Some("echoes") => {
             radio.echoes = words.next() != Some("off");
             format!(
@@ -333,7 +348,7 @@ pub fn control(line: &str, radio: &Mutex<Radio>, events: &broadcast::Sender<Even
         }
         _ => "commands: hear <slot> [<name>|]<text>, dm <text>, react <slot> <emoji>, \
              dmreact <emoji>, post <text>, room missing|strict|open, advert [chat|repeater|room|sensor], crowd <contacts>, trace, \
-             answers on|off, busy <percent>, echoes on|off, drop"
+             answers on|off, busy <percent>, battery <mV>|random, echoes on|off, drop"
             .into(),
     }
 }
